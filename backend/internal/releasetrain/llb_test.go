@@ -65,14 +65,26 @@ func TestLLBDetection(t *testing.T) {
 		{"a branch named after a card needs two MRs in", func(f *fixture) {
 			f.mr("di", "DEMO-1 part", "feat/a", "feature/DEMO-7-chat", MRMerged, "2026-09-01", "2026-09-02")
 		}, nil},
-		{"a branch named after a card counts with two MRs in", func(f *fixture) {
+		{"a branch named after a card counts with two other cards' MRs in", func(f *fixture) {
 			f.mr("di", "DEMO-1 part", "feat/a", "feature/DEMO-7-chat", MRMerged, "2026-09-01", "2026-09-02")
 			f.mr("di", "DEMO-2 part", "feat/b", "feature/DEMO-7-chat", MROpened, "2026-09-03", "")
 		}, []string{"di:feature/DEMO-7-chat"}},
-		{"a branch named after a card counts once it merges out", func(f *fixture) {
+		{"a stacked MR into a card's branch that merges out is not long-lived", func(f *fixture) {
 			f.mr("di", "DEMO-1 part", "feat/a", "feature/DEMO-7-chat", MRMerged, "2026-09-01", "2026-09-02")
-			f.mr("di", "DEMO-7 chat", "feature/DEMO-7-chat", "develop", MRMerged, "2026-09-05", "2026-09-06")
-		}, []string{"di:feature/DEMO-7-chat"}},
+			f.mr("di", "DEMO-7 chat", "feature/DEMO-7-chat", "feature/sprint-20-2026", MRMerged, "2026-09-05", "2026-09-06")
+		}, nil},
+		{"two MRs of one other card are one card", func(f *fixture) {
+			f.mr("di", "DEMO-1 part", "feat/a", "feature/DEMO-7-chat", MRMerged, "2026-09-01", "2026-09-02")
+			f.mr("di", "DEMO-1 more", "feat/a2", "feature/DEMO-7-chat", MROpened, "2026-09-03", "")
+		}, nil},
+		{"the branch's own card coming back in does not count", func(f *fixture) {
+			f.mr("di", "DEMO-1 part", "feat/a", "feature/DEMO-7-chat", MRMerged, "2026-09-01", "2026-09-02")
+			f.mr("di", "DEMO-7 fixup", "feat/DEMO-7-fix", "feature/DEMO-7-chat", MROpened, "2026-09-03", "")
+		}, nil},
+		{"a branch with no card key still counts once it merges out", func(f *fixture) {
+			f.mr("di", "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-09-05", "2026-09-06")
+			f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+		}, []string{"di:feature/demo-wallet"}},
 		{"closed MRs are ignored", func(f *fixture) {
 			f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", "closed", "2026-09-01", "")
 		}, nil},

@@ -56,7 +56,7 @@ var ruleA5 = rule{
 			}
 			return versionHit(t, v,
 				fmt.Sprintf("Jira release date %s, milestone due %s", v.Jira.ReleaseDate.label(), v.Milestone.Due.label()),
-				Evidence{"releaseDate": *v.Jira.ReleaseDate, "due": *v.Milestone.Due}, jiraLink(v.Jira))
+				Evidence{"releaseDate": *v.Jira.ReleaseDate, "due": *v.Milestone.Due}, jiraLink(v.Jira), milestoneLink(&v.Milestone))
 		})
 	},
 }
@@ -81,8 +81,8 @@ func pageDateHits(t *Train, v *AppVersion) []Hit {
 	if p == nil {
 		return nil
 	}
-	hit := func(field DateField, text string, ev Evidence) Hit {
-		h := versionHit(t, v, text, ev, Link{Label: "Open page", URL: p.URL})
+	hit := func(field DateField, text string, ev Evidence, links ...Link) Hit {
+		h := versionHit(t, v, text, ev, append([]Link{{Label: "Open page", URL: p.URL}}, links...)...)
 		h.Subject = SubjVersionDate{Train: t.ID, App: v.App, Field: field}
 		return *h
 	}
@@ -102,7 +102,7 @@ func pageDateHits(t *Train, v *AppVersion) []Hit {
 			continue
 		}
 		out = append(out, hit(d.field, fmt.Sprintf("Page says %s %s, %s %s", d.onPage, d.page.label(), d.onMilestone, d.milestone.label()),
-			Evidence{"page": *d.page, "milestone": *d.milestone}))
+			Evidence{"page": *d.page, "milestone": *d.milestone}, milestoneLink(&v.Milestone)))
 	}
 	return out
 }
@@ -116,6 +116,7 @@ var ruleA7 = rule{
 			t := &b.Trains[i]
 			off, usual := trainDateSplit(t)
 			for _, v := range off {
+				links := []Link{milestoneLink(&v.Milestone)}
 				start, due := *v.Milestone.Start, *v.Milestone.Due
 				ev := Evidence{"start": start, "due": due}
 				text := fmt.Sprintf("Apps in %s disagree on dates: %s → %s here", t.ID, start.label(), due.label())
@@ -123,8 +124,11 @@ var ruleA7 = rule{
 					ev["usualStart"], ev["usualDue"] = usual.start, usual.due
 					text = fmt.Sprintf("Milestone %s → %s, the rest of %s runs %s → %s. Give it its own train or move the milestone",
 						start.label(), due.label(), t.ID, usual.start.label(), usual.due.label())
+					if other := usualApp(t, *usual); other != nil {
+						links = append(links, Link{Label: "Open " + b.appName(other.App) + " milestone", URL: other.Milestone.URL})
+					}
 				}
-				out = append(out, *versionHit(t, v, text, ev, Link{Label: "Open milestone", URL: v.Milestone.URL}))
+				out = append(out, *versionHit(t, v, text, ev, links...))
 			}
 		}
 		return out
@@ -166,6 +170,15 @@ func trainDateSplit(t *Train) ([]*AppVersion, *datePair) {
 	return off, &top
 }
 
+func usualApp(t *Train, usual datePair) *AppVersion {
+	for _, v := range t.Versions {
+		if v.Milestone.Start != nil && v.Milestone.Due != nil && (datePair{*v.Milestone.Start, *v.Milestone.Due}) == usual {
+			return v
+		}
+	}
+	return nil
+}
+
 func datesSplit(t *Train) []AppID {
 	off, _ := trainDateSplit(t)
 	out := make([]AppID, len(off))
@@ -190,18 +203,16 @@ func mismatchHits(b *Board, kind MismatchKind, describe func(Mismatch) (Subject,
 		}
 		subject, text, ages := describe(m)
 		ev := Evidence{"kind": m.Kind, "version": m.Version}
-		link := Link{Label: "Open Jira release"}
+		var links []Link
 		if m.Jira != nil {
 			ev["jira"] = m.Jira.Name
-			link.URL = m.Jira.URL
+			links = append(links, jiraLink(m.Jira))
 		}
 		if m.Milestone != nil {
 			ev["milestone"] = m.Milestone.Title
-			if m.Jira == nil {
-				link = Link{Label: "Open milestone", URL: m.Milestone.URL}
-			}
+			links = append(links, milestoneLink(m.Milestone))
 		}
-		out = append(out, Hit{Subject: subject, Train: m.Train, App: m.App, AgesOn: ages, Evidence: ev, Text: text, Link: link})
+		out = append(out, Hit{Subject: subject, Train: m.Train, App: m.App, AgesOn: ages, Evidence: ev, Text: text, Links: links})
 	}
 	return out
 }

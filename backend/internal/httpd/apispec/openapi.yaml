@@ -13196,8 +13196,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainFixKind'
         id:
           type: string
-        link:
-          $ref: '#/components/schemas/ReleaseTrainLink'
+        links:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLink'
+          type: array
         mine:
           items:
             $ref: '#/components/schemas/ReleaseTrainMineReason'
@@ -13219,7 +13221,7 @@ components:
       - severity
       - evidence
       - text
-      - link
+      - links
       - asOf
       - bucket
       type: object

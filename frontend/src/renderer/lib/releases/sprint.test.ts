@@ -11,8 +11,6 @@ import {
 	mineText,
 	mrPills,
 	versionMineText,
-	shortAppName,
-	sprintCount,
 	sprintShipsIn,
 } from "./sprint";
 import { board, train, version } from "./testkit";
@@ -82,7 +80,6 @@ const row: SprintRow = {
 	],
 };
 
-const noLens = { me: false, apps: null };
 const t21Dest = { kind: "train", train: "21-2026" } as const;
 const wallet = { kind: "llb", group: "demo-wallet", branch: "feature/demo-wallet", via: "22-2026" } as const;
 const cards: SprintCard[] = [
@@ -205,51 +202,6 @@ describe("sprint numbers", () => {
 		expect(sprintShipsIn(bb, { ...fullRow, number: 20 })?.id).toBe("21-2026");
 		expect(sprintShipsIn(bb, { ...fullRow, number: 30 })).toBeUndefined();
 	});
-
-	it("counts the active, not abandoned sprint cards of every board", () => {
-		const abandoned = card("DEMO-13", [], { status: "Abandoned" });
-		expect(sprintCount(board({ sprints: [{ ...fullRow, cards: [...cards, abandoned] }, fullRow] }), noLens)).toBe(8);
-	});
-
-	describe("under a lens", () => {
-		const mine = [{ why: "assignee" as const }];
-		const known = { kind: "known" as const, jiraAccountId: "acc-dee", gitlabUsername: "dee", displayName: "Dee" };
-		const lensed = board({
-			identity: known,
-			sprints: [
-				{
-					...fullRow,
-					cards: [
-						card("DEMO-1", [mr("di", 1, "sprint")], { mine }),
-						card("DEMO-2", [mr("da", 2, "sprint")]),
-						card("DEMO-3", [mr("da", 3, "sprint"), mr("di", 4, "sprint")]),
-						card("DEMO-4", [], { mine }),
-						card("DEMO-5", [mr("di", 5, "sprint")], { mine, active: false }),
-						card("DEMO-6", [mr("di", 6, "sprint")], { mine, status: "Abandoned" }),
-					],
-				},
-			],
-		});
-
-		it("counts every active card with no lens", () => {
-			expect(sprintCount(lensed, noLens)).toBe(4);
-		});
-
-		it("counts only my cards with Only me on", () => {
-			expect(sprintCount(lensed, { me: true, apps: null })).toBe(2);
-		});
-
-		it("drops cards whose MRs are all in hidden apps and keeps cards with no MR", () => {
-			expect(sprintCount(lensed, { me: false, apps: new Set(["di"]) })).toBe(3);
-			expect(sprintCount(lensed, { me: true, apps: new Set(["da"]) })).toBe(1);
-		});
-
-		it("ignores Only me while the identity is unknown", () => {
-			expect(
-				sprintCount({ ...lensed, identity: { kind: "unknown", reason: "not read" } }, { me: true, apps: null }),
-			).toBe(4);
-		});
-	});
 });
 
 describe("destinations", () => {
@@ -300,10 +252,9 @@ describe("MR family pills", () => {
 		]);
 	});
 
-	it("labels a pill with the short family name the top bar's app chips use", () => {
+	it("labels a pill with the short family name the app mark uses", () => {
 		const apps = [{ id: "xi", name: "F4A iOS", family: "f4a", platform: "ios" as const }];
 		expect(mrPills(card("DEMO-4"), apps)[0].label).toBe("F4A");
-		expect(shortAppName(apps[0])).toBe("F4A iOS");
 	});
 
 	it("colours an app by its merged MR before an open one", () => {

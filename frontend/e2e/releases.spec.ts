@@ -43,7 +43,7 @@ test.describe("releases page", () => {
 		await open(page);
 		await page.getByTestId("bar-da-22-2026").click({ position: { x: 4, y: 4 } });
 		const sheet = page.getByRole("dialog", { name: "Release details" });
-		await expect(sheet).toContainText("Demo Android");
+		await expect(sheet.getByLabel("Demo Android").first()).toBeVisible();
 		await expect(sheet).toContainText("2.5.0");
 		await page.keyboard.press("Escape");
 		await expect(sheet).toHaveCount(0);
@@ -86,16 +86,16 @@ test.describe("releases page", () => {
 	test("hiding an alert moves it to Hidden and Restore brings it back", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const count = page.getByTestId("attention-count");
-		await expect(count).toHaveText("7");
+		await expect(count).toHaveText("8");
 		await page.getByRole("button", { name: "Hide C1~v/21-2026/di" }).click();
-		await expect(count).toHaveText("6");
+		await expect(count).toHaveText("7");
 		await page
 			.getByTestId("hidden-fold")
 			.getByRole("button", { name: /hidden/ })
 			.click();
 		const hidden = page.locator('.al[data-hit="C1~v/21-2026/di"]');
 		await hidden.getByRole("button", { name: "Restore" }).click();
-		await expect(count).toHaveText("7");
+		await expect(count).toHaveText("8");
 	});
 
 	test("panning 500 px leaves no half-visible label and no bar at scaleX(0)", async ({ page }) => {
@@ -125,13 +125,207 @@ test.describe("releases page", () => {
 		expect(report.zero).toBe(0);
 	});
 
+	test("no row, block or alert draws a coloured stripe on its left edge, and severity reads as a word", async ({
+		page,
+	}) => {
+		const stripes = () =>
+			page.evaluate(() =>
+				[
+					...document.querySelectorAll<HTMLElement>(
+						".crow, .crows, .nest, .dsum, .csum, .rel-cg, .rel-llbsum .ls, .al, .al > *, .rel-spr",
+					),
+				]
+					.filter((el) => {
+						const cs = getComputedStyle(el);
+						return parseFloat(cs.borderLeftWidth) > 0 && cs.borderLeftColor !== cs.borderRightColor
+							? true
+							: /\)\s+[1-9][\d.]*px 0px 0px 0px inset/.test(cs.boxShadow) ||
+									(parseFloat(cs.borderLeftWidth) > 0 && parseFloat(cs.borderTopWidth) === 0);
+					})
+					.map((el) => el.className),
+			);
+		await open(page, "?layers=sprint,llb,cards");
+		const demo = page.getByTestId("sprint-row-DEMO");
+		await demo.locator(".spsrc .csum").click();
+		await settle(page);
+		for (const key of ["t:21-2026", "l:demo-wallet", "carried"]) {
+			await demo.locator(`[data-dest="${key}"] .dsum`).click();
+			await settle(page);
+		}
+		await page.getByTestId("cards-di:21-2026").locator(".csum").click();
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
+		await settle(page);
+		expect(await stripes()).toEqual([]);
+		await open(page, "?layers=sprint,llb,cards&me=1");
+		await demo.locator(".spsrc .csum").click();
+		await expect(page.locator(".crow.mine").first()).toBeVisible();
+		expect(await stripes()).toEqual([]);
+		await open(page, "?sheet=attention");
+		const hit = page.locator('.al[data-hit="C5~v/21-2026/di"]');
+		await expect(hit.locator(".sev")).toHaveText("Block");
+		expect(await stripes()).toEqual([]);
+	});
+
+	test("the sticky app label stays opaque over the lanes when hovered, focused and under Only me", async ({ page }) => {
+		await open(page, "?me=1");
+		await page.getByTestId("release-timeline").evaluate((el) => (el.scrollLeft = el.scrollWidth));
+		await page.waitForTimeout(200);
+		const label = page.getByTestId("label-di");
+		const fill = () =>
+			label.evaluate((el) => {
+				const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+				const lab = el.closest(".rel-lab") as HTMLElement;
+				const [, , , a = 1] = parse(getComputedStyle(lab).backgroundColor);
+				const r = lab.getBoundingClientRect();
+				const hit = document.elementsFromPoint(r.left + r.width - 12, r.top + r.height / 2);
+				const above = hit.indexOf(lab) >= 0 && hit.slice(0, hit.indexOf(lab)).every((e) => lab.contains(e));
+				return { alpha: a, opacity: getComputedStyle(lab).opacity, above };
+			});
+		await expect.poll(fill).toEqual({ alpha: 1, opacity: "1", above: true });
+		await label.hover();
+		await expect.poll(fill).toEqual({ alpha: 1, opacity: "1", above: true });
+		await label.focus();
+		await expect.poll(fill).toEqual({ alpha: 1, opacity: "1", above: true });
+	});
+
+	for (const reduced of [false, true])
+		test(`a fast diagonal flick ${reduced ? "stops dead on release under reduced motion" : "glides on both axes after release"}`, async ({
+			page,
+		}) => {
+			await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
+			await open(page, "?layers=sprint,llb,cards");
+			await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+			await page.setViewportSize({ width: 1512, height: 700 });
+			await settle(page);
+			const sc = page.getByTestId("release-timeline");
+			expect(await sc.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(400);
+			await sc.evaluate((el) => {
+				el.scrollTop = 0;
+				el.scrollLeft = 0;
+			});
+			const box = (await sc.boundingBox())!;
+			const x = box.x + 900;
+			const y = box.y + box.height - 60;
+			await page.mouse.move(x, y);
+			await page.mouse.down();
+			const released = await sc.evaluate(
+				(el, [x, y]) => {
+					const spin = (ms: number) => {
+						const t = performance.now();
+						while (performance.now() - t < ms);
+					};
+					for (let i = 1; i <= 4; i++) {
+						spin(16);
+						window.dispatchEvent(new PointerEvent("pointermove", { clientX: x - i * 40, clientY: y - i * 15 }));
+					}
+					const at = { left: el.scrollLeft, top: el.scrollTop };
+					window.dispatchEvent(new PointerEvent("pointerup", { clientX: x - 160, clientY: y - 60 }));
+					return at;
+				},
+				[x, y],
+			);
+			await page.mouse.up();
+			const at = () => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
+			await settle(page);
+			const rest = await at();
+			if (reduced) expect(rest).toEqual(released);
+			else {
+				expect(rest.left).toBeGreaterThan(released.left);
+				expect(rest.top).toBeGreaterThan(released.top);
+			}
+		});
+
+	test("a drag pans the timeline both ways at once, and a still click on a bar still opens it", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await settle(page);
+		const sc = page.getByTestId("release-timeline");
+		const at = () => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
+		const start = await sc.evaluate((el) => {
+			el.scrollTop = 0;
+			return { left: el.scrollLeft, top: el.scrollTop, room: el.scrollHeight - el.clientHeight };
+		});
+		expect(start.room).toBeGreaterThan(100);
+		const box = (await sc.boundingBox())!;
+		const x = box.x + 900;
+		const y = box.y + box.height - 60;
+		await page.mouse.move(x, y);
+		await page.mouse.down();
+		await page.mouse.move(x - 120, y - 60, { steps: 6 });
+		await page.mouse.move(x - 240, y - 120, { steps: 6 });
+		await page.mouse.up();
+		await settle(page);
+		const after = await at();
+		expect(after.left).toBeGreaterThan(start.left + 200);
+		expect(after.top).toBeGreaterThan(start.top + 100);
+		const bar = page.getByTestId("bar-da-22-2026");
+		await bar.evaluate((el) => el.scrollIntoView({ block: "center", inline: "center" }));
+		await settle(page);
+		await bar.click({ position: { x: 8, y: 8 } });
+		await expect(page.getByRole("dialog", { name: "Release details" })).toContainText("2.5.0");
+	});
+
+	test("leaving Releases and coming back, or reloading, keeps filters, sheet, folds and scroll; a URL wins", async ({
+		page,
+	}) => {
+		await open(page, "?layers=sprint,llb,cards&apps=di,da,pi&focus=21-2026&hotfixes=0");
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await page.getByTestId("cards-di:21-2026").locator(".csum").click();
+		await settle(page);
+		await page.getByRole("button", { name: /Needs attention/ }).click();
+		await page
+			.getByRole("dialog", { name: "Release details" })
+			.getByTestId("stale-fold")
+			.locator("button.fold")
+			.click();
+		const sc = page.getByTestId("release-timeline");
+		const scrolled = await sc.evaluate((el) => {
+			el.scrollLeft = 700;
+			el.scrollTop = 120;
+			return { left: el.scrollLeft, top: el.scrollTop };
+		});
+		expect(scrolled.top).toBeGreaterThan(0);
+		await page.waitForTimeout(300);
+		const url = new URL(page.url()).hash;
+
+		const nav = page.locator('[data-sidebar="sidebar"]');
+		await nav.getByText("Dashboard").first().click();
+		await expect(page.getByTestId("releases-page")).toHaveCount(0);
+		await nav.getByRole("button", { name: /^Releases/ }).click();
+
+		await expect(page.getByTestId("releases-page")).toBeVisible();
+		expect(new URL(page.url()).hash).toBe(url);
+		await expect(page.getByRole("dialog", { name: "Release details" })).toContainText("Needs attention");
+		await expect(page.getByTestId("stale-fold").locator("button.fold")).toHaveAttribute("aria-expanded", "true");
+		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-dest-block").first()).toBeVisible();
+		await expect(page.getByTestId("cards-di:21-2026").locator(".crow").first()).toBeVisible();
+		await expect.poll(() => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }))).toEqual(scrolled);
+
+		await page.reload();
+		await expect(page.getByTestId("label-di")).toBeVisible();
+		expect(new URL(page.url()).hash).toBe(url);
+		await expect(page.getByTestId("stale-fold").locator("button.fold")).toHaveAttribute("aria-expanded", "true");
+		await expect.poll(() => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }))).toEqual(scrolled);
+
+		const fresh = await page.context().newPage();
+		await fresh.goto("/#/releases");
+		await expect(fresh.getByTestId("label-di")).toBeVisible();
+		expect(new URL(fresh.url()).hash).toBe(url);
+		await fresh.close();
+
+		await page.goto("/#/releases?apps=di");
+		await expect(page.getByTestId("label-di")).toBeVisible();
+		await expect(page.getByTestId("label-da")).toHaveCount(0);
+		await expect(page.getByRole("dialog", { name: "Release details" })).toHaveCount(0);
+	});
+
 	test("a failed source shows unknown with its age, never a blank", async ({ page }) => {
 		await open(page, "", "failed-source");
 		await expect(page.getByTestId("release-sources").locator('[data-source="gitlab"]')).toHaveText(
 			/gitlab unknown · \d+[mhd]/,
 		);
 		await expect(page.getByTestId("release-sources").locator('[data-source="jira"]')).not.toContainText("unknown");
-		await expect(page.getByTestId("attention-count")).toHaveText("7 · 1 unknown");
+		await expect(page.getByTestId("attention-count")).toHaveText("8 · 1 unknown");
 		await expect(page.locator('.rel-app[data-app="di"] .rel-mk[data-stage="scan"]')).toHaveAttribute(
 			"data-st",
 			"unknown",
@@ -171,7 +365,8 @@ test.describe("releases page", () => {
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		await expect(sheet.getByTestId("card-summary")).toHaveText("Show the fee before the order");
 		await expect(sheet.getByTestId("card-unit")).toHaveCount(2);
-		await expect(sheet.getByTestId("card-unit").first()).toContainText("Demo iOS · #21");
+		await expect(sheet.getByTestId("card-unit").first()).toContainText("Dem · #21");
+		await expect(sheet.getByTestId("card-unit").first().getByLabel("Demo iOS")).toBeVisible();
 		await expect(sheet.getByRole("link", { name: "Open card" })).toHaveAttribute("target", "_blank");
 	});
 
@@ -179,7 +374,7 @@ test.describe("releases page", () => {
 		page,
 	}) => {
 		await open(page);
-		const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button");
+		const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]");
 		await sum.click();
 		const app = page.locator('.rel-app[data-app="di"]');
 		await expect(app.getByTestId("llb-lane")).toHaveCount(3);
@@ -200,7 +395,7 @@ test.describe("releases page", () => {
 
 	test("the Long-lived layer off hides the line, its lanes and its wires", async ({ page }) => {
 		await open(page);
-		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button").click();
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
 		await expect(page.getByTestId("llb-lane").first()).toBeVisible();
 		await layer(page, "Long-lived").click();
 		await expect(page.getByTestId("llb-summary")).toHaveCount(0);
@@ -219,7 +414,7 @@ test.describe("releases page", () => {
 		await expect(form).toContainText("v1");
 		await expect(page.getByTestId("llb-status")).toContainText("Targets #22");
 		await page.keyboard.press("Escape");
-		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button").click();
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
 		await expect(page.locator('[data-testid="llb-lane"][data-branch="feature/demo-chat"]')).toContainText("→ #22");
 	});
 
@@ -238,15 +433,52 @@ test.describe("releases page", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-plan-conflict.png` });
 	});
 
-	test("the sidebar's Long-lived entry counts open groups and opens their list", async ({ page }) => {
+	test("the sidebar has no Releases sub-entries; the page opens the long-lived list, Sprint layer and rules", async ({
+		page,
+	}) => {
 		await open(page);
-		const entry = page.getByRole("button", { name: /^Long-lived\s*2$/ });
+		const nav = page.locator('[data-sidebar="sidebar"]');
+		await expect(nav.getByRole("button", { name: "Releases" })).toBeVisible();
+		for (const name of [/^Sprint/, /^Long-lived/, /^Alert rules$/])
+			await expect(nav.getByRole("button", { name })).toHaveCount(0);
+		await layer(page, "Sprint cards").click();
+		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await page.getByRole("button", { name: /Needs attention/ }).click();
+		await page.getByRole("dialog", { name: "Release details" }).getByRole("tab", { name: "Rules" }).click();
+		await expect(page.locator('.rule[data-rule="L9"]')).toBeVisible();
+		await page.keyboard.press("Escape");
+		const entry = page.getByTestId("llbs-button");
+		await expect(entry).toHaveText(/Long-lived\s*2/);
 		await entry.click();
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		await expect(sheet).toContainText("Long-lived branches");
 		await expect(sheet).toContainText("Open 2");
 		await sheet.getByRole("button", { name: /Wallet/ }).click();
 		await expect(page.getByTestId("plan-form")).toBeVisible();
+	});
+
+	test("a plan marked dropped by mistake is found from the page and set back to a train", async ({ page }) => {
+		await open(page);
+		await page.evaluate(() => {
+			type Seam = { __aoReleaseBoard?: { board: { llbs: { id: string; target: { kind: string } }[] } } };
+			(globalThis as Seam).__aoReleaseBoard!.board.llbs.find((x) => x.id === "demo-chat")!.target = { kind: "dropped" };
+		});
+		await page.getByRole("button", { name: "Refresh sources" }).click();
+		await expect(page.locator('[data-testid="llb-summary"][data-app="di"]')).toContainText("2 long-lived");
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByTestId("llbs-from-line").click();
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		const row = sheet.locator(".lbrow", { hasText: "demo-chat" });
+		await expect(row).toContainText("dropped");
+		await row.click();
+		await expect(page.getByTestId("llb-status")).toContainText("Marked dropped");
+		const form = page.getByTestId("plan-form");
+		await form.getByLabel("Name").fill("Advisor chat");
+		await form.getByRole("group", { name: "Target train" }).getByRole("button", { name: /#22/ }).click();
+		await form.getByRole("button", { name: "Save plan" }).click();
+		await expect(page.getByTestId("llb-status")).toContainText("Targets #22");
+		await page.keyboard.press("Escape");
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
+		await expect(page.locator('[data-testid="llb-lane"][data-branch="feature/demo-chat"]')).toContainText("→ #22");
 	});
 
 	test("the plan form refuses a plan with no name", async ({ page }) => {
@@ -330,7 +562,8 @@ test.describe("releases page", () => {
 		await expect(sheet.getByTestId("card-summary")).toHaveText("Filter the fund list by risk level");
 		const routes = sheet.getByTestId("card-route");
 		await expect(routes).toHaveCount(2);
-		await expect(routes.nth(0)).toContainText("Demo iOS · sprint branch · ships in #21");
+		await expect(routes.nth(0)).toContainText("Dem · sprint branch · ships in #21");
+		await expect(routes.nth(0).getByLabel("Demo iOS")).toBeVisible();
 		await expect(routes.nth(1)).toContainText("MR open → sprint branch");
 		await expect(routes.nth(1)).toContainText("!402");
 		await expect(sheet.getByText("Subtasks (2)")).toBeVisible();
@@ -341,23 +574,13 @@ test.describe("releases page", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-sheet.png` });
 	});
 
-	test("the sidebar's Sprint entry turns the layer on and unfolds every board", async ({ page }) => {
-		await open(page);
-		await expect(page.locator("[data-board]")).toHaveCount(0);
-		await page.getByRole("button", { name: /^Sprint\s*8$/ }).click();
-		await expect(layer(page, "Sprint cards")).toHaveAttribute("aria-pressed", "true");
-		await expect(page.locator("[data-board]")).toHaveCount(2);
-		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-dest-block")).toHaveCount(6);
-		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-dest-block")).toHaveCount(1);
-	});
-
 	test("Only me filters every kind of thing and changes the badge", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
-		await expect(page.getByTestId("attention-count")).toHaveText("7");
+		await expect(page.getByTestId("attention-count")).toHaveText("8");
 		await page.getByTestId("only-me").click();
 		await expect(page).toHaveURL(/me=%221%22/);
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
-		await expect(page.getByTestId("attention-count")).toHaveText("2");
+		await expect(page.getByTestId("attention-count")).toHaveText("3");
 		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveText(
 			"your release MR !77 · 1 of my card",
 		);
@@ -370,7 +593,7 @@ test.describe("releases page", () => {
 		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-scope")).toHaveText("1 new · 1 carried, done");
 		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-scope")).toHaveText("1 new");
 		await page.getByRole("button", { name: /Needs attention/ }).click();
-		await expect(page.locator(".al[data-hit]")).toHaveCount(2);
+		await expect(page.locator(".al[data-hit]")).toHaveCount(3);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-only-me.png` });
 	});
 
@@ -415,27 +638,13 @@ test.describe("releases page", () => {
 		await expect(group.locator(".crow.mine")).toHaveCount(0);
 	});
 
-	test("the sidebar's Sprint count follows Only me and the app filter", async ({ page }) => {
-		await open(page);
-		const sprint = (n: number) => page.getByRole("button", { name: new RegExp(`^Sprint\\s*${n}$`) });
-		await expect(sprint(8)).toBeVisible();
-		await page.getByTestId("only-me").click();
-		await expect(sprint(2)).toBeVisible();
-		await page.getByTestId("only-me").click();
-		await expect(sprint(8)).toBeVisible();
-		await open(page, "?apps=di");
-		await expect(sprint(4)).toBeVisible();
-		await open(page, "?apps=di&me=1");
-		await expect(sprint(1)).toBeVisible();
-	});
-
 	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="L9~mr/da/415"]');
 		await expect(hit).toContainText(
 			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
 		);
-		await expect(hit).toContainText("Demo Android");
+		await expect(hit.getByLabel("Demo Android")).toBeVisible();
 		await expect(hit.getByRole("link", { name: "Open MR" })).toHaveAttribute(
 			"href",
 			"https://gitlab.example.com/demo/merge_requests/415",
@@ -444,6 +653,77 @@ test.describe("releases page", () => {
 		await expect(page.locator('.rule[data-rule="L9"]')).toContainText(
 			"MR into a branch that is not a sprint branch, a long-lived branch or develop",
 		);
+	});
+
+	test("every place that names an app uses the family short name and a platform glyph", async ({ page }) => {
+		const noLongName = async (scope: ReturnType<Page["locator"]>) => {
+			const text = await scope.evaluate((el) => {
+				const clone = el.cloneNode(true) as HTMLElement;
+				for (const m of clone.querySelectorAll("[aria-label], [title]")) {
+					m.removeAttribute("aria-label");
+					m.removeAttribute("title");
+				}
+				return clone.innerText;
+			});
+			expect(text).not.toMatch(/\b(Demo|Pilot) (iOS|Android)\b/);
+			expect(text).not.toMatch(/\b(di|da|pi|pa)\b/);
+		};
+		const marks = (scope: ReturnType<Page["locator"]>) => scope.getByTestId("app-mark");
+
+		await open(page, "?sheet=train:21-2026");
+		const apps = page.getByRole("group", { name: "Apps" });
+		await expect(marks(apps)).toHaveCount(4);
+		await expect(apps.locator('svg[data-platform="android"]')).toHaveCount(2);
+		await noLongName(apps);
+		for (const id of ["di", "da", "pi", "pa"]) {
+			await expect(marks(page.getByTestId(`label-${id}`))).toHaveCount(1);
+			await noLongName(page.getByTestId(`label-${id}`).locator(".nm"));
+		}
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		await expect(marks(sheet.locator(".tapp"))).toHaveCount(4);
+		const chips = sheet.getByTestId("approver-chip");
+		await expect(chips.first()).toBeVisible();
+		for (const chip of await chips.all()) {
+			await expect(marks(chip)).toHaveCount(1);
+			await noLongName(chip);
+		}
+		await noLongName(sheet.locator(".al .who").first());
+
+		await open(page, "?sheet=attention");
+		const who = page.locator(".rel-sheet .al .who");
+		for (const w of await who.all()) await noLongName(w);
+		await expect(marks(page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"]'))).toHaveCount(1);
+
+		await open(page, "?sheet=version:21-2026:da");
+		await expect(marks(page.getByRole("dialog", { name: "Release details" }).locator(".sh-h"))).toHaveCount(1);
+		await noLongName(page.getByRole("dialog", { name: "Release details" }).locator(".sh-h"));
+	});
+
+	test("an A6 hit opens both sources it compares, in Attention and the version sheet", async ({ page }) => {
+		const expectBoth = async (scope: ReturnType<Page["locator"]>) => {
+			await expect(scope.getByRole("link", { name: "Open page" })).toHaveAttribute(
+				"href",
+				"https://wiki.example.com/pages/21-demo",
+			);
+			await expect(scope.getByRole("link", { name: "Open milestone" })).toHaveAttribute(
+				"href",
+				"https://gitlab.example.com/demo/milestones/1",
+			);
+		};
+		await open(page, "?sheet=attention");
+		const hit = page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"]');
+		await expect(hit).toContainText("Page says freeze");
+		await expectBoth(hit);
+		await hit.getByRole("button", { name: "Show" }).click();
+		await expectBoth(page.locator('.rel-sheet .al[data-hit="A6~vd/21-2026/di/freeze"]'));
+	});
+
+	test("an A1 hit's mismatch sheet opens the Jira release and the milestone", async ({ page }) => {
+		await open(page, "?sheet=attention");
+		await page.locator('.al[data-hit="A1~v/21-2026/pi"]').getByRole("button", { name: "Show" }).click();
+		const links = page.locator(".rel-sheet .kv .links");
+		await expect(links.getByRole("link", { name: "Open Jira release" })).toBeVisible();
+		await expect(links.getByRole("link", { name: "Open milestone" })).toBeVisible();
 	});
 
 	test("with the identity unknown Only me is disabled with the reason and ?me=1 filters nothing", async ({ page }) => {
@@ -455,7 +735,7 @@ test.describe("releases page", () => {
 		await expect(page.getByRole("tooltip")).toContainText(
 			"Only me needs your Jira and GitLab accounts: gitlab.user has not been read yet",
 		);
-		await expect(page.getByTestId("attention-count")).toHaveText("7");
+		await expect(page.getByTestId("attention-count")).toHaveText("8");
 		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveCount(0);
 	});
 
@@ -669,7 +949,7 @@ for (const [width, height] of [
 	}) => {
 		await page.setViewportSize({ width, height });
 		await open(page, "?layers=sprint,llb,cards,past");
-		for (const s of await page.getByTestId("llb-summary").all()) await s.getByRole("button").click();
+		for (const s of await page.getByTestId("llb-summary").all()) await s.locator(".ls[aria-expanded]").click();
 		for (const g of await page.locator(".rel-cg .csum").all()) await g.click();
 		for (const d of await page.locator(".rel-cg.dest .dsum").all()) await d.click();
 		await page.waitForTimeout(100);

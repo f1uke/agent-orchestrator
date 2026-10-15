@@ -17,7 +17,7 @@ var ruleB1 = rule{
 				return nil
 			}
 			return versionHit(t, v, s.Detail, Evidence{"freeze": s.Date, "status": s.Status},
-				Link{Label: "Open milestone", URL: v.Milestone.URL})
+				milestoneLink(&v.Milestone))
 		})
 	},
 }

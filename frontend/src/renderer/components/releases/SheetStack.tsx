@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronRight, X } from "lucide-react";
 import { AnimatePresence, m } from "motion/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useClearStaleHides, useSetRule } from "../../hooks/useReleaseBoard";
 import { FIX_STATE_META } from "../../lib/releases/fix";
 import { dayLabel } from "../../lib/releases/day";
@@ -28,7 +28,9 @@ import {
 } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Switch } from "../ui/switch";
-import { AlertList, AlertRow, appName, Ext, Sec } from "./Alerts";
+import { appMarkOf } from "../../lib/releases/appMark";
+import { AlertList, AlertRow, Ext, HitLinks, HitWho, Sec } from "./Alerts";
+import { AppMark } from "./AppMark";
 import { Avatar } from "./Avatar";
 import { cardSheet, sprintSheet } from "./CardSheets";
 import { fixesSheet, fixSheet } from "./FixSheets";
@@ -212,7 +214,7 @@ function trainSheet(id: string, c: Ctx): Sheet {
 								onClick={() => c.actions.openSheet({ kind: "version", train: t.id, app: a.id }, "push")}
 							>
 								<b>
-									{a.name} <span className="mono muted">{v.version}</span>
+									<AppMark mark={appMarkOf(c.board.apps, a.id)} /> <span className="mono muted">{v.version}</span>
 								</b>
 								<span className="muted text-[12px]">
 									approvals {ap.ok}/{ap.total}
@@ -239,9 +241,9 @@ function trainSheet(id: string, c: Ctx): Sheet {
 											key={x.app}
 											className="spill"
 											data-st={x.approved ? "done" : "waiting"}
-											title={appName(c.board, x.app)}
+											data-testid="approver-chip"
 										>
-											{x.approved ? "✓" : "◷"} {x.app}
+											{x.approved ? "✓" : "◷"} <AppMark mark={appMarkOf(c.board.apps, x.app)} size="sm" />
 										</span>
 									))}
 								</span>
@@ -262,7 +264,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 	const v = t && versionOf(t, app);
 	if (!t || !v)
 		return {
-			title: appName(c.board, app),
+			title: <AppMark mark={appMarkOf(c.board.apps, app)} />,
 			body: <div className="sec empty">This version is no longer on the Board.</div>,
 		};
 	const own = owner(v);
@@ -272,7 +274,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 	return {
 		title: (
 			<>
-				{appName(c.board, app)} <span className="mono">{v.version}</span>
+				<AppMark mark={appMarkOf(c.board.apps, app)} /> <span className="mono">{v.version}</span>
 				<span className="badge" data-st="accent">
 					{t.label}
 				</span>
@@ -376,7 +378,7 @@ function hotfixSheet(app: string, version: string, c: Ctx): Sheet {
 	return {
 		title: (
 			<>
-				{appName(c.board, app)} <span className="mono">{version}</span>
+				<AppMark mark={appMarkOf(c.board.apps, app)} /> <span className="mono">{version}</span>
 				<span className="badge" data-st="hotfix">
 					hotfix
 				</span>
@@ -417,7 +419,9 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 		body: h ? (
 			<div className="sec kv">
 				<span>App</span>
-				<span>{appName(c.board, h.app)}</span>
+				<span>
+					<AppMark mark={appMarkOf(c.board.apps, h.app)} />
+				</span>
 				<span>Train</span>
 				<span>{h.train ? (c.board.trains.find((t) => t.id === h.train)?.label ?? h.train) : "none"}</span>
 				<span>Problem</span>
@@ -438,11 +442,11 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 						</span>
 					</>
 				)}
-				{h.link.url && (
+				{h.links.some((l) => l.url) && (
 					<>
-						<span>Source</span>
-						<span>
-							<Ext url={h.link.url}>{h.link.label}</Ext>
+						<span>Open</span>
+						<span className="links">
+							<HitLinks h={h} />
 						</span>
 					</>
 				)}
@@ -454,10 +458,11 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 }
 
 function Fold({ label, children, testid }: { label: string; children: ReactNode; testid: string }) {
-	const [open, setOpen] = useState(false);
+	const open = useReleasesUi((s) => s.open.has(`sheet:${testid}`));
+	const toggle = useReleasesUi((s) => s.toggleFold);
 	return (
 		<div data-testid={testid}>
-			<button type="button" className="fold" aria-expanded={open} onClick={() => setOpen(!open)}>
+			<button type="button" className="fold" aria-expanded={open} onClick={() => toggle(`sheet:${testid}`)}>
 				<ChevronRight className="size-3" style={{ rotate: open ? "90deg" : "0deg" }} aria-hidden="true" />
 				{label}
 			</button>
@@ -479,10 +484,10 @@ function UnknownCells({ rules, c }: { rules: RuleOutcome[]; c: Ctx }) {
 		>
 			{rules.map((r) => (
 				<div key={`${r.rule}:${r.app ?? ""}`} className="al" data-st="unknown" data-testid="unknown-cell">
-					<span className="bar3" />
 					<div>
 						<div className="who">
-							{appName(c.board, r.app)}
+							<span className="sev">Unknown</span>
+							<HitWho board={c.board} app={r.app} />
 							<span className="rid">{r.rule}</span>
 						</div>
 						<div className="tx">{r.outcome.kind === "unknown" ? unknownText(r.outcome.missing, c.now) : ""}</div>
@@ -538,7 +543,6 @@ function AttentionBody({ c }: { c: Ctx }) {
 				<Fold label={`${stale.length} hide(s) no longer matching`} testid="stale-fold">
 					{stale.map((s) => (
 						<div key={s.id} className="al dim">
-							<span className="bar3" />
 							<div>
 								<div className="who mono">{s.id}</div>
 								<div className="tx">

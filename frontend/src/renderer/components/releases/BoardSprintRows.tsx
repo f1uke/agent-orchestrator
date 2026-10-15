@@ -20,6 +20,7 @@ import {
 } from "../../lib/releases/sprint";
 import type { Board, BoardApp, Dest, SprintCard, SprintRow } from "../../lib/releases/types";
 import { useReleasesUi } from "../../stores/releases-ui";
+import { PlatformGlyph } from "./AppMark";
 import { CardLine, Chev } from "./CardGroups";
 import { Moving, Unfold, Wire, WireText } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
@@ -34,11 +35,6 @@ const ROW_BORDER = 1;
 const DESTS_TOP = SRC_TOP + SUM_H;
 const INDENT = 44;
 const BLOCK_W = 683;
-
-const GLYPH: Record<BoardApp["platform"], string> = {
-	ios: "M11.3 8.6c0-1.7 1.4-2.5 1.5-2.5-.8-1.2-2.1-1.4-2.5-1.4-1-.1-2.1.6-2.6.6s-1.4-.6-2.3-.6C4.2 4.7 3 5.4 2.4 6.6c-1.3 2.2-.3 5.4.9 7.2.6.9 1.3 1.8 2.2 1.8.9 0 1.2-.6 2.3-.6s1.4.6 2.3.6c1 0 1.6-.9 2.1-1.8.7-1 1-1.9 1-1.9s-1.9-.8-1.9-3.3zM9.6 3.5c.5-.6.8-1.4.7-2.3-.7 0-1.6.5-2.1 1.1-.5.5-.9 1.3-.8 2.2.8.1 1.6-.4 2.2-1z",
-	android: "M2.2 12.6a5.8 5.8 0 0 1 11.6 0z",
-};
 
 function Pills({ pills, card, here }: { pills: MrPill[]; card: SprintCard; here: string | null }) {
 	return (
@@ -69,9 +65,7 @@ function Pills({ pills, card, here }: { pills: MrPill[]; card: SprintCard; here:
 									aria-label={tip}
 									onClick={(e) => e.stopPropagation()}
 								>
-									<svg viewBox="0 0 16 16" aria-hidden="true">
-										<path d={GLYPH[a.platform]} />
-									</svg>
+									<PlatformGlyph platform={a.platform} />
 								</a>
 							);
 						})}

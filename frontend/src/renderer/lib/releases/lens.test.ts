@@ -27,7 +27,7 @@ const hit = (id: string, over: Partial<AlertHit> = {}): AlertHit => ({
 	bucket: "badge",
 	text: id,
 	evidence: {},
-	link: { label: "Open" },
+	links: [],
 	asOf: "2026-10-14T03:00:00Z",
 	...over,
 });

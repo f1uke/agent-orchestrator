@@ -28,7 +28,7 @@ var ruleF1 = rule{
 				Subject: SubjTrainPair{A: x.ID, B: y.ID}, Train: &train, AgesOn: y.Publish,
 				Evidence: Evidence{"freeze": *y.Freeze, "publish": *x.Publish},
 				Text:     fmt.Sprintf("%s freezes %s, before %s publishes %s", y.ID, y.Freeze.label(), x.ID, x.Publish.label()),
-				Link:     Link{Label: "Open train"},
+				Links:    []Link{},
 			})
 		}
 		return out
@@ -57,10 +57,20 @@ var ruleF2 = rule{
 					Evidence: Evidence{"start": *start, "due": *due, "freeze": *t.Freeze, "publish": *t.Publish},
 					Text: fmt.Sprintf("Hotfix %s runs %s to %s, inside train %s (%s to %s)",
 						h.Version, start.label(), due.label(), t.ID, t.Freeze.label(), t.Publish.label()),
-					Link: Link{Label: "Open hotfix", URL: h.Milestone.URL},
+					Links: hotfixLinks(h, t),
 				})
 			}
 		}
 		return out
 	},
+}
+
+func hotfixLinks(h Hotfix, t *Train) []Link {
+	links := []Link{{Label: "Open hotfix", URL: h.Milestone.URL}}
+	for _, v := range t.Versions {
+		if v.App == h.App {
+			links = append(links, Link{Label: "Open " + t.ID.String() + " milestone", URL: v.Milestone.URL})
+		}
+	}
+	return links
 }

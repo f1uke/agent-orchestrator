@@ -45,7 +45,7 @@ func testView() rt.PlanView {
 			{App: "da", Project: 1002, Live: false, JiraVersionID: "5002"},
 			{App: "pi", Project: 1003, Live: true},
 		},
-		ApproverIDs:     []string{"acc-ann", "acc-bob"},
+		PersonIDs:       []string{"acc-ann", "acc-bob"},
 		LLBCardKeys:     []string{"DEMO-30", "DEMO-31"},
 		MyAccountID:     "acc-dee",
 		WatchedCardKeys: []string{"DEMO-1", "DEMO-30"},

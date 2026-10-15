@@ -2,6 +2,7 @@ package releasetrain
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -133,17 +134,29 @@ func detectLLBs(cfg Config, snap Snapshot) ([]LongLivedBranch, map[AppID]Day) {
 					outs = append(outs, m)
 				}
 			}
-			need := 1
-			if issueKeyRE.MatchString(name) {
-				need = 2
-			}
-			if len(outs) == 0 && len(ins) < need {
+			if !longLived(name, ins, outs) {
 				continue
 			}
 			out = append(out, llbOf(app, name, ins, outs, snap, jira, cutover))
 		}
 	}
 	return out, cutover
+}
+
+func longLived(name string, ins, outs []MRFact) bool {
+	own := issueKeyRE.FindAllString(name, -1)
+	if len(own) == 0 {
+		return len(ins) > 0 || len(outs) > 0
+	}
+	others := map[string]bool{}
+	for _, m := range ins {
+		for _, k := range mrKeys(m) {
+			if !slices.Contains(own, k) {
+				others[k] = true
+			}
+		}
+	}
+	return len(others) >= 2
 }
 
 func sortMRs(mrs []MRFact, at func(MRFact) Day) {

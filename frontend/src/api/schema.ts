@@ -4645,7 +4645,7 @@ export interface components {
             evidence: components["schemas"]["ReleaseTrainEvidence"];
             fix?: components["schemas"]["ReleaseTrainFixKind"];
             id: string;
-            link: components["schemas"]["ReleaseTrainLink"];
+            links: components["schemas"]["ReleaseTrainLink"][];
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             openFix?: components["schemas"]["ReleaseTrainFixRef"];
             rule: string;

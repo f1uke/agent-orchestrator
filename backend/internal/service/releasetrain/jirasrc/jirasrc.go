@@ -104,7 +104,7 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 		}
 		jobs = append(jobs, svc.Job{Spec: spec, Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.pageCards(ctx, keys) }})
 	}
-	for _, id := range view.ApproverIDs {
+	for _, id := range view.PersonIDs {
 		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindJiraUsers, rt.UserScope(id), ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.user(ctx, id) }})
 	}
 	if keys := view.LLBCardKeys; len(keys) > 0 {

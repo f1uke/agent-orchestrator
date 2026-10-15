@@ -3,6 +3,8 @@ import { approvals, nowStage, owner, unknownText, versionOf, type Lens } from ".
 import type { BoardApp, Stage } from "../../lib/releases/types";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
 import { versionMineText } from "../../lib/releases/sprint";
+import { appMark } from "../../lib/releases/appMark";
+import { AppMark } from "./AppMark";
 import { useLabelStagger } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 
@@ -45,11 +47,9 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 	useLabelStagger(root, t?.id ?? "");
 	const hits = lens.appHits(app.id);
 	const top = hits[0];
-	const family = app.name.replace(/\s*(iOS|Android)\s*$/i, "").trim() || app.name;
 	const head = (
 		<div className="nm">
-			{family}
-			<span className="plat">{app.platform === "ios" ? "iOS" : "Android"}</span>
+			<AppMark mark={appMark(app)} />
 			{hits.length > 0 && top && (
 				<span
 					className="flag"

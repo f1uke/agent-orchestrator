@@ -1,5 +1,6 @@
 @layer components {
 	.rel {
+		position: relative;
 		--lw: 280px;
 		--fg-off: color-mix(in srgb, var(--fg) 22%, var(--bg));
 		--hover: var(--interactive-hover);
@@ -486,9 +487,8 @@
 		position: absolute;
 		top: 5px;
 		height: 20px;
-		border-left: 2px solid var(--fg-off);
-		border-right: 1px solid var(--border-1);
-		border-radius: 2px;
+		border: 1px solid var(--border-1);
+		border-radius: 4px;
 		padding: 0;
 		font-size: 11.5px;
 		color: var(--fg-muted);
@@ -509,7 +509,7 @@
 	}
 	.rel-spr.active {
 		color: var(--fg);
-		border-left-color: var(--accent);
+		border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 		background-color: rgb(77 141 255 / 0.07);
 	}
 	.rel-spr.active .sl {
@@ -530,8 +530,9 @@
 	.rel-app > .rel-lab > * {
 		flex: none;
 	}
-	.rel-app > .rel-lab:hover {
-		background: var(--interactive-hover);
+	.rel-app > .rel-lab:hover,
+	.rel-app > .rel-lab:focus-visible {
+		background: color-mix(in srgb, var(--fg) 4%, var(--bg));
 	}
 	.rel-app > .rel-trk {
 		align-self: stretch;
@@ -548,13 +549,26 @@
 		font-weight: 600;
 		font-size: 13.5px;
 	}
-	.rel-lab .plat {
-		font-size: 10px;
-		font-weight: 500;
-		color: var(--fg-passive);
-		border: 1px solid var(--border-1);
-		border-radius: 4px;
-		padding: 0 5px;
+	.rel .appmark {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		white-space: nowrap;
+		vertical-align: -1px;
+	}
+	.rel .pg {
+		width: 12px;
+		height: 12px;
+		flex: none;
+		fill: currentColor;
+	}
+	.rel .appmark.sm {
+		font-size: 11px;
+		gap: 2px;
+	}
+	.rel .appmark.sm .pg {
+		width: 11px;
+		height: 11px;
 	}
 	.rel-lab .flag {
 		margin-left: auto;
@@ -644,10 +658,14 @@
 		height: 22px;
 		pointer-events: none;
 	}
-	.rel-llbsum .ls {
-		pointer-events: auto;
+	.rel-llbsum .lsrow {
 		position: sticky;
 		left: calc(var(--lw) + 6px);
+		display: inline-flex;
+		gap: 2px;
+	}
+	.rel-llbsum .ls {
+		pointer-events: auto;
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
@@ -657,6 +675,14 @@
 		font-size: 11.5px;
 		color: var(--fg-passive);
 		white-space: nowrap;
+	}
+	.rel-llbsum .ls.all {
+		padding: 0 8px;
+		color: var(--fg-passive);
+	}
+	.rel-chip .n {
+		font: 600 10.5px var(--font-mono);
+		color: var(--purple);
 	}
 	.rel-llbsum .ic {
 		color: var(--purple);
@@ -851,7 +877,7 @@
 	}
 
 	.rel-scrim {
-		position: fixed;
+		position: absolute;
 		inset: 0;
 		z-index: 40;
 	}
@@ -946,6 +972,11 @@
 	.rel-sheet .kv > :nth-child(odd) {
 		color: var(--fg-passive);
 	}
+	.rel-sheet .kv .links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 12px;
+	}
 	.rel-sheet a {
 		color: var(--accent);
 	}
@@ -1026,14 +1057,26 @@
 	}
 	.rel-sheet .al {
 		display: grid;
-		grid-template-columns: 3px 1fr auto;
+		grid-template-columns: 1fr auto;
 		gap: 10px;
 		padding: 9px 0;
 		border-bottom: 1px solid var(--border);
 	}
-	.rel-sheet .al .bar3 {
+	.rel-sheet .al .sev {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--c);
+	}
+	.rel-sheet .al .sev::before {
+		content: "";
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
 		background: var(--c);
-		border-radius: 2px;
+		box-shadow: 0 0 7px color-mix(in srgb, var(--c) 60%, transparent);
 	}
 	.rel-sheet .al .who {
 		font-size: 12px;
@@ -1296,9 +1339,7 @@
 		color: var(--c);
 	}
 	.rel .llbgrp .nest {
-		margin-left: 20px;
-		padding-left: 2px;
-		border-left: 1px solid color-mix(in srgb, var(--purple) 35%, transparent);
+		margin-left: 22px;
 	}
 	.rel .llbgrp .nest .crow {
 		width: 474px;
@@ -1704,8 +1745,8 @@
 	.rel-lab .meline.off {
 		color: var(--fg-passive);
 	}
-	.rel .crow.mine {
-		box-shadow: inset 2px 0 0 var(--accent);
+	.rel .crow.sp.mine .av {
+		box-shadow: 0 0 0 1.5px var(--accent);
 	}
 	.rel .crow .mecell {
 		display: inline-grid;
@@ -1823,7 +1864,6 @@
 		color: var(--fg-muted);
 		white-space: nowrap;
 		background: color-mix(in srgb, var(--c) 10%, var(--bg));
-		box-shadow: inset 2px 0 0 var(--c);
 	}
 	.rel .dsum:hover {
 		background: color-mix(in srgb, var(--c) 17%, var(--bg));
@@ -1862,9 +1902,7 @@
 		text-decoration: underline;
 	}
 	.rel-cg.dest .crows {
-		margin-left: 10px;
-		padding-left: 4px;
-		border-left: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+		margin-left: 14px;
 		background: var(--bg);
 	}
 	.rel .crow.sp {
@@ -1921,11 +1959,6 @@
 		border-radius: 50%;
 		color: var(--c);
 		text-decoration: none;
-	}
-	.rel .mrd svg {
-		width: 12px;
-		height: 12px;
-		fill: currentColor;
 	}
 	.rel .mrd.away {
 		color: var(--fg-off);

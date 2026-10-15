@@ -86,6 +86,7 @@ func newWorldWith(t *testing.T, config string) *world {
 	w.jira.Set(`/rest/api/3/search/jql?jql=fixVersion = 5001 ORDER BY key`, `{"issues":[{"key":"DEMO-1","fields":{"summary":"Release Demo 3.5.0","status":{"name":"To Do","statusCategory":{"key":"new"}},"issuetype":{"subtask":false},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 	w.jira.Set(`/rest/api/3/search/jql?jql=project = DEMOREQ AND summary ~ "force update" AND created >= "2026-04-01" ORDER BY key`, `{"issues":[]}`)
 	w.jira.Set("/rest/api/3/user?accountId=acc-ann", `{"accountId":"acc-ann","displayName":"Ann Example"}`)
+	w.jira.Set("/rest/api/3/user?accountId=acc-dee", `{"accountId":"acc-dee","displayName":"Dee Example"}`)
 	w.jira.Set("/rest/api/3/myself", `{"accountId":"acc-dee","displayName":"Dee Example"}`)
 	w.jira.Set(`/wiki/rest/api/content/search?cql=space = "DEMOSPACE" AND title ~ "Release train" AND created >= "2026-01-31"`,
 		`{"results":[{"id":"801","title":"2026.10.12 - Release train #21","history":{"createdDate":"2026-09-14T06:30:00.000Z"},"_links":{"webui":"/spaces/DEMOSPACE/pages/801"},`+

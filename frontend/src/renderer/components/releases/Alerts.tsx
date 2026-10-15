@@ -4,13 +4,22 @@ import { useHideHit, useUnhideHit } from "../../hooks/useReleaseBoard";
 import { FIX_STATE_META, fixAction } from "../../lib/releases/fix";
 import type { AlertHit, Board } from "../../lib/releases/types";
 import type { SheetEntry } from "../../lib/releases/url";
+import { appMarkOf } from "../../lib/releases/appMark";
 import { SEVERITY_META } from "../../lib/releases/vocab";
+import { AppMark } from "./AppMark";
 import type { PageActions } from "./ReleasesPage";
 
 type AlertCtx = { board: Board; actions: PageActions };
 
-export function appName(b: Board, id: string | undefined): string {
-	return b.apps.find((a) => a.id === id)?.name ?? id ?? "all apps";
+export function HitWho({ board, train, app }: { board: Board; train?: string; app?: string }) {
+	const label = train ? board.trains.find((t) => t.id === train)?.label : null;
+	if (!label && !app) return <>All apps</>;
+	return (
+		<>
+			{label}
+			{app && <AppMark mark={appMarkOf(board.apps, app)} size="sm" />}
+		</>
+	);
 }
 
 export function Sec({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) {
@@ -22,6 +31,20 @@ export function Sec({ title, extra, children }: { title: string; extra?: ReactNo
 			</div>
 			{children}
 		</div>
+	);
+}
+
+export function HitLinks({ h }: { h: AlertHit }) {
+	return (
+		<>
+			{h.links
+				.filter((l) => l.url)
+				.map((l) => (
+					<Ext key={l.url} url={l.url}>
+						{l.label}
+					</Ext>
+				))}
+		</>
 	);
 }
 
@@ -70,18 +93,12 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	const hide = useHideHit();
 	const unhide = useUnhideHit();
 	const target = sheetFor(h);
-	const who = [
-		h.train ? c.board.trains.find((t) => t.id === h.train)?.label : null,
-		h.app ? appName(c.board, h.app) : null,
-	]
-		.filter(Boolean)
-		.join(" ");
 	return (
 		<div className={`al${hidden ? " dim" : ""}`} data-st={SEVERITY_META[h.severity].tone} data-hit={h.id}>
-			<span className="bar3" />
 			<div>
 				<div className="who">
-					{who || "All apps"}
+					<span className="sev">{SEVERITY_META[h.severity].label}</span>
+					<HitWho board={c.board} train={h.train} app={h.app} />
 					<span className="rid">{h.rule}</span>
 					{h.changedSinceHidden && (
 						<span className="spill" data-st="waiting">
@@ -96,7 +113,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 							Show
 						</button>
 					)}
-					{h.link.url && <Ext url={h.link.url}>{h.link.label}</Ext>}
+					<HitLinks h={h} />
 					<FixButton h={h} hidden={hidden} c={c} />
 					{hidden && (
 						<button type="button" onClick={() => unhide.mutate(h.id)}>

@@ -55,9 +55,16 @@ export function Timeline({
 	const mo = useReleaseMotion();
 	const folds = useReleasesUi((s) => s.open);
 	const focusFreeze = lens.focus?.freeze;
+	const focusId = lens.focus?.id ?? null;
 
 	useLayoutEffect(() => {
 		const el = sc.current;
+		const saved = useReleasesUi.getState().scroll;
+		if (el && saved && saved.focus === focusId) {
+			el.scrollLeft = saved.left;
+			el.scrollTop = saved.top;
+			return;
+		}
 		if (!el || !focusFreeze) return;
 		const to = Math.max(0, tl.x(addDays(focusFreeze, -8)));
 		if (mo.reduced || el.scrollLeft === 0) {
@@ -94,6 +101,7 @@ export function Timeline({
 			queued = requestAnimationFrame(() => {
 				queued = 0;
 				fit();
+				useReleasesUi.getState().setScroll({ left: el.scrollLeft, top: el.scrollTop, focus: focusId });
 			});
 		};
 		queue();
@@ -338,34 +346,54 @@ function usePan(sc: React.RefObject<HTMLDivElement | null>, mo: ReleaseMotion) {
 	useEffect(() => {
 		const el = sc.current;
 		if (!el) return;
-		let drag: { x: number; sl: number; t: number; v: number; moved: boolean } | null = null;
-		let inertia: { stop: () => void } | null = null;
+		type Drag = { x: number; y: number; sl: number; st: number; t: number; vx: number; vy: number; moved: boolean };
+		let drag: Drag | null = null;
+		let inertia: { stop: () => void }[] = [];
+		const stopInertia = () => {
+			for (const a of inertia) a.stop();
+			inertia = [];
+		};
 		const down = (e: PointerEvent) => {
 			if (e.button !== 0 || (e.target as HTMLElement).closest("button, a, input")) return;
-			inertia?.stop();
-			drag = { x: e.clientX, sl: el.scrollLeft, t: performance.now(), v: 0, moved: false };
+			stopInertia();
+			drag = {
+				x: e.clientX,
+				y: e.clientY,
+				sl: el.scrollLeft,
+				st: el.scrollTop,
+				t: performance.now(),
+				vx: 0,
+				vy: 0,
+				moved: false,
+			};
 		};
 		const move = (e: PointerEvent) => {
 			if (!drag) return;
 			const dx = e.clientX - drag.x;
-			if (!drag.moved && Math.abs(dx) < 4) return;
+			const dy = e.clientY - drag.y;
+			if (!drag.moved && Math.hypot(dx, dy) < 4) return;
 			if (!drag.moved) el.classList.add("panning");
 			const now = performance.now();
-			const next = drag.sl - dx;
-			drag.v = (next - el.scrollLeft) / Math.max(1, now - drag.t);
+			const dt = Math.max(1, now - drag.t);
+			const left = drag.sl - dx;
+			const top = drag.st - dy;
+			drag.vx = (left - el.scrollLeft) / dt;
+			drag.vy = (top - el.scrollTop) / dt;
 			drag.t = now;
 			drag.moved = true;
-			el.scrollLeft = next;
+			el.scrollLeft = left;
+			el.scrollTop = top;
 		};
 		const up = () => {
 			if (!drag) return;
 			el.classList.remove("panning");
-			const extra = mo.reduced ? 0 : momentumDistance(drag.v);
-			if (drag.moved && extra) {
-				inertia = animate(el.scrollLeft, el.scrollLeft + extra, {
-					...mo.momentum,
-					onUpdate: (v) => (el.scrollLeft = v),
-				});
+			if (drag.moved && !mo.reduced) {
+				const glide = (from: number, by: number, set: (v: number) => void) =>
+					by ? [animate(from, from + by, { ...mo.momentum, onUpdate: set })] : [];
+				inertia = [
+					...glide(el.scrollLeft, momentumDistance(drag.vx), (v) => (el.scrollLeft = v)),
+					...glide(el.scrollTop, momentumDistance(drag.vy), (v) => (el.scrollTop = v)),
+				];
 			}
 			drag = null;
 		};
@@ -373,7 +401,7 @@ function usePan(sc: React.RefObject<HTMLDivElement | null>, mo: ReleaseMotion) {
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", up);
 		return () => {
-			inertia?.stop();
+			stopInertia();
 			el.removeEventListener("pointerdown", down);
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
