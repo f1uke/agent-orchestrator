@@ -213,6 +213,25 @@ func TestL9MRIntoABranchNoTrainTakes(t *testing.T) {
 	}
 }
 
+func TestL9CatchesAStackedMRIntoACardBranchThatMergesOut(t *testing.T) {
+	f := newFixture(t, today)
+	f.sprintCard(demoSprint(f), "DEMO-2", "In Progress", true)
+	f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
+	stacked := f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feature/DEMO-1-base", MROpened, "2026-10-12", "")
+	f.mr("di", "DEMO-1 base", "feature/DEMO-1-base", "feature/sprint-21-2026", MROpened, "2026-10-12", "")
+	b := f.reconcile()
+	if got := llbBranches(b); len(got) != 0 {
+		t.Fatalf("long-lived branches = %v, want none: one other card's MR into a card's branch is a stacked MR", got)
+	}
+	if got, want := firedIDs(b, "L9"), []string{"L9~mr/di/" + strconv.Itoa(stacked.IID)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("L9 hits = %v, want the stacked MR %v", got, want)
+	}
+	card := rowOf(t, b, "DEMO").Cards[0]
+	if len(card.Routes) != 1 || card.Routes[0].Kind != DestOther {
+		t.Fatalf("DEMO-2 routes = %+v, want one off-flow route like any sprint card with an MR into an odd branch", card.Routes)
+	}
+}
+
 func TestL9WithNoCutoverCatchesOpenMRsOnly(t *testing.T) {
 	f := newFixture(t, today)
 	open := f.mr("da", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MROpened, "2026-10-12", "")
