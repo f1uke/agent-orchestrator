@@ -322,7 +322,6 @@ func planRetarget(b *Board, h *AlertHit) FixPlan {
 	title := fmt.Sprintf("Retarget !%d", s.IID)
 	var mr *retargetMR
 	var to string
-	var need *FixNeed
 	var why string
 	if h.Rule == "L1" {
 		g, br := b.llbOfMR(s)
@@ -358,10 +357,10 @@ func planRetarget(b *Board, h *AlertHit) FixPlan {
 		return blocked(title, "The MR is no longer on the Board.", nil)
 	}
 	if mr.state == MRMerged {
-		return blocked(title, "This MR is already merged, so it cannot be retargeted. Merge its change into the sprint branch by hand.", need)
+		return blocked(title, "This MR is already merged, so it cannot be retargeted. Merge its change into the sprint branch by hand.", nil)
 	}
 	if to == "" {
-		return blocked(title, "No MR has used "+why+" yet, so its name is unknown; it is never guessed from a pattern.", need)
+		return blocked(title, "No MR has used "+why+" yet, so its name is unknown; it is never guessed from a pattern.", nil)
 	}
 	e := EffGitLabRetarget{Host: b.fix.gitlabHost, App: s.App, Project: b.fix.projects[s.App], IID: s.IID, From: mr.target, To: to}
 	return FixPlan{Title: fmt.Sprintf("Retarget !%d to %s", s.IID, to), Mode: ModeQueue,
