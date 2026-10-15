@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronRight, X } from "lucide-react";
 import { AnimatePresence, m } from "motion/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useClearStaleHides, useSetRule } from "../../hooks/useReleaseBoard";
 import { FIX_STATE_META } from "../../lib/releases/fix";
 import { dayLabel } from "../../lib/releases/day";
@@ -458,10 +458,11 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 }
 
 function Fold({ label, children, testid }: { label: string; children: ReactNode; testid: string }) {
-	const [open, setOpen] = useState(false);
+	const open = useReleasesUi((s) => s.open.has(`sheet:${testid}`));
+	const toggle = useReleasesUi((s) => s.toggleFold);
 	return (
 		<div data-testid={testid}>
-			<button type="button" className="fold" aria-expanded={open} onClick={() => setOpen(!open)}>
+			<button type="button" className="fold" aria-expanded={open} onClick={() => toggle(`sheet:${testid}`)}>
 				<ChevronRight className="size-3" style={{ rotate: open ? "90deg" : "0deg" }} aria-hidden="true" />
 				{label}
 			</button>

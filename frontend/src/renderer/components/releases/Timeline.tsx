@@ -55,9 +55,16 @@ export function Timeline({
 	const mo = useReleaseMotion();
 	const folds = useReleasesUi((s) => s.open);
 	const focusFreeze = lens.focus?.freeze;
+	const focusId = lens.focus?.id ?? null;
 
 	useLayoutEffect(() => {
 		const el = sc.current;
+		const saved = useReleasesUi.getState().scroll;
+		if (el && saved && saved.focus === focusId) {
+			el.scrollLeft = saved.left;
+			el.scrollTop = saved.top;
+			return;
+		}
 		if (!el || !focusFreeze) return;
 		const to = Math.max(0, tl.x(addDays(focusFreeze, -8)));
 		if (mo.reduced || el.scrollLeft === 0) {
@@ -94,6 +101,7 @@ export function Timeline({
 			queued = requestAnimationFrame(() => {
 				queued = 0;
 				fit();
+				useReleasesUi.getState().setScroll({ left: el.scrollLeft, top: el.scrollTop, focus: focusId });
 			});
 		};
 		queue();

@@ -92,6 +92,7 @@ import { useWikiStatus } from "../hooks/useWiki";
 import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
 import { useReleaseBoard } from "../hooks/useReleaseBoard";
 import { badgeLabel } from "../lib/releases/lens";
+import { readSavedSearch } from "../stores/releases-ui";
 import { SEVERITY_META, TONE_COLOR } from "../lib/releases/vocab";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
@@ -198,7 +199,7 @@ function useSelection() {
 		goPrs: () => void navigate({ to: "/prs" }),
 		goWiki: () => void navigate({ to: "/wiki" }),
 		goMemory: () => void navigate({ to: "/memory" }),
-		goReleases: () => void navigate({ to: "/releases", search: {} }),
+		goReleases: () => void navigate({ to: "/releases", search: readSavedSearch() }),
 		goGlobalSettings: () => void navigate({ to: "/settings" }),
 		goSettings: (projectId: string) => void navigate({ to: "/projects/$projectId/settings", params: { projectId } }),
 		// Search opens the settings two-pane (where the in-settings search field

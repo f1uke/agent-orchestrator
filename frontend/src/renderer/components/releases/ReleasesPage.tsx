@@ -1,5 +1,5 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
 import { makeLens } from "../../lib/releases/lens";
 import type { Board } from "../../lib/releases/types";
@@ -10,7 +10,7 @@ import {
 	type ReleasesSearch,
 	type SheetEntry,
 } from "../../lib/releases/url";
-import { useReleasesUi } from "../../stores/releases-ui";
+import { saveSearch, useReleasesUi } from "../../stores/releases-ui";
 import { ReleaseMotionRoot } from "./ReleaseMotion";
 import { SheetStack } from "./SheetStack";
 import { SummaryStrip } from "./SummaryStrip";
@@ -33,6 +33,7 @@ export function ReleasesPage() {
 	const stored = useReleasesUi((s) => s.layers);
 	const layers = url.layers ?? stored;
 	const { pushBack, popBack, clearBack } = useReleasesUi();
+	useEffect(() => saveSearch(releasesSearch(url)), [url]);
 
 	const setSearch = useCallback(
 		(patch: Partial<ReleasesSearch>) =>

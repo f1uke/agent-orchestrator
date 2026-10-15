@@ -1,5 +1,6 @@
 @layer components {
 	.rel {
+		position: relative;
 		--lw: 280px;
 		--fg-off: color-mix(in srgb, var(--fg) 22%, var(--bg));
 		--hover: var(--interactive-hover);
@@ -876,7 +877,7 @@
 	}
 
 	.rel-scrim {
-		position: fixed;
+		position: absolute;
 		inset: 0;
 		z-index: 40;
 	}

@@ -195,15 +195,20 @@ test.describe("releases page", () => {
 			await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
 			await open(page, "?layers=sprint,llb,cards");
 			await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+			await page.setViewportSize({ width: 1512, height: 700 });
 			await settle(page);
 			const sc = page.getByTestId("release-timeline");
-			await sc.evaluate((el) => (el.scrollTop = 0));
+			expect(await sc.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(400);
+			await sc.evaluate((el) => {
+				el.scrollTop = 0;
+				el.scrollLeft = 0;
+			});
 			const box = (await sc.boundingBox())!;
 			const x = box.x + 900;
 			const y = box.y + box.height - 60;
 			await page.mouse.move(x, y);
 			await page.mouse.down();
-			for (let i = 1; i <= 4; i++) await page.mouse.move(x - i * 40, y - i * 20);
+			for (let i = 1; i <= 4; i++) await page.mouse.move(x - i * 40, y - i * 15);
 			await page.mouse.up();
 			const at = () => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 			const released = await at();
@@ -244,6 +249,60 @@ test.describe("releases page", () => {
 		await settle(page);
 		await bar.click({ position: { x: 8, y: 8 } });
 		await expect(page.getByRole("dialog", { name: "Release details" })).toContainText("2.5.0");
+	});
+
+	test("leaving Releases and coming back, or reloading, keeps filters, sheet, folds and scroll; a URL wins", async ({
+		page,
+	}) => {
+		await open(page, "?layers=sprint,llb,cards&apps=di,da,pi&focus=21-2026&hotfixes=0");
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await page.getByTestId("cards-di:21-2026").locator(".csum").click();
+		await settle(page);
+		await page.getByRole("button", { name: /Needs attention/ }).click();
+		await page
+			.getByRole("dialog", { name: "Release details" })
+			.getByTestId("stale-fold")
+			.locator("button.fold")
+			.click();
+		const sc = page.getByTestId("release-timeline");
+		const scrolled = await sc.evaluate((el) => {
+			el.scrollLeft = 700;
+			el.scrollTop = 120;
+			return { left: el.scrollLeft, top: el.scrollTop };
+		});
+		expect(scrolled.top).toBeGreaterThan(0);
+		await page.waitForTimeout(300);
+		const url = new URL(page.url()).hash;
+
+		const nav = page.locator('[data-sidebar="sidebar"]');
+		await nav.getByText("Dashboard").first().click();
+		await expect(page.getByTestId("releases-page")).toHaveCount(0);
+		await nav.getByRole("button", { name: /^Releases/ }).click();
+
+		await expect(page.getByTestId("releases-page")).toBeVisible();
+		expect(new URL(page.url()).hash).toBe(url);
+		await expect(page.getByRole("dialog", { name: "Release details" })).toContainText("Needs attention");
+		await expect(page.getByTestId("stale-fold").locator("button.fold")).toHaveAttribute("aria-expanded", "true");
+		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-dest-block").first()).toBeVisible();
+		await expect(page.getByTestId("cards-di:21-2026").locator(".crow").first()).toBeVisible();
+		await expect.poll(() => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }))).toEqual(scrolled);
+
+		await page.reload();
+		await expect(page.getByTestId("label-di")).toBeVisible();
+		expect(new URL(page.url()).hash).toBe(url);
+		await expect(page.getByTestId("stale-fold").locator("button.fold")).toHaveAttribute("aria-expanded", "true");
+		await expect.poll(() => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }))).toEqual(scrolled);
+
+		const fresh = await page.context().newPage();
+		await fresh.goto("/#/releases");
+		await expect(fresh.getByTestId("label-di")).toBeVisible();
+		expect(new URL(fresh.url()).hash).toBe(url);
+		await fresh.close();
+
+		await page.goto("/#/releases?apps=di");
+		await expect(page.getByTestId("label-di")).toBeVisible();
+		await expect(page.getByTestId("label-da")).toHaveCount(0);
+		await expect(page.getByRole("dialog", { name: "Release details" })).toHaveCount(0);
 	});
 
 	test("a failed source shows unknown with its age, never a blank", async ({ page }) => {

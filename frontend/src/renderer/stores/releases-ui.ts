@@ -1,8 +1,48 @@
 import { create } from "zustand";
-import { DEFAULT_LAYERS, type Layer, type Layers, type SheetEntry } from "../lib/releases/url";
+import {
+	DEFAULT_LAYERS,
+	parseReleasesSearch,
+	releasesSearch,
+	type Layer,
+	type Layers,
+	type ReleasesSearchRaw,
+	type SheetEntry,
+} from "../lib/releases/url";
 
 const LAYERS_KEY = "ao.releases.layers.v1";
 const FOLDS_KEY = "ao.releases.folds.v1";
+const SEARCH_KEY = "ao.releases.search.v1";
+const SCROLL_KEY = "ao.releases.scroll.v1";
+
+export function readSavedSearch(): ReleasesSearchRaw {
+	try {
+		const saved: unknown = JSON.parse(window.localStorage.getItem(SEARCH_KEY) ?? "{}");
+		return saved && typeof saved === "object"
+			? releasesSearch(parseReleasesSearch(saved as Record<string, unknown>))
+			: {};
+	} catch {
+		return {};
+	}
+}
+
+export function saveSearch(search: ReleasesSearchRaw): void {
+	try {
+		window.localStorage.setItem(SEARCH_KEY, JSON.stringify(search));
+	} catch {}
+}
+
+export type Scroll = { left: number; top: number; focus: string | null };
+
+function readScroll(): Scroll | null {
+	try {
+		const s = JSON.parse(window.localStorage.getItem(SCROLL_KEY) ?? "null") as Partial<Scroll> | null;
+		return s && typeof s.left === "number" && typeof s.top === "number"
+			? { left: s.left, top: s.top, focus: typeof s.focus === "string" ? s.focus : null }
+			: null;
+	} catch {
+		return null;
+	}
+}
 
 function readFolds(): ReadonlySet<string> {
 	try {
@@ -48,6 +88,8 @@ type ReleasesUi = {
 	pushBack: (s: SheetEntry) => void;
 	popBack: () => SheetEntry | undefined;
 	clearBack: () => void;
+	scroll: Scroll | null;
+	setScroll: (s: Scroll) => void;
 };
 
 export const useReleasesUi = create<ReleasesUi>((set, get) => ({
@@ -78,4 +120,11 @@ export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 		return back.at(-1);
 	},
 	clearBack: () => set({ back: [] }),
+	scroll: readScroll(),
+	setScroll: (scroll) => {
+		try {
+			window.localStorage.setItem(SCROLL_KEY, JSON.stringify(scroll));
+		} catch {}
+		set({ scroll });
+	},
 }));

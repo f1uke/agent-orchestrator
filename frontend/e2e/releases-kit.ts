@@ -6,6 +6,8 @@ export async function open(page: Page, query = "", variant?: "failed-source" | "
 			if (!sessionStorage.getItem("releases-spec")) {
 				localStorage.removeItem("ao.releases.layers.v1");
 				localStorage.removeItem("ao.releases.folds.v1");
+				localStorage.removeItem("ao.releases.search.v1");
+				localStorage.removeItem("ao.releases.scroll.v1");
 			}
 			sessionStorage.setItem("releases-spec", "1");
 		} catch {}

@@ -60,3 +60,37 @@ describe("releases UI layers", () => {
 		set.mockRestore();
 	});
 });
+
+describe("releases page memory", () => {
+	beforeEach(() => {
+		vi.resetModules();
+		window.localStorage.clear();
+	});
+
+	it("keeps the last search and scroll across a reload", async () => {
+		const first = await import("./releases-ui");
+		first.saveSearch({ apps: "di", me: "1", sheet: "attention", layers: "sprint,cards" });
+		first.useReleasesUi.getState().setScroll({ left: 700, top: 120, focus: "21-2026" });
+		vi.resetModules();
+		const reloaded = await import("./releases-ui");
+		expect(reloaded.readSavedSearch()).toEqual({ apps: "di", me: "1", sheet: "attention", layers: "sprint,cards" });
+		expect(reloaded.useReleasesUi.getState().scroll).toEqual({ left: 700, top: 120, focus: "21-2026" });
+	});
+
+	it("drops what the URL parser would refuse and survives junk or blocked storage", async () => {
+		window.localStorage.setItem("ao.releases.search.v1", JSON.stringify({ sheet: "nope:", me: "maybe", apps: "di" }));
+		window.localStorage.setItem("ao.releases.scroll.v1", '{"left":"far"}');
+		const { readSavedSearch, useReleasesUi, saveSearch } = await import("./releases-ui");
+		expect(readSavedSearch()).toEqual({ apps: "di" });
+		expect(useReleasesUi.getState().scroll).toBeNull();
+		window.localStorage.setItem("ao.releases.search.v1", "{not json");
+		expect(readSavedSearch()).toEqual({});
+		const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("blocked");
+		});
+		saveSearch({ apps: "da" });
+		useReleasesUi.getState().setScroll({ left: 1, top: 2, focus: null });
+		expect(useReleasesUi.getState().scroll).toEqual({ left: 1, top: 2, focus: null });
+		set.mockRestore();
+	});
+});
