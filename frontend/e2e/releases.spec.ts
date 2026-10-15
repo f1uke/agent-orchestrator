@@ -9,7 +9,10 @@ const SHOTS = process.env.AO_RELEASES_SHOTS;
 async function open(page: Page, query = "", variant?: "failed-source") {
 	await page.addInitScript((v) => {
 		try {
-			if (!sessionStorage.getItem("releases-spec")) localStorage.removeItem("ao.releases.layers.v1");
+			if (!sessionStorage.getItem("releases-spec")) {
+				localStorage.removeItem("ao.releases.layers.v1");
+				localStorage.removeItem("ao.releases.folds.v1");
+			}
 			sessionStorage.setItem("releases-spec", "1");
 		} catch {}
 		if (v) (globalThis as { __aoReleaseBoardVariant?: string }).__aoReleaseBoardVariant = v;
@@ -40,7 +43,7 @@ test.describe("releases page", () => {
 		const barBox = await focused.boundingBox();
 		expect(markerTops.length).toBe(6 - 1);
 		for (const top of markerTops) expect(top).toBeGreaterThan((barBox?.y ?? 0) + (barBox?.height ?? 0));
-		await expect(page.getByTestId("llb-summary").first()).toContainText("2 long-lived");
+		await expect(page.getByTestId("llb-summary").first()).toContainText("3 long-lived");
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-1512.png` });
 	});
 
@@ -164,6 +167,119 @@ test.describe("releases page", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-failed-source.png` });
 	});
 
+	test("a card group unfolds under its train's bar, nests its long-lived branch, and folds back", async ({ page }) => {
+		await open(page);
+		const group = page.getByTestId("cards-di:21-2026");
+		const toggle = group.locator(".csum");
+		const bar = await page.getByTestId("bar-di-21-2026").boundingBox();
+		const sum = await toggle.boundingBox();
+		expect(sum!.y).toBeGreaterThan(bar!.y + bar!.height);
+		expect(sum!.y - (bar!.y + bar!.height)).toBeLessThan(40);
+		await expect(group).toContainText("6 cards");
+		await expect(group).toContainText("3 merged · 1 MR open · 1 parked");
+		await expect(group).toContainText("1 long-lived");
+		await toggle.click();
+		await expect(group.locator(".crow:not(.lbr)")).toHaveCount(6);
+		await expect(group.locator(".crow.lbr")).toContainText("demo-search");
+		await expect(group.locator('.crow[data-key="DEMO-101"]')).toContainText("Sign-in with a passkey");
+		await group.locator(".crow.lbr").click();
+		await expect(group.locator('.nest .crow[data-key="DEMO-109"]')).toContainText("Search by fund code");
+		await toggle.click();
+		await expect(group.locator(".crow")).toHaveCount(0);
+	});
+
+	test("a card row opens the card sheet with the trains it ships in", async ({ page }) => {
+		await open(page);
+		await page.getByTestId("cards-di:21-2026").locator(".csum").click();
+		await page.getByTestId("cards-di:21-2026").locator('.crow[data-key="DEMO-103"] .t').click();
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		await expect(sheet.getByTestId("card-summary")).toHaveText("Show the fee before the order");
+		await expect(sheet.getByTestId("card-unit")).toHaveCount(2);
+		await expect(sheet.getByTestId("card-unit").first()).toContainText("Demo iOS · #21");
+		await expect(sheet.getByRole("link", { name: "Open card" })).toHaveAttribute("target", "_blank");
+	});
+
+	test("the long-lived line unfolds to a lane per branch with wires into its trains, and folds back", async ({
+		page,
+	}) => {
+		await open(page);
+		const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button");
+		await sum.click();
+		const app = page.locator('.rel-app[data-app="di"]');
+		await expect(app.getByTestId("llb-lane")).toHaveCount(3);
+		const wires = app.getByTestId("llb-wires");
+		await expect(wires.locator("g")).toHaveCount(2);
+		await expect(wires.locator('g[data-wire="feature/demo-wallet"] path')).toHaveClass("plan");
+		await expect(wires.locator('g[data-wire="feature/demo-search"] path')).not.toHaveClass("plan");
+		const dot = await wires.locator('g[data-wire="feature/demo-wallet"] circle').boundingBox();
+		const bar = await page.getByTestId("bar-di-22-2026").boundingBox();
+		expect(Math.abs(dot!.y + dot!.height / 2 - bar!.y)).toBeLessThan(2);
+		expect(dot!.x).toBeGreaterThan(bar!.x);
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-llb-unfolded.png` });
+		await sum.click();
+		await expect(app.getByTestId("llb-lane")).toHaveCount(0);
+		await expect(app.getByTestId("llb-wires")).toHaveCount(0);
+	});
+
+	test("the Long-lived layer off hides the line, its lanes and its wires", async ({ page }) => {
+		await open(page);
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button").click();
+		await expect(page.getByTestId("llb-lane").first()).toBeVisible();
+		await layer(page, "Long-lived").click();
+		await expect(page.getByTestId("llb-summary")).toHaveCount(0);
+		await expect(page.getByTestId("llb-lane")).toHaveCount(0);
+		await expect(page.getByTestId("llb-wires")).toHaveCount(0);
+	});
+
+	test("saving a plan shows its target on the long-lived line", async ({ page }) => {
+		await open(page, "?sheet=llb:demo-chat");
+		const form = page.getByTestId("plan-form");
+		await form.getByLabel("Name").fill("Advisor chat");
+		await form.getByRole("group", { name: "Target train" }).getByRole("button", { name: /#22/ }).click();
+		await form.getByLabel("Note").fill("Ships with the new inbox.");
+		await form.getByRole("button", { name: "Save plan" }).click();
+		await expect(form).toContainText("Saved");
+		await expect(form).toContainText("v1");
+		await expect(page.getByTestId("llb-status")).toContainText("Targets #22");
+		await page.keyboard.press("Escape");
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button").click();
+		await expect(page.locator('[data-testid="llb-lane"][data-branch="feature/demo-chat"]')).toContainText("→ #22");
+	});
+
+	test("a stale plan version shows the conflict and keeps the edit", async ({ page }) => {
+		await open(page, "?sheet=llb:demo-wallet");
+		const form = page.getByTestId("plan-form");
+		await form.getByLabel("Note").fill("my edit");
+		await page.evaluate(() => {
+			type Seam = { __aoReleaseBoard?: { board: { llbs: { id: string; plan?: { version: number } }[] } } };
+			const b = (globalThis as Seam).__aoReleaseBoard!.board;
+			b.llbs.find((g) => g.id === "demo-wallet")!.plan!.version = 5;
+		});
+		await form.getByRole("button", { name: "Save plan" }).click();
+		await expect(page.getByTestId("plan-conflict")).toContainText("Changed elsewhere, reload");
+		await expect(form.getByLabel("Note")).toHaveValue("my edit");
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-plan-conflict.png` });
+	});
+
+	test("the sidebar's Long-lived entry counts open groups and opens their list", async ({ page }) => {
+		await open(page);
+		const entry = page.getByRole("button", { name: /^Long-lived\s*2$/ });
+		await entry.click();
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		await expect(sheet).toContainText("Long-lived branches");
+		await expect(sheet).toContainText("Open 2");
+		await sheet.getByRole("button", { name: /Wallet/ }).click();
+		await expect(page.getByTestId("plan-form")).toBeVisible();
+	});
+
+	test("the plan form refuses a plan with no name", async ({ page }) => {
+		await open(page, "?sheet=llb:demo-chat");
+		const form = page.getByTestId("plan-form");
+		await form.getByLabel("Name").fill("");
+		await expect(page.getByTestId("plan-problems")).toContainText("Give the plan a name.");
+		await expect(form.getByRole("button", { name: "Save plan" })).toBeDisabled();
+	});
+
 	test("with no config the page says how to make one", async ({ page }) => {
 		await page.addInitScript(() => {
 			(globalThis as { __aoReleaseBoard?: unknown }).__aoReleaseBoard = {
@@ -193,5 +309,48 @@ for (const [width, height] of [
 		}
 		await expect(page.getByRole("button", { name: /Needs attention/ })).toBeInViewport({ ratio: 1 });
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-${width}.png` });
+	});
+
+	test(`at ${width}x${height} no labels overlap with every layer on and every long-lived line unfolded`, async ({
+		page,
+	}) => {
+		await page.setViewportSize({ width, height });
+		await open(page, "?layers=llb,cards,past");
+		for (const s of await page.getByTestId("llb-summary").all()) await s.getByRole("button").click();
+		for (const g of await page.locator(".rel-cg .csum").all()) await g.click();
+		await page.waitForTimeout(100);
+		const report = await page.evaluate(() => {
+			const vw = innerWidth;
+			const vh = innerHeight;
+			const seen = (e: Element) => {
+				const r = e.getBoundingClientRect();
+				const h = document.elementFromPoint(
+					Math.min(vw - 1, Math.max(0, r.left + r.width / 2)),
+					Math.min(vh - 1, Math.max(0, r.top + r.height / 2)),
+				);
+				return !!h && (h === e || e.contains(h) || h.contains(e));
+			};
+			const els = [...document.querySelectorAll(".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr")].filter((e) => {
+				const r = e.getBoundingClientRect();
+				const visible = r.width > 0 && r.height > 0 && r.right > 0 && r.left < vw && r.top < vh && r.bottom > 0;
+				return visible && getComputedStyle(e).visibility !== "hidden" && !e.closest(".tight") && seen(e);
+			});
+			const overlaps: string[] = [];
+			for (let i = 0; i < els.length; i++)
+				for (let j = i + 1; j < els.length; j++) {
+					const [a, b] = [els[i], els[j]];
+					if (a.contains(b) || b.contains(a)) continue;
+					const r = a.getBoundingClientRect();
+					const q = b.getBoundingClientRect();
+					const ix = Math.min(r.right, q.right) - Math.max(r.left, q.left);
+					const iy = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top);
+					if (ix > 2 && iy > 2)
+						overlaps.push(`${a.textContent?.trim().slice(0, 24)} x ${b.textContent?.trim().slice(0, 24)}`);
+				}
+			return { n: els.length, overlaps };
+		});
+		expect(report.n).toBeGreaterThan(10);
+		expect(report.overlaps).toEqual([]);
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-all-${width}.png` });
 	});
 }

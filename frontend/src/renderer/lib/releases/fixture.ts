@@ -174,7 +174,17 @@ const RULES: [string, Severity, string][] = [
 	["F1", "info", "Two trains overlap"],
 ];
 
+function withCards(b: Board): Board {
+	attachCards(b);
+	b.llbs = demoLlbs(b);
+	return b;
+}
+
 export function demoBoard(today: string): Board {
+	return withCards(baseBoard(today));
+}
+
+function baseBoard(today: string): Board {
 	const f20 = addDays(today, -16);
 	const f21 = addDays(today, -1);
 	const f22 = addDays(today, 13);
@@ -349,38 +359,7 @@ export function demoBoard(today: string): Board {
 				total: 0,
 			},
 		],
-		llbs: [
-			{
-				id: "demo-wallet",
-				name: "Wallet",
-				branches: [
-					{
-						app: "di",
-						branch: "feature/demo-wallet",
-						openedOn: addDays(today, -40),
-						lastIn: addDays(today, -3),
-						state: "open",
-						cards: [],
-					},
-				],
-				target: { kind: "planned", train: "21-2026" },
-			},
-			{
-				id: "demo-chat",
-				name: "demo-chat",
-				branches: [
-					{
-						app: "di",
-						branch: "feature/demo-chat",
-						openedOn: addDays(today, -20),
-						lastIn: addDays(today, -5),
-						state: "open",
-						cards: [],
-					},
-				],
-				target: { kind: "none" },
-			},
-		],
+		llbs: [],
 		mismatches: [{ kind: "version", app: "pi", train: "21-2026", version: "1.0.2" }],
 		sources: [
 			{ system: "gitlab", resources: 40, asOf: `${today}T02:58:00Z`, issues: [] },
@@ -407,6 +386,218 @@ export function demoBoard(today: string): Board {
 		},
 		catalogue,
 	};
+}
+
+type Unit = Board["trains"][number]["versions"][number]["cards"][number];
+
+const CARD_SPECS: [string, string, Unit["code"]["kind"], string, string, number][] = [
+	["DEMO-101", "Sign-in with a passkey", "merged", "Ready for UAT", "indeterminate", 0],
+	["DEMO-102", "Dark mode for the statement page", "merged", "Done", "done", 1],
+	["DEMO-103", "Show the fee before the order", "open", "Pull Request", "indeterminate", 2],
+	["DEMO-104", "Wallet top-up limits", "parked", "In Progress", "indeterminate", 3],
+	["DEMO-105", "Fix the chart tooltip on small phones", "none", "To Do", "new", 4],
+	["DEMO-106", "Portfolio export to CSV", "merged", "Ready for UAT", "indeterminate", 5],
+];
+
+function unitOf(
+	key: string,
+	summary: string,
+	app: string,
+	kind: Unit["code"]["kind"],
+	status: string,
+	cat: string,
+	who: number,
+): Unit {
+	const [accountId, name] = PEOPLE[who];
+	const code: Unit["code"] =
+		kind === "parked"
+			? { kind, branch: "feature/demo-wallet", mrs: [301] }
+			: kind === "merged"
+				? { kind, mrs: [200 + who] }
+				: kind === "open"
+					? { kind, mrs: [250 + who] }
+					: kind === "elsewhere"
+						? { kind, branch: "feature/demo-other", on: "2026-01-01" }
+						: { kind };
+	return {
+		key,
+		summary,
+		app,
+		status,
+		statusCategory: cat,
+		url: `${JIRA}/browse/${key}`,
+		assignee: { accountId, name },
+		why: ["fixVersion"],
+		code,
+	};
+}
+
+function attachCards(b: Board): void {
+	const t21 = b.trains.find((t) => t.id === "21-2026");
+	const t22 = b.trains.find((t) => t.id === "22-2026");
+	for (const v of t21?.versions ?? []) {
+		const n = v.app === "di" ? CARD_SPECS.length : v.app === "da" ? 4 : 2;
+		v.cards = CARD_SPECS.slice(0, n).map(([k, s, kind, st, cat, who]) =>
+			unitOf(k, s, v.app, v.app === "di" || kind !== "parked" ? kind : "merged", st, cat, who),
+		);
+	}
+	for (const v of t22?.versions ?? []) {
+		if (v.app === "di" || v.app === "da")
+			v.cards = [
+				unitOf("DEMO-201", "Price alerts on the watchlist", v.app, "open", "In Progress", "indeterminate", 6),
+				unitOf("DEMO-202", "New onboarding checklist", v.app, "none", "To Do", "new", 7),
+			];
+	}
+}
+
+function llbCardOf(
+	key: string,
+	summary: string,
+	branch: string,
+	iid: number,
+	created: string,
+	merged: string | undefined,
+	who: number,
+) {
+	const [accountId, name] = PEOPLE[who];
+	return {
+		key,
+		summary,
+		status: merged ? "Ready for UAT" : "Pull Request",
+		statusCategory: "indeterminate",
+		assignee: { accountId, name },
+		mr: {
+			iid,
+			project: 1,
+			title: `${key} ${summary}`,
+			state: merged ? "merged" : "opened",
+			author: name,
+			sourceBranch: `feat/${key}`,
+			targetBranch: branch,
+			createdOn: created,
+			mergedOn: merged,
+			url: `${HOST}/merge_requests/${iid}`,
+		},
+	};
+}
+
+function demoLlbs(b: Board): Board["llbs"] {
+	const today = b.today;
+	const f21 = b.trains.find((t) => t.id === "21-2026")?.freeze ?? today;
+	const landedOn = addDays(f21, -3);
+	return [
+		{
+			id: "demo-wallet",
+			name: "Wallet",
+			branches: [
+				{
+					app: "di",
+					branch: "feature/demo-wallet",
+					openedOn: addDays(today, -40),
+					lastIn: addDays(today, -3),
+					state: "open",
+					ahead: 14,
+					cards: [
+						llbCardOf(
+							"DEMO-104",
+							"Wallet top-up limits",
+							"feature/demo-wallet",
+							301,
+							addDays(today, -30),
+							addDays(today, -28),
+							3,
+						),
+						llbCardOf(
+							"DEMO-107",
+							"Wallet history screen",
+							"feature/demo-wallet",
+							302,
+							addDays(today, -12),
+							addDays(today, -10),
+							4,
+						),
+						llbCardOf("DEMO-108", "Wallet receipts", "feature/demo-wallet", 303, addDays(today, -3), undefined, 5),
+					],
+				},
+			],
+			target: { kind: "planned", train: "22-2026" },
+			plan: {
+				id: "demo-wallet",
+				name: "Wallet",
+				targetKind: "train",
+				targetTrain: "22-2026",
+				note: "Waits for the payments review.",
+				branches: [],
+				accepted: [],
+				version: 1,
+				updatedAt: `${addDays(today, -2)}T03:00:00Z`,
+				updatedBy: "app",
+			},
+		},
+		{
+			id: "demo-search",
+			name: "demo-search",
+			branches: [
+				{
+					app: "di",
+					branch: "feature/demo-search",
+					openedOn: addDays(today, -30),
+					lastIn: addDays(landedOn, -2),
+					state: "landed",
+					train: "21-2026",
+					cards: [
+						llbCardOf(
+							"DEMO-109",
+							"Search by fund code",
+							"feature/demo-search",
+							304,
+							addDays(today, -25),
+							addDays(today, -24),
+							6,
+						),
+					],
+					landing: {
+						iid: 320,
+						project: 1,
+						title: "Merge demo-search",
+						state: "merged",
+						author: "Gus Invented",
+						sourceBranch: "feature/demo-search",
+						targetBranch: "sprint-20-2026",
+						createdOn: addDays(landedOn, -1),
+						mergedOn: landedOn,
+						url: `${HOST}/merge_requests/320`,
+					},
+				},
+			],
+			target: { kind: "landed", train: "21-2026" },
+		},
+		{
+			id: "demo-chat",
+			name: "demo-chat",
+			branches: [
+				{
+					app: "di",
+					branch: "feature/demo-chat",
+					openedOn: addDays(today, -20),
+					lastIn: addDays(today, -5),
+					state: "open",
+					cards: [
+						llbCardOf(
+							"DEMO-110",
+							"Chat with an advisor",
+							"feature/demo-chat",
+							305,
+							addDays(today, -18),
+							addDays(today, -17),
+							7,
+						),
+					],
+				},
+			],
+			target: { kind: "none" },
+		},
+	];
 }
 
 export function failedSourceBoard(today: string): Board {
