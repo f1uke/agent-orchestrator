@@ -6,7 +6,8 @@ function targetTrain(g: LLBGroup): string | null {
 	return g.target.kind === "planned" || g.target.kind === "landed" ? g.target.train : null;
 }
 
-function urgency(g: LLBGroup, b: Board): "failed" | "waiting" | "accent" {
+function urgency(g: LLBGroup, b: Board): "done" | "failed" | "waiting" | "accent" {
+	if (g.target.kind === "landed") return "done";
 	const t = b.trains.find((x) => x.id === targetTrain(g));
 	if (g.target.kind !== "planned" || !t?.freeze) return "accent";
 	const days = dayDiff(b.today, t.freeze);

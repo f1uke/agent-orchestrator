@@ -5,6 +5,7 @@ import type {
 	Badge,
 	Board,
 	BoardApp,
+	LLBGroup,
 	ResourceStatus,
 	SourceFreshness,
 	Stage,
@@ -12,8 +13,22 @@ import type {
 	Train,
 	TrainKey,
 } from "./types";
+import { addDays } from "./day";
 import type { ReleasesSearch } from "./url";
 import { SEVERITY_META, stageTone, type Tone } from "./vocab";
+
+const LLB_RECENT_DAYS = 21;
+
+/** d4 keeps a group while any branch is open, or landed within three weeks so the train it landed in still names it. */
+export function llbGroupsFor(b: Board, app: AppId): LLBGroup[] {
+	const since = addDays(b.today, -LLB_RECENT_DAYS);
+	return b.llbs.filter((g) => {
+		if (g.target.kind === "dropped" || !g.branches.some((x) => x.app === app)) return false;
+		return g.branches.some(
+			(x) => (x.state !== "landed" && x.state !== "landed_wrong" && !x.gone) || (x.landing?.mergedOn ?? "") >= since,
+		);
+	});
+}
 
 export function nowStage(stages: Stage[]): Stage | null {
 	return stages.find((s) => s.status !== "done" && s.status !== "not_observable") ?? null;

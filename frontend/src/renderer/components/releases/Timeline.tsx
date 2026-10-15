@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { addDays, dayOfMonth, monthYear, weekday, weekdayShort } from "../../lib/releases/day";
 import { appLanes, DW, LABEL_W, LLB_LINE_H, rowHeight, timeline, type Timeline as TL } from "../../lib/releases/layout";
-import type { Lens } from "../../lib/releases/lens";
+import { llbGroupsFor, type Lens } from "../../lib/releases/lens";
 import { momentumDistance } from "../../lib/releases/motion";
 import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib/releases/stickyFit";
 import type { Board } from "../../lib/releases/types";
@@ -133,13 +133,7 @@ export function Timeline({
 						past: layers.past,
 						hotfixes: url.hotfixes,
 					});
-					const llbs = layers.llb
-						? board.llbs.filter(
-								(g) =>
-									g.target.kind !== "dropped" &&
-									g.branches.some((b) => b.app === a.id && b.state !== "landed" && b.state !== "landed_wrong"),
-							)
-						: [];
+					const llbs = layers.llb ? llbGroupsFor(board, a.id) : [];
 					const top = llbs.length ? LLB_LINE_H : 0;
 					return (
 						<div
