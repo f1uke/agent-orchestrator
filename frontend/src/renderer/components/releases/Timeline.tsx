@@ -1,6 +1,5 @@
 import { animate } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { addDays, dayOfMonth, monthYear, weekday, weekdayShort } from "../../lib/releases/day";
 import { cardGroups, groupRowCount, jiraUrl } from "../../lib/releases/cards";
 import {
@@ -17,7 +16,7 @@ import {
 } from "../../lib/releases/layout";
 import type { Lens } from "../../lib/releases/lens";
 import { llbGroupsFor, llbLanes } from "../../lib/releases/llb";
-import { momentumDistance } from "../../lib/releases/motion";
+import { momentumDistance, type ReleaseMotion } from "../../lib/releases/motion";
 import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib/releases/stickyFit";
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
@@ -25,6 +24,7 @@ import { useReleasesUi } from "../../stores/releases-ui";
 import { BoardSprintRow } from "./BoardSprintRows";
 import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
+import { useReleaseMotion } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 import { StickyAppLabel } from "./StickyAppLabel";
 import { VersionLanes } from "./VersionLanes";
@@ -52,22 +52,18 @@ export function Timeline({
 	const tl = useMemo(() => timeline(board), [board]);
 	const sc = useRef<HTMLDivElement>(null);
 	const canvas = useRef<HTMLDivElement>(null);
-	const reduced = usePrefersReducedMotion();
+	const mo = useReleaseMotion();
 	const focusFreeze = lens.focus?.freeze;
 
 	useLayoutEffect(() => {
 		const el = sc.current;
 		if (!el || !focusFreeze) return;
 		const to = Math.max(0, tl.x(addDays(focusFreeze, -8)));
-		if (reduced || el.scrollLeft === 0) {
+		if (mo.reduced || el.scrollLeft === 0) {
 			el.scrollLeft = to;
 			return;
 		}
-		const a = animate(el.scrollLeft, to, {
-			duration: 0.24,
-			ease: [0.4, 0, 0.2, 1],
-			onUpdate: (v) => (el.scrollLeft = v),
-		});
+		const a = animate(el.scrollLeft, to, { ...mo.axis, onUpdate: (v) => (el.scrollLeft = v) });
 		return () => a.stop();
 		// Scroll only when the focus moves, never on a refetch.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,7 +105,7 @@ export function Timeline({
 		};
 	});
 
-	usePan(sc, reduced);
+	usePan(sc, mo);
 
 	return (
 		<div className="rel-sc" ref={sc} data-testid="release-timeline">
@@ -331,7 +327,7 @@ function Axis({ tl, layers }: { tl: TL; layers: Layers }) {
 	);
 }
 
-function usePan(sc: React.RefObject<HTMLDivElement | null>, reduced: boolean) {
+function usePan(sc: React.RefObject<HTMLDivElement | null>, mo: ReleaseMotion) {
 	useEffect(() => {
 		const el = sc.current;
 		if (!el) return;
@@ -357,11 +353,10 @@ function usePan(sc: React.RefObject<HTMLDivElement | null>, reduced: boolean) {
 		const up = () => {
 			if (!drag) return;
 			el.classList.remove("panning");
-			const extra = reduced ? 0 : momentumDistance(drag.v);
+			const extra = mo.reduced ? 0 : momentumDistance(drag.v);
 			if (drag.moved && extra) {
 				inertia = animate(el.scrollLeft, el.scrollLeft + extra, {
-					duration: 0.24,
-					ease: [0.1, 0.7, 0.25, 1],
+					...mo.momentum,
 					onUpdate: (v) => (el.scrollLeft = v),
 				});
 			}
@@ -376,5 +371,5 @@ function usePan(sc: React.RefObject<HTMLDivElement | null>, reduced: boolean) {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
 		};
-	}, [sc, reduced]);
+	}, [sc, mo]);
 }

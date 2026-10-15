@@ -1,10 +1,11 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DURATION, momentumDistance, sheetEnter } from "./motion";
+import { DURATION, momentumDistance, releaseMotion, type Presence } from "./motion";
 
 const COMPONENTS = path.resolve(__dirname, "../../components/releases");
 const FIX = "use Motion's x/y/scale values (transform: [.., 'none'] collapsed to scaleX(0) in d3)";
+const OWN = "take transitions from releaseMotion() in lib/releases/motion.ts, the only place that times motion";
 
 function sources(dir: string): string[] {
 	return readdirSync(dir).flatMap((name) => {
@@ -40,6 +41,22 @@ function motionViolations(src: string): string[] {
 	});
 }
 
+function timingViolations(src: string): string[] {
+	const code = src.replace(/\/\/.*$/gm, "");
+	return [...code.matchAll(/\b(duration|ease|delay)\s*:|\bstagger\(/g)].map((m) => m[0]);
+}
+
+const ALL = [releaseMotion(false), releaseMotion(true)];
+const presences = (s: ReturnType<typeof releaseMotion>): [string, Presence][] => [
+	["unfold", s.unfold],
+	["appear", s.appear],
+	["sheet", s.sheet],
+	...[0, 1, 4].map((i): [string, Presence] => [`label(${i})`, s.label(i)]),
+];
+const keysOf = (p: Presence) =>
+	[...new Set([...Object.keys(p.initial || {}), ...Object.keys(p.animate), ...Object.keys(p.exit)])].sort();
+const seconds = (t: { duration?: number; delay?: number }) => (t.duration ?? 0) + (t.delay ?? 0);
+
 describe("releases motion", () => {
 	it("catches the d3 mistake in a sample", () => {
 		expect(motionViolations(`<m.div animate={{ transform: ["scaleX(0.4)", "none"] }} />`)).toHaveLength(2);
@@ -55,9 +72,49 @@ describe("releases motion", () => {
 		expect(found, FIX).toEqual([]);
 	});
 
-	it("keeps the sheet enter within DESIGN.md's medium duration, on Motion values", () => {
-		expect(sheetEnter.transition.duration).toBeLessThanOrEqual(DURATION.medium);
-		expect(Object.keys(sheetEnter.initial).sort()).toEqual(["opacity", "x"]);
+	it("catches a component that times its own animation", () => {
+		expect(timingViolations(`animate(el, 0, { duration: 0.3, ease: [0, 0, 1, 1] })`)).toEqual(["duration:", "ease:"]);
+		expect(timingViolations(`transition={{ delay: stagger(0.01) }}`)).toEqual(["delay:", "stagger("]);
+		expect(timingViolations(`transition={mo.fold}`)).toEqual([]);
+	});
+
+	it(`components/releases never time motion themselves: ${OWN}`, () => {
+		const found = sources(COMPONENTS)
+			.filter((f) => f.endsWith(".tsx"))
+			.flatMap((f) => timingViolations(readFileSync(f, "utf8")).map((v) => `${path.basename(f)}: ${v}`));
+		expect(found, OWN).toEqual([]);
+	});
+
+	it("unfolds on height and opacity, appears and staggers labels on opacity only", () => {
+		for (const s of ALL) {
+			expect(keysOf(s.unfold)).toEqual(["height", "opacity"]);
+			expect(keysOf(s.appear)).toEqual(["opacity"]);
+			for (const i of [0, 1, 4]) expect(keysOf(s.label(i)), `label(${i}) has no offset`).toEqual(["opacity"]);
+			expect(keysOf(s.sheet)).toEqual(s.reduced ? ["opacity"] : ["opacity", "x"]);
+		}
+		expect(releaseMotion(false).unfold.animate.height).toBe("auto");
+		expect(releaseMotion(false).unfold.exit).toEqual({ height: 0, opacity: 0 });
+	});
+
+	it("settles every effect within DESIGN.md's medium duration, the last label included", () => {
+		const s = releaseMotion(false);
+		for (const [name, p] of presences(s)) expect(seconds(p.transition), name).toBeLessThanOrEqual(DURATION.medium);
+		for (const [name, t] of Object.entries({ fold: s.fold, row: s.row, axis: s.axis, momentum: s.momentum }))
+			expect(seconds(t), name).toBeLessThanOrEqual(DURATION.medium);
+		expect(s.label(4).transition.delay).toBeGreaterThan(0);
+		expect(s.label(1).transition.delay).toBeLessThan(s.label(4).transition.delay ?? 0);
+		expect(s.unfold.transition).toEqual(s.fold);
+	});
+
+	it("makes every effect instant under reduced motion, with no starting frame", () => {
+		const s = releaseMotion(true);
+		for (const [name, p] of presences(s)) {
+			expect(p.initial, `${name} starts at its end state`).toBe(false);
+			expect(seconds(p.transition), name).toBe(0);
+			expect(seconds(p.exitTransition ?? p.transition), `${name} exit`).toBe(0);
+		}
+		for (const [name, t] of Object.entries({ fold: s.fold, row: s.row, axis: s.axis, momentum: s.momentum }))
+			expect(seconds(t), name).toBe(0);
 	});
 
 	it("gives a flick momentum and a slow release none", () => {

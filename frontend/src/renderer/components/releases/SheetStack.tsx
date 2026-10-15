@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronRight, X } from "lucide-react";
-import { AnimatePresence, m, LazyMotion, domAnimation } from "motion/react";
+import { AnimatePresence, m } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useClearStaleHides, useSetRule } from "../../hooks/useReleaseBoard";
 import { FIX_STATE_META } from "../../lib/releases/fix";
@@ -16,7 +16,6 @@ import {
 	versionOf,
 	type Lens,
 } from "../../lib/releases/lens";
-import { sheetEnter, sheetExit } from "../../lib/releases/motion";
 import type { Board, FixState, RuleOutcome, Stage } from "../../lib/releases/types";
 import type { ReleasesSearch, SheetEntry } from "../../lib/releases/url";
 import {
@@ -34,6 +33,7 @@ import { Avatar } from "./Avatar";
 import { cardSheet, sprintSheet } from "./CardSheets";
 import { fixesSheet, fixSheet } from "./FixSheets";
 import { llbSheet, llbsSheet } from "./LlbSheet";
+import { useReleaseMotion } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 import { Stepper } from "./StickyAppLabel";
 import { phaseTone } from "./SummaryStrip";
@@ -63,8 +63,9 @@ export function SheetStack({
 	const ctx: Ctx = { board, lens, actions, now: Date.now() };
 	const sheet = s ? render(s, ctx) : null;
 	const canBack = useReleasesUi((st) => st.back.length > 0);
+	const { sheet: mo } = useReleaseMotion();
 	return (
-		<LazyMotion features={domAnimation}>
+		<>
 			{s && <div className="rel-scrim" onClick={actions.closeSheet} aria-hidden="true" />}
 			<AnimatePresence>
 				{sheet && (
@@ -73,10 +74,10 @@ export function SheetStack({
 						className="rel-sheet"
 						role="dialog"
 						aria-label="Release details"
-						initial={sheetEnter.initial}
-						animate={sheetEnter.animate}
-						exit={{ ...sheetEnter.exit, transition: sheetExit }}
-						transition={sheetEnter.transition}
+						initial={mo.initial}
+						animate={mo.animate}
+						exit={{ ...mo.exit, transition: mo.exitTransition ?? mo.transition }}
+						transition={mo.transition}
 					>
 						<div className="sh-h">
 							{canBack && (
@@ -94,7 +95,7 @@ export function SheetStack({
 					</m.aside>
 				)}
 			</AnimatePresence>
-		</LazyMotion>
+		</>
 	);
 }
 

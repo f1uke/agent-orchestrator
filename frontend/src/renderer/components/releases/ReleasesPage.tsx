@@ -1,5 +1,4 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { MotionConfig } from "motion/react";
 import { useCallback, useMemo } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
 import { makeLens } from "../../lib/releases/lens";
@@ -12,6 +11,7 @@ import {
 	type SheetEntry,
 } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
+import { ReleaseMotionRoot } from "./ReleaseMotion";
 import { SheetStack } from "./SheetStack";
 import { SummaryStrip } from "./SummaryStrip";
 import { Timeline } from "./Timeline";
@@ -64,7 +64,7 @@ export function ReleasesPage() {
 		: null;
 
 	return (
-		<MotionConfig reducedMotion="user">
+		<ReleaseMotionRoot>
 			<div className="rel" data-testid="releases-page">
 				{!response ? (
 					<div className="rel-empty">{fetchError ? `Release trains: ${fetchError}` : "Loading release trains…"}</div>
@@ -81,7 +81,7 @@ export function ReleasesPage() {
 					/>
 				)}
 			</div>
-		</MotionConfig>
+		</ReleaseMotionRoot>
 	);
 }
 
