@@ -133,6 +133,28 @@ func TestCORS(t *testing.T) {
 	}
 }
 
+// The renderer keeps the Board's ETag for If-None-Match; a cross-origin script
+// sees only safelisted response headers unless the daemon exposes the others.
+func TestCORSExposesETagToTheRenderer(t *testing.T) {
+	cfg := config.Config{AllowedOrigins: []string{"app://renderer"}}
+	srv := httptest.NewServer(newTestRouter(cfg, discardLogger(), nil))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/healthz", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Origin", "app://renderer")
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Expose-Headers"); got != "ETag" {
+		t.Fatalf("Access-Control-Expose-Headers = %q, want ETag", got)
+	}
+}
+
 // TestCORSPreflightHeaders pins the preflight grant shape: methods, echoed
 // request headers, max-age, and the private-network opt-in.
 func TestCORSPreflightHeaders(t *testing.T) {

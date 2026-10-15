@@ -651,6 +651,19 @@ func releaseTrainOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
+		{
+			method: http.MethodGet, path: "/api/v1/release-trains/avatars/{accountId}", id: "getReleaseTrainAvatar", tag: "release-trains",
+			summary:    "Serve a Jira user's avatar that the user read cached; 404 until it is downloaded",
+			pathParams: []any{controllers.ReleaseTrainAccountIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, ""},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+			contentTypes: map[int]string{http.StatusOK: "image/*"},
+		},
 	}
 }
 
