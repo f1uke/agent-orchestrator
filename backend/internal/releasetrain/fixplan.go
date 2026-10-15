@@ -126,7 +126,8 @@ func (b *Board) hitVersion(h *AlertHit) (*Train, *AppVersion) {
 	}
 	for i := range b.Trains {
 		if t := &b.Trains[i]; t.ID == s.Train {
-			return t, t.version(s.App)
+			v := t.version(s.App)
+			return t, v
 		}
 	}
 	return nil, nil

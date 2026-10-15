@@ -38,6 +38,13 @@ type ReleaseTrainsService interface {
 	Plans(ctx context.Context) ([]rt.LlbPlan, error)
 	// PutPlan returns rt.ErrInvalidPlan, *rt.PlanVersionError or *rt.BranchTakenError.
 	PutPlan(ctx context.Context, p rt.LlbPlan, ifVersion int) (rt.LlbPlan, error)
+	// PlanFix returns rt.ErrNoSuchHit, rt.ErrNotFixable or rt.ErrUnknownChoice.
+	PlanFix(ctx context.Context, hit rt.HitID, choice string) (rt.FixPlan, error)
+	// ConfirmFix also returns *rtsvc.PlanChangedError and rtsvc.ErrNothingToRecord.
+	ConfirmFix(ctx context.Context, hit rt.HitID, choice, fingerprint, actor string) (rt.Fix, error)
+	Fixes(ctx context.Context) ([]rt.Fix, error)
+	// UndoFix returns rt.ErrNoSuchFix, rtsvc.ErrNoUndo or the executor's error.
+	UndoFix(ctx context.Context, id, actor string) (rt.Fix, error)
 	// Avatar returns rtsvc.ErrNoAvatar until the account's avatar is downloaded, rtsvc.ErrBadAccountID for an id no file can have.
 	Avatar(accountID string) ([]byte, error)
 }
@@ -116,6 +123,10 @@ func (c *ReleaseTrainsController) Register(r chi.Router) {
 	r.Delete("/release-trains/hides", c.unhideStale)
 	r.Get("/release-trains/llb-plans", c.plans)
 	r.Put("/release-trains/llb-plans/{planId}", c.putPlan)
+	r.Post("/release-trains/fixes/plan", c.planFix)
+	r.Post("/release-trains/fixes", c.confirmFix)
+	r.Get("/release-trains/fixes", c.fixes)
+	r.Post("/release-trains/fixes/{fixId}/undo", c.undoFix)
 	r.Get("/release-trains/avatars/{accountId}", c.avatar)
 }
 

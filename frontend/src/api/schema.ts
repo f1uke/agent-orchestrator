@@ -860,6 +860,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/release-trains/fixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every fix with its append-only audit events */
+        get: operations["listReleaseTrainFixes"];
+        put?: never;
+        /** Confirm a fix: L3 applies to AO's own plan, every other fix is recorded as a dry run and sends nothing; the same plan twice returns the same fix; 409 FIX_PLAN_CHANGED when the plan changed since it was reviewed */
+        post: operations["confirmReleaseTrainFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/fixes/{fixId}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw a dry run, or undo an applied L3 fix under the same plan-version check */
+        post: operations["undoReleaseTrainFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/fixes/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan a hit's fix on the current Board with the exact request each step would send; writes nothing */
+        post: operations["planReleaseTrainFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/release-trains/hides": {
         parameters: {
             query?: never;
@@ -4591,9 +4643,11 @@ export interface components {
             bucket: components["schemas"]["ReleaseTrainBucket"];
             changedSinceHidden?: boolean;
             evidence: components["schemas"]["ReleaseTrainEvidence"];
+            fix?: components["schemas"]["ReleaseTrainFixKind"];
             id: string;
             link: components["schemas"]["ReleaseTrainLink"];
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
+            openFix?: components["schemas"]["ReleaseTrainFixRef"];
             rule: string;
             severity: components["schemas"]["ReleaseTrainSeverity"];
             text: string;
@@ -4754,10 +4808,184 @@ export interface components {
             /** @description Train key, "21-2026" or "20-1-2026". */
             train: string;
         };
+        ReleaseTrainEffAOPlanTarget: {
+            after: components["schemas"]["ReleaseTrainLLBTargetInput"];
+            before: components["schemas"]["ReleaseTrainLLBTargetInput"];
+            /** @constant */
+            kind: "ao_plan_target";
+            plan: string;
+            planVersion: number;
+        };
+        ReleaseTrainEffCopyText: {
+            /** @constant */
+            kind: "copy_text";
+            target: string;
+            text: string;
+        };
+        ReleaseTrainEffGitLabJobRetry: {
+            app: string;
+            host: string;
+            jobId: number;
+            /** @constant */
+            kind: "gitlab_job_retry";
+            name: string;
+            project: number;
+        };
+        ReleaseTrainEffGitLabMilestoneDue: {
+            after: components["schemas"]["ReleaseTrainDay"];
+            app: string;
+            before: components["schemas"]["ReleaseTrainDay"];
+            host: string;
+            /** @constant */
+            kind: "gitlab_milestone_due";
+            milestoneId: number;
+            project: number;
+        };
+        ReleaseTrainEffGitLabRetarget: {
+            app: string;
+            from: string;
+            host: string;
+            iid: number;
+            /** @constant */
+            kind: "gitlab_retarget";
+            project: number;
+            to: string;
+        };
+        ReleaseTrainEffJiraApprovers: {
+            after: components["schemas"]["ReleaseTrainPerson"][];
+            /** @constant */
+            kind: "jira_approvers";
+            site: string;
+            versionId: string;
+        };
+        ReleaseTrainEffJiraRelatedWork: {
+            category: string;
+            /** @constant */
+            kind: "jira_related_work";
+            site: string;
+            title: string;
+            versionId: string;
+        };
+        ReleaseTrainEffJiraTransition: {
+            from: string;
+            key: string;
+            /** @constant */
+            kind: "jira_transition";
+            site: string;
+            to: string;
+        };
+        ReleaseTrainEffJiraVersionUpdate: {
+            after: components["schemas"]["ReleaseTrainVersionFields"];
+            before: components["schemas"]["ReleaseTrainVersionFields"];
+            /** @constant */
+            kind: "jira_version_update";
+            site: string;
+            versionId: string;
+        };
+        ReleaseTrainEffect: components["schemas"]["ReleaseTrainEffJiraVersionUpdate"] | components["schemas"]["ReleaseTrainEffJiraTransition"] | components["schemas"]["ReleaseTrainEffJiraApprovers"] | components["schemas"]["ReleaseTrainEffJiraRelatedWork"] | components["schemas"]["ReleaseTrainEffGitLabRetarget"] | components["schemas"]["ReleaseTrainEffGitLabJobRetry"] | components["schemas"]["ReleaseTrainEffGitLabMilestoneDue"] | components["schemas"]["ReleaseTrainEffCopyText"] | components["schemas"]["ReleaseTrainEffAOPlanTarget"];
         /** @enum {string} */
         ReleaseTrainErrorClass: "auth" | "rate_limited" | "unavailable" | "not_found" | "decode" | "truncated" | "unconfigured";
         ReleaseTrainEvidence: {
             [key: string]: unknown;
+        };
+        ReleaseTrainFix: {
+            choice?: string;
+            /** Format: date-time */
+            createdAt: string;
+            events: components["schemas"]["ReleaseTrainFixEvent"][];
+            hit: string;
+            id: string;
+            plan: components["schemas"]["ReleaseTrainFixPlan"];
+            rule: string;
+            state: components["schemas"]["ReleaseTrainFixState"];
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ReleaseTrainFixChoice: {
+            id: string;
+            label: string;
+            steps: components["schemas"]["ReleaseTrainFixStep"][];
+        };
+        ReleaseTrainFixConfirmRequest: {
+            choice?: string;
+            hitId: string;
+            /** @description The fingerprint of the plan the person reviewed; 409 when the plan changed since. */
+            planFingerprint: string;
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
+        };
+        ReleaseTrainFixEvent: {
+            actor: string;
+            /** Format: date-time */
+            at: string;
+            detail: unknown;
+            kind: components["schemas"]["ReleaseTrainFixEventKind"];
+            /** Format: int64 */
+            seq: number;
+        };
+        /** @enum {string} */
+        ReleaseTrainFixEventKind: "confirmed" | "dry_run_recorded" | "applied" | "apply_failed" | "undone" | "undo_failed" | "withdrawn" | "superseded";
+        /** @enum {string} */
+        ReleaseTrainFixKind: "apply" | "queue" | "choose" | "copy";
+        /** @enum {string} */
+        ReleaseTrainFixMode: "apply" | "queue" | "choose" | "copy" | "blocked";
+        ReleaseTrainFixNeed: {
+            label: string;
+            llb: string;
+        };
+        ReleaseTrainFixPlan: {
+            app?: string;
+            choice?: string;
+            choices?: components["schemas"]["ReleaseTrainFixChoice"][];
+            fingerprint: string;
+            hit: string;
+            mode: components["schemas"]["ReleaseTrainFixMode"];
+            need?: components["schemas"]["ReleaseTrainFixNeed"];
+            note?: string;
+            rule: string;
+            steps: components["schemas"]["ReleaseTrainFixStep"][];
+            title: string;
+        };
+        ReleaseTrainFixPlanRequest: {
+            /** @description For a choose plan (A5): the side to take, jira or gitlab. */
+            choice?: string;
+            hitId: string;
+        };
+        ReleaseTrainFixPlanResponse: {
+            plan: components["schemas"]["ReleaseTrainFixPlan"];
+        };
+        ReleaseTrainFixRef: {
+            id: string;
+            state: components["schemas"]["ReleaseTrainFixState"];
+        };
+        ReleaseTrainFixResponse: {
+            fix: components["schemas"]["ReleaseTrainFix"];
+        };
+        /** @enum {string} */
+        ReleaseTrainFixState: "dry_run" | "applying" | "applied" | "failed" | "undone" | "withdrawn" | "superseded";
+        ReleaseTrainFixStep: {
+            after: string;
+            before: string;
+            effect: components["schemas"]["ReleaseTrainEffect"];
+            label: string;
+            request: components["schemas"]["ReleaseTrainShownRequest"];
+        };
+        ReleaseTrainFixUndoRequest: {
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
+        };
+        ReleaseTrainFixesResponse: {
+            fixes: components["schemas"]["ReleaseTrainFix"][];
         };
         ReleaseTrainForceUpdateFact: {
             createdOn: components["schemas"]["ReleaseTrainDay"];
@@ -4826,6 +5054,7 @@ export interface components {
         };
         ReleaseTrainJobFact: {
             allowFailure: boolean;
+            id?: number;
             name: string;
             status: string;
         };
@@ -4873,6 +5102,11 @@ export interface components {
         /** @enum {string} */
         ReleaseTrainLLBState: "open" | "landing" | "landing_wrong" | "landed" | "landed_wrong" | "stranded";
         ReleaseTrainLLBTarget: components["schemas"]["ReleaseTrainLLBLandedIn"] | components["schemas"]["ReleaseTrainLLBPlanned"] | components["schemas"]["ReleaseTrainLLBNoTarget"] | components["schemas"]["ReleaseTrainLLBDropped"];
+        ReleaseTrainLLBTargetInput: {
+            targetKind: components["schemas"]["ReleaseTrainTargetKind"];
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            targetTrain?: string;
+        };
         ReleaseTrainLink: {
             label: string;
             url?: string;
@@ -5078,6 +5312,7 @@ export interface components {
         };
         ReleaseTrainRuleInfo: {
             defaultOn: boolean;
+            fix?: components["schemas"]["ReleaseTrainFixKind"];
             group: string;
             hint?: string;
             id: string;
@@ -5100,6 +5335,13 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainSeverity: "block" | "data" | "risk" | "hygiene" | "info";
+        ReleaseTrainShownRequest: {
+            /** @description The JSON body as sent; never credentials. */
+            body?: unknown;
+            /** @description An HTTP method, or COPY for text to paste by hand. */
+            method: string;
+            url: string;
+        };
         ReleaseTrainSourceFreshness: {
             /** Format: date-time */
             asOf?: null | string;
@@ -5216,6 +5458,10 @@ export interface components {
         ReleaseTrainTrainPhase: "past" | "current" | "next";
         ReleaseTrainUnhideStaleResponse: {
             removed: string[];
+        };
+        ReleaseTrainVersionFields: {
+            releaseDate?: components["schemas"]["ReleaseTrainDay"];
+            released: boolean;
         };
         RemoveProjectResult: {
             projectId: string;
@@ -9465,6 +9711,245 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listReleaseTrainFixes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainFixesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    confirmReleaseTrainFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainFixConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainFixResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    undoReleaseTrainFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Fix id from the Fixes list, e.g. fx-0a1b2c3d4e5f6a7b. */
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainFixUndoRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainFixResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    planReleaseTrainFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainFixPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainFixPlanResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

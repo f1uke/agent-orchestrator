@@ -38,6 +38,15 @@ func TestReleaseTrainUnionTwinsMatchWhatTheCoreWrites(t *testing.T) {
 		{rt.BeforeFirstTrain{Train: rt.TrainID{Number: 6, Year: 2026}}, rtDestBefore{}},
 		{rt.OffFlow{}, rtDestOff{}},
 		{rt.NotRouted{}, rtDestNone{}},
+		{rt.EffJiraVersionUpdate{Site: "https://jira.example.com", VersionID: "5001", After: rt.VersionFields{Released: true, ReleaseDate: &rt.Day{Y: 2026, M: 10, D: 8}}}, rtEffJiraVersionUpdate{}},
+		{rt.EffJiraTransition{Site: "https://jira.example.com", Key: "DEMO-1", From: "Pull Request", To: "Ready for QA"}, rtEffJiraTransition{}},
+		{rt.EffJiraApprovers{Site: "https://jira.example.com", VersionID: "5001", After: []rt.Person{{AccountID: "acc-ann", Name: "Ann"}}}, rtEffJiraApprovers{}},
+		{rt.EffJiraRelatedWork{Site: "https://jira.example.com", VersionID: "5001", Category: "Development", Title: "Source code scan 3.5.0"}, rtEffJiraRelatedWork{}},
+		{rt.EffGitLabRetarget{Host: "gitlab.example.com", App: "di", Project: 1001, IID: 7, From: "develop", To: "feature/sprint-2026-7"}, rtEffGitLabRetarget{}},
+		{rt.EffGitLabJobRetry{Host: "gitlab.example.com", App: "di", Project: 1001, JobID: 901, Name: "build_test"}, rtEffGitLabJobRetry{}},
+		{rt.EffGitLabMilestoneDue{Host: "gitlab.example.com", App: "di", Project: 1001, MilestoneID: 11, Before: rt.Day{Y: 2026, M: 10, D: 16}, After: rt.Day{Y: 2026, M: 10, D: 17}}, rtEffGitLabMilestoneDue{}},
+		{rt.EffCopyText{Target: "https://wiki.example.com/pages/8001", Text: "DEMO-1\nDEMO-2"}, rtEffCopyText{}},
+		{rt.EffAOPlanTarget{Plan: "demo-wallet", Before: rt.LLBTargetInput{Kind: rt.TargetUnplanned}, After: rt.LLBTargetInput{Kind: rt.TargetTrain, Train: &rt.TrainID{Number: 21, Year: 2026}}, PlanVersion: 3}, rtEffAOPlanTarget{}},
 	} {
 		body, err := json.Marshal(tc.variant)
 		if err != nil {
