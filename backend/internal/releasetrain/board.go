@@ -55,6 +55,7 @@ type Board struct {
 	Alerts    Alerts        `json:"alerts"`
 	Catalogue []RuleInfo    `json:"catalogue"`
 	fix       fixContext
+	mrs       map[AppID][]MRFact
 }
 
 // BoardApp is one configured app as every surface names it.

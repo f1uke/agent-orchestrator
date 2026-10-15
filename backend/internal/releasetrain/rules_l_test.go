@@ -143,3 +143,114 @@ func TestL3QuietOnceTheBranchLandsInTheSourceSprint(t *testing.T) {
 		t.Fatalf("code = %#v, want merged via feature/demo-wallet", code)
 	}
 }
+
+func TestL9MRIntoABranchNoTrainTakes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(f *fixture) *MRFact
+		fires bool
+	}{
+		{"open into another card's branch", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MROpened, "2026-10-12", "")
+		}, true},
+		{"merged into another card's branch after the cutover", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MRMerged, "2026-10-11", "2026-10-12")
+		}, true},
+		{"merged on the cutover day", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MRMerged, "2026-09-30", "2026-10-01")
+		}, false},
+		{"merged before the cutover", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MRMerged, "2026-09-01", "2026-09-02")
+		}, false},
+		{"closed", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MRClosed, "2026-10-12", "")
+		}, false},
+		{"into the sprint branch", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feature/sprint-21-2026", MROpened, "2026-10-12", "")
+		}, false},
+		{"into develop", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "develop", MROpened, "2026-10-12", "")
+		}, false},
+		{"into main", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "main", MROpened, "2026-10-12", "")
+		}, false},
+		{"into master", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "master", MROpened, "2026-10-12", "")
+		}, false},
+		{"into a release branch", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "release/3.5.0", MROpened, "2026-10-12", "")
+		}, false},
+		{"into a hotfix branch", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "hotfix/3.4.1", MROpened, "2026-10-12", "")
+		}, false},
+		{"into a long-lived branch the Board found", func(f *fixture) *MRFact {
+			return f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feature/demo-wallet", MROpened, "2026-10-12", "")
+		}, false},
+		{"out of a long-lived branch", func(f *fixture) *MRFact {
+			return f.mr("di", "wallet", "feature/demo-wallet", "feat/DEMO-1-base", MROpened, "2026-10-12", "")
+		}, false},
+		{"back out of a sprint branch", func(f *fixture) *MRFact {
+			return f.mr("di", "sprint 20", "feature/sprint-20-2026", "feat/DEMO-1-base", MROpened, "2026-10-12", "")
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, today)
+			f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
+			f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+			mr := tc.setup(f)
+			var want []string
+			if tc.fires {
+				want = []string{"L9~mr/di/" + strconv.Itoa(mr.IID)}
+			}
+			b := f.reconcile()
+			if got := firedIDs(b, "L9"); !reflect.DeepEqual(got, want) {
+				t.Fatalf("L9 hits = %v, want %v", got, want)
+			}
+			if _, ok := outcomeOf(b, "L9", "di").(Unknown); ok {
+				t.Fatalf("L9 is unknown on fresh MRs")
+			}
+		})
+	}
+}
+
+func TestL9WithNoCutoverCatchesOpenMRsOnly(t *testing.T) {
+	f := newFixture(t, today)
+	open := f.mr("da", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MROpened, "2026-10-12", "")
+	f.mr("da", "DEMO-3 part", "feat/DEMO-3", "feat/DEMO-1-other", MRMerged, "2026-10-11", "2026-10-12")
+	if got, want := firedIDs(f.reconcile(), "L9"), []string{"L9~mr/da/" + strconv.Itoa(open.IID)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("L9 hits = %v, want %v", got, want)
+	}
+}
+
+func TestL9EvidenceAndText(t *testing.T) {
+	f := newFixture(t, today)
+	f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
+	mr := f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MROpened, "2026-10-12", "")
+	hits := firedHits(f.reconcile(), "L9")
+	if len(hits) != 1 {
+		t.Fatalf("L9 hits = %v", hits)
+	}
+	h := hits[0]
+	want := "!" + strconv.Itoa(mr.IID) + " feat/DEMO-2 → feat/DEMO-1-base: not a sprint branch, a long-lived branch or develop"
+	if h.Text != want || h.Severity != SevRisk || h.App != "di" || h.Train != nil || h.AgesOn != nil || h.Link.URL != mr.URL {
+		t.Fatalf("L9 hit = %+v, want text %q, risk, app di, no train, never ages, the MR link", h, want)
+	}
+	if h.Evidence["source"] != "feat/DEMO-2" || h.Evidence["target"] != "feat/DEMO-1-base" || h.Evidence["state"] != MROpened {
+		t.Fatalf("L9 evidence = %v, want source, target and state", h.Evidence)
+	}
+}
+
+func TestL9HitIsMineWhenIAuthoredTheMR(t *testing.T) {
+	f := newFixture(t, today)
+	f.me()
+	mine := f.mr("di", "DEMO-2 part", "feat/DEMO-2", "feat/DEMO-1-base", MROpened, "2026-10-12", "")
+	mine.AuthorUsername = "dee"
+	theirs := f.mr("di", "DEMO-3 part", "feat/DEMO-3", "feat/DEMO-4-base", MROpened, "2026-10-12", "")
+	got := map[int]bool{}
+	for _, h := range firedHits(f.reconcile(), "L9") {
+		got[h.Subject.(SubjMR).IID] = len(h.Mine) > 0
+	}
+	if want := map[int]bool{mine.IID: true, theirs.IID: false}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("L9 mine by MR = %v, want %v", got, want)
+	}
+}

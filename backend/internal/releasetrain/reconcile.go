@@ -36,6 +36,7 @@ func Reconcile(in Inputs, env Env) Board {
 		cutover: b.Cutover, llbs: llbs, groups: groupsByBranch(b.LLBs),
 		trains: b.Trains, plans: planTrains(b.Trains, b.Today),
 	})
+	b.mrs = mrsByApp(in.Config, in.Snap)
 	b.Identity = identityOf(in.Snap)
 	mine(&b, meOf(b.Identity, in.Snap), mrs, in.Snap, in.Config)
 	b.Alerts = alerts(&b, in, rs)

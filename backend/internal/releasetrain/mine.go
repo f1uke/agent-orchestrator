@@ -233,6 +233,20 @@ func mineOfSubject(b *Board, s Subject) []MineReason {
 				}
 			}
 		}
+		return b.authoredByMe(s)
+	}
+	return nil
+}
+
+func (b *Board) authoredByMe(s SubjMR) []MineReason {
+	id, ok := b.Identity.(IdentityKnown)
+	if !ok {
+		return nil
+	}
+	for _, mr := range b.mrs[s.App] {
+		if mr.IID == s.IID && mr.AuthorUsername != "" && mr.AuthorUsername == id.GitLabUsername {
+			return []MineReason{{Why: MineMRAuthor, Ref: mrRef(mr)}}
+		}
 	}
 	return nil
 }
