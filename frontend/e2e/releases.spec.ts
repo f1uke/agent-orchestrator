@@ -188,6 +188,64 @@ test.describe("releases page", () => {
 		await expect.poll(fill).toEqual({ alpha: 1, opacity: "1", above: true });
 	});
 
+	for (const reduced of [false, true])
+		test(`a fast diagonal flick ${reduced ? "stops dead on release under reduced motion" : "glides on both axes after release"}`, async ({
+			page,
+		}) => {
+			await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
+			await open(page, "?layers=sprint,llb,cards");
+			await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+			await settle(page);
+			const sc = page.getByTestId("release-timeline");
+			await sc.evaluate((el) => (el.scrollTop = 0));
+			const box = (await sc.boundingBox())!;
+			const x = box.x + 900;
+			const y = box.y + box.height - 60;
+			await page.mouse.move(x, y);
+			await page.mouse.down();
+			for (let i = 1; i <= 4; i++) await page.mouse.move(x - i * 40, y - i * 20);
+			await page.mouse.up();
+			const at = () => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
+			const released = await at();
+			await settle(page);
+			const rest = await at();
+			if (reduced) expect(rest).toEqual(released);
+			else {
+				expect(rest.left).toBeGreaterThan(released.left);
+				expect(rest.top).toBeGreaterThan(released.top);
+			}
+		});
+
+	test("a drag pans the timeline both ways at once, and a still click on a bar still opens it", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await settle(page);
+		const sc = page.getByTestId("release-timeline");
+		const at = () => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
+		const start = await sc.evaluate((el) => {
+			el.scrollTop = 0;
+			return { left: el.scrollLeft, top: el.scrollTop, room: el.scrollHeight - el.clientHeight };
+		});
+		expect(start.room).toBeGreaterThan(100);
+		const box = (await sc.boundingBox())!;
+		const x = box.x + 900;
+		const y = box.y + box.height - 60;
+		await page.mouse.move(x, y);
+		await page.mouse.down();
+		await page.mouse.move(x - 120, y - 60, { steps: 6 });
+		await page.mouse.move(x - 240, y - 120, { steps: 6 });
+		await page.mouse.up();
+		await settle(page);
+		const after = await at();
+		expect(after.left).toBeGreaterThan(start.left + 200);
+		expect(after.top).toBeGreaterThan(start.top + 100);
+		const bar = page.getByTestId("bar-da-22-2026");
+		await bar.evaluate((el) => el.scrollIntoView({ block: "center", inline: "center" }));
+		await settle(page);
+		await bar.click({ position: { x: 8, y: 8 } });
+		await expect(page.getByRole("dialog", { name: "Release details" })).toContainText("2.5.0");
+	});
+
 	test("a failed source shows unknown with its age, never a blank", async ({ page }) => {
 		await open(page, "", "failed-source");
 		await expect(page.getByTestId("release-sources").locator('[data-source="gitlab"]')).toHaveText(
