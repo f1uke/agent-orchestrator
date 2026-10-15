@@ -230,10 +230,10 @@ func TestCardsMarkAnyFamilysReleaseTicket(t *testing.T) {
 	}
 	url := func(k string) string { return jira.URL + "/browse/" + k }
 	want := []rt.IssueFact{
-		{Key: "DEMO-1", Summary: "Release notes for Wallet top up", Status: "In Progress", StatusCategory: "indeterminate", FixVersions: []string{"5001"}, Assignee: &rt.Person{AccountID: "acc-ann", Name: "Ann Example"}, URL: url("DEMO-1")},
-		{Key: "DEMO-2", Summary: "Release Demo 3.5.0", Status: "Done", StatusCategory: "done", ReleaseTicket: true, FixVersions: []string{"5001"}, URL: url("DEMO-2")},
-		{Key: "DEMO-3", Summary: "Release Pilot 1.3.0", Status: "Done", StatusCategory: "done", ReleaseTicket: true, FixVersions: []string{"5001"}, URL: url("DEMO-3")},
-		{Key: "DEMO-4", Summary: "iOS task", Status: "Done", StatusCategory: "done", Subtask: true, FixVersions: []string{"5001"}, URL: url("DEMO-4")},
+		{Key: "DEMO-1", Summary: "Release notes for Wallet top up", Status: "In Progress", StatusCategory: "indeterminate", FixVersions: []string{"5001"}, Assignee: &rt.Person{AccountID: "acc-ann", Name: "Ann Example"}, IssueType: "Task", URL: url("DEMO-1")},
+		{Key: "DEMO-2", Summary: "Release Demo 3.5.0", Status: "Done", StatusCategory: "done", ReleaseTicket: true, FixVersions: []string{"5001"}, IssueType: "Task", URL: url("DEMO-2")},
+		{Key: "DEMO-3", Summary: "Release Pilot 1.3.0", Status: "Done", StatusCategory: "done", ReleaseTicket: true, FixVersions: []string{"5001"}, IssueType: "Task", URL: url("DEMO-3")},
+		{Key: "DEMO-4", Summary: "iOS task", Status: "Done", StatusCategory: "done", Subtask: true, FixVersions: []string{"5001"}, IssueType: "Task", URL: url("DEMO-4")},
 	}
 	if got := decode(t, rt.KindCards, b); !reflect.DeepEqual(got, want) {
 		t.Fatalf("cards =\n%+v\nwant\n%+v", got, want)
@@ -303,5 +303,35 @@ func TestCredentialsFollowTheConfigChainSilently(t *testing.T) {
 	}
 	if ok, err := newSource(rttest.NewJira(t)).Credentials(context.Background(), testView()); !ok || err != nil {
 		t.Fatalf("configured: %v, %v", ok, err)
+	}
+}
+
+func TestLLBCardsCarryTheirParentAndItsTypeAndPageCardsTheirOwnType(t *testing.T) {
+	jira := rttest.NewJira(t)
+	jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-30, DEMO-31) ORDER BY key`, `{"issues":[`+
+		issue("DEMO-30", "Wallet limits", "In Progress", "indeterminate", false, nil, `,"parent":{"key":"DEMO-5","fields":{"issuetype":{"name":"Epic"}}}`)+","+
+		issue("DEMO-31", "iOS wallet limits", "To Do", "new", true, nil, `,"parent":{"key":"DEMO-30","fields":{"issuetype":{"name":"Story"}}}`)+`]}`)
+	jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-5) ORDER BY key`, `{"issues":[{"key":"DEMO-5","fields":{"summary":"Wallet","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"name":"Epic"}}}]}`)
+	src := newSource(jira)
+	b, err := fetch(t, src, rt.SpecFor(rt.KindLLBCards, rt.LLBCardsScope, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type parent struct{ Type, Parent, ParentType string }
+	var got []parent
+	for _, is := range decode(t, rt.KindLLBCards, b) {
+		got = append(got, parent{is.IssueType, is.Parent, is.ParentType})
+	}
+	if want := []parent{{"Task", "DEMO-5", "Epic"}, {"Task", "DEMO-30", "Story"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("llb cards (type, parent, parent type) = %+v, want %+v", got, want)
+	}
+	v := testView()
+	v.Pages = []rt.PlannedPage{{ID: "901", Keys: []string{"DEMO-5"}, Live: true}}
+	pb, err := src.Fetch(t.Context(), rt.SpecFor(rt.KindPageCards, rt.PageScope("901"), ""), v, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decode(t, rt.KindPageCards, pb); len(got) != 1 || got[0].IssueType != "Epic" {
+		t.Fatalf("page cards = %+v, want DEMO-5 typed Epic", got)
 	}
 }

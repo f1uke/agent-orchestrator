@@ -139,6 +139,7 @@ type IssueRow struct {
 	Assignee       *Assignee
 	FixVersionIDs  []string
 	ParentKey      string
+	ParentType     string
 	SubtaskKeys    []string
 	Labels         []string
 	DueDate        string
@@ -211,7 +212,12 @@ func issueRow(cfg atlassian.Config, it rawSearchIssue) (IssueRow, error) {
 			ID string `json:"id"`
 		} `json:"fixVersions"`
 		Parent *struct {
-			Key string `json:"key"`
+			Key    string `json:"key"`
+			Fields struct {
+				IssueType struct {
+					Name string `json:"name"`
+				} `json:"issuetype"`
+			} `json:"fields"`
 		} `json:"parent"`
 		Subtasks []struct {
 			Key string `json:"key"`
@@ -239,7 +245,7 @@ func issueRow(cfg atlassian.Config, it rawSearchIssue) (IssueRow, error) {
 		row.SubtaskKeys = append(row.SubtaskKeys, s.Key)
 	}
 	if f.Parent != nil {
-		row.ParentKey = f.Parent.Key
+		row.ParentKey, row.ParentType = f.Parent.Key, f.Parent.Fields.IssueType.Name
 	}
 	if f.Created != "" {
 		created, err := time.Parse(jiraTimeLayout, f.Created)

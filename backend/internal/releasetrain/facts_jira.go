@@ -52,9 +52,14 @@ type IssueFact struct {
 	ReleaseTicket  bool     `json:"releaseTicket"`
 	FixVersions    []string `json:"fixVersions"`
 	Assignee       *Person  `json:"assignee,omitempty"`
+	IssueType      string   `json:"issueType,omitempty"`
 	Parent         string   `json:"parent,omitempty"`
+	ParentType     string   `json:"parentType,omitempty"`
 	URL            string   `json:"url"`
 }
+
+// IssueTypeEpic is the Jira issue type that groups a feature's cards.
+const IssueTypeEpic = "Epic"
 
 // Person is a Jira user.
 type Person struct {

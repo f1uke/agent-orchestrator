@@ -373,7 +373,7 @@ func TestSearchAllFieldsMapsRowsFromTheRequestedFields(t *testing.T) {
 			"issuetype":{"name":"Sub-task","subtask":true},
 			"assignee":{"accountId":"acc-1","displayName":"Alex Rivera"},
 			"fixVersions":[{"id":"10001","name":"App iOS 6.7.0"},{"id":"10002","name":"App Android 6.7.0"}],
-			"parent":{"key":"DEMO-1","fields":{"summary":"Epic"}},
+			"parent":{"key":"DEMO-1","fields":{"summary":"Payments","issuetype":{"name":"Epic"}}},
 			"subtasks":[{"key":"DEMO-8"},{"key":"DEMO-9"}],
 			"labels":["mobile"],"duedate":"2026-10-20","created":"2026-10-01T10:00:00.000+0700"}},
 			{"key":"DEMO-10","fields":{"summary":"Bare","assignee":null,"duedate":null}}],"isLast":true}`)
@@ -387,7 +387,7 @@ func TestSearchAllFieldsMapsRowsFromTheRequestedFields(t *testing.T) {
 	}
 	r := rows[0]
 	if r.Key != "DEMO-7" || r.Summary != "Pay with card" || r.Status != "Ready to Release" || r.StatusCategory != "done" ||
-		r.IssueType != "Sub-task" || !r.Subtask || r.ParentKey != "DEMO-1" || r.DueDate != "2026-10-20" || r.URL != base+"/browse/DEMO-7" {
+		r.IssueType != "Sub-task" || !r.Subtask || r.ParentKey != "DEMO-1" || r.ParentType != "Epic" || r.DueDate != "2026-10-20" || r.URL != base+"/browse/DEMO-7" {
 		t.Errorf("row = %+v", r)
 	}
 	if r.Assignee == nil || *r.Assignee != (Assignee{AccountID: "acc-1", DisplayName: "Alex Rivera"}) {
