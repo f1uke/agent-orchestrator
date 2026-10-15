@@ -226,6 +226,15 @@ func TestL9CatchesAStackedMRIntoACardBranchThatMergesOut(t *testing.T) {
 	if got, want := firedIDs(b, "L9"), []string{"L9~mr/di/" + strconv.Itoa(stacked.IID)}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("L9 hits = %v, want the stacked MR %v", got, want)
 	}
+	f.human.Plans = []LlbPlan{{ID: "demo-1-base", Name: "base", TargetKind: TargetDropped, Version: 1,
+		Branches: []PlanBranch{{App: "di", Branch: "feature/DEMO-1-base"}}}}
+	planned := f.reconcile()
+	if got, want := firedIDs(planned, "L9"), []string{"L9~mr/di/" + strconv.Itoa(stacked.IID)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("L9 hits with a plan naming the branch = %v, want %v: a plan must not make a stacked branch long-lived", got, want)
+	}
+	if got := llbBranches(planned); len(got) != 0 {
+		t.Fatalf("long-lived branches with a plan naming the branch = %v, want none", got)
+	}
 	card := rowOf(t, b, "DEMO").Cards[0]
 	if len(card.Routes) != 1 || card.Routes[0].Kind != DestOther {
 		t.Fatalf("DEMO-2 routes = %+v, want one off-flow route like any sprint card with an MR into an odd branch", card.Routes)
