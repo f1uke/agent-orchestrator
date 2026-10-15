@@ -5,6 +5,12 @@ import type {
 	Badge,
 	Board,
 	BoardApp,
+	CardUnit,
+	Hotfix,
+	LLBGroup,
+	MineReason,
+	SprintCard,
+	SprintRow,
 	ResourceStatus,
 	SourceFreshness,
 	Stage,
@@ -62,11 +68,16 @@ function bySeverity(a: AlertHit, b: AlertHit): number {
 	return SEVERITY_META[a.severity].rank - SEVERITY_META[b.severity].rank;
 }
 
-export function lensBadge(b: Board, apps: ReadonlySet<AppId> | null): Badge {
-	if (!apps) return b.alerts.badge;
+function isMine(x: { mine?: readonly MineReason[] }): boolean {
+	return (x.mine?.length ?? 0) > 0;
+}
+
+/** Only me counts no Unknown cell: a rule that could not read cannot say whose its hits would be. */
+export function lensBadge(b: Board, apps: ReadonlySet<AppId> | null, me = false): Badge {
+	if (!apps && !me) return b.alerts.badge;
 	const on = shown(apps);
-	const hits = b.alerts.hits.filter((h) => h.bucket === "badge" && on(h.app)).sort(bySeverity);
-	const unknown = b.alerts.rules.filter((r) => r.on && r.outcome.kind === "unknown" && on(r.app)).length;
+	const hits = b.alerts.hits.filter((h) => h.bucket === "badge" && on(h.app) && (!me || isMine(h))).sort(bySeverity);
+	const unknown = me ? 0 : b.alerts.rules.filter((r) => r.on && r.outcome.kind === "unknown" && on(r.app)).length;
 	return { count: hits.length, unknown, worst: hits[0]?.severity };
 }
 
@@ -78,21 +89,37 @@ export type Lens = {
 	history: AlertHit[];
 	hidden: AlertHit[];
 	appHits: (app: AppId) => AlertHit[];
+	/** Only me is on and the identity is known; with an unknown identity ?me=1 filters nothing. */
+	me: boolean;
+	keepVersion: (v: AppVersion) => boolean;
+	keepCard: (u: CardUnit) => boolean;
+	keepHotfix: (h: Hotfix) => boolean;
+	sprintCards: (row: SprintRow) => SprintCard[];
+	llbs: LLBGroup[];
 };
 
 export function makeLens(b: Board, url: ReleasesSearch): Lens {
 	const on = shown(url.apps);
+	const me = url.me && b.identity.kind === "known";
+	const keep = <T extends { mine?: readonly MineReason[] }>(x: T) => !me || isMine(x);
 	const focus = focusTrain(b, url.focus);
-	const bucket = (k: AlertHit["bucket"]) => b.alerts.hits.filter((h) => h.bucket === k && on(h.app)).sort(bySeverity);
+	const bucket = (k: AlertHit["bucket"]) =>
+		b.alerts.hits.filter((h) => h.bucket === k && on(h.app) && keep(h)).sort(bySeverity);
 	const attention = bucket("badge");
 	return {
 		focus,
 		apps: visibleApps(b, url.apps),
-		badge: lensBadge(b, url.apps),
+		badge: lensBadge(b, url.apps, me),
 		attention,
 		history: bucket("history"),
 		hidden: bucket("hidden"),
 		appHits: (app) => attention.filter((h) => h.app === app && h.train === focus?.id),
+		me,
+		keepVersion: keep,
+		keepCard: keep,
+		keepHotfix: keep,
+		sprintCards: (row) => row.cards.filter((c) => c.status !== "Abandoned" && keep(c)),
+		llbs: b.llbs.filter(keep),
 	};
 }
 
