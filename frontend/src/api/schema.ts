@@ -5353,6 +5353,7 @@ export interface components {
             mr: number;
             /** @description Train key, "21-2026" or "20-1-2026". */
             plan?: string;
+            planFrom?: components["schemas"]["ReleaseTrainCardWhy"][];
             to: components["schemas"]["ReleaseTrainDest"];
             viaLlb?: string;
         };

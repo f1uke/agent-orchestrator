@@ -219,6 +219,39 @@ func TestEveryCardUnitHasEvidenceForExactlyItsReasons(t *testing.T) {
 	}
 }
 
+func TestRoutePlanNamesTheSourcesThatPutTheCardOnThePlanTrain(t *testing.T) {
+	f := newFixture(t, today)
+	v := f.version("di", "21", "3.5.0", liveFreeze, liveDue)
+	v.releaseMR("2026-10-09", MROpened)
+	p := f.page("demo", "21", "2026-09-20", liveFreeze, liveDue)
+	sp := f.sprint(42, 21, "2026-10-06", "2026-10-20")
+	for _, key := range []string{"DEMO-1", "DEMO-2", "DEMO-3", "DEMO-4"} {
+		f.sprintCard(sp, key, "In Progress", true)
+		f.mr("di", key+" work", "feat/"+key, "feature/sprint-21-2026", MROpened, "2026-10-07", "")
+	}
+	v.issue("DEMO-1", "In Progress", "indeterminate")
+	f.card(p, "DEMO-2")
+	f.mr("di", "DEMO-3 earlier", "feat/DEMO-3-a", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-02")
+	f.branchIss = append(f.branchIss, &IssueFact{Key: "DEMO-3", Status: "In Progress", StatusCategory: "indeterminate"})
+	b := f.reconcile()
+
+	for key, want := range map[string][]CardWhy{
+		"DEMO-1": {WhyFixVersion},
+		"DEMO-2": {WhyPage},
+		"DEMO-3": {WhySprintBranch},
+		"DEMO-4": nil,
+	} {
+		routes := b.sprintCard(key).Routes
+		if len(routes) != 1 {
+			t.Fatalf("%s routes = %+v, want one for di", key, routes)
+		}
+		r := routes[0]
+		if !reflect.DeepEqual(r.PlanFrom, want) || (want == nil) != (r.Plan == nil) {
+			t.Errorf("%s plan %v from %v, want from %v", key, r.Plan, r.PlanFrom, want)
+		}
+	}
+}
+
 func kindEntry(t *testing.T, b Board, kind KindName) KindFreshness {
 	t.Helper()
 	for _, k := range b.Kinds {

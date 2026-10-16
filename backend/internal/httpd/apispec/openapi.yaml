@@ -15044,6 +15044,10 @@ components:
         plan:
           description: Train key, "21-2026" or "20-1-2026".
           type: string
+        planFrom:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainCardWhy'
+          type: array
         to:
           $ref: '#/components/schemas/ReleaseTrainDest'
         viaLlb:
