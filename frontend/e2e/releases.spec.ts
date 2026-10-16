@@ -817,6 +817,30 @@ test.describe("releases page", () => {
 		await expect(group.locator(".crow.mine")).toHaveCount(0);
 	});
 
+	test("every alert names what it is about on a line of its own, and no two alerts read the same", async ({ page }) => {
+		await open(page, "?sheet=attention");
+		const rows = page.locator(".rel-sheet .al[data-hit]");
+		await expect(rows.first()).toBeVisible();
+		const lines = await rows.evaluateAll((els) =>
+			els.map((el) => {
+				const subj = el.querySelector<HTMLElement>("[data-testid=hit-subject]");
+				const mark = subj?.querySelector("[role=img]")?.getAttribute("aria-label") ?? "";
+				return {
+					subject: subj?.innerText.trim() ?? "",
+					line: `${mark} ${subj?.innerText} ${el.querySelector(".tx")?.textContent}`,
+				};
+			}),
+		);
+		expect(lines.filter((l) => !l.subject)).toEqual([]);
+		expect(new Set(lines.map((l) => l.line)).size).toBe(lines.length);
+		await expect(
+			page.locator('.al[data-hit="L9~mr/da/415"] [data-testid=hit-subject] > span:not(.appmark)'),
+		).toHaveText("!415 feat/DEMO-203 → feat/DEMO-201-base");
+		await expect(
+			page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"] [data-testid=hit-subject] > span:not(.appmark)'),
+		).toHaveText("2.4.0 · #21 · freeze date");
+	});
+
 	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="L9~mr/da/415"]');

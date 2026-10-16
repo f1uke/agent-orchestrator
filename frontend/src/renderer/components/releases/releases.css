@@ -1094,8 +1094,32 @@
 		font: 10.5px var(--font-mono);
 		color: var(--fg-passive);
 	}
+	.rel-sheet .al .subj {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 3px;
+		max-width: 100%;
+		font-size: 12.5px;
+		font-weight: 500;
+		color: var(--fg);
+		text-align: left;
+		overflow-wrap: anywhere;
+	}
+	.rel-sheet .al .subj > span:not(.appmark) {
+		min-width: 0;
+	}
+	.rel-sheet .al button.subj:hover > span:not(.appmark) {
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+	.rel-sheet .al .subj > svg {
+		flex: none;
+		color: var(--fg-passive);
+	}
 	.rel-sheet .al .tx {
 		font-size: 12.5px;
+		color: var(--fg-muted);
 		margin-top: 2px;
 		overflow-wrap: anywhere;
 	}
