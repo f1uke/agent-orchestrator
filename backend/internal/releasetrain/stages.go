@@ -48,15 +48,17 @@ type stageRow struct {
 	key   StageKey
 	reads []KindName
 	eval  func(t *Train, v *AppVersion, today Day) Stage
+	// byConvention: the row's date is always an AO convention (freeze + n), never a recorded one.
+	byConvention bool
 }
 
 var stageTable = []stageRow{
-	{StageFreeze, []KindName{KindMilestones.Name, KindMRs.Name}, freezeStage},
-	{StageScan, []KindName{KindMilestones.Name, KindMRs.Name, KindMRDetail.Name, KindJobs.Name}, scanStage},
-	{StageApprove, []KindName{KindMilestones.Name, KindJiraVersions.Name}, approveStage},
-	{StageTag, []KindName{KindMilestones.Name, KindMRs.Name, KindTags.Name}, tagStage},
-	{StagePublish, []KindName{KindMilestones.Name, KindJiraVersions.Name, KindTags.Name}, publishStage},
-	{StageForce, []KindName{KindMilestones.Name, KindTechReq.Name}, forceStage},
+	{StageFreeze, []KindName{KindMilestones.Name, KindMRs.Name}, freezeStage, false},
+	{StageScan, []KindName{KindMilestones.Name, KindMRs.Name, KindMRDetail.Name, KindJobs.Name}, scanStage, true},
+	{StageApprove, []KindName{KindMilestones.Name, KindJiraVersions.Name}, approveStage, true},
+	{StageTag, []KindName{KindMilestones.Name, KindMRs.Name, KindTags.Name}, tagStage, false},
+	{StagePublish, []KindName{KindMilestones.Name, KindJiraVersions.Name, KindTags.Name}, publishStage, false},
+	{StageForce, []KindName{KindMilestones.Name, KindTechReq.Name}, forceStage, false},
 }
 
 func stages(t *Train, v *AppVersion, today Day, rs *readSet) []Stage {
@@ -65,6 +67,9 @@ func stages(t *Train, v *AppVersion, today Day, rs *readSet) []Stage {
 		s := row.eval(t, v, today)
 		s.Key = row.key
 		s.Reads = row.reads
+		if row.byConvention && s.Date != nil {
+			s.Conventional = true
+		}
 		if cov := rs.coverageFor(row.reads, v.App, []*AppVersion{v}); !cov.fresh() {
 			s.Status = StatusUnknown
 			s.Missing = cov.missing()

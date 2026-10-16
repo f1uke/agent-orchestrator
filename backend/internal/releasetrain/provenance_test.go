@@ -138,6 +138,22 @@ func TestSourcesAreTheRollupOfTheirKinds(t *testing.T) {
 	}
 }
 
+func TestScanAndApproveDatesAreAOConventions(t *testing.T) {
+	f := newFixture(t, today)
+	healthy(f)
+	f.version("da", "21", "3.5.1", liveFreeze, liveDue)
+	b := f.reconcile()
+
+	want := map[StageKey]bool{StageScan: true, StageApprove: true, StageTag: true}
+	for _, v := range b.Trains[0].Versions {
+		for _, s := range v.Stages {
+			if s.Conventional != want[s.Key] {
+				t.Errorf("%s %s conventional = %v, want %v: only freeze + 1, freeze + 2 and publish - 1 are AO's own dates", v.App, s.Key, s.Conventional, want[s.Key])
+			}
+		}
+	}
+}
+
 func kindEntry(t *testing.T, b Board, kind KindName) KindFreshness {
 	t.Helper()
 	for _, k := range b.Kinds {
