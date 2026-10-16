@@ -578,20 +578,18 @@ let shellEnvPromise: Promise<void> | null = null;
 
 // Telemetry defaults stamped on the daemon env on every platform; explicit env
 // always wins.
-function telemetryOverrides(): Record<string, string> {
-	return {
-		AO_TELEMETRY_EVENTS: process.env.AO_TELEMETRY_EVENTS ?? "on",
-		AO_TELEMETRY_REMOTE: process.env.AO_TELEMETRY_REMOTE ?? "posthog",
-		AO_TELEMETRY_POSTHOG_KEY: process.env.AO_TELEMETRY_POSTHOG_KEY ?? DEFAULT_POSTHOG_PROJECT_KEY,
-		AO_TELEMETRY_POSTHOG_HOST: process.env.AO_TELEMETRY_POSTHOG_HOST ?? DEFAULT_POSTHOG_HOST,
-	};
-}
+const TELEMETRY_DEFAULTS: Record<string, string> = {
+	AO_TELEMETRY_EVENTS: "on",
+	AO_TELEMETRY_REMOTE: "posthog",
+	AO_TELEMETRY_POSTHOG_KEY: DEFAULT_POSTHOG_PROJECT_KEY,
+	AO_TELEMETRY_POSTHOG_HOST: DEFAULT_POSTHOG_HOST,
+};
 
 // Run the user's login shell to dump its env. stdin is ignored so an rc that
 // reads input hits EOF instead of hanging; stderr is ignored to drop banner
 // noise. Never rejects: resolves null on spawn error, non-zero exit, or timeout
 // (SIGKILLed), so the caller degrades to the static PATH floor.
-const runLoginShell: ShellRunner = (shellPath, args) =>
+const runLoginShell: ShellRunner = (shellPath, args, env) =>
 	new Promise((resolve) => {
 		let settled = false;
 		const finish = (value: string | null) => {
@@ -601,7 +599,7 @@ const runLoginShell: ShellRunner = (shellPath, args) =>
 		};
 		let child: ReturnType<typeof spawn>;
 		try {
-			child = spawn(shellPath, args, { stdio: ["ignore", "pipe", "ignore"] });
+			child = spawn(shellPath, args, { env, stdio: ["ignore", "pipe", "ignore"] });
 		} catch {
 			finish(null);
 			return;
@@ -656,9 +654,9 @@ function daemonEnv(): NodeJS.ProcessEnv {
 	}
 	// Windows keeps the old behavior exactly: no shell probe, no unix PATH floor.
 	if (process.platform === "win32") {
-		return { ...process.env, ...devExtras, ...telemetryOverrides(), ...ownerTag };
+		return { ...TELEMETRY_DEFAULTS, ...process.env, ...devExtras, ...ownerTag };
 	}
-	return buildDaemonEnv(process.env, cachedShellEnv, { ...devExtras, ...telemetryOverrides(), ...ownerTag });
+	return buildDaemonEnv(process.env, cachedShellEnv, { ...devExtras, ...ownerTag }, TELEMETRY_DEFAULTS);
 }
 
 function pathKey(value: string): string {

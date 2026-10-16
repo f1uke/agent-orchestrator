@@ -87,7 +87,7 @@ Forwarding the environment is not the bug. The daemon and agents genuinely need:
 - shell-exported credentials (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GH_TOKEN`,
   ...);
 - locale/proxy (`LANG`, `LC_*`, `HTTPS_PROXY`);
-- AO's own vars (telemetry, `AO_DATA_DIR`, `AO_RUN_FILE`, session ids).
+- AO's own vars (telemetry, `AO_DATA_DIR`, `AO_RUN_FILE`, `AO_PORT`).
 
 The bug is the _source_ of what we forward: under a GUI launch, `process.env` is
 launchd's minimal env, not the shell's. The fix is to forward a _good_ base env,
@@ -117,8 +117,42 @@ into key/value pairs and merge it under the existing forwarded env so explicit
 overrides still win:
 
 ```
-finalEnv = { ...shellEnv, ...process.env, AO_*: defaults }
+finalEnv = { ...defaults, ...shellEnv, ...withoutCallerSessionEnv(process.env), ...overrides }
 ```
+
+### Launch from inside an agent session
+
+The app can also start from inside an agent session: `open` run by the
+session's Bash tool, an install script, or `npm run dev` in its pane. On macOS,
+`open` passes the caller's whole environment to the app. That environment
+describes the caller, not the user:
+
+- its Claude Code identity: `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`,
+  `CLAUDE_CODE_MESSAGING_SOCKET`, and the rest of `CLAUDE_CODE_*`;
+- its provider: `ANTHROPIC_BASE_URL` from the profile's `--settings` file;
+- its AO session: `AO_SESSION_ID`, `AO_CREW_ID`, `AO_WORKSPACE`, and the rest of
+  `AO_*`;
+- its tmux pane: `TMUX`, `TMUX_PANE`.
+
+If these reach the daemon, every session it launches inherits them. A
+Subscription session then sends its requests to the caller's provider.
+
+`withoutCallerSessionEnv` (`frontend/src/shared/shell-env.ts`) removes these
+families from `process.env`. It keeps `AO_DATA_DIR`, `AO_RUN_FILE` and
+`AO_PORT`, which tell the app which daemon to run. The shell probe runs with the
+same filtered environment, because a shell prints back the environment that it
+inherits. The user's own exports of these families (`ANTHROPIC_API_KEY`,
+`AO_JIRA_*`, `AO_GITLAB_HOST`, `CLAUDE_CODE_USE_BEDROCK`) still come from the
+login shell. A value set only on the command line, such as
+`AO_TELEMETRY_EVENTS=off npm run dev`, no longer reaches the daemon. Export it
+in the shell profile instead.
+
+The tmux launcher (`backend/internal/adapters/runtime/tmux/tmux.go`) also
+removes the Claude Code identity keys and the per-session `AO_*` keys from the
+environment that a session's tmux server inherits. This covers a headless
+`ao daemon` started from inside a session. The daemon cannot tell a caller's
+`ANTHROPIC_*` value from one that the user exported, so only the app removes
+those.
 
 ### Worked example
 

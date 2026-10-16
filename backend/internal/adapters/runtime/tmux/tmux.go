@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -139,15 +140,22 @@ var daemonOnlyEnvKeys = []string{"AO_SESSION_IDLE_CLOSE", "AO_OWNER"}
 // server's identity, and so `attach-session` does not refuse as "nested".
 var tmuxClientEnvKeys = []string{"TMUX", "TMUX_PANE"}
 
-// sessionOnlyEnvKeys are per-session vars that are exported only when AO decides
-// a session gets them, so an inherited value is always somebody else's. A daemon
-// started from inside an AO session (a sandbox daemon) carries that session's
-// simulator, and without this an orchestrator it spawned would be told the
-// device was its own.
-var sessionOnlyEnvKeys = []string{"AO_SIM_UDID", "AO_SIM_DESTINATION"}
+var sessionOnlyEnvKeys = []string{
+	"AO_SIM_UDID", "AO_SIM_DESTINATION", "AO_SESSION_ID", "AO_SESSION_KIND", "AO_PROJECT_ID", "AO_ISSUE_ID",
+	"AO_WORKSPACE", "AO_CREW_ID", "AO_CREW_DEV_ID", "AO_CREW_QA_ID", "AO_CHILD_WORKTREES", "AO_SCRIPTS_STORE",
+	ports.EnvAgentParentPID,
+}
+
+// claudeSessionEnvKeys are what a running Claude Code hands its children about
+// itself, so a daemon started from one would make every pane's claude its child.
+var claudeSessionEnvKeys = []string{
+	"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET",
+	"CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED",
+	"CLAUDE_CODE_SESSION_KIND", "CLAUDE_CODE_SSE_PORT",
+}
 
 // execEnvDropKeys is everything the tmux client's environment drops.
-var execEnvDropKeys = append(append(append([]string(nil), daemonOnlyEnvKeys...), tmuxClientEnvKeys...), sessionOnlyEnvKeys...)
+var execEnvDropKeys = slices.Concat(daemonOnlyEnvKeys, tmuxClientEnvKeys, sessionOnlyEnvKeys, claudeSessionEnvKeys)
 
 // stripEnvKeys returns env (a KEY=VALUE slice) without any entry whose key is in
 // keys. The input slice is not mutated.
