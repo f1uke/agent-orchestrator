@@ -32,6 +32,7 @@ const (
 
 type kindMeta struct {
 	Name    KindName
+	Label   string
 	Version int
 	Mode    SyncMode
 	Budget  time.Duration
@@ -117,8 +118,8 @@ func (k Kind[T]) Encode(v T) ([]byte, error) {
 	return b, nil
 }
 
-func newKind[T any](name KindName, mode SyncMode, budget time.Duration, cover coverMode) Kind[T] {
-	k := Kind[T]{kindMeta{Name: name, Version: 1, Mode: mode, Budget: budget, cover: cover}}
+func newKind[T any](name KindName, label string, mode SyncMode, budget time.Duration, cover coverMode) Kind[T] {
+	k := Kind[T]{kindMeta{Name: name, Label: label, Version: 1, Mode: mode, Budget: budget, cover: cover}}
 	k.decode = func(b []byte) (any, error) { return k.Decode(b) }
 	kinds[name] = k.kindMeta
 	return k

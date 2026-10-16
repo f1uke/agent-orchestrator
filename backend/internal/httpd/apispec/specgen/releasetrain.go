@@ -182,6 +182,7 @@ func init() {
 		"ReleasetrainStageStatus":                    "ReleaseTrainStageStatus",
 		"ReleasetrainTrainPhase":                     "ReleaseTrainTrainPhase",
 		"ReleasetrainSourceFreshness":                "ReleaseTrainSourceFreshness",
+		"ReleasetrainKindFreshness":                  "ReleaseTrainKindFreshness",
 		"ReleasetrainStage":                          "ReleaseTrainStage",
 		"ReleasetrainTag":                            "ReleaseTrainTag",
 		"ReleasetrainTrain":                          "ReleaseTrainTrain",

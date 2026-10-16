@@ -422,6 +422,7 @@ function baseBoard(today: string): Board {
 			{ system: "jira", resources: 30, asOf: `${today}T02:57:00Z`, issues: [] },
 			{ system: "confluence", resources: 2, asOf: `${today}T02:50:00Z`, issues: [] },
 		],
+		kinds: [],
 		cutover: null,
 		identity: { kind: "known", jiraAccountId: "acc-ada", gitlabUsername: "ada", displayName: "Ada Example" },
 		alerts: {

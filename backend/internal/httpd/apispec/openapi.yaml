@@ -13344,6 +13344,10 @@ components:
           type: array
         identity:
           $ref: '#/components/schemas/ReleaseTrainIdentity'
+        kinds:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainKindFreshness'
+          type: array
         llbs:
           items:
             $ref: '#/components/schemas/ReleaseTrainLLBGroup'
@@ -13370,6 +13374,7 @@ components:
       - today
       - apps
       - sources
+      - kinds
       - trains
       - hotfixes
       - mismatches
@@ -14322,6 +14327,22 @@ components:
       - project
       - pipeline
       - jobs
+      type: object
+    ReleaseTrainKindFreshness:
+      properties:
+        budgetSeconds:
+          type: integer
+        kind:
+          type: string
+        label:
+          type: string
+        system:
+          type: string
+      required:
+      - kind
+      - system
+      - label
+      - budgetSeconds
       type: object
     ReleaseTrainLLBCard:
       properties:

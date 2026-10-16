@@ -68,6 +68,7 @@ export function board(over: Partial<Board> = {}): Board {
 		llbs: [],
 		mismatches: [],
 		sources: [],
+		kinds: [],
 		cutover: null,
 		identity: { kind: "unknown", reason: "not read" },
 		alerts: { badge: { count: 0, unknown: 0 }, hits: [], rules: [], staleHides: [] },

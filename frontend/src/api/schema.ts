@@ -4696,6 +4696,7 @@ export interface components {
             } | null;
             hotfixes: components["schemas"]["ReleaseTrainHotfix"][];
             identity: components["schemas"]["ReleaseTrainIdentity"];
+            kinds: components["schemas"]["ReleaseTrainKindFreshness"][];
             llbs: components["schemas"]["ReleaseTrainLLBGroup"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
@@ -5064,6 +5065,12 @@ export interface components {
             jobs: components["schemas"]["ReleaseTrainJobFact"][];
             pipeline: number;
             project: number;
+        };
+        ReleaseTrainKindFreshness: {
+            budgetSeconds: number;
+            kind: string;
+            label: string;
+            system: string;
         };
         ReleaseTrainLLBCard: {
             assignee?: components["schemas"]["ReleaseTrainPerson"];

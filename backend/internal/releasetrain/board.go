@@ -39,13 +39,15 @@ type Hide struct {
 
 // Board is the read model every surface renders.
 type Board struct {
-	Today      Day               `json:"today"`
-	Apps       []BoardApp        `json:"apps"`
-	Sources    []SourceFreshness `json:"sources"`
-	Trains     []Train           `json:"trains"`
-	Hotfixes   []Hotfix          `json:"hotfixes"`
-	Mismatches []Mismatch        `json:"mismatches"`
-	LLBs       []LLBGroup        `json:"llbs"`
+	Today   Day               `json:"today"`
+	Apps    []BoardApp        `json:"apps"`
+	Sources []SourceFreshness `json:"sources"`
+	// Kinds is every fact kind with its system, label and budget, sorted by kind.
+	Kinds      []KindFreshness `json:"kinds"`
+	Trains     []Train         `json:"trains"`
+	Hotfixes   []Hotfix        `json:"hotfixes"`
+	Mismatches []Mismatch      `json:"mismatches"`
+	LLBs       []LLBGroup      `json:"llbs"`
 	// Sprints is one row per configured board with an active sprint.
 	Sprints []SprintRow `json:"sprints"`
 	// Cutover is each app's first merge into a sprint branch; apps with none are absent.
@@ -98,6 +100,14 @@ type SourceFreshness struct {
 	Resources int              `json:"resources"`
 	AsOf      *time.Time       `json:"asOf,omitempty"`
 	Issues    []ResourceStatus `json:"issues"`
+}
+
+// KindFreshness is one fact kind as a source tag names it.
+type KindFreshness struct {
+	Kind          KindName `json:"kind"`
+	System        string   `json:"system"`
+	Label         string   `json:"label"`
+	BudgetSeconds int      `json:"budgetSeconds"`
 }
 
 // AppVersion is one app's version on one train.
@@ -209,7 +219,7 @@ func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
 	}
 	bySystem := map[string]*SourceFreshness{}
 	system := func(k KindName) *SourceFreshness {
-		name, _, _ := strings.Cut(string(k), ".")
+		name := systemOf(k)
 		s := bySystem[name]
 		if s == nil {
 			s = &SourceFreshness{System: name, Issues: []ResourceStatus{}}
@@ -244,6 +254,20 @@ func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].System < out[j].System })
 	return out
+}
+
+func kindList() []KindFreshness {
+	out := make([]KindFreshness, 0, len(kinds))
+	for name, meta := range kinds {
+		out = append(out, KindFreshness{Kind: name, System: systemOf(name), Label: meta.Label, BudgetSeconds: int(meta.Budget.Seconds())})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Kind < out[j].Kind })
+	return out
+}
+
+func systemOf(k KindName) string {
+	name, _, _ := strings.Cut(string(k), ".")
+	return name
 }
 
 func goneCompares(llbs []LLBGroup, cfg Config) map[resKey]bool {
