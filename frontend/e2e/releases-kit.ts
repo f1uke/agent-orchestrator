@@ -76,7 +76,7 @@ export function labelOverlaps(page: Page): Promise<{ n: number; overlaps: string
 		};
 		const els = [
 			...document.querySelectorAll(
-				".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr, .dsum, .rel-sprow .crow, .rel-lab.top .spn, .rel-lab.top .sps, .rel-lab.top .spt, .rel-lab.top > .hide",
+				".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr, .dsum, .rel-sprow .crow, .rel-lab.top .spn, .rel-lab.top .sps, .rel-lab.top .spt, .rel-lab.top > .hide, .rel-app > .rel-lab > *, .rel-lab .stag",
 			),
 		].filter((e) => {
 			const r = e.getBoundingClientRect();

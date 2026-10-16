@@ -39,6 +39,13 @@ function OnlyMe({ board, on, onToggle }: { board: Board; on: boolean; onToggle: 
 	);
 }
 
+const MARK_ORDER = ["jira", "gitlab", "confluence"];
+
+function markOrder(system: string): number {
+	const i = MARK_ORDER.indexOf(system);
+	return i < 0 ? MARK_ORDER.length : i;
+}
+
 function SourceMark({ age: s, idx }: { age: SourceAge; idx: SourceIndex }) {
 	const name = systemMeta(s.system).name;
 	const state = s.unknown ? "unknown" : s.age === "now" ? "read just now" : `read ${s.age} ago`;
@@ -150,9 +157,11 @@ export function TopBar({
 			</div>
 			<div className="flex-1" />
 			<div className="rel-src" data-testid="release-sources" role="group" aria-label="Sources">
-				{idx.systems.map((s) => (
-					<SourceMark key={s.system} age={s} idx={idx} />
-				))}
+				{[...idx.systems]
+					.sort((a, b) => markOrder(a.system) - markOrder(b.system))
+					.map((s) => (
+						<SourceMark key={s.system} age={s} idx={idx} />
+					))}
 			</div>
 			<OnlyMe board={board} on={lens.me} onToggle={() => actions.setSearch({ me: !url.me })} />
 			<SimpleTooltip label="Read every source again now">

@@ -2283,7 +2283,17 @@
 	}
 	.rel[data-src] .rel-lab .meta {
 		flex-wrap: wrap;
-		row-gap: 3px;
+		row-gap: 1px;
+	}
+	.rel[data-src] .rel-app > .rel-lab {
+		padding-block: 8px;
+		gap: 2px;
+	}
+	.rel[data-src] .rel-lab .ver {
+		gap: 5px;
+	}
+	.rel[data-src] .rel-lab .ver .stag {
+		margin-left: -1px;
 	}
 	.rel[data-src] .rel-lab .meta > span {
 		white-space: nowrap;
