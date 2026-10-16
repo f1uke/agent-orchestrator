@@ -1219,6 +1219,7 @@
 		font-size: 11.5px;
 		color: var(--fg-muted);
 		white-space: nowrap;
+		overflow: clip;
 	}
 	.rel-cg .csum:hover {
 		background: var(--hover);

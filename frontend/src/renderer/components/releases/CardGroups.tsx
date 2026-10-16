@@ -2,7 +2,16 @@ import { ChevronRight, GitFork } from "lucide-react";
 import type { ReactNode } from "react";
 import { branchFoldKey, statusTone, type BranchCard, type CardGroup } from "../../lib/releases/cards";
 import { shortDay } from "../../lib/releases/day";
-import { aimedTrain, branchState, shortBranch, targetChip } from "../../lib/releases/llb";
+import { aimedTrain, branchState, shortBranch, targetChip, trainLabel } from "../../lib/releases/llb";
+import {
+	codeStateOf,
+	derivedOf,
+	llbTargetOf,
+	membershipOf,
+	readOf,
+	statusOf,
+	type Provenance,
+} from "../../lib/releases/sources";
 import { mineText } from "../../lib/releases/sprint";
 import type { Board, CardUnit, IdentityKnown, MineReason, Person } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
@@ -10,6 +19,7 @@ import { useReleasesUi } from "../../stores/releases-ui";
 import { Avatar } from "./Avatar";
 import { Unfold } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
+import { SourceCell, SourceTag, SourceValue } from "./Sources";
 import { TargetTag } from "./TargetTag";
 
 export function Chev({ open }: { open: boolean }) {
@@ -62,9 +72,15 @@ export function CardLine({
 	status,
 	statusCategory,
 	extra,
+	source,
+	glyphSource,
+	statusKind = "jira.cards",
 	onOpen,
 	className = "",
 }: {
+	source?: ReactNode;
+	glyphSource?: Provenance;
+	statusKind?: string;
 	glyph: string;
 	glyphTone: string;
 	glyphTitle: string;
@@ -87,21 +103,38 @@ export function CardLine({
 			onClick={onOpen}
 			onKeyDown={(e) => onOpen && (e.key === "Enter" || e.key === " ") && onOpen()}
 		>
-			<span className="cg c" data-st={glyphTone} title={glyphTitle}>
-				{glyph}
-			</span>
+			<SourceValue p={glyphSource ?? null}>
+				<span className="cg c" data-st={glyphTone} title={glyphTitle}>
+					{glyph}
+				</span>
+			</SourceValue>
 			<Face person={person} />
 			<JiraKey k={k} url={url} />
 			<span className="t">{summary}</span>
 			{extra ?? <span />}
-			<span className="spill" data-st={statusTone(status, statusCategory)}>
-				{status ?? "-"}
-			</span>
+			<SourceValue p={status ? statusOf(status, statusKind) : null}>
+				<span className="spill" data-st={statusTone(status, statusCategory)}>
+					{status ?? "-"}
+				</span>
+			</SourceValue>
+			{source}
 		</div>
 	);
 }
 
-function UnitRow({ u, face, actions }: { u: CardUnit; face: IdentityKnown | null; actions: PageActions }) {
+function UnitRow({
+	u,
+	train,
+	focused,
+	face,
+	actions,
+}: {
+	u: CardUnit;
+	train: string;
+	focused: boolean;
+	face: IdentityKnown | null;
+	actions: PageActions;
+}) {
 	const m = CODE_META[u.code.kind];
 	const into = u.code.kind === "parked" || u.code.kind === "elsewhere" ? ` into ${u.code.branch}` : "";
 	return (
@@ -109,6 +142,7 @@ function UnitRow({ u, face, actions }: { u: CardUnit; face: IdentityKnown | null
 			glyph={m.glyph}
 			glyphTone={m.tone}
 			glyphTitle={`${m.label}${into}`}
+			glyphSource={codeStateOf(u)}
 			person={u.assignee}
 			k={u.key}
 			url={u.url}
@@ -120,6 +154,14 @@ function UnitRow({ u, face, actions }: { u: CardUnit; face: IdentityKnown | null
 			}
 			status={u.status}
 			statusCategory={u.statusCategory}
+			statusKind={u.factsFrom}
+			source={
+				focused && (
+					<SourceCell>
+						<SourceTag p={membershipOf(u, train)} />
+					</SourceCell>
+				)
+			}
 			extra={<MineFace face={face} mine={u.mine} />}
 			className={face && u.mine?.length ? "mine" : ""}
 			onOpen={() => actions.openSheet({ kind: "card", key: u.key }, "push")}
@@ -131,11 +173,13 @@ function BranchCardRow({
 	c,
 	landed,
 	url,
+	focused,
 	face,
 	actions,
 }: {
 	c: BranchCard;
 	landed: boolean;
+	focused: boolean;
 	url?: string;
 	face: IdentityKnown | null;
 	actions: PageActions;
@@ -156,6 +200,14 @@ function BranchCardRow({
 			summary={c.summary}
 			status={c.status}
 			statusCategory={c.statusCategory}
+			statusKind="jira.llb_cards"
+			source={
+				focused && (
+					<SourceCell>
+						<SourceTag p={BRANCH_CARD_P} />
+					</SourceCell>
+				)
+			}
 			extra={<MineFace face={face} mine={c.mine} />}
 			className={face && c.mine?.length ? "mine" : ""}
 			onOpen={() => actions.openSheet({ kind: "card", key: c.key }, "push")}
@@ -163,9 +215,20 @@ function BranchCardRow({
 	);
 }
 
+const BRANCH_CARD_P = derivedOf(
+	"Card in the branch",
+	[
+		{ kind: "gitlab.mrs", text: "an MR into the branch names the card" },
+		{ kind: "jira.llb_cards", text: "status, title, assignee" },
+	],
+	undefined,
+	"LongLivedBranch.cards",
+);
+
 function GroupRows({
 	g,
 	board,
+	focused,
 	face,
 	actions,
 	isOpen,
@@ -173,6 +236,7 @@ function GroupRows({
 }: {
 	g: CardGroup;
 	board: Board;
+	focused: boolean;
 	face: IdentityKnown | null;
 	actions: PageActions;
 	isOpen: (k: string) => boolean;
@@ -182,7 +246,7 @@ function GroupRows({
 	return (
 		<>
 			{g.direct.map((u) => (
-				<UnitRow key={u.key} u={u} face={face} actions={actions} />
+				<UnitRow key={u.key} u={u} train={g.train.label} focused={focused} face={face} actions={actions} />
 			))}
 			{g.llbs.map(({ group, branch, cards }) => {
 				const fk = branchFoldKey(g, branch);
@@ -217,6 +281,7 @@ function GroupRows({
 									{cards.length} card{cards.length === 1 ? "" : "s"}
 								</span>
 								{tgt && <TargetTag chip={tgt} />}
+								{tgt && focused && <SourceTag p={llbTargetOf(group, (t) => trainLabel(board, t))} />}
 							</span>
 							<span className="spill">
 								{landed && st.label !== "accepted" ? `merged ${shortDay(branch.landing?.mergedOn ?? "")}` : st.label}
@@ -224,7 +289,15 @@ function GroupRows({
 						</div>
 						<Unfold open={open} className="nest">
 							{cards.map((c) => (
-								<BranchCardRow key={c.key} c={c} landed={landed} url={jira(c.key)} face={face} actions={actions} />
+								<BranchCardRow
+									key={c.key}
+									c={c}
+									landed={landed}
+									url={jira(c.key)}
+									focused={focused}
+									face={face}
+									actions={actions}
+								/>
 							))}
 						</Unfold>
 					</div>
@@ -233,6 +306,20 @@ function GroupRows({
 		</>
 	);
 }
+
+const CODE_TALLY_P = derivedOf(
+	"Code state",
+	[{ kind: "gitlab.mrs", text: "MRs whose title or source branch names the card" }],
+	"One bucket per card: merged + MR open + parked + elsewhere + no MR = cards.",
+	"CardUnit.code",
+);
+
+const READY_P = readOf(
+	"Ready",
+	"jira.cards",
+	"card status in the ready set or Jira's Done category",
+	"CardUnit.status",
+);
 
 function CodeMix({ g }: { g: CardGroup }) {
 	const n = g.units.length || 1;
@@ -249,6 +336,7 @@ export function CardGroupBox({
 	g,
 	board,
 	left,
+	room,
 	top,
 	focused,
 	face,
@@ -258,6 +346,7 @@ export function CardGroupBox({
 	g: CardGroup;
 	board: Board;
 	left: number;
+	room: number;
 	top: number;
 	focused: boolean;
 	face: IdentityKnown | null;
@@ -276,7 +365,13 @@ export function CardGroupBox({
 			data-testid={`cards-${g.key}`}
 			data-group={g.key}
 		>
-			<button type="button" className="csum" aria-expanded={open.has(g.key)} onClick={() => toggle(g.key)}>
+			<button
+				type="button"
+				className="csum"
+				aria-expanded={open.has(g.key)}
+				onClick={() => toggle(g.key)}
+				style={Number.isFinite(room) ? { maxWidth: room } : undefined}
+			>
 				<Chev open={open.has(g.key)} />
 				<span>{g.train.label}</span>
 				<b>
@@ -288,8 +383,12 @@ export function CardGroupBox({
 					{t.open ? ` · ${t.open} MR open` : ""}
 					{t.parked ? ` · ${t.parked} parked` : ""}
 					{t.elsewhere ? ` · ${t.elsewhere} elsewhere` : ""}
+					{focused && <SourceTag p={CODE_TALLY_P} />}
 				</span>
-				<span className="passive">{g.ready} ready</span>
+				<span className="passive">
+					{g.ready} ready
+					{focused && <SourceTag p={READY_P} />}
+				</span>
 				{g.llbs.length > 0 && (
 					<span className="llbn">
 						<GitFork className="inline size-3" aria-hidden="true" /> {g.llbs.length} long-lived
@@ -297,7 +396,7 @@ export function CardGroupBox({
 				)}
 			</button>
 			<Unfold open={open.has(g.key)} className="crows">
-				<GroupRows g={g} board={board} face={face} actions={actions} isOpen={isOpen} jira={jira} />
+				<GroupRows g={g} board={board} focused={focused} face={face} actions={actions} isOpen={isOpen} jira={jira} />
 			</Unfold>
 		</div>
 	);

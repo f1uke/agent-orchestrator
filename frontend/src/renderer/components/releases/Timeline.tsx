@@ -26,6 +26,8 @@ import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
 import { MoveRoot, Moving, useReleaseMotion } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
+import { readOf } from "../../lib/releases/sources";
+import { SourceTag } from "./Sources";
 import { StickyAppLabel } from "./StickyAppLabel";
 import { VersionLanes } from "./VersionLanes";
 
@@ -158,6 +160,14 @@ export function Timeline({
 											<span className="sl" data-sticky>
 												<span>Sprint {s.number} · active</span>
 												<span className="passive">ships in #{s.number + 1}</span>
+												<SourceTag
+													p={readOf(
+														`Sprint ${s.number}`,
+														"jira.board_sprints",
+														`${s.sprint.name}: start, end, state`,
+														"sprints[].sprint",
+													)}
+												/>
 											</span>
 										</div>
 									))}
@@ -264,6 +274,7 @@ function AppRow({
 							g={g}
 							board={board}
 							left={left}
+							room={Math.min(Infinity, ...boxes.filter((o) => o.left > left).map((o) => o.left - left - 10))}
 							top={top - llbH}
 							focused={g.train.id === lens.focus?.id}
 							face={lens.face}

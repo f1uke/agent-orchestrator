@@ -1,5 +1,5 @@
 import { dayDiff, shortDay } from "./day";
-import type { AppVersion, Day, Hotfix } from "./types";
+import type { AppVersion, Day, Hotfix, Stage } from "./types";
 import { STAGE_META, type Tone } from "./vocab";
 
 export type BarPart = { id: "mr" | "next" | "tag" | "title"; text: string; tone?: Tone; emphasis?: string };
@@ -16,9 +16,13 @@ function mrPart(v: AppVersion): BarPart {
 	return { id: "mr", text: `${n} open`, tone: "running" };
 }
 
-function nextPart(v: AppVersion, today: Day): BarPart {
+export function nextStage(v: AppVersion, today: Day): Stage | undefined {
 	const open = v.stages.filter((s) => s.date && s.status !== "done" && s.status !== "not_observable");
-	const next = open.find((s) => (s.date ?? "") >= today) ?? open[0];
+	return open.find((s) => (s.date ?? "") >= today) ?? open[0];
+}
+
+function nextPart(v: AppVersion, today: Day): BarPart {
+	const next = nextStage(v, today);
 	if (next?.date) {
 		const d = dayDiff(today, next.date);
 		const when = d === 0 ? "today" : d > 0 ? `in ${d}d` : `${-d}d late`;

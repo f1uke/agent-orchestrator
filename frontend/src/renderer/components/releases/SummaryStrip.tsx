@@ -1,7 +1,9 @@
 import { addDays, dayDiff, dayLabel } from "../../lib/releases/day";
 import { trainApprovers, trainChips, type Lens } from "../../lib/releases/lens";
+import { derivedOf } from "../../lib/releases/sources";
 import type { Board, Train } from "../../lib/releases/types";
 import { Avatar } from "./Avatar";
+import { SourceTag } from "./Sources";
 import type { PageActions } from "./ReleasesPage";
 import { Snowflake } from "lucide-react";
 
@@ -83,6 +85,17 @@ export function SummaryStrip({
 								<Snowflake className="size-3" aria-hidden="true" /> {t.freeze ? dayLabel(t.freeze) : "-"} → ●{" "}
 								{t.publish ? dayLabel(t.publish) : "-"}
 								{sprint ? ` · ships Sprint ${sprint.number}` : ""}
+								<SourceTag
+									p={derivedOf(
+										`${t.label} dates`,
+										[
+											{ kind: "gitlab.milestones", text: "earliest start and latest due over the apps' milestones" },
+											{ kind: "jira.board_sprints", text: '"ships Sprint N": train N carries sprint N - 1' },
+										],
+										"The page's freeze and publish cells only feed rule A6.",
+										"Train.freeze, Train.publish",
+									)}
+								/>
 							</small>
 						</div>
 						<div className="flex items-center gap-2.5">
@@ -93,40 +106,53 @@ export function SummaryStrip({
 					<div className="blk" style={{ flex: 1 }}>
 						<span className="rel-eyebrow">Approvers</span>
 						{people.length ? (
-							<button
-								type="button"
-								className="rel-faces"
-								data-testid="approver-faces"
-								aria-label={`${pending.length} approvers pending, ${done} done. Open train ${t.label}`}
-								onClick={() => actions.openSheet({ kind: "train", train: t.id })}
-							>
-								<span className="fs">
-									{(pending.length ? pending : people).slice(0, MAX_FACES).map((p) => (
-										<span
-											key={p.accountId}
-											className={`fc${p.pending ? "" : " ok"}`}
-											title={`${p.name}: ${p.pending ? "pending" : "approved"}`}
-										>
-											<Avatar accountId={p.accountId} name={p.name} />
-										</span>
-									))}
-									{(pending.length ? pending : people).length > MAX_FACES && (
-										<span className="fc more">+{(pending.length ? pending : people).length - MAX_FACES}</span>
-									)}
-								</span>
-								<span className="t">
-									{pending.length ? (
-										<b data-st="waiting" className="c font-medium">
-											{pending.length} pending
-										</b>
-									) : (
-										<b data-st="done" className="c font-medium">
-											all approved
-										</b>
-									)}
-									{done > 0 && <span className="passive"> · {done} done</span>}
-								</span>
-							</button>
+							<span className="flex items-center">
+								<button
+									type="button"
+									className="rel-faces"
+									data-testid="approver-faces"
+									aria-label={`${pending.length} approvers pending, ${done} done. Open train ${t.label}`}
+									onClick={() => actions.openSheet({ kind: "train", train: t.id })}
+								>
+									<span className="fs">
+										{(pending.length ? pending : people).slice(0, MAX_FACES).map((p) => (
+											<span
+												key={p.accountId}
+												className={`fc${p.pending ? "" : " ok"}`}
+												title={`${p.name}: ${p.pending ? "pending" : "approved"}`}
+											>
+												<Avatar accountId={p.accountId} name={p.name} />
+											</span>
+										))}
+										{(pending.length ? pending : people).length > MAX_FACES && (
+											<span className="fc more">+{(pending.length ? pending : people).length - MAX_FACES}</span>
+										)}
+									</span>
+									<span className="t">
+										{pending.length ? (
+											<b data-st="waiting" className="c font-medium">
+												{pending.length} pending
+											</b>
+										) : (
+											<b data-st="done" className="c font-medium">
+												all approved
+											</b>
+										)}
+										{done > 0 && <span className="passive"> · {done} done</span>}
+									</span>
+								</button>
+								<SourceTag
+									p={{
+										title: `Approvers of ${t.label}`,
+										how: "read",
+										lines: t.versions
+											.filter((v) => v.jira && lens.apps.some((a) => a.id === v.app))
+											.map((v) => ({ kind: "jira.versions", text: `${v.jira?.name}: approvers and status` })),
+										note: "Pending first. Done = approved on every app.",
+										field: "Version.jira.approvers",
+									}}
+								/>
+							</span>
 						) : (
 							<span className="muted text-[12px]">
 								No approvers on any Jira release yet.{" "}

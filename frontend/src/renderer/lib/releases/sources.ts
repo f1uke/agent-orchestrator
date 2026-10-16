@@ -251,6 +251,16 @@ export function sprintCardOf(c: SprintCard, row: SprintRow): Provenance {
 	};
 }
 
+export function statusOf(status: string, kind: KindName): Provenance {
+	return {
+		title: `Status: ${status}`,
+		how: "read",
+		lines: [{ kind, text: `issue status "${status}"` }],
+		note: "Green = Ready for UAT, UAT Approved, Ready To Deploy / Deliver, Deployed, Done, or Jira's Done category.",
+		field: "status",
+	};
+}
+
 export function readOf(title: string, kind: KindName, text?: string, field?: string): Provenance {
 	return { title, how: "read", lines: [{ kind, text }], field };
 }
