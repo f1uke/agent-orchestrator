@@ -24,7 +24,7 @@ func Reconcile(in Inputs, env Env) Board {
 		t.DatesSplit = datesSplit(t)
 		fromPages := pageMembers(t, in.Config, in.Snap, mrs)
 		for _, v := range t.Versions {
-			var fromBranch []IssueFact
+			var fromBranch []branchMember
 			if live[t.ID] {
 				fromBranch = branchMembers(t, v, mrs, jira)
 			}

@@ -13429,6 +13429,15 @@ components:
       - history
       - hidden
       type: string
+    ReleaseTrainCardEvidence:
+      properties:
+        fixVersion:
+          $ref: '#/components/schemas/ReleaseTrainFixVersionEvidence'
+        page:
+          $ref: '#/components/schemas/ReleaseTrainPageEvidence'
+        sprintMR:
+          $ref: '#/components/schemas/ReleaseTrainSprintMREvidence'
+      type: object
     ReleaseTrainCardUnit:
       properties:
         app:
@@ -13437,6 +13446,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainPerson'
         code:
           $ref: '#/components/schemas/ReleaseTrainCodeState'
+        evidence:
+          $ref: '#/components/schemas/ReleaseTrainCardEvidence'
+        factsFrom:
+          type: string
         key:
           type: string
         mine:
@@ -13463,6 +13476,8 @@ components:
       - status
       - statusCategory
       - why
+      - evidence
+      - factsFrom
       - code
       type: object
     ReleaseTrainCardWhy:
@@ -14117,6 +14132,19 @@ components:
           - cli
           - api
           type: string
+      type: object
+    ReleaseTrainFixVersionEvidence:
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - name
+      - url
       type: object
     ReleaseTrainFixesResponse:
       properties:
@@ -14820,6 +14848,19 @@ components:
       - kind
       - missing
       type: object
+    ReleaseTrainPageEvidence:
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - title
+      - url
+      type: object
     ReleaseTrainPageFact:
       properties:
         created:
@@ -15252,6 +15293,18 @@ components:
       - author
       - created
       - dest
+      type: object
+    ReleaseTrainSprintMREvidence:
+      properties:
+        branch:
+          type: string
+        mrs:
+          items:
+            type: integer
+          type: array
+      required:
+      - branch
+      - mrs
       type: object
     ReleaseTrainSprintRow:
       properties:

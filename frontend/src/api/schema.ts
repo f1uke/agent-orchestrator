@@ -4721,10 +4721,17 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainBucket: "badge" | "history" | "hidden";
+        ReleaseTrainCardEvidence: {
+            fixVersion?: components["schemas"]["ReleaseTrainFixVersionEvidence"];
+            page?: components["schemas"]["ReleaseTrainPageEvidence"];
+            sprintMR?: components["schemas"]["ReleaseTrainSprintMREvidence"];
+        };
         ReleaseTrainCardUnit: {
             app: string;
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             code: components["schemas"]["ReleaseTrainCodeState"];
+            evidence: components["schemas"]["ReleaseTrainCardEvidence"];
+            factsFrom: string;
             key: string;
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             status: string;
@@ -4984,6 +4991,11 @@ export interface components {
              * @enum {string}
              */
             via?: "app" | "cli" | "api";
+        };
+        ReleaseTrainFixVersionEvidence: {
+            id: string;
+            name: string;
+            url: string;
         };
         ReleaseTrainFixesResponse: {
             fixes: components["schemas"]["ReleaseTrainFix"][];
@@ -5259,6 +5271,11 @@ export interface components {
             kind: "unknown";
             missing: components["schemas"]["ReleaseTrainResourceStatus"][];
         };
+        ReleaseTrainPageEvidence: {
+            id: string;
+            title: string;
+            url: string;
+        };
         ReleaseTrainPageFact: {
             created: components["schemas"]["ReleaseTrainDay"];
             extra?: number;
@@ -5424,6 +5441,10 @@ export interface components {
             target: string;
             title: string;
             url: string;
+        };
+        ReleaseTrainSprintMREvidence: {
+            branch: string;
+            mrs: number[];
         };
         ReleaseTrainSprintRow: {
             board: components["schemas"]["ReleaseTrainBoardConfig"];

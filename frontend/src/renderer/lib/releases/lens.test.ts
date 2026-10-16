@@ -268,6 +268,8 @@ describe("Only me", () => {
 		status: "To Do",
 		statusCategory: "new",
 		why: ["fixVersion" as const],
+		evidence: { fixVersion: { id: "5001", name: "iOS 2.4.0", url: "" } },
+		factsFrom: "jira.cards",
 		code: { kind: "none" as const },
 		...(m ? { mine } : {}),
 	});

@@ -459,7 +459,7 @@ const CARD_SPECS: [string, string, Unit["code"]["kind"], string, string, number]
 function unitOf(
 	key: string,
 	summary: string,
-	app: string,
+	v: Board["trains"][number]["versions"][number],
 	kind: Unit["code"]["kind"],
 	status: string,
 	cat: string,
@@ -476,15 +476,18 @@ function unitOf(
 					: kind === "elsewhere"
 						? { kind, branch: "feature/demo-other", on: "2026-01-01" }
 						: { kind };
+	const jira = v.jira;
 	return {
 		key,
 		summary,
-		app,
+		app: v.app,
 		status,
 		statusCategory: cat,
 		url: `${JIRA}/browse/${key}`,
 		assignee: { accountId, name },
 		why: ["fixVersion"],
+		evidence: jira ? { fixVersion: { id: jira.id, name: jira.name, url: jira.url } } : {},
+		factsFrom: "jira.cards",
 		code,
 	};
 }
@@ -495,14 +498,14 @@ function attachCards(b: Board): void {
 	for (const v of t21?.versions ?? []) {
 		const n = v.app === "di" ? CARD_SPECS.length : v.app === "da" ? 4 : 2;
 		v.cards = CARD_SPECS.slice(0, n).map(([k, s, kind, st, cat, who]) =>
-			unitOf(k, s, v.app, v.app === "di" || kind !== "parked" ? kind : "merged", st, cat, who),
+			unitOf(k, s, v, v.app === "di" || kind !== "parked" ? kind : "merged", st, cat, who),
 		);
 	}
 	for (const v of t22?.versions ?? []) {
 		if (v.app === "di" || v.app === "da")
 			v.cards = [
-				unitOf("DEMO-201", "Price alerts on the watchlist", v.app, "open", "In Progress", "indeterminate", 6),
-				unitOf("DEMO-202", "New onboarding checklist", v.app, "none", "To Do", "new", 7),
+				unitOf("DEMO-201", "Price alerts on the watchlist", v, "open", "In Progress", "indeterminate", 6),
+				unitOf("DEMO-202", "New onboarding checklist", v, "none", "To Do", "new", 7),
 			];
 	}
 }

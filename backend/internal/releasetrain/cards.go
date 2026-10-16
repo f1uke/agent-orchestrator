@@ -46,16 +46,47 @@ func (CodeNone) codeState()      {}
 
 // CardUnit is one card on one app's version.
 type CardUnit struct {
-	Key            string       `json:"key"`
-	URL            string       `json:"url"`
-	Summary        string       `json:"summary"`
-	App            AppID        `json:"app"`
-	Status         string       `json:"status"`
-	StatusCategory string       `json:"statusCategory"`
-	Assignee       *Person      `json:"assignee,omitempty"`
-	Why            []CardWhy    `json:"why"`
-	Code           CodeState    `json:"code"`
-	Mine           []MineReason `json:"mine,omitempty"`
+	Key            string    `json:"key"`
+	URL            string    `json:"url"`
+	Summary        string    `json:"summary"`
+	App            AppID     `json:"app"`
+	Status         string    `json:"status"`
+	StatusCategory string    `json:"statusCategory"`
+	Assignee       *Person   `json:"assignee,omitempty"`
+	Why            []CardWhy `json:"why"`
+	// Evidence names the record behind each reason in Why, one key per reason.
+	Evidence CardEvidence `json:"evidence"`
+	// FactsFrom is the Jira read that gave the status, summary and assignee.
+	FactsFrom KindName     `json:"factsFrom"`
+	Code      CodeState    `json:"code"`
+	Mine      []MineReason `json:"mine,omitempty"`
+}
+
+// CardEvidence is what matched for each reason a card is on a version.
+type CardEvidence struct {
+	FixVersion *FixVersionEvidence `json:"fixVersion,omitempty"`
+	Page       *PageEvidence       `json:"page,omitempty"`
+	SprintMR   *SprintMREvidence   `json:"sprintMR,omitempty"`
+}
+
+// FixVersionEvidence is the Jira release in the card's fixVersions.
+type FixVersionEvidence struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// PageEvidence is the release train page that lists the card.
+type PageEvidence struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+}
+
+// SprintMREvidence is the card's MRs into the sprint branch the train ships.
+type SprintMREvidence struct {
+	Branch string `json:"branch"`
+	MRs    []int  `json:"mrs"`
 }
 
 // CardWhy is why a card is on a version.
@@ -161,29 +192,51 @@ func sprintOf(branch string) (int, bool) {
 	return v, true
 }
 
+// branchMember is a card in by its MRs into the sprint branch the train ships.
+type branchMember struct {
+	issue IssueFact
+	mrs   SprintMREvidence
+}
+
 // branchMembers is the cards with an MR in v's app into the branch of the
 // sprint before t; their Jira facts come from jira.branch_cards.
-func branchMembers(t *Train, v *AppVersion, mrs mrIndex, jira map[string]IssueFact) []IssueFact {
+func branchMembers(t *Train, v *AppVersion, mrs mrIndex, jira map[string]IssueFact) []branchMember {
 	if t.ID.Extra != 0 {
 		return nil
 	}
-	var out []IssueFact
+	var out []branchMember
 	for key, list := range mrs[v.App] {
 		is, known := jira[key]
 		if !known || is.Subtask || is.ReleaseTicket {
 			continue
 		}
+		var in []MRFact
 		for _, mr := range list {
 			if n, ok := sprintOf(mr.TargetBranch); ok && n == t.ID.Number-1 {
-				out = append(out, is)
-				break
+				in = append(in, mr)
 			}
 		}
+		if len(in) == 0 {
+			continue
+		}
+		sort.Slice(in, func(i, j int) bool { return in[i].IID < in[j].IID })
+		ev := SprintMREvidence{Branch: in[0].TargetBranch, MRs: make([]int, len(in))}
+		for i, mr := range in {
+			ev.MRs[i] = mr.IID
+		}
+		out = append(out, branchMember{issue: is, mrs: ev})
 	}
 	return out
 }
 
-func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage, fromBranch []IssueFact, llbs map[string]*LongLivedBranch) []CardUnit {
+// whyKind is the Jira read that supplies a card's facts when it is in for that reason.
+var whyKind = map[CardWhy]KindName{
+	WhyFixVersion:   KindCards.Name,
+	WhyPage:         KindPageCards.Name,
+	WhySprintBranch: KindBranchCards.Name,
+}
+
+func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, fromBranch []branchMember, llbs map[string]*LongLivedBranch) []CardUnit {
 	byKey := mrs[v.App]
 	var cut *Day
 	if v.ReleaseMR != nil {
@@ -196,27 +249,31 @@ func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage, fromBranch []Issu
 	}
 	units := make([]CardUnit, 0, len(v.Issues)+len(fromPage))
 	at := map[string]int{}
-	add := func(is IssueFact, why CardWhy) {
-		if i, ok := at[is.Key]; ok {
-			if !slices.Contains(units[i].Why, why) {
-				units[i].Why = append(units[i].Why, why)
-			}
-			return
+	add := func(is IssueFact, why CardWhy, mark func(*CardEvidence)) {
+		i, ok := at[is.Key]
+		if !ok {
+			i = len(units)
+			at[is.Key] = i
+			units = append(units, CardUnit{
+				Key: is.Key, URL: is.URL, Summary: is.Summary, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
+				FactsFrom: whyKind[why], Code: codeOf(byKey[is.Key], cut, source, hasSource, llbs),
+			})
 		}
-		at[is.Key] = len(units)
-		units = append(units, CardUnit{
-			Key: is.Key, URL: is.URL, Summary: is.Summary, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
-			Why: []CardWhy{why}, Code: codeOf(byKey[is.Key], cut, source, hasSource, llbs),
-		})
+		if !slices.Contains(units[i].Why, why) {
+			units[i].Why = append(units[i].Why, why)
+			mark(&units[i].Evidence)
+		}
 	}
 	for _, is := range v.Issues {
-		add(is, WhyFixVersion)
+		add(is, WhyFixVersion, func(e *CardEvidence) {
+			e.FixVersion = &FixVersionEvidence{ID: v.Jira.ID, Name: v.Jira.Name, URL: v.Jira.URL}
+		})
 	}
 	for _, is := range fromPage {
-		add(is, WhyPage)
+		add(is, WhyPage, func(e *CardEvidence) { e.Page = &PageEvidence{ID: v.page.ID, Title: v.page.Title, URL: v.page.URL} })
 	}
-	for _, is := range fromBranch {
-		add(is, WhySprintBranch)
+	for _, m := range fromBranch {
+		add(m.issue, WhySprintBranch, func(e *CardEvidence) { e.SprintMR = &m.mrs })
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
 	return units
