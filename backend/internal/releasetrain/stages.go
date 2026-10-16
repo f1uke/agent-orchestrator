@@ -48,7 +48,7 @@ type stageRow struct {
 	key   StageKey
 	reads []KindName
 	eval  func(t *Train, v *AppVersion, today Day) Stage
-	// byConvention: the row's date is always an AO convention (freeze + n), never a recorded one.
+	// byConvention rows date by freeze + n, a date no system records.
 	byConvention bool
 }
 

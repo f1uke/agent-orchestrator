@@ -192,7 +192,6 @@ func sprintOf(branch string) (int, bool) {
 	return v, true
 }
 
-// branchMember is a card in by its MRs into the sprint branch the train ships.
 type branchMember struct {
 	issue IssueFact
 	mrs   SprintMREvidence
@@ -229,7 +228,6 @@ func branchMembers(t *Train, v *AppVersion, mrs mrIndex, jira map[string]IssueFa
 	return out
 }
 
-// whyKind is the Jira read that supplies a card's facts when it is in for that reason.
 var whyKind = map[CardWhy]KindName{
 	WhyFixVersion:   KindCards.Name,
 	WhyPage:         KindPageCards.Name,

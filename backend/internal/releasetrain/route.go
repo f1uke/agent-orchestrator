@@ -373,7 +373,6 @@ func (r routing) train(n int) TrainID {
 
 func planKey(key string, app AppID) string { return string(app) + "/" + key }
 
-// plannedOn is the train a card is planned on and why the card is on it.
 type plannedOn struct {
 	train TrainID
 	from  []CardWhy
