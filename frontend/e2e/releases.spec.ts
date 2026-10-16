@@ -722,7 +722,7 @@ test.describe("releases page", () => {
 		await expect(glyphs.nth(1)).toHaveAttribute("href", /merge_requests\/402$/);
 		const split = t21.locator('.crow[data-key="DEMO-302"]').getByTestId("mr-glyph");
 		await expect(split.and(page.locator('[data-app="di"]'))).toHaveClass(/away/);
-		await expect(t21.locator('.crow[data-key="DEMO-305"]')).toContainText("page says #22");
+		await expect(t21.locator('.crow[data-key="DEMO-305"]')).toContainText("fixVersion says #22");
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-unfolded.png` });
 		await demo.locator(".spsrc .csum").click();
 		await expect(demo.getByTestId("sprint-dest-block")).toHaveCount(0);

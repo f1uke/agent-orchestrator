@@ -18,6 +18,15 @@ import { CardLine } from "./CardGroups";
 import { jiraUrl } from "../../lib/releases/cards";
 import type { PageActions } from "./ReleasesPage";
 import { TargetTag } from "./TargetTag";
+import { derivedOf, llbTargetOf, readOf } from "../../lib/releases/sources";
+import { SourceTag } from "./Sources";
+
+const BRANCH_STATE_P = derivedOf(
+	"Branch state",
+	[{ kind: "gitlab.mrs", text: "card MRs into the branch, merge-out MR into develop or a sprint branch" }],
+	"parked = cards merged in, branch not merged out.",
+	"LongLivedBranch.state",
+);
 
 function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	const t = g.target;
@@ -71,7 +80,10 @@ function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	}
 	return (
 		<div className="status-line" data-st={tone} data-testid="llb-status">
-			<span>{text}</span>
+			<span>
+				{text}
+				<SourceTag p={llbTargetOf(g, (x) => trainLabel(board, x))} wide />
+			</span>
 		</div>
 	);
 }
@@ -121,6 +133,10 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 					{g.plan
 						? `set by ${g.plan.updatedBy} · ${shortDay(g.plan.updatedAt.slice(0, 10))} · v${g.plan.version}`
 						: "not set"}
+					<SourceTag
+						p={readOf("Plan", "ao.plans", "saved by a person on this page or with ao train", "LLBGroup.plan")}
+						wide
+					/>
 				</span>
 			</div>
 			<label className="fl2" htmlFor="plan-name">
@@ -348,11 +364,13 @@ export function llbSheet(id: string, board: Board, actions: PageActions): { titl
 								<span className="badge" data-st={st.tone}>
 									{st.label}
 								</span>
+								<SourceTag p={BRANCH_STATE_P} wide />
 							</div>
 							<div className="kv">
 								<span>Opened</span>
 								<span>
 									{shortDay(b.openedOn)} · last card in {shortDay(b.lastIn)}
+									<SourceTag p={readOf("Opened", "gitlab.mrs", "first and last card MR into the branch")} wide />
 								</span>
 								<span>Merge out</span>
 								<span>
@@ -369,11 +387,18 @@ export function llbSheet(id: string, board: Board, actions: PageActions): { titl
 									) : (
 										"not opened"
 									)}
+									<SourceTag
+										p={readOf("Merge out", "gitlab.mrs", "MR from the branch into develop or a sprint branch")}
+										wide
+									/>
 								</span>
 								{b.ahead != null && (
 									<>
 										<span>Ahead of develop</span>
-										<span>{b.ahead} commits</span>
+										<span>
+											{b.ahead} commits
+											<SourceTag p={readOf("Ahead of develop", "gitlab.compare", "develop...branch commits")} wide />
+										</span>
 									</>
 								)}
 								{b.train && (

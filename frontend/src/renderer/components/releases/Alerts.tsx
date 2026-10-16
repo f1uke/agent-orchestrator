@@ -8,6 +8,8 @@ import { appMarkOf } from "../../lib/releases/appMark";
 import { SEVERITY_META } from "../../lib/releases/vocab";
 import { AppMark } from "./AppMark";
 import type { PageActions } from "./ReleasesPage";
+import { ruleTagOf, type Provenance } from "../../lib/releases/sources";
+import { SourceTag, useSources } from "./Sources";
 
 type AlertCtx = { board: Board; actions: PageActions };
 
@@ -22,11 +24,22 @@ export function HitWho({ board, train, app }: { board: Board; train?: string; ap
 	);
 }
 
-export function Sec({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) {
+export function Sec({
+	title,
+	extra,
+	source,
+	children,
+}: {
+	title: string;
+	extra?: ReactNode;
+	source?: Provenance | null;
+	children: ReactNode;
+}) {
 	return (
 		<div className="sec">
 			<div className="sec-h">
 				<span className="rel-eyebrow">{title}</span>
+				{source && <SourceTag p={source} wide />}
 				{extra}
 			</div>
 			{children}
@@ -56,6 +69,11 @@ export function Ext({ url, children }: { url?: string; children: ReactNode }) {
 	) : (
 		<>{children}</>
 	);
+}
+
+function RuleId({ board, rule }: { board: Board; rule: string }) {
+	const p = ruleTagOf(board.catalogue, rule);
+	return useSources() && p ? <SourceTag p={p} wide /> : <span className="rid">{rule}</span>;
 }
 
 function sheetFor(h: AlertHit): SheetEntry | null {
@@ -99,7 +117,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 				<div className="who">
 					<span className="sev">{SEVERITY_META[h.severity].label}</span>
 					<HitWho board={c.board} train={h.train} app={h.app} />
-					<span className="rid">{h.rule}</span>
+					<RuleId board={c.board} rule={h.rule} />
 					{h.changedSinceHidden && (
 						<span className="spill" data-st="waiting">
 							changed since hidden
