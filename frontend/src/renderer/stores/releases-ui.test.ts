@@ -61,6 +61,40 @@ describe("releases UI layers", () => {
 	});
 });
 
+describe("hidden sprint boards", () => {
+	beforeEach(() => {
+		vi.resetModules();
+		window.localStorage.clear();
+	});
+
+	it("starts with every board shown and remembers the hidden set across a reload", async () => {
+		const first = await import("./releases-ui");
+		expect(first.useReleasesUi.getState().hidden.size).toBe(0);
+		first.useReleasesUi.getState().setHidden(new Set(["PILOT", "DEMO"]));
+		vi.resetModules();
+		const reloaded = await import("./releases-ui");
+		expect([...reloaded.useReleasesUi.getState().hidden].sort()).toEqual(["DEMO", "PILOT"]);
+		reloaded.useReleasesUi.getState().setHidden(new Set());
+		vi.resetModules();
+		expect((await import("./releases-ui")).useReleasesUi.getState().hidden.size).toBe(0);
+	});
+
+	it("shows every board when the stored set is junk or storage throws", async () => {
+		window.localStorage.setItem("ao.releases.hidden-boards.v1", '{"DEMO":true}');
+		const { useReleasesUi } = await import("./releases-ui");
+		expect(useReleasesUi.getState().hidden.size).toBe(0);
+		window.localStorage.setItem("ao.releases.hidden-boards.v1", '["DEMO", 7, ""]');
+		vi.resetModules();
+		expect([...(await import("./releases-ui")).useReleasesUi.getState().hidden]).toEqual(["DEMO"]);
+		const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("blocked");
+		});
+		useReleasesUi.getState().setHidden(new Set(["PILOT"]));
+		expect(useReleasesUi.getState().hidden.has("PILOT")).toBe(true);
+		set.mockRestore();
+	});
+});
+
 describe("releases page memory", () => {
 	beforeEach(() => {
 		vi.resetModules();

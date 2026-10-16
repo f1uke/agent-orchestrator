@@ -13,6 +13,7 @@ const LAYERS_KEY = "ao.releases.layers.v1";
 const FOLDS_KEY = "ao.releases.folds.v1";
 const SEARCH_KEY = "ao.releases.search.v1";
 const SCROLL_KEY = "ao.releases.scroll.v1";
+const HIDDEN_KEY = "ao.releases.hidden-boards.v1";
 
 export function readSavedSearch(): ReleasesSearchRaw {
 	try {
@@ -44,18 +45,18 @@ function readScroll(): Scroll | null {
 	}
 }
 
-function readFolds(): ReadonlySet<string> {
+function readKeys(storageKey: string): ReadonlySet<string> {
 	try {
-		const saved: unknown = JSON.parse(window.localStorage.getItem(FOLDS_KEY) ?? "[]");
-		return new Set(Array.isArray(saved) ? saved.filter((k): k is string => typeof k === "string") : []);
+		const saved: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
+		return new Set(Array.isArray(saved) ? saved.filter((k): k is string => typeof k === "string" && k !== "") : []);
 	} catch {
 		return new Set();
 	}
 }
 
-function writeFolds(open: ReadonlySet<string>): void {
+function writeKeys(storageKey: string, keys: ReadonlySet<string>): void {
 	try {
-		window.localStorage.setItem(FOLDS_KEY, JSON.stringify([...open]));
+		window.localStorage.setItem(storageKey, JSON.stringify([...keys]));
 	} catch {}
 }
 
@@ -90,11 +91,14 @@ type ReleasesUi = {
 	clearBack: () => void;
 	scroll: Scroll | null;
 	setScroll: (s: Scroll) => void;
+	/** Kept for a board with no active sprint too, so its row stays hidden when the next sprint starts. */
+	hidden: ReadonlySet<string>;
+	setHidden: (keys: ReadonlySet<string>) => void;
 };
 
 export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 	layers: readLayers(),
-	open: readFolds(),
+	open: readKeys(FOLDS_KEY),
 	back: [],
 	setLayer: (k, on) => {
 		const layers = { ...get().layers, [k]: on };
@@ -105,12 +109,12 @@ export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 		const open = new Set(get().open);
 		if (open.has(key)) open.delete(key);
 		else open.add(key);
-		writeFolds(open);
+		writeKeys(FOLDS_KEY, open);
 		set({ open });
 	},
 	openFolds: (keys) => {
 		const open = new Set([...get().open, ...keys]);
-		writeFolds(open);
+		writeKeys(FOLDS_KEY, open);
 		set({ open });
 	},
 	pushBack: (s) => set({ back: [...get().back, s] }),
@@ -126,5 +130,10 @@ export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 			window.localStorage.setItem(SCROLL_KEY, JSON.stringify(scroll));
 		} catch {}
 		set({ scroll });
+	},
+	hidden: readKeys(HIDDEN_KEY),
+	setHidden: (hidden) => {
+		writeKeys(HIDDEN_KEY, hidden);
+		set({ hidden });
 	},
 }));

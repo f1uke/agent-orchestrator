@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LAYERS, parseReleasesSearch, releasesSearch, type ReleasesSearch } from "./url";
 
-const empty: ReleasesSearch = { focus: null, me: false, apps: null, hotfixes: true, sheet: null, layers: null };
+const empty: ReleasesSearch = {
+	focus: null,
+	me: false,
+	apps: null,
+	hotfixes: true,
+	sheet: null,
+	layers: null,
+	hideBoards: null,
+};
 
 describe("releases search params", () => {
 	it("reads an empty query as the default view", () => {
@@ -17,6 +25,7 @@ describe("releases search params", () => {
 			hotfixes: false,
 			sheet: { kind: "version", train: "21-2026", app: "di" },
 			layers: { sprint: true, llb: false, cards: true, past: false },
+			hideBoards: new Set(["PILOT", "DEMO"]),
 		};
 		const raw = releasesSearch(s);
 		expect(raw).toEqual({
@@ -26,6 +35,7 @@ describe("releases search params", () => {
 			hotfixes: "0",
 			sheet: "version:21-2026:di",
 			layers: "sprint,cards",
+			hideBoards: "DEMO,PILOT",
 		});
 		expect(parseReleasesSearch(raw)).toEqual(s);
 	});
@@ -99,6 +109,14 @@ describe("releases search params", () => {
 		expect(releasesSearch({ ...empty, layers: { sprint: false, llb: false, cards: false, past: false } }).layers).toBe(
 			"",
 		);
+	});
+
+	it("hides exactly the named boards, and an empty list hides none over the saved set", () => {
+		expect(parseReleasesSearch({}).hideBoards).toBeNull();
+		expect([...(parseReleasesSearch({ hideBoards: "PILOT,,DEMO" }).hideBoards ?? [])]).toEqual(["PILOT", "DEMO"]);
+		expect(parseReleasesSearch({ hideBoards: "" }).hideBoards).toEqual(new Set());
+		expect(releasesSearch({ ...empty, hideBoards: new Set() }).hideBoards).toBe("");
+		expect(releasesSearch({ ...empty, hideBoards: new Set(["ZED", "ALPHA"]) }).hideBoards).toBe("ALPHA,ZED");
 	});
 
 	it("defaults to long-lived and cards on, sprint cards and history off", () => {
