@@ -34,6 +34,7 @@ const LAYER_NAMES: Record<Layer, string> = {
 	llb: "Long-lived",
 	cards: "Cards",
 	past: "History",
+	src: "Sources",
 };
 
 export function Timeline({

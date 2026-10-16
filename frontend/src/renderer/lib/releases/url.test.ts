@@ -24,7 +24,7 @@ describe("releases search params", () => {
 			apps: new Set(["di", "pa"]),
 			hotfixes: false,
 			sheet: { kind: "version", train: "21-2026", app: "di" },
-			layers: { sprint: true, llb: false, cards: true, past: false },
+			layers: { sprint: true, llb: false, cards: true, past: false, src: false },
 			hideBoards: new Set(["PILOT", "DEMO"]),
 		};
 		const raw = releasesSearch(s);
@@ -99,16 +99,28 @@ describe("releases search params", () => {
 			llb: false,
 			cards: false,
 			past: true,
+			src: false,
+		});
+		expect(parseReleasesSearch({ layers: "cards,src" }).layers).toEqual({
+			sprint: false,
+			llb: false,
+			cards: true,
+			past: false,
+			src: true,
 		});
 		expect(parseReleasesSearch({ layers: "" }).layers).toEqual({
 			sprint: false,
 			llb: false,
 			cards: false,
 			past: false,
+			src: false,
 		});
-		expect(releasesSearch({ ...empty, layers: { sprint: false, llb: false, cards: false, past: false } }).layers).toBe(
-			"",
-		);
+		expect(
+			releasesSearch({ ...empty, layers: { sprint: false, llb: false, cards: false, past: false, src: false } }).layers,
+		).toBe("");
+		expect(
+			releasesSearch({ ...empty, layers: { sprint: false, llb: true, cards: true, past: false, src: true } }).layers,
+		).toBe("llb,cards,src");
 	});
 
 	it("hides exactly the named boards, and an empty list hides none over the saved set", () => {
@@ -119,7 +131,7 @@ describe("releases search params", () => {
 		expect(releasesSearch({ ...empty, hideBoards: new Set(["ZED", "ALPHA"]) }).hideBoards).toBe("ALPHA,ZED");
 	});
 
-	it("defaults to long-lived and cards on, sprint cards and history off", () => {
-		expect(DEFAULT_LAYERS).toEqual({ sprint: false, llb: true, cards: true, past: false });
+	it("defaults to long-lived and cards on, sprint cards, history and sources off", () => {
+		expect(DEFAULT_LAYERS).toEqual({ sprint: false, llb: true, cards: true, past: false, src: false });
 	});
 });

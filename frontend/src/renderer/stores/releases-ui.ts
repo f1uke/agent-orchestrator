@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
 	DEFAULT_LAYERS,
+	LAYER_ORDER,
 	parseReleasesSearch,
 	releasesSearch,
 	type Layer,
@@ -66,7 +67,7 @@ function readLayers(): Layers {
 		if (!raw) return DEFAULT_LAYERS;
 		const saved = JSON.parse(raw) as Partial<Record<Layer, unknown>>;
 		const pick = (k: Layer) => (typeof saved[k] === "boolean" ? (saved[k] as boolean) : DEFAULT_LAYERS[k]);
-		return { sprint: pick("sprint"), llb: pick("llb"), cards: pick("cards"), past: pick("past") };
+		return Object.fromEntries(LAYER_ORDER.map((k) => [k, pick(k)])) as Record<Layer, boolean>;
 	} catch {
 		return DEFAULT_LAYERS;
 	}

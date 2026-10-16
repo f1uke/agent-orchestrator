@@ -65,17 +65,20 @@ function stageDates(stages: Stage[]): Day[] {
 	return stages.flatMap((s) => (s.date ? [s.date] : []));
 }
 
+const HOTFIX_READS = ["gitlab.tags", "gitlab.milestones"];
+
 export function hotfixStages(h: Hotfix, today: Day): Stage[] {
 	const due = h.milestone.due;
 	const out: Stage[] = [];
-	if (h.tag) out.push({ key: "tag", date: h.tag.commitOn, status: "done", detail: `Tag ${h.tag.name}`, reads: [] });
+	if (h.tag)
+		out.push({ key: "tag", date: h.tag.commitOn, status: "done", detail: `Tag ${h.tag.name}`, reads: HOTFIX_READS });
 	if (due)
 		out.push({
 			key: "publish",
 			date: due,
 			status: h.tag && due <= today ? "done" : "todo",
 			detail: "Hotfix due",
-			reads: [],
+			reads: HOTFIX_READS,
 		});
 	return out;
 }
