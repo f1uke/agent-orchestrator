@@ -1131,7 +1131,7 @@ for (const [width, height] of [
 		for (const s of await page.getByTestId("llb-summary").all()) await s.locator(".ls[aria-expanded]").click();
 		for (const g of await page.locator(".rel-cg .csum").all()) await g.click();
 		for (const d of await page.locator(".rel-cg.dest .dsum").all()) await d.click();
-		await page.waitForTimeout(100);
+		await settle(page);
 		const report = await labelOverlaps(page);
 		expect(report.n).toBeGreaterThan(10);
 		expect(report.overlaps).toEqual([]);

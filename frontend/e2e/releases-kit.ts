@@ -83,13 +83,21 @@ export function labelOverlaps(page: Page): Promise<{ n: number; overlaps: string
 			const visible = r.width > 0 && r.height > 0 && r.right > 0 && r.left < vw && r.top < vh && r.bottom > 0;
 			return visible && getComputedStyle(e).visibility !== "hidden" && !e.closest(".tight") && seen(e);
 		});
+		const labRight = document.querySelector(".rel-app > .rel-lab")?.getBoundingClientRect().right ?? 0;
+		const axisBottom = document.querySelector(".rel-axis")?.getBoundingClientRect().bottom ?? 0;
+		const visible = (e: Element) => {
+			const r = e.getBoundingClientRect();
+			const left = e.closest(".rel-lab") ? r.left : Math.max(r.left, labRight);
+			const top = e.closest(".rel-axis") ? r.top : Math.max(r.top, axisBottom);
+			return { left, top, right: r.right, bottom: r.bottom };
+		};
 		const overlaps: string[] = [];
 		for (let i = 0; i < els.length; i++)
 			for (let j = i + 1; j < els.length; j++) {
 				const [a, b] = [els[i], els[j]];
 				if (a.contains(b) || b.contains(a)) continue;
-				const r = a.getBoundingClientRect();
-				const q = b.getBoundingClientRect();
+				const r = visible(a);
+				const q = visible(b);
 				const ix = Math.min(r.right, q.right) - Math.max(r.left, q.left);
 				const iy = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top);
 				if (ix > 2 && iy > 2)
