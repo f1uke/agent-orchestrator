@@ -7,6 +7,7 @@ import {
 	DEFAULT_LAYERS,
 	parseReleasesSearch,
 	releasesSearch,
+	type Layers,
 	type ReleasesSearch,
 	type SheetEntry,
 } from "../../lib/releases/url";
@@ -23,6 +24,8 @@ export type PageActions = {
 	openSheet: (s: SheetEntry, from?: "push") => void;
 	closeSheet: () => void;
 	back: () => void;
+	setLayers: (layers: Layers) => void;
+	setHiddenBoards: (keys: ReadonlySet<string>) => void;
 };
 
 export function ReleasesPage() {
@@ -34,7 +37,7 @@ export function ReleasesPage() {
 	const layers = url.layers ?? stored;
 	const storedHidden = useReleasesUi((s) => s.hidden);
 	const hiddenBoards = url.hideBoards ?? storedHidden;
-	const { pushBack, popBack, clearBack } = useReleasesUi();
+	const { pushBack, popBack, clearBack, setLayers, setHidden } = useReleasesUi();
 	useEffect(() => saveSearch(releasesSearch(url)), [url]);
 
 	const setSearch = useCallback(
@@ -60,8 +63,16 @@ export function ReleasesPage() {
 				setSearch({ sheet: null });
 			},
 			back: () => setSearch({ sheet: popBack() ?? null }),
+			setLayers: (l) => {
+				setLayers(l);
+				if (url.layers) setSearch({ layers: l });
+			},
+			setHiddenBoards: (keys) => {
+				setHidden(keys);
+				if (url.hideBoards) setSearch({ hideBoards: keys });
+			},
 		}),
-		[setSearch, url.sheet, pushBack, popBack, clearBack],
+		[setSearch, url.sheet, url.layers, url.hideBoards, pushBack, popBack, clearBack, setLayers, setHidden],
 	);
 
 	const response = query.data;

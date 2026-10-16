@@ -62,6 +62,18 @@ test.describe("releases page", () => {
 		await expect(layer(page, "Long-lived")).toHaveAttribute("aria-pressed", "false");
 	});
 
+	test("a layer toggle still works when the link set the layers, and the link follows it", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		await layer(page, "History").click();
+		await expect(layer(page, "History")).toHaveAttribute("aria-pressed", "true");
+		await expect(page).toHaveURL(/layers=sprint%2Cllb%2Ccards%2Cpast|layers=sprint,llb,cards,past/);
+		await layer(page, "Sprint cards").click();
+		await expect(page.locator("[data-board]")).toHaveCount(0);
+		await page.reload();
+		await expect(layer(page, "Sprint cards")).toHaveAttribute("aria-pressed", "false");
+		await expect(layer(page, "History")).toHaveAttribute("aria-pressed", "true");
+	});
+
 	test("the Key sheet explains bars, stages and status colours", async ({ page }) => {
 		await open(page);
 		await page.getByTestId("releases-page").getByRole("button", { name: "Key", exact: true }).click();

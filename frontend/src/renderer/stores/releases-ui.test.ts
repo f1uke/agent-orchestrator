@@ -9,7 +9,7 @@ describe("releases UI layers", () => {
 	it("starts from the default layers and remembers a toggle across a reload", async () => {
 		const first = await import("./releases-ui");
 		expect(first.useReleasesUi.getState().layers).toEqual({ sprint: false, llb: true, cards: true, past: false });
-		first.useReleasesUi.getState().setLayer("past", true);
+		first.useReleasesUi.getState().setLayers({ ...first.useReleasesUi.getState().layers, past: true });
 		vi.resetModules();
 		const reloaded = await import("./releases-ui");
 		expect(reloaded.useReleasesUi.getState().layers.past).toBe(true);
@@ -55,7 +55,7 @@ describe("releases UI layers", () => {
 		const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
 			throw new Error("blocked");
 		});
-		blocked.useReleasesUi.getState().setLayer("sprint", true);
+		blocked.useReleasesUi.getState().setLayers({ ...blocked.useReleasesUi.getState().layers, sprint: true });
 		expect(blocked.useReleasesUi.getState().layers.sprint).toBe(true);
 		set.mockRestore();
 	});

@@ -121,7 +121,7 @@ export function Timeline({
 			<MoveRoot keys={moveKeys(url, layers, folds, lens.hiddenBoards)}>
 				<div className="rel-canvas" ref={canvas} style={{ width: LABEL_W + tl.width }}>
 					<Background tl={tl} />
-					<Axis tl={tl} layers={layers} />
+					<Axis tl={tl} layers={layers} actions={actions} />
 					<div className="rel-sched">
 						<div className="rel-row">
 							<div className="rel-lab">
@@ -292,8 +292,7 @@ function Background({ tl }: { tl: TL }) {
 	);
 }
 
-function Axis({ tl, layers }: { tl: TL; layers: Layers }) {
-	const setLayer = useReleasesUi((s) => s.setLayer);
+function Axis({ tl, layers, actions }: { tl: TL; layers: Layers; actions: PageActions }) {
 	const days = Array.from({ length: tl.days }, (_, i) => addDays(tl.start, i));
 	const months = days.filter((d, i) => i === 0 || dayOfMonth(d) === 1);
 	return (
@@ -307,7 +306,7 @@ function Axis({ tl, layers }: { tl: TL; layers: Layers }) {
 							type="button"
 							className="rel-lyr"
 							aria-pressed={layers[k]}
-							onClick={() => setLayer(k, !layers[k])}
+							onClick={() => actions.setLayers({ ...layers, [k]: !layers[k] })}
 						>
 							{LAYER_NAMES[k]}
 						</button>

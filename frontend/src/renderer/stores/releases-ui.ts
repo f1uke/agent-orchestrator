@@ -83,7 +83,7 @@ type ReleasesUi = {
 	open: ReadonlySet<string>;
 	/** Sheets under the one in the URL, for the back button. */
 	back: SheetEntry[];
-	setLayer: (k: Layer, on: boolean) => void;
+	setLayers: (layers: Layers) => void;
 	toggleFold: (key: string) => void;
 	openFolds: (keys: readonly string[]) => void;
 	pushBack: (s: SheetEntry) => void;
@@ -100,8 +100,7 @@ export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 	layers: readLayers(),
 	open: readKeys(FOLDS_KEY),
 	back: [],
-	setLayer: (k, on) => {
-		const layers = { ...get().layers, [k]: on };
+	setLayers: (layers) => {
 		writeLayers(layers);
 		set({ layers });
 	},
