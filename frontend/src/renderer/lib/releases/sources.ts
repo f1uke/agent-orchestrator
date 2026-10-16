@@ -19,7 +19,7 @@ export type Provenance = {
 
 export type SystemMeta = { name: string; short: string; mark: string; besideOthers: boolean };
 
-export const SYSTEMS: Readonly<Record<string, SystemMeta>> = {
+const SYSTEMS: Readonly<Record<string, SystemMeta>> = {
 	jira: { name: "Jira", short: "Jira", mark: "J", besideOthers: true },
 	gitlab: { name: "GitLab", short: "GitLab", mark: "G", besideOthers: true },
 	confluence: { name: "Confluence", short: "Confluence", mark: "C", besideOthers: true },

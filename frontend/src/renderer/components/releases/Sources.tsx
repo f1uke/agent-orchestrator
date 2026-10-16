@@ -131,7 +131,6 @@ export function SourceTag({ p, wide = false }: { p: Provenance | null; wide?: bo
 	);
 }
 
-/** A value with no tag of its own: while the layer is on, a hover opens the same card. */
 export function SourceValue({ p, children }: { p: Provenance | null; children: ReactElement }) {
 	const s = useSources();
 	if (!s || !p) return children;
