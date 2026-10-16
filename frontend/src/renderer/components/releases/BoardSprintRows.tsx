@@ -1,4 +1,14 @@
-import { Snowflake } from "lucide-react";
+import { EyeOff, Snowflake } from "lucide-react";
+import type { RefObject } from "react";
+import {
+	DropdownMenu,
+	DropdownMenuCheckboxItem,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { dayLabel } from "../../lib/releases/day";
 import { DW, type Timeline } from "../../lib/releases/layout";
 import type { Lens } from "../../lib/releases/lens";
@@ -11,6 +21,7 @@ import {
 	destHead,
 	destKey,
 	destTally,
+	hiddenBoardsText,
 	isSplit,
 	leadKind,
 	mrPills,
@@ -258,18 +269,66 @@ function Wires({ board, placed, x0, tl }: { board: Board; placed: Placed[]; x0: 
 	);
 }
 
+export function HiddenBoardsMenu({
+	board,
+	lens,
+	actions,
+	trigger,
+}: {
+	board: Board;
+	lens: Lens;
+	actions: PageActions;
+	trigger: RefObject<HTMLButtonElement | null>;
+}) {
+	const text = hiddenBoardsText(board.sprints, lens.hiddenBoards);
+	if (!text) return null;
+	const show = (key: string, shown: boolean) => {
+		const next = new Set(lens.hiddenBoards);
+		if (shown) next.delete(key);
+		else next.add(key);
+		actions.setHiddenBoards(next);
+	};
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<button ref={trigger} type="button" className="rel-lyr rel-hid" data-testid="hidden-boards">
+					<EyeOff aria-hidden="true" />
+					{text}
+				</button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start" aria-label="Sprint rows">
+				<DropdownMenuLabel>Sprint rows</DropdownMenuLabel>
+				{board.sprints.map((r) => (
+					<DropdownMenuCheckboxItem
+						key={r.board.key}
+						checked={!lens.hiddenBoards.has(r.board.key)}
+						onCheckedChange={(on) => show(r.board.key, on === true)}
+						onSelect={(e) => e.preventDefault()}
+					>
+						{r.board.key} {r.number}
+					</DropdownMenuCheckboxItem>
+				))}
+				<DropdownMenuSeparator />
+				<DropdownMenuItem onSelect={() => actions.setHiddenBoards(new Set())}>Show all</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
 export function BoardSprintRow({
 	row,
 	board,
 	tl,
 	lens,
 	actions,
+	onHide,
 }: {
 	row: SprintRow;
 	board: Board;
 	tl: Timeline;
 	lens: Lens;
 	actions: PageActions;
+	onHide: (board: string) => void;
 }) {
 	const open = useReleasesUi((s) => s.open);
 	const toggle = useReleasesUi((s) => s.toggleFold);
@@ -291,30 +350,41 @@ export function BoardSprintRow({
 			className="rel-row rel-sprow"
 			data={{ "data-board": row.board.key, "data-testid": `sprint-row-${row.board.key}` }}
 		>
-			<button
-				type="button"
-				className="rel-lab top"
-				onClick={() => actions.openSheet({ kind: "sprint", board: row.board.key })}
-			>
-				<span className="spn">
-					<b>{label.title}</b>
-					<small>{label.dates}</small>
-				</span>
-				<small className="sps" data-testid="sprint-scope">
-					{label.scope}
-				</small>
-				<span className="spt" data-testid="sprint-dests">
-					{label.dests.length ? (
-						label.dests.map((d) => (
-							<span key={d.text} className="c" data-st={d.tone}>
-								{d.text}
-							</span>
-						))
-					) : (
-						<span className="passive">{lens.me ? "nothing of mine" : "no cards"}</span>
-					)}
-				</span>
-			</button>
+			<div className="rel-lab top">
+				<button
+					type="button"
+					className="open"
+					onClick={() => actions.openSheet({ kind: "sprint", board: row.board.key })}
+				>
+					<span className="spn">
+						<b>{label.title}</b>
+						<small>{label.dates}</small>
+					</span>
+					<small className="sps" data-testid="sprint-scope">
+						{label.scope}
+					</small>
+					<span className="spt" data-testid="sprint-dests">
+						{label.dests.length ? (
+							label.dests.map((d) => (
+								<span key={d.text} className="c" data-st={d.tone}>
+									{d.text}
+								</span>
+							))
+						) : (
+							<span className="passive">{lens.me ? "nothing of mine" : "no cards"}</span>
+						)}
+					</span>
+				</button>
+				<button
+					type="button"
+					className="hide"
+					aria-label={`Hide ${row.board.key} sprint`}
+					title={`Hide ${row.board.key} sprint`}
+					onClick={() => onHide(row.board.key)}
+				>
+					<EyeOff aria-hidden="true" />
+				</button>
+			</div>
 			<div className="rel-trk" style={{ width: tl.width }}>
 				<div className="rel-cg spsrc" style={{ left: x0, top: SRC_TOP, width }}>
 					<button type="button" className="csum" aria-expanded={open.has(fk)} onClick={() => toggle(fk)}>

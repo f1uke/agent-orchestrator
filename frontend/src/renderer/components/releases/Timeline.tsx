@@ -21,7 +21,7 @@ import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
-import { BoardSprintRow } from "./BoardSprintRows";
+import { BoardSprintRow, HiddenBoardsMenu } from "./BoardSprintRows";
 import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
 import { MoveRoot, Moving, useReleaseMotion } from "./ReleaseMotion";
@@ -116,6 +116,18 @@ export function Timeline({
 
 	usePan(sc, mo);
 
+	const hiddenTrigger = useRef<HTMLButtonElement>(null);
+	const focusTrigger = useRef(false);
+	useEffect(() => {
+		if (!focusTrigger.current) return;
+		focusTrigger.current = false;
+		hiddenTrigger.current?.focus();
+	}, [lens.hiddenBoards]);
+	const hideBoard = (key: string) => {
+		focusTrigger.current = true;
+		actions.setHiddenBoards(new Set([...lens.hiddenBoards, key]));
+	};
+
 	return (
 		<div className="rel-sc" ref={sc} data-testid="release-timeline">
 			<MoveRoot keys={moveKeys(url, layers, folds, lens.hiddenBoards)}>
@@ -126,6 +138,9 @@ export function Timeline({
 						<div className="rel-row">
 							<div className="rel-lab">
 								<span className="rel-eyebrow">Sprint</span>
+								{layers.sprint && (
+									<HiddenBoardsMenu board={board} lens={lens} actions={actions} trigger={hiddenTrigger} />
+								)}
 							</div>
 							<div className="rel-trk" style={{ width: tl.width, height: 30 }}>
 								{board.sprints
@@ -149,7 +164,15 @@ export function Timeline({
 						</div>
 						{layers.sprint &&
 							lens.sprintRows.map((row) => (
-								<BoardSprintRow key={row.board.key} row={row} board={board} tl={tl} lens={lens} actions={actions} />
+								<BoardSprintRow
+									key={row.board.key}
+									row={row}
+									board={board}
+									tl={tl}
+									lens={lens}
+									actions={actions}
+									onHide={hideBoard}
+								/>
 							))}
 					</div>
 					{lens.apps.map((a) => (

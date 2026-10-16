@@ -82,6 +82,7 @@ test.describe("releases page", () => {
 		await expect(sheet).toContainText("train in focus, with its stage markers");
 		await expect(sheet).toContainText("Jira release approval");
 		await expect(sheet).toContainText("unknown: the read failed or is stale");
+		await expect(sheet).toContainText("its alerts stay in Needs attention");
 	});
 
 	test("toggling a rule turns it off and back on", async ({ page }) => {
@@ -581,6 +582,104 @@ test.describe("releases page", () => {
 		);
 	});
 
+	test("hiding a board's row moves the rows below up, shows N hidden, and survives a reload and a page switch", async ({
+		page,
+	}) => {
+		await open(page, "?layers=sprint,llb,cards");
+		const demo = page.getByTestId("sprint-row-DEMO");
+		const pilot = page.getByTestId("sprint-row-PILOT");
+		const firstApp = page.locator(".rel-app").first();
+		const demoTop = (await demo.boundingBox())!.y;
+		const appTop = (await firstApp.boundingBox())!.y;
+		await expect(page.getByTestId("hidden-boards")).toHaveCount(0);
+
+		await demo.hover();
+		await demo.getByRole("button", { name: "Hide DEMO sprint" }).click();
+		await expect(demo).toHaveCount(0);
+		await expect(page.getByTestId("hidden-boards")).toHaveText("1 hidden");
+		await settle(page);
+		expect((await pilot.boundingBox())!.y).toBeCloseTo(demoTop, 0);
+		expect((await firstApp.boundingBox())!.y).toBeLessThan(appTop - 40);
+
+		await page.reload();
+		await expect(page.getByTestId("label-di")).toBeVisible();
+		await expect(page.getByTestId("sprint-row-DEMO")).toHaveCount(0);
+		await expect(page.getByTestId("hidden-boards")).toHaveText("1 hidden");
+
+		const nav = page.locator('[data-sidebar="sidebar"]');
+		await nav.getByText("Dashboard").first().click();
+		await expect(page.getByTestId("releases-page")).toHaveCount(0);
+		await nav.getByRole("button", { name: /^Releases/ }).click();
+		await expect(page.getByTestId("label-di")).toBeVisible();
+		await expect(page.getByTestId("sprint-row-DEMO")).toHaveCount(0);
+		await expect(pilot).toBeVisible();
+	});
+
+	test("the N hidden menu lists every board, shows one again, and Show all brings every row back", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		for (const key of ["DEMO", "PILOT"]) {
+			await page.getByTestId(`sprint-row-${key}`).hover();
+			await page.getByRole("button", { name: `Hide ${key} sprint` }).click();
+		}
+		await expect(page.locator("[data-board]")).toHaveCount(0);
+		await page.getByTestId("hidden-boards").click();
+		const menu = page.getByRole("menu");
+		await expect(menu.getByRole("menuitemcheckbox")).toHaveText(["DEMO 20", "PILOT 20"]);
+		await expect(menu.getByRole("menuitemcheckbox", { name: "DEMO 20" })).toHaveAttribute("aria-checked", "false");
+		await menu.getByRole("menuitemcheckbox", { name: "PILOT 20" }).click();
+		await expect(menu).toBeVisible();
+		await expect(page.getByTestId("sprint-row-PILOT")).toBeVisible();
+		await expect(page.getByTestId("hidden-boards")).toHaveText("1 hidden");
+		await menu.getByRole("menuitem", { name: "Show all" }).click();
+		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.getByTestId("hidden-boards")).toHaveCount(0);
+	});
+
+	test("a link with hideBoards wins over the saved set, and a change from it rewrites the link", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		await page.getByTestId("sprint-row-DEMO").hover();
+		await page.getByRole("button", { name: "Hide DEMO sprint" }).click();
+		await expect(page.getByTestId("sprint-row-DEMO")).toHaveCount(0);
+
+		await page.goto("/#/releases?layers=sprint,llb,cards&hideBoards=PILOT");
+		await expect(page.getByTestId("label-di")).toBeVisible();
+		await expect(page.getByTestId("sprint-row-DEMO")).toBeVisible();
+		await expect(page.getByTestId("sprint-row-PILOT")).toHaveCount(0);
+
+		await page.getByTestId("sprint-row-DEMO").hover();
+		await page.getByRole("button", { name: "Hide DEMO sprint" }).click();
+		await expect(page).toHaveURL(/hideBoards=DEMO(%2C|,)PILOT/);
+		await expect(page.locator("[data-board]")).toHaveCount(0);
+	});
+
+	test("keyboard: Tab reaches a row's hide button, Enter hides it, and focus lands on N hidden", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		await page.getByTestId("sprint-row-DEMO").locator(".rel-lab .open").focus();
+		await page.keyboard.press("Tab");
+		const hide = page.getByRole("button", { name: "Hide DEMO sprint" });
+		await expect(hide).toBeFocused();
+		await expect(hide).toHaveCSS("opacity", "1");
+		await page.keyboard.press("Enter");
+		await expect(page.getByTestId("sprint-row-DEMO")).toHaveCount(0);
+		await expect(page.getByTestId("hidden-boards")).toBeFocused();
+		await page.keyboard.press("Enter");
+		await expect(page.getByRole("menuitemcheckbox", { name: "DEMO 20" })).toBeVisible();
+	});
+
+	test("a hidden board's sprint sheet says so and shows it again; its alerts stay in Needs attention", async ({
+		page,
+	}) => {
+		await open(page, "?layers=sprint,llb,cards");
+		const before = await page.getByRole("button", { name: /Needs attention/ }).innerText();
+		await page.goto("/#/releases?layers=sprint,llb,cards&hideBoards=DEMO&sheet=sprint:DEMO");
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		await expect(sheet.getByTestId("sprint-sheet-hidden")).toBeVisible();
+		await expect(page.getByRole("button", { name: /Needs attention/ })).toHaveText(before);
+		await sheet.getByRole("button", { name: "Show DEMO sprint" }).click();
+		await expect(sheet.getByTestId("sprint-sheet-cards")).toBeVisible();
+		await expect(page.getByTestId("sprint-row-DEMO")).toBeVisible();
+	});
+
 	test("a board row unfolds into destinations at their train, wired from the sprint, with MR pills by destination", async ({
 		page,
 	}) => {
@@ -1035,5 +1134,21 @@ for (const [width, height] of [
 		expect(report.n).toBeGreaterThan(10);
 		expect(report.overlaps).toEqual([]);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-all-${width}.png` });
+	});
+
+	test(`at ${width}x${height} no labels overlap with a board hidden and a row label hovered`, async ({ page }) => {
+		await page.setViewportSize({ width, height });
+		await open(page, "?layers=sprint,llb,cards&hideBoards=PILOT");
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await page.getByTestId("sprint-row-DEMO").locator(".rel-lab").hover();
+		await expect(page.getByRole("button", { name: "Hide DEMO sprint" })).toHaveCSS("opacity", "1");
+		await settle(page);
+		const report = await labelOverlaps(page);
+		expect(report.n).toBeGreaterThan(10);
+		expect(report.overlaps).toEqual([]);
+		const hid = (await page.getByTestId("hidden-boards").boundingBox())!;
+		const lab = (await page.locator(".rel-sched > .rel-row > .rel-lab").first().boundingBox())!;
+		expect(hid.x + hid.width, "N hidden stays inside the label column").toBeLessThanOrEqual(lab.x + lab.width);
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-hidden-${width}.png` });
 	});
 }

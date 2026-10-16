@@ -8,6 +8,7 @@ export async function open(page: Page, query = "", variant?: "failed-source" | "
 				localStorage.removeItem("ao.releases.folds.v1");
 				localStorage.removeItem("ao.releases.search.v1");
 				localStorage.removeItem("ao.releases.scroll.v1");
+				localStorage.removeItem("ao.releases.hidden-boards.v1");
 			}
 			sessionStorage.setItem("releases-spec", "1");
 		} catch {}
@@ -70,7 +71,9 @@ export function labelOverlaps(page: Page): Promise<{ n: number; overlaps: string
 			return !!h && (h === e || e.contains(h) || h.contains(e));
 		};
 		const els = [
-			...document.querySelectorAll(".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr, .dsum, .rel-sprow .crow"),
+			...document.querySelectorAll(
+				".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr, .dsum, .rel-sprow .crow, .rel-lab.top .spn, .rel-lab.top .sps, .rel-lab.top .spt, .rel-lab.top > .hide",
+			),
 		].filter((e) => {
 			const r = e.getBoundingClientRect();
 			const visible = r.width > 0 && r.height > 0 && r.right > 0 && r.left < vw && r.top < vh && r.bottom > 0;
