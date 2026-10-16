@@ -9,6 +9,8 @@ import type {
 	Severity,
 	Stage,
 	StageStatus,
+	Subject,
+	SubjectKind,
 	Train,
 } from "./types";
 
@@ -259,6 +261,23 @@ const READS: Readonly<Record<string, string[]>> = {
 	L9: ["gitlab.mrs"],
 };
 
+const SUBJECTS: Readonly<Record<string, SubjectKind[]>> = {
+	A1: ["version"],
+	A5: ["version"],
+	A6: ["versionDate"],
+	A7: ["version"],
+	B1: ["version"],
+	C1: ["version"],
+	C5: ["version"],
+	D1: ["version"],
+	D3: ["version"],
+	E1: ["version", "hotfix"],
+	F1: ["trainPair"],
+	G5: ["pageFamily"],
+	L3: ["cardOnTrain"],
+	L9: ["mr"],
+};
+
 const FIX_KINDS: Readonly<Record<string, FixKind>> = {
 	A5: "choose",
 	C1: "queue",
@@ -366,9 +385,17 @@ function baseBoard(today: string): Board {
 			],
 		})),
 	);
-	const hit = (id: string, rule: string, severity: Severity, text: string, over: Partial<AlertHit> = {}): AlertHit => ({
+	const hit = (
+		id: string,
+		rule: string,
+		severity: Severity,
+		text: string,
+		subject: Subject,
+		over: Partial<AlertHit> = {},
+	): AlertHit => ({
 		id,
 		rule,
+		subject,
 		severity,
 		bucket: "badge",
 		text,
@@ -378,29 +405,52 @@ function baseBoard(today: string): Board {
 		...over,
 	});
 	const hits: AlertHit[] = [
-		hit("C5~v/21-2026/di", "C5", "block", "!77 has merge conflicts", { app: "di", train: "21-2026" }),
-		hit("C1~v/21-2026/di", "C1", "block", "!77 failed: build_test", { app: "di", train: "21-2026", fix: "queue" }),
+		hit(
+			"C5~v/21-2026/di",
+			"C5",
+			"block",
+			"!77 has merge conflicts",
+			{ kind: "version", train: "21-2026", app: "di" },
+			{ app: "di", train: "21-2026" },
+		),
+		hit(
+			"C1~v/21-2026/di",
+			"C1",
+			"block",
+			"!77 failed: build_test",
+			{ kind: "version", train: "21-2026", app: "di" },
+			{ app: "di", train: "21-2026", fix: "queue" },
+		),
 		hit(
 			"A7~v/21-2026/pa",
 			"A7",
 			"data",
 			`Milestone ${dayLabel(addDays(f21, 2))} → ${dayLabel(addDays(p21, 2))}, the rest of #21 runs ${dayLabel(f21)} → ${dayLabel(p21)}. Give it its own train or move the milestone`,
+			{ kind: "version", train: "21-2026", app: "pa" },
 			{ app: "pa", train: "21-2026" },
 		),
-		hit("A1~v/21-2026/pi", "A1", "data", "Milestone says 1.0.1, Jira release says 1.0.2", {
-			app: "pi",
-			train: "21-2026",
-			evidence: { kind: "version", version: "1.0.2", milestone: "v 1.0.1", jira: "pi 1.0.2" },
-			links: [
-				{ label: "Open Jira release", url: `${JIRA}/versions/1` },
-				{ label: "Open milestone", url: `${HOST}/milestones/1` },
-			],
-		}),
+		hit(
+			"A1~v/21-2026/pi",
+			"A1",
+			"data",
+			"Milestone says 1.0.1, Jira release says 1.0.2",
+			{ kind: "version", train: "21-2026", app: "pi" },
+			{
+				app: "pi",
+				train: "21-2026",
+				evidence: { kind: "version", version: "1.0.2", milestone: "v 1.0.1", jira: "pi 1.0.2" },
+				links: [
+					{ label: "Open Jira release", url: `${JIRA}/versions/1` },
+					{ label: "Open milestone", url: `${HOST}/milestones/1` },
+				],
+			},
+		),
 		hit(
 			"A6~vd/21-2026/di/freeze",
 			"A6",
 			"data",
 			`Page says freeze ${dayLabel(addDays(f21, 1))}, milestone starts ${dayLabel(f21)}`,
+			{ kind: "versionDate", train: "21-2026", app: "di", field: "freeze" },
 			{
 				app: "di",
 				train: "21-2026",
@@ -411,33 +461,62 @@ function baseBoard(today: string): Board {
 				],
 			},
 		),
-		hit("D3~v/21-2026/da", "D3", "risk", "0 of 9 approvers approved, publish in 6 days", {
-			app: "da",
-			train: "21-2026",
-		}),
-		hit("F1~t/21-2026+22-2026", "F1", "info", "#21 and #22 are two weeks apart", { train: "21-2026" }),
+		hit(
+			"D3~v/21-2026/da",
+			"D3",
+			"risk",
+			"0 of 9 approvers approved, publish in 6 days",
+			{ kind: "version", train: "21-2026", app: "da" },
+			{
+				app: "da",
+				train: "21-2026",
+			},
+		),
+		hit(
+			"F1~tt/21-2026/22-2026",
+			"F1",
+			"info",
+			"#22 freezes before #21 publishes",
+			{ kind: "trainPair", a: "21-2026", b: "22-2026" },
+			{ train: "22-2026" },
+		),
 		hit(
 			"L9~mr/da/415",
 			"L9",
 			"risk",
 			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
+			{ kind: "mr", app: "da", iid: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base" },
 			{
 				app: "da",
 				evidence: { mr: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base", state: "opened" },
 				links: [{ label: "Open MR", url: `${HOST}/merge_requests/415` }],
 			},
 		),
-		hit("E1~v/20-2026/di", "E1", "hygiene", "Published but the Jira release is not marked released", {
-			app: "di",
-			train: "20-2026",
-			bucket: "history",
-			fix: "queue",
-		}),
-		hit("D1~v/22-2026/da", "D1", "risk", "No approvers set on the Jira release", {
-			app: "da",
-			train: "22-2026",
-			bucket: "hidden",
-		}),
+		hit(
+			"E1~v/20-2026/di",
+			"E1",
+			"hygiene",
+			"Published but the Jira release is not marked released",
+			{ kind: "version", train: "20-2026", app: "di" },
+			{
+				app: "di",
+				train: "20-2026",
+				bucket: "history",
+				fix: "queue",
+			},
+		),
+		hit(
+			"D1~v/22-2026/da",
+			"D1",
+			"risk",
+			"No approvers set on the Jira release",
+			{ kind: "version", train: "22-2026", app: "da" },
+			{
+				app: "da",
+				train: "22-2026",
+				bucket: "hidden",
+			},
+		),
 	];
 	const catalogue: RuleInfo[] = RULES.map(([id, severity, title]) => ({
 		id,
@@ -447,6 +526,7 @@ function baseBoard(today: string): Board {
 		on: id !== "F1",
 		defaultOn: true,
 		reads: READS[id],
+		subjects: SUBJECTS[id],
 		...(FIX_KINDS[id] ? { fix: FIX_KINDS[id] } : {}),
 	}));
 	const badge = hits.filter((h) => h.bucket === "badge");
@@ -1109,8 +1189,15 @@ export function fixesBoard(today: string): Board {
 		},
 	];
 	const at = `${today}T02:00:00Z`;
-	const fixable = (id: string, severity: Severity, text: string, over: Partial<AlertHit>): AlertHit => ({
+	const fixable = (
+		id: string,
+		severity: Severity,
+		text: string,
+		subject: Subject,
+		over: Partial<AlertHit>,
+	): AlertHit => ({
 		id,
+		subject,
 		rule: id.slice(0, id.indexOf("~")),
 		severity,
 		bucket: "badge",
@@ -1122,14 +1209,21 @@ export function fixesBoard(today: string): Board {
 		...over,
 	});
 	const added = [
-		fixable("A5~v/21-2026/da", "data", "Jira release date is 2 days after the milestone due date", {
-			app: "da",
-			train: "21-2026",
-		}),
+		fixable(
+			"A5~v/21-2026/da",
+			"data",
+			"Jira release date is 2 days after the milestone due date",
+			{ kind: "version", train: "21-2026", app: "da" },
+			{
+				app: "da",
+				train: "21-2026",
+			},
+		),
 		fixable(
 			"L3~ct/21-2026/di/DEMO-110",
 			"risk",
 			"DEMO-110 is on train 21-2026, but its code sits in feature/demo-chat (no target train)",
+			{ kind: "cardOnTrain", train: "21-2026", app: "di", key: "DEMO-110" },
 			{
 				app: "di",
 				train: "21-2026",
@@ -1141,6 +1235,7 @@ export function fixesBoard(today: string): Board {
 			"G5~pf/21-2026/demo/merged",
 			"risk",
 			"2 card(s) ship with #21 but are not on Release Train #21 Demo: DEMO-103, DEMO-106",
+			{ kind: "pageFamily", train: "21-2026", family: "demo", bucket: "merged", keys: ["DEMO-103", "DEMO-106"] },
 			{
 				train: "21-2026",
 				evidence: { page: "page-21-demo", cards: ["DEMO-103", "DEMO-106"], bucket: "merged" },
@@ -1164,6 +1259,7 @@ export function fixesBoard(today: string): Board {
 			defaultOn: true,
 			fix: FIX_KINDS[id],
 			reads: READS[id],
+			subjects: SUBJECTS[id],
 		});
 	b.alerts.rules = b.catalogue.map((r) => {
 		const ids = b.alerts.hits.filter((h) => h.rule === r.id && h.bucket === "badge").map((h) => h.id);

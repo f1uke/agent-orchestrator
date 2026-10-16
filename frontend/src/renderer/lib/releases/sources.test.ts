@@ -121,6 +121,7 @@ describe("ruleOf", () => {
 		on: true,
 		defaultOn: true,
 		reads,
+		subjects: ["version"],
 	});
 
 	it("reads rule C5 on the page and C5 · GitLab in a sheet", () => {

@@ -8,8 +8,9 @@ import (
 
 var ruleB1 = rule{
 	ID: "B1", Group: "B", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindMRs.Name},
-	Title: "Freeze day passed and no release MR is open",
+	Subjects: []SubjectKind{SubjectVersion},
+	Reads:    []KindName{KindMilestones.Name, KindMRs.Name},
+	Title:    "Freeze day passed and no release MR is open",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			s := freezeStage(t, v, b.Today)
@@ -26,8 +27,9 @@ var devStatuses = map[string]bool{"Ready to Dev": true, "In Progress": true, "Pu
 
 var ruleB3 = rule{
 	ID: "B3", Group: "B", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name},
-	Title: "Cards still in development after freeze",
+	Subjects: []SubjectKind{SubjectVersion},
+	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name},
+	Title:    "Cards still in development after freeze",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			freeze := freezeOf(t, v)

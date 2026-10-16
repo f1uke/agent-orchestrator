@@ -6,8 +6,9 @@ var doneStatuses = map[string]bool{"Done": true, "Deployed": true, "UAT Approved
 
 var ruleE1 = rule{
 	ID: "E1", Group: "E", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindJiraVersions.Name, KindTags.Name},
-	Title: "Published but the Jira release is not marked released",
+	Subjects: []SubjectKind{SubjectVersion, SubjectHotfix},
+	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindTags.Name},
+	Title:    "Published but the Jira release is not marked released",
 	Check: func(b *Board) []Hit {
 		hits := forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			if v.Jira == nil || v.Jira.Released || !published(t, v, b.Today) {
@@ -36,9 +37,10 @@ var ruleE1 = rule{
 
 var ruleE2 = rule{
 	ID: "E2", Group: "E", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name},
-	Title: "Cards not Done after publish",
-	Hint:  "Team decision: every card should be moved to Done after publish, including Ready for UAT and Ready to Deliver.",
+	Subjects: []SubjectKind{SubjectVersion},
+	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name},
+	Title:    "Cards not Done after publish",
+	Hint:     "Team decision: every card should be moved to Done after publish, including Ready for UAT and Ready to Deliver.",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			due := dueOf(t, v)
@@ -62,8 +64,9 @@ var ruleE2 = rule{
 
 var ruleE4 = rule{
 	ID: "E4", Group: "E", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindTechReq.Name},
-	Title: "Force-update ticket open after its due date",
+	Subjects: []SubjectKind{SubjectVersion},
+	Reads:    []KindName{KindMilestones.Name, KindTechReq.Name},
+	Title:    "Force-update ticket open after its due date",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			fu := v.ForceUpdate
@@ -78,8 +81,9 @@ var ruleE4 = rule{
 
 var ruleE5 = rule{
 	ID: "E5", Group: "E", Severity: SevInfo, DefaultOn: false, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindTechReq.Name},
-	Title: "Force-update ticket has no due date",
+	Subjects: []SubjectKind{SubjectVersion},
+	Reads:    []KindName{KindMilestones.Name, KindTechReq.Name},
+	Title:    "Force-update ticket has no due date",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			fu := v.ForceUpdate

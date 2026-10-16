@@ -18,6 +18,7 @@ function hit(id: string, over: Partial<AlertHit> = {}): AlertHit {
 	return {
 		id,
 		rule: id.slice(0, id.indexOf("~")),
+		subject: { kind: "version", train: "21-2026", app: "di" },
 		severity: "risk",
 		bucket: "badge",
 		text: "",
@@ -166,7 +167,15 @@ describe("undo", () => {
 
 describe("hits about a card", () => {
 	it("matches a sprint card and a card on a train by key, not by a key prefix", () => {
-		const hits = [hit("G1~c/DEMO-11"), hit("L3~ct/21-2026/di/DEMO-11"), hit("G1~c/DEMO-110"), hit("C1~v/21-2026/di")];
+		const card = (key: string) => ({ kind: "card" as const, key, board: "DEMO" });
+		const hits = [
+			hit("G1~c/DEMO-11", { subject: card("DEMO-11") }),
+			hit("L3~ct/21-2026/di/DEMO-11", {
+				subject: { kind: "cardOnTrain", train: "21-2026", app: "di", key: "DEMO-11" },
+			}),
+			hit("G1~c/DEMO-110", { subject: card("DEMO-110") }),
+			hit("C1~v/21-2026/di"),
+		];
 		expect(cardHits(hits, "DEMO-11").map((h) => h.id)).toEqual(["G1~c/DEMO-11", "L3~ct/21-2026/di/DEMO-11"]);
 	});
 });
