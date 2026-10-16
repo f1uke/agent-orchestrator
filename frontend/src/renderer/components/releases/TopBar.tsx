@@ -1,7 +1,8 @@
 import { GitFork, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
 import { useRefreshSources } from "../../hooks/useReleaseBoard";
-import { badgeLabel, sourceAges, type Lens } from "../../lib/releases/lens";
+import { badgeLabel, type Lens, type SourceAge } from "../../lib/releases/lens";
+import { systemMeta, type SourceIndex } from "../../lib/releases/sources";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../ui/hover-card";
 import { appMark } from "../../lib/releases/appMark";
 import { isOpenLlb } from "../../lib/releases/llb";
 import type { Board } from "../../lib/releases/types";
@@ -11,6 +12,7 @@ import { SimpleTooltip } from "../ui/tooltip";
 import { AppMark } from "./AppMark";
 import { Avatar } from "./Avatar";
 import type { PageActions } from "./ReleasesPage";
+import { SystemMark } from "./Sources";
 
 function OnlyMe({ board, on, onToggle }: { board: Board; on: boolean; onToggle: () => void }) {
 	const id = board.identity;
@@ -37,13 +39,50 @@ function OnlyMe({ board, on, onToggle }: { board: Board; on: boolean; onToggle: 
 	);
 }
 
-function useNow(ms: number): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const id = window.setInterval(() => setNow(Date.now()), ms);
-		return () => window.clearInterval(id);
-	}, [ms]);
-	return now;
+function SourceMark({ age: s, idx }: { age: SourceAge; idx: SourceIndex }) {
+	const name = systemMeta(s.system).name;
+	const state = s.unknown ? "unknown" : s.age === "now" ? "read just now" : `read ${s.age} ago`;
+	return (
+		<HoverCard openDelay={80} closeDelay={120}>
+			<HoverCardTrigger asChild>
+				<button
+					type="button"
+					className="rel-smark"
+					data-source={s.system}
+					data-unknown={s.unknown || undefined}
+					aria-label={`${name}: ${state}`}
+				>
+					<SystemMark system={s.system} />
+					{s.unknown && <b>unknown</b>}
+				</button>
+			</HoverCardTrigger>
+			<HoverCardContent className="srcpop" onEscapeKeyDown={(e) => e.stopPropagation()}>
+				<div className="srccard" data-testid="source-card">
+					<div className="sc-h">
+						{name} · {s.unknown ? `unknown, last read ${s.age === "never read" ? "never" : `${s.age} ago`}` : state}
+					</div>
+					<div className="sc-k">Feeds</div>
+					{idx.kindsOf(s.system).map((k) => (
+						<div key={k} className="sc-l">
+							<SystemMark system={s.system} />
+							<span data-unknown={idx.kindStale(k) || undefined}>
+								{idx.labelOf(k)}
+								<small>{k}</small>
+							</span>
+						</div>
+					))}
+					<div className="sc-how">
+						{s.unknown
+							? `Not fresh: ${s.why}. Values read from it show as unknown, and their source tags get an amber dot.`
+							: `Every source tag that names ${name} reads from here.`}
+					</div>
+					<div className="sc-fd">
+						<code>Board.kinds, Board.sources</code>
+					</div>
+				</div>
+			</HoverCardContent>
+		</HoverCard>
+	);
 }
 
 export function TopBar({
@@ -51,23 +90,15 @@ export function TopBar({
 	url,
 	lens,
 	actions,
-	fetchError,
-	updatedAt,
+	idx,
 }: {
 	board: Board;
 	url: ReleasesSearch;
 	lens: Lens;
 	actions: PageActions;
-	fetchError: string | null;
-	updatedAt: number;
+	idx: SourceIndex;
 }) {
 	const refresh = useRefreshSources();
-	const now = useNow(30_000);
-	const ages = sourceAges(
-		board.sources,
-		now,
-		fetchError ? `${fetchError}; board last read ${Math.max(0, Math.round((now - updatedAt) / 60_000))}m ago` : null,
-	);
 	const toggleApp = (id: string) => {
 		const on = new Set(url.apps ?? board.apps.map((a) => a.id));
 		if (on.has(id)) on.delete(id);
@@ -118,16 +149,9 @@ export function TopBar({
 				</button>
 			</div>
 			<div className="flex-1" />
-			<div className="rel-src" data-testid="release-sources">
-				{ages.map((s) => (
-					<SimpleTooltip
-						key={s.system}
-						label={s.unknown ? `${s.system}: ${s.why}` : `${s.system}: every resource fresh`}
-					>
-						<span className={s.unknown ? "u" : ""} data-source={s.system}>
-							{s.system} {s.unknown ? `unknown · ${s.age}` : s.age}
-						</span>
-					</SimpleTooltip>
+			<div className="rel-src" data-testid="release-sources" role="group" aria-label="Sources">
+				{idx.systems.map((s) => (
+					<SourceMark key={s.system} age={s} idx={idx} />
 				))}
 			</div>
 			<OnlyMe board={board} on={lens.me} onToggle={() => actions.setSearch({ me: !url.me })} />

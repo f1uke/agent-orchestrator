@@ -169,6 +169,11 @@ export function stageOf(s: Stage): Provenance {
 	};
 }
 
+export function ruleTagOf(catalogue: readonly RuleInfo[], id: string): Provenance | null {
+	const r = catalogue.find((x) => x.id === id);
+	return r ? ruleOf(r) : null;
+}
+
 export function ruleOf(r: RuleInfo): Provenance {
 	return {
 		title: `Rule ${r.id}`,

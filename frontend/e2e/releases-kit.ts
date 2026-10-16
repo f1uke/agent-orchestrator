@@ -1,6 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 
-export async function open(page: Page, query = "", variant?: "failed-source" | "identity-unknown" | "fixes") {
+export async function open(
+	page: Page,
+	query = "",
+	variant?: "failed-source" | "identity-unknown" | "fixes" | "stale-kind",
+) {
 	await page.addInitScript((v) => {
 		try {
 			if (!sessionStorage.getItem("releases-spec")) {

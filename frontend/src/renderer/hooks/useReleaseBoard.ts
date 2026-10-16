@@ -1,7 +1,14 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage, getApiBaseUrl, hasTrustedApiBaseUrl } from "../lib/api-client";
 import { boardFetcher } from "../lib/releases/boardFetch";
-import { demoBoard, demoResponse, failedSourceBoard, fixesBoard, unknownIdentityBoard } from "../lib/releases/fixture";
+import {
+	demoBoard,
+	demoResponse,
+	failedSourceBoard,
+	fixesBoard,
+	staleKindBoard,
+	unknownIdentityBoard,
+} from "../lib/releases/fixture";
 import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
 import { previewConfirm, previewPlan, previewUndo, type PreviewFixStore } from "../lib/releases/fixPreview";
 import { PlanConflictError, planInput, targetAfterPlan, type PlanDraft } from "../lib/releases/plan";
@@ -15,13 +22,14 @@ const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 /** Playwright sets the variant before load; a mutation edits the board kept here. */
 type PreviewSeam = {
 	__aoReleaseBoard?: BoardResponse;
-	__aoReleaseBoardVariant?: "failed-source" | "identity-unknown" | "fixes";
+	__aoReleaseBoardVariant?: keyof typeof VARIANTS;
 };
 
 const VARIANTS = {
 	"failed-source": failedSourceBoard,
 	"identity-unknown": unknownIdentityBoard,
 	fixes: fixesBoard,
+	"stale-kind": staleKindBoard,
 } as const;
 
 function previewBoard(): BoardResponse {

@@ -240,7 +240,7 @@ function AppRow({
 			data={{ "data-app": a.id }}
 			height={rowHeight({ llbH, lanesH: L.lanesH, cardsBottom })}
 		>
-			<StickyAppLabel app={a} lens={lens} actions={actions} />
+			<StickyAppLabel app={a} lens={lens} catalogue={board.catalogue} actions={actions} />
 			<div className="rel-trk" style={{ width: tl.width }}>
 				{groups.length > 0 && (
 					<LongLivedSummary

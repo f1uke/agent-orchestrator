@@ -332,12 +332,14 @@ test.describe("releases page", () => {
 		await expect(page.getByRole("dialog", { name: "Release details" })).toHaveCount(0);
 	});
 
-	test("a failed source shows unknown with its age, never a blank", async ({ page }) => {
+	test("a failed source shows unknown on its mark and its age in the mark's card, never a blank", async ({ page }) => {
 		await open(page, "", "failed-source");
-		await expect(page.getByTestId("release-sources").locator('[data-source="gitlab"]')).toHaveText(
-			/gitlab unknown · \d+[mhd]/,
-		);
-		await expect(page.getByTestId("release-sources").locator('[data-source="jira"]')).not.toContainText("unknown");
+		const gitlab = page.getByTestId("release-sources").locator('[data-source="gitlab"]');
+		await expect(gitlab).toHaveText("Gunknown");
+		await expect(page.getByTestId("release-sources").locator('[data-source="jira"]')).toHaveText("J");
+		await gitlab.hover();
+		await expect(page.getByTestId("source-card")).toContainText(/GitLab · unknown, last read \d+[mhd] ago/);
+		await page.mouse.move(700, 600);
 		await expect(page.getByTestId("attention-count")).toHaveText("8 · 1 unknown");
 		await expect(page.locator('.rel-app[data-app="di"] .rel-mk[data-stage="scan"]')).toHaveAttribute(
 			"data-st",
