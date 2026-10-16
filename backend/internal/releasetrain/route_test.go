@@ -45,7 +45,7 @@ func goldenRouting(t *testing.T) routing {
 			trainOn(t, 7, "2026-10-12", "2026-10-19", "di"),
 			trainOn(t, 8, "2026-10-26", "2026-11-02", "di"),
 		},
-		plans: map[string]TrainID{},
+		plans: map[string]plannedOn{},
 	}
 }
 
@@ -77,7 +77,7 @@ func TestRouteOfGoldenCases(t *testing.T) {
 		}, Route{Kind: DestLLB, To: ToLLB{Group: "demo-chat", Branch: "feature/demo-chat", Via: ptrTrain(9)}, MR: 6}},
 		{"parked in a long-lived branch its epic aims at a train, which the page agrees with", 8, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 19, "feature/demo-pay", MRMerged, "2026-10-07", "2026-10-08")}
-		}, Route{Kind: DestLLB, To: ToLLB{Group: "demo-pay", Branch: "feature/demo-pay", Via: ptrTrain(8)}, Plan: ptrTrain(8), MR: 19}},
+		}, Route{Kind: DestLLB, To: ToLLB{Group: "demo-pay", Branch: "feature/demo-pay", Via: ptrTrain(8)}, Plan: ptrTrain(8), PlanFrom: pagePlan, MR: 19}},
 		{"merged into develop after cutover goes off flow", 0, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 7, "develop", MRMerged, "2026-10-07", "2026-10-08")}
 		}, Route{Kind: DestDevelop, To: OffFlow{}, MR: 7}},
@@ -95,16 +95,16 @@ func TestRouteOfGoldenCases(t *testing.T) {
 		}, Route{Kind: DestPrev, To: ToTrain{Train: routeTrain(7)}, MR: 11}},
 		{"page says another train than the sprint branch", 7, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 12, "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")}
-		}, Route{Kind: DestSprint, To: ToTrain{Train: routeTrain(8)}, Plan: ptrTrain(7), Mismatch: true, MR: 12}},
+		}, Route{Kind: DestSprint, To: ToTrain{Train: routeTrain(8)}, Plan: ptrTrain(7), PlanFrom: pagePlan, Mismatch: true, MR: 12}},
 		{"page agrees with the sprint branch", 8, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 13, "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")}
-		}, Route{Kind: DestSprint, To: ToTrain{Train: routeTrain(8)}, Plan: ptrTrain(8), MR: 13}},
+		}, Route{Kind: DestSprint, To: ToTrain{Train: routeTrain(8)}, Plan: ptrTrain(8), PlanFrom: pagePlan, MR: 13}},
 		{"page names another train than the long-lived plan", 8, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 14, "feature/demo-chat", MRMerged, "2026-10-07", "2026-10-08")}
-		}, Route{Kind: DestLLB, To: ToLLB{Group: "demo-chat", Branch: "feature/demo-chat", Via: ptrTrain(9)}, Plan: ptrTrain(8), Mismatch: true, MR: 14}},
+		}, Route{Kind: DestLLB, To: ToLLB{Group: "demo-chat", Branch: "feature/demo-chat", Via: ptrTrain(9)}, Plan: ptrTrain(8), PlanFrom: pagePlan, Mismatch: true, MR: 14}},
 		{"merged before this sprint, its page names the train", 6, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 16, "develop", MRMerged, "2026-09-02", "2026-09-03")}
-		}, Route{Kind: DestBefore, To: ToTrain{Train: routeTrain(6)}, Plan: ptrTrain(6), MR: 16}},
+		}, Route{Kind: DestBefore, To: ToTrain{Train: routeTrain(6)}, Plan: ptrTrain(6), PlanFrom: pagePlan, MR: 16}},
 		{"with no cutover, develop after the sprint start goes off flow", 0, true, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 17, "develop", MRMerged, "2026-10-07", "2026-10-08")}
 		}, Route{Kind: DestDevelop, To: OffFlow{}, MR: 17}},
@@ -121,7 +121,7 @@ func TestRouteOfGoldenCases(t *testing.T) {
 				r.cutover = map[AppID]Day{}
 			}
 			if tc.plan != 0 {
-				r.plans[planKey("DEMO-1", "di")] = routeTrain(tc.plan)
+				r.plans[planKey("DEMO-1", "di")] = plannedOn{train: routeTrain(tc.plan), from: pagePlan}
 			}
 			got := r.RouteOf("DEMO-1", "di", tc.mrs(t))
 			tc.want.App = "di"
@@ -131,6 +131,8 @@ func TestRouteOfGoldenCases(t *testing.T) {
 		})
 	}
 }
+
+var pagePlan = []CardWhy{WhyPage}
 
 func ptrTrain(n int) *TrainID { id := routeTrain(n); return &id }
 

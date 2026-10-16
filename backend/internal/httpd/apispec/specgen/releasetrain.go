@@ -54,8 +54,10 @@ type (
 
 	rtLLBTarget   struct{}
 	rtLLBLandedIn struct {
-		Kind  string     `json:"kind" const:"landed"`
-		Train rt.TrainID `json:"train"`
+		Kind   string     `json:"kind" const:"landed"`
+		Train  rt.TrainID `json:"train"`
+		App    string     `json:"app" description:"The app of the landing that chose the train."`
+		Branch string     `json:"branch" description:"The long-lived branch whose landing chose the train."`
 	}
 	rtLLBPlanned struct {
 		Kind  string     `json:"kind" const:"planned"`
@@ -147,6 +149,10 @@ func init() {
 		"ReleasetrainBoardApp":                       "ReleaseTrainBoardApp",
 		"ReleasetrainBoardResponse":                  "ReleaseTrainBoardResponse",
 		"ReleasetrainCardUnit":                       "ReleaseTrainCardUnit",
+		"ReleasetrainCardEvidence":                   "ReleaseTrainCardEvidence",
+		"ReleasetrainFixVersionEvidence":             "ReleaseTrainFixVersionEvidence",
+		"ReleasetrainPageEvidence":                   "ReleaseTrainPageEvidence",
+		"ReleasetrainSprintMREvidence":               "ReleaseTrainSprintMREvidence",
 		"ReleasetrainCommitFact":                     "ReleaseTrainCommitFact",
 		"ReleasetrainConfigReport":                   "ReleaseTrainConfigReport",
 		"ReleasetrainDay":                            "ReleaseTrainDay",
@@ -182,6 +188,7 @@ func init() {
 		"ReleasetrainStageStatus":                    "ReleaseTrainStageStatus",
 		"ReleasetrainTrainPhase":                     "ReleaseTrainTrainPhase",
 		"ReleasetrainSourceFreshness":                "ReleaseTrainSourceFreshness",
+		"ReleasetrainKindFreshness":                  "ReleaseTrainKindFreshness",
 		"ReleasetrainStage":                          "ReleaseTrainStage",
 		"ReleasetrainTag":                            "ReleaseTrainTag",
 		"ReleasetrainTrain":                          "ReleaseTrainTrain",

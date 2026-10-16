@@ -98,12 +98,12 @@ type CommitFact struct {
 
 // GitLab fact kinds.
 var (
-	KindMilestones = newKind[MilestoneFact]("gitlab.milestones", Snapshotted, 10*time.Minute, perApp)
-	KindMRs        = newKind[MRFact]("gitlab.mrs", Incremental, 2*time.Minute, perApp)
-	KindMRDetail   = newKind[MRDetailFact]("gitlab.mr_detail", Snapshotted, 2*time.Minute, perEntity)
-	KindJobs       = newKind[JobsFact]("gitlab.jobs", Snapshotted, 2*time.Minute, perEntity)
-	KindTags       = newKind[TagFact]("gitlab.tags", Snapshotted, 10*time.Minute, perApp)
-	KindCompare    = newKind[CompareFact]("gitlab.compare", Snapshotted, 30*time.Minute, perEntity)
+	KindMilestones = newKind[MilestoneFact]("gitlab.milestones", "milestones", Snapshotted, 10*time.Minute, perApp)
+	KindMRs        = newKind[MRFact]("gitlab.mrs", "merge requests", Incremental, 2*time.Minute, perApp)
+	KindMRDetail   = newKind[MRDetailFact]("gitlab.mr_detail", "release MR detail", Snapshotted, 2*time.Minute, perEntity)
+	KindJobs       = newKind[JobsFact]("gitlab.jobs", "pipeline jobs", Snapshotted, 2*time.Minute, perEntity)
+	KindTags       = newKind[TagFact]("gitlab.tags", "tags", Snapshotted, 10*time.Minute, perApp)
+	KindCompare    = newKind[CompareFact]("gitlab.compare", "branch compares", Snapshotted, 30*time.Minute, perEntity)
 )
 
 // ItemKey keys a MilestoneFact within its resource.

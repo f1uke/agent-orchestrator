@@ -62,6 +62,9 @@ type LLBTarget interface{ llbTarget() }
 // LLBLandedIn means every branch of the group landed; Train is where the first landing rides.
 type LLBLandedIn struct {
 	Train TrainID `json:"train"`
+	// App and Branch name the landing that chose Train.
+	App    AppID  `json:"app"`
+	Branch string `json:"branch"`
 }
 
 // LLBPlanned means a plan names the train.
@@ -404,18 +407,18 @@ func planSafe(s string) string {
 
 // A plan naming a train or dropped beats the epic; an unplanned plan does not.
 func llbTarget(g LLBGroup, trains []Train, epics pageEpics) LLBTarget {
-	var landedIn *TrainID
+	var landedIn *LLBLandedIn
 	allMerged := len(g.Branches) > 0
 	for _, b := range g.Branches {
 		if t := trainForLanding(b, trains); t != nil && landedIn == nil {
-			landedIn = t
+			landedIn = &LLBLandedIn{Train: *t, App: b.App, Branch: b.Branch}
 		}
 		if b.Landing == nil || b.Landing.MergedOn == nil {
 			allMerged = false
 		}
 	}
 	if landedIn != nil && allMerged {
-		return LLBLandedIn{Train: *landedIn}
+		return *landedIn
 	}
 	if g.Plan != nil {
 		switch g.Plan.TargetKind {

@@ -48,7 +48,7 @@ const landed: LLBGroup = {
 			},
 		}),
 	],
-	target: { kind: "landed", train: "21-2026" },
+	target: { kind: "landed", train: "21-2026", app: "di", branch: "feature/demo-chat" },
 	plan: {
 		id: "demo-chat",
 		name: "Chat",
@@ -206,11 +206,15 @@ describe("llbGroupsFor", () => {
 			group("open", { kind: "none" }, branch("di", "open")),
 			group(
 				"just-landed",
-				{ kind: "landed", train: "21-2026" },
+				{ kind: "landed", train: "21-2026", app: "di", branch: "feature/di-landed_wrong" },
 				branch("di", "landed_wrong", "2026-10-12"),
 				branch("da", "landed", "2026-10-12"),
 			),
-			group("old", { kind: "landed", train: "18-2026" }, branch("di", "landed", "2026-09-14")),
+			group(
+				"old",
+				{ kind: "landed", train: "18-2026", app: "di", branch: "feature/di-landed" },
+				branch("di", "landed", "2026-09-14"),
+			),
 			group("dropped", { kind: "dropped" }, branch("di", "open")),
 			group("other-app", { kind: "none" }, branch("pa", "open")),
 		],

@@ -82,8 +82,10 @@ type Route struct {
 	// ViaLLB is the landed long-lived branch that carried the code into the train.
 	ViaLLB string `json:"viaLlb,omitempty"`
 	// Plan is the train whose page or fixVersion lists the card.
-	Plan     *TrainID `json:"plan,omitempty"`
-	Mismatch bool     `json:"mismatch,omitempty"`
+	Plan *TrainID `json:"plan,omitempty"`
+	// PlanFrom is why the card is on Plan: its page, its fixVersion, its MRs into the sprint branch.
+	PlanFrom []CardWhy `json:"planFrom,omitempty"`
+	Mismatch bool      `json:"mismatch,omitempty"`
 }
 
 // SprintMR is one MR of a sprint card, with its app's destination kind.
@@ -110,7 +112,7 @@ type routing struct {
 	llbs    map[AppID]map[string]*LongLivedBranch
 	groups  map[AppID]map[string]*LLBGroup
 	trains  []Train
-	plans   map[string]TrainID
+	plans   map[string]plannedOn
 }
 
 var (
@@ -234,7 +236,7 @@ func (r routing) RouteOf(key string, app AppID, mrs []SprintMR) Route {
 	}
 	route := Route{App: app, Kind: kind, To: OffFlow{}, MR: main.IID}
 	if p, ok := r.plans[planKey(key, app)]; ok {
-		route.Plan = &p
+		route.Plan, route.PlanFrom = &p.train, p.from
 	}
 	first := r.firstTrain(app)
 	shipAt := at
@@ -371,10 +373,15 @@ func (r routing) train(n int) TrainID {
 
 func planKey(key string, app AppID) string { return string(app) + "/" + key }
 
+type plannedOn struct {
+	train TrainID
+	from  []CardWhy
+}
+
 // planTrains is, per card and app, the first train not yet published that
 // carries the card: by its page, its fixVersion or an MR into its sprint branch.
-func planTrains(trains []Train, today Day) map[string]TrainID {
-	out := map[string]TrainID{}
+func planTrains(trains []Train, today Day) map[string]plannedOn {
+	out := map[string]plannedOn{}
 	for i := range trains {
 		t := &trains[i]
 		if t.Publish != nil && t.Publish.Before(today) {
@@ -383,7 +390,7 @@ func planTrains(trains []Train, today Day) map[string]TrainID {
 		for _, v := range t.Versions {
 			for _, c := range v.Cards {
 				if _, seen := out[planKey(c.Key, v.App)]; !seen {
-					out[planKey(c.Key, v.App)] = t.ID
+					out[planKey(c.Key, v.App)] = plannedOn{train: t.ID, from: c.Why}
 				}
 			}
 		}

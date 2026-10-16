@@ -53,6 +53,8 @@ type RuleInfo struct {
 	Title     string   `json:"title"`
 	Hint      string   `json:"hint,omitempty"`
 	Fix       FixKind  `json:"fix,omitempty"`
+	// Reads is every fact kind the rule reads, so an alert can name its sources.
+	Reads []KindName `json:"reads"`
 }
 
 // LookupRule returns the catalogue row of id under settings, or false when no rule has that id.
@@ -70,7 +72,7 @@ func catalogue(settings map[RuleID]bool) []RuleInfo {
 	out := make([]RuleInfo, len(table))
 	for i, r := range table {
 		out[i] = RuleInfo{ID: r.ID, Group: r.Group, Severity: r.Severity, DefaultOn: r.DefaultOn,
-			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID)}
+			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID), Reads: r.Reads}
 	}
 	return out
 }

@@ -16,6 +16,8 @@ const unit = (
 	status,
 	statusCategory,
 	why: ["fixVersion"],
+	evidence: { fixVersion: { id: "5001", name: "iOS 3.5.0", url: "https://jira.example.com/versions/5001" } },
+	factsFrom: "jira.cards",
 	code,
 });
 

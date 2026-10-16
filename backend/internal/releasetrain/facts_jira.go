@@ -84,12 +84,12 @@ type ForceUpdateFact struct {
 
 // Jira fact kinds.
 var (
-	KindJiraVersions = newKind[JiraVersionFact]("jira.versions", Snapshotted, 5*time.Minute, global)
-	KindRelatedWork  = newKind[RelatedWorkFact]("jira.relatedwork", Snapshotted, 15*time.Minute, perEntity)
-	KindCards        = newKind[IssueFact]("jira.cards", Snapshotted, 5*time.Minute, perEntity)
-	KindTechReq      = newKind[ForceUpdateFact]("jira.techreq", Snapshotted, 30*time.Minute, global)
-	KindLLBCards     = newKind[IssueFact]("jira.llb_cards", Snapshotted, 10*time.Minute, global)
-	KindMySubtasks   = newKind[IssueFact]("jira.my_subtasks", Snapshotted, 5*time.Minute, global)
+	KindJiraVersions = newKind[JiraVersionFact]("jira.versions", "Jira releases", Snapshotted, 5*time.Minute, global)
+	KindRelatedWork  = newKind[RelatedWorkFact]("jira.relatedwork", "related work", Snapshotted, 15*time.Minute, perEntity)
+	KindCards        = newKind[IssueFact]("jira.cards", "fixVersion cards", Snapshotted, 5*time.Minute, perEntity)
+	KindTechReq      = newKind[ForceUpdateFact]("jira.techreq", "force-update tickets", Snapshotted, 30*time.Minute, global)
+	KindLLBCards     = newKind[IssueFact]("jira.llb_cards", "long-lived branch cards", Snapshotted, 10*time.Minute, global)
+	KindMySubtasks   = newKind[IssueFact]("jira.my_subtasks", "my subtasks", Snapshotted, 5*time.Minute, global)
 )
 
 // LLBCardsScope is the scope of the Jira read of every long-lived-branch card.

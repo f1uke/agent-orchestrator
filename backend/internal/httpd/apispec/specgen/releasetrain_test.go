@@ -23,7 +23,7 @@ func TestReleaseTrainUnionTwinsMatchWhatTheCoreWrites(t *testing.T) {
 		{rt.CodeMerged{MRs: []int{7}}, rtCodeMerged{}},
 		{rt.CodeMerged{MRs: []int{7}, Via: "feature/demo-wallet"}, rtCodeMerged{}},
 		{rt.CodeParked{Branch: "feature/demo-wallet", MRs: []int{9}}, rtCodeParked{}},
-		{rt.LLBLandedIn{Train: rt.TrainID{Number: 21, Year: 2026}}, rtLLBLandedIn{}},
+		{rt.LLBLandedIn{Train: rt.TrainID{Number: 21, Year: 2026}, App: "di", Branch: "feature/demo-wallet"}, rtLLBLandedIn{}},
 		{rt.LLBPlanned{Train: rt.TrainID{Number: 20, Extra: 1, Year: 2026}}, rtLLBPlanned{}},
 		{rt.LLBFromEpic{Train: rt.TrainID{Number: 22, Year: 2026}, Epic: "DEMO-500", Covered: 10, Total: 11}, rtLLBFromEpic{}},
 		{rt.LLBFromEpic{Train: rt.TrainID{Number: 21, Year: 2026}, Epic: "DEMO-500", Covered: 2, Total: 2, Also: []rt.TrainID{{Number: 22, Year: 2026}}}, rtLLBFromEpic{}},

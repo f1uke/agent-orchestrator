@@ -137,8 +137,9 @@ describe("targetAfterPlan", () => {
 	});
 
 	it("keeps a landing and turns an epic-less unplanned group into none", () => {
-		const landed: LLBGroup = { ...group, target: { kind: "landed", train: "21-2026" } };
-		expect(targetAfterPlan(landed, { targetKind: "dropped" })).toEqual({ kind: "landed", train: "21-2026" });
+		const landedIn = { kind: "landed", train: "21-2026", app: "di", branch: "feature/demo-wallet" } as const;
+		const landed: LLBGroup = { ...group, target: landedIn };
+		expect(targetAfterPlan(landed, { targetKind: "dropped" })).toEqual(landedIn);
 		const planned: LLBGroup = { ...group, target: { kind: "planned", train: "21-2026" } };
 		expect(targetAfterPlan(planned, { targetKind: "unplanned" })).toEqual({ kind: "none" });
 	});

@@ -176,6 +176,33 @@ const RULES: [string, Severity, string][] = [
 	["L9", "risk", "MR into a branch that is not a sprint branch, a long-lived branch or develop"],
 ];
 
+const MS = "gitlab.milestones";
+const CARD_READS = [
+	MS,
+	"jira.versions",
+	"jira.cards",
+	"gitlab.mrs",
+	"confluence.pages",
+	"jira.page_cards",
+	"jira.llb_cards",
+];
+const READS: Readonly<Record<string, string[]>> = {
+	A1: [MS, "jira.versions"],
+	A5: [MS, "jira.versions"],
+	A6: [MS, "confluence.pages"],
+	A7: [MS],
+	B1: [MS, "gitlab.mrs"],
+	C1: [MS, "gitlab.mrs", "gitlab.mr_detail", "gitlab.jobs"],
+	C5: [MS, "gitlab.mrs", "gitlab.mr_detail"],
+	D1: [MS, "jira.versions"],
+	D3: [MS, "jira.versions", "gitlab.tags"],
+	E1: [MS, "jira.versions", "gitlab.tags"],
+	F1: [MS],
+	G5: [...CARD_READS, "jira.branch_cards"],
+	L3: CARD_READS,
+	L9: ["gitlab.mrs"],
+};
+
 const FIX_KINDS: Readonly<Record<string, FixKind>> = {
 	A5: "choose",
 	C1: "queue",
@@ -363,6 +390,7 @@ function baseBoard(today: string): Board {
 		title,
 		on: id !== "F1",
 		defaultOn: true,
+		reads: READS[id],
 		...(FIX_KINDS[id] ? { fix: FIX_KINDS[id] } : {}),
 	}));
 	const badge = hits.filter((h) => h.bucket === "badge");
@@ -394,6 +422,7 @@ function baseBoard(today: string): Board {
 			{ system: "jira", resources: 30, asOf: `${today}T02:57:00Z`, issues: [] },
 			{ system: "confluence", resources: 2, asOf: `${today}T02:50:00Z`, issues: [] },
 		],
+		kinds: [],
 		cutover: null,
 		identity: { kind: "known", jiraAccountId: "acc-ada", gitlabUsername: "ada", displayName: "Ada Example" },
 		alerts: {
@@ -430,7 +459,7 @@ const CARD_SPECS: [string, string, Unit["code"]["kind"], string, string, number]
 function unitOf(
 	key: string,
 	summary: string,
-	app: string,
+	v: Board["trains"][number]["versions"][number],
 	kind: Unit["code"]["kind"],
 	status: string,
 	cat: string,
@@ -447,15 +476,18 @@ function unitOf(
 					: kind === "elsewhere"
 						? { kind, branch: "feature/demo-other", on: "2026-01-01" }
 						: { kind };
+	const jira = v.jira;
 	return {
 		key,
 		summary,
-		app,
+		app: v.app,
 		status,
 		statusCategory: cat,
 		url: `${JIRA}/browse/${key}`,
 		assignee: { accountId, name },
 		why: ["fixVersion"],
+		evidence: jira ? { fixVersion: { id: jira.id, name: jira.name, url: jira.url } } : {},
+		factsFrom: "jira.cards",
 		code,
 	};
 }
@@ -466,14 +498,14 @@ function attachCards(b: Board): void {
 	for (const v of t21?.versions ?? []) {
 		const n = v.app === "di" ? CARD_SPECS.length : v.app === "da" ? 4 : 2;
 		v.cards = CARD_SPECS.slice(0, n).map(([k, s, kind, st, cat, who]) =>
-			unitOf(k, s, v.app, v.app === "di" || kind !== "parked" ? kind : "merged", st, cat, who),
+			unitOf(k, s, v, v.app === "di" || kind !== "parked" ? kind : "merged", st, cat, who),
 		);
 	}
 	for (const v of t22?.versions ?? []) {
 		if (v.app === "di" || v.app === "da")
 			v.cards = [
-				unitOf("DEMO-201", "Price alerts on the watchlist", v.app, "open", "In Progress", "indeterminate", 6),
-				unitOf("DEMO-202", "New onboarding checklist", v.app, "none", "To Do", "new", 7),
+				unitOf("DEMO-201", "Price alerts on the watchlist", v, "open", "In Progress", "indeterminate", 6),
+				unitOf("DEMO-202", "New onboarding checklist", v, "none", "To Do", "new", 7),
 			];
 	}
 }
@@ -598,7 +630,7 @@ function demoLlbs(b: Board): Board["llbs"] {
 					},
 				},
 			],
-			target: { kind: "landed", train: "21-2026" },
+			target: { kind: "landed", train: "21-2026", app: "di", branch: "feature/demo-search" },
 		},
 		{
 			id: "demo-chat",
@@ -1011,7 +1043,16 @@ export function fixesBoard(today: string): Board {
 		["G5", "risk", "Card ships with a train but is not on its release train page"],
 		["L3", "risk", "Card is on a train page but parked in a long-lived branch that does not target it"],
 	] as const)
-		b.catalogue.push({ id, group: "G", severity, title, on: true, defaultOn: true, fix: FIX_KINDS[id] });
+		b.catalogue.push({
+			id,
+			group: "G",
+			severity,
+			title,
+			on: true,
+			defaultOn: true,
+			fix: FIX_KINDS[id],
+			reads: READS[id],
+		});
 	b.alerts.rules = b.catalogue.map((r) => {
 		const ids = b.alerts.hits.filter((h) => h.rule === r.id && h.bucket === "badge").map((h) => h.id);
 		return {

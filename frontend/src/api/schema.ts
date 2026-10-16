@@ -4696,6 +4696,7 @@ export interface components {
             } | null;
             hotfixes: components["schemas"]["ReleaseTrainHotfix"][];
             identity: components["schemas"]["ReleaseTrainIdentity"];
+            kinds: components["schemas"]["ReleaseTrainKindFreshness"][];
             llbs: components["schemas"]["ReleaseTrainLLBGroup"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
@@ -4720,10 +4721,17 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainBucket: "badge" | "history" | "hidden";
+        ReleaseTrainCardEvidence: {
+            fixVersion?: components["schemas"]["ReleaseTrainFixVersionEvidence"];
+            page?: components["schemas"]["ReleaseTrainPageEvidence"];
+            sprintMR?: components["schemas"]["ReleaseTrainSprintMREvidence"];
+        };
         ReleaseTrainCardUnit: {
             app: string;
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             code: components["schemas"]["ReleaseTrainCodeState"];
+            evidence: components["schemas"]["ReleaseTrainCardEvidence"];
+            factsFrom: string;
             key: string;
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             status: string;
@@ -4984,6 +4992,11 @@ export interface components {
              */
             via?: "app" | "cli" | "api";
         };
+        ReleaseTrainFixVersionEvidence: {
+            id: string;
+            name: string;
+            url: string;
+        };
         ReleaseTrainFixesResponse: {
             fixes: components["schemas"]["ReleaseTrainFix"][];
         };
@@ -5065,6 +5078,16 @@ export interface components {
             pipeline: number;
             project: number;
         };
+        ReleaseTrainKindFreshness: {
+            /** Format: date-time */
+            asOf?: null | string;
+            budgetSeconds: number;
+            issues: components["schemas"]["ReleaseTrainResourceStatus"][];
+            kind: string;
+            label: string;
+            resources: number;
+            system: string;
+        };
         ReleaseTrainLLBCard: {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             epic?: string;
@@ -5102,6 +5125,10 @@ export interface components {
             target: components["schemas"]["ReleaseTrainLLBTarget"];
         };
         ReleaseTrainLLBLandedIn: {
+            /** @description The app of the landing that chose the train. */
+            app: string;
+            /** @description The long-lived branch whose landing chose the train. */
+            branch: string;
             /** @constant */
             kind: "landed";
             /** @description Train key, "21-2026" or "20-1-2026". */
@@ -5248,6 +5275,11 @@ export interface components {
             kind: "unknown";
             missing: components["schemas"]["ReleaseTrainResourceStatus"][];
         };
+        ReleaseTrainPageEvidence: {
+            id: string;
+            title: string;
+            url: string;
+        };
         ReleaseTrainPageFact: {
             created: components["schemas"]["ReleaseTrainDay"];
             extra?: number;
@@ -5325,6 +5357,7 @@ export interface components {
             mr: number;
             /** @description Train key, "21-2026" or "20-1-2026". */
             plan?: string;
+            planFrom?: components["schemas"]["ReleaseTrainCardWhy"][];
             to: components["schemas"]["ReleaseTrainDest"];
             viaLlb?: string;
         };
@@ -5335,6 +5368,7 @@ export interface components {
             hint?: string;
             id: string;
             on: boolean;
+            reads: string[];
             severity: components["schemas"]["ReleaseTrainSeverity"];
             title: string;
         };
@@ -5412,6 +5446,10 @@ export interface components {
             target: string;
             title: string;
             url: string;
+        };
+        ReleaseTrainSprintMREvidence: {
+            branch: string;
+            mrs: number[];
         };
         ReleaseTrainSprintRow: {
             board: components["schemas"]["ReleaseTrainBoardConfig"];

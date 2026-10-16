@@ -13344,6 +13344,10 @@ components:
           type: array
         identity:
           $ref: '#/components/schemas/ReleaseTrainIdentity'
+        kinds:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainKindFreshness'
+          type: array
         llbs:
           items:
             $ref: '#/components/schemas/ReleaseTrainLLBGroup'
@@ -13370,6 +13374,7 @@ components:
       - today
       - apps
       - sources
+      - kinds
       - trains
       - hotfixes
       - mismatches
@@ -13424,6 +13429,15 @@ components:
       - history
       - hidden
       type: string
+    ReleaseTrainCardEvidence:
+      properties:
+        fixVersion:
+          $ref: '#/components/schemas/ReleaseTrainFixVersionEvidence'
+        page:
+          $ref: '#/components/schemas/ReleaseTrainPageEvidence'
+        sprintMR:
+          $ref: '#/components/schemas/ReleaseTrainSprintMREvidence'
+      type: object
     ReleaseTrainCardUnit:
       properties:
         app:
@@ -13432,6 +13446,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainPerson'
         code:
           $ref: '#/components/schemas/ReleaseTrainCodeState'
+        evidence:
+          $ref: '#/components/schemas/ReleaseTrainCardEvidence'
+        factsFrom:
+          type: string
         key:
           type: string
         mine:
@@ -13458,6 +13476,8 @@ components:
       - status
       - statusCategory
       - why
+      - evidence
+      - factsFrom
       - code
       type: object
     ReleaseTrainCardWhy:
@@ -14113,6 +14133,19 @@ components:
           - api
           type: string
       type: object
+    ReleaseTrainFixVersionEvidence:
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - name
+      - url
+      type: object
     ReleaseTrainFixesResponse:
       properties:
         fixes:
@@ -14323,6 +14356,35 @@ components:
       - pipeline
       - jobs
       type: object
+    ReleaseTrainKindFreshness:
+      properties:
+        asOf:
+          format: date-time
+          type:
+          - "null"
+          - string
+        budgetSeconds:
+          type: integer
+        issues:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainResourceStatus'
+          type: array
+        kind:
+          type: string
+        label:
+          type: string
+        resources:
+          type: integer
+        system:
+          type: string
+      required:
+      - kind
+      - system
+      - label
+      - budgetSeconds
+      - resources
+      - issues
+      type: object
     ReleaseTrainLLBCard:
       properties:
         assignee:
@@ -14412,6 +14474,12 @@ components:
       type: object
     ReleaseTrainLLBLandedIn:
       properties:
+        app:
+          description: The app of the landing that chose the train.
+          type: string
+        branch:
+          description: The long-lived branch whose landing chose the train.
+          type: string
         kind:
           const: landed
           type: string
@@ -14421,6 +14489,8 @@ components:
       required:
       - kind
       - train
+      - app
+      - branch
       type: object
     ReleaseTrainLLBNoTarget:
       properties:
@@ -14786,6 +14856,19 @@ components:
       - kind
       - missing
       type: object
+    ReleaseTrainPageEvidence:
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - title
+      - url
+      type: object
     ReleaseTrainPageFact:
       properties:
         created:
@@ -14969,6 +15052,10 @@ components:
         plan:
           description: Train key, "21-2026" or "20-1-2026".
           type: string
+        planFrom:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainCardWhy'
+          type: array
         to:
           $ref: '#/components/schemas/ReleaseTrainDest'
         viaLlb:
@@ -14993,6 +15080,10 @@ components:
           type: string
         "on":
           type: boolean
+        reads:
+          items:
+            type: string
+          type: array
         severity:
           $ref: '#/components/schemas/ReleaseTrainSeverity'
         title:
@@ -15004,6 +15095,7 @@ components:
       - defaultOn
       - "on"
       - title
+      - reads
       type: object
     ReleaseTrainRuleOutcome:
       properties:
@@ -15213,6 +15305,18 @@ components:
       - author
       - created
       - dest
+      type: object
+    ReleaseTrainSprintMREvidence:
+      properties:
+        branch:
+          type: string
+        mrs:
+          items:
+            type: integer
+          type: array
+      required:
+      - branch
+      - mrs
       type: object
     ReleaseTrainSprintRow:
       properties:

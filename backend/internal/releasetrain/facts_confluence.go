@@ -39,8 +39,8 @@ type RawPage struct {
 
 // Confluence fact kinds. jira.page_cards is the Jira read of the cards a page lists.
 var (
-	KindPages     = newKind[PageFact]("confluence.pages", Snapshotted, 15*time.Minute, global)
-	KindPageCards = newKind[IssueFact]("jira.page_cards", Snapshotted, 5*time.Minute, perEntity)
+	KindPages     = newKind[PageFact]("confluence.pages", "train pages", Snapshotted, 15*time.Minute, global)
+	KindPageCards = newKind[IssueFact]("jira.page_cards", "page cards (Jira)", Snapshotted, 5*time.Minute, perEntity)
 )
 
 // ItemKey keys a PageFact within its resource.
