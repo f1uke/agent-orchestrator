@@ -66,6 +66,17 @@ export function planInput(d: PlanDraft): LlbPlanInput {
 	};
 }
 
+/** The preview's stand-in for the daemon's precedence: landed, a plan's train or dropped, the epic, none. */
+export function targetAfterPlan(
+	g: LLBGroup,
+	p: { targetKind: LlbPlanInput["targetKind"]; targetTrain?: TrainKey },
+): LLBGroup["target"] {
+	if (g.target.kind === "landed") return g.target;
+	if (p.targetKind === "train" && p.targetTrain) return { kind: "planned", train: p.targetTrain };
+	if (p.targetKind === "dropped") return { kind: "dropped" };
+	return g.target.kind === "epic" ? g.target : { kind: "none" };
+}
+
 export class PlanConflictError extends Error {
 	constructor(readonly current: number) {
 		super("This plan changed elsewhere. Reload it to see the change; your edit is kept here.");

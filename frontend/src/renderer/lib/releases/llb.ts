@@ -26,8 +26,12 @@ export function isOpenLlb(g: LLBGroup): boolean {
 	return g.branches.some((b) => !b.landing?.mergedOn && !b.gone);
 }
 
+export function aimedTrain(g: LLBGroup): TrainKey | null {
+	return g.target.kind === "planned" || g.target.kind === "epic" ? g.target.train : null;
+}
+
 export function targetTrain(g: LLBGroup): TrainKey | null {
-	return g.target.kind === "planned" || g.target.kind === "landed" ? g.target.train : null;
+	return g.target.kind === "landed" ? g.target.train : aimedTrain(g);
 }
 
 export function trainLabel(b: Board, key: TrainKey): string {
@@ -36,8 +40,8 @@ export function trainLabel(b: Board, key: TrainKey): string {
 
 export function urgency(g: LLBGroup, b: Board): Tone {
 	if (g.target.kind === "landed") return "done";
-	if (g.target.kind !== "planned") return "todo";
-	const t = g.target.train;
+	const t = aimedTrain(g);
+	if (!t) return "todo";
 	const freeze = b.trains.find((x) => x.id === t)?.freeze;
 	if (!freeze) return "accent";
 	const days = dayDiff(b.today, freeze);
@@ -56,10 +60,28 @@ export function branchState(g: LLBGroup, br: LongLivedBranch): { label: string; 
 	return { label: m.short, tone: m.tone };
 }
 
-export function targetChip(g: LLBGroup, b: Board): { text: string; tone: Tone | null } | null {
+export type TargetChip = { text: string; tone: Tone | null; epic?: boolean; title?: string };
+
+export function epicNote(g: LLBGroup, b: Board): string | null {
+	const t = g.target;
+	if (t.kind !== "epic") return null;
+	const also = t.also?.length
+		? ` (the ${t.also.map((x) => trainLabel(b, x)).join(", ")} page too, the earliest wins)`
+		: "";
+	return `From epic ${t.epic}: ${t.covered} of ${t.total} cards sit under it, and the ${trainLabel(b, t.train)} page lists it${also}. Not a plan yet.`;
+}
+
+export function targetChip(g: LLBGroup, b: Board): TargetChip {
 	switch (g.target.kind) {
 		case "planned":
 			return { text: `→ ${trainLabel(b, g.target.train)}`, tone: urgency(g, b) };
+		case "epic":
+			return {
+				text: `→ ${trainLabel(b, g.target.train)} · epic`,
+				tone: urgency(g, b),
+				epic: true,
+				title: epicNote(g, b) ?? undefined,
+			};
 		case "landed":
 			return { text: `in ${trainLabel(b, g.target.train)}`, tone: "done" };
 		case "dropped":
@@ -80,7 +102,7 @@ export type LLBLane = {
 	accepted: boolean;
 	open: boolean;
 	state: { label: string; tone: Tone };
-	target: { text: string; tone: Tone | null } | null;
+	target: TargetChip;
 	train: TrainKey | null;
 	keys: number;
 	ticks: { key: string; x: number; tone: Tone; title: string }[];
@@ -98,7 +120,7 @@ export function llbLanes(b: Board, app: AppId, tl: Timeline): LLBLane[] {
 			const x0 = centre(branch.openedOn);
 			const x1 = Math.max(centre(endDay(branch, b.today)), x0 + 2 * DW);
 			const merged = !!branch.landing?.mergedOn;
-			const planned = !merged && group.target.kind === "planned" ? group.target.train : null;
+			const planned = merged ? null : aimedTrain(group);
 			const freeze = planned ? b.trains.find((t) => t.id === planned)?.freeze : undefined;
 			const state = branchState(group, branch);
 			lanes.push({

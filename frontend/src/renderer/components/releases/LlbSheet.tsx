@@ -17,6 +17,7 @@ import { AppMark } from "./AppMark";
 import { CardLine } from "./CardGroups";
 import { jiraUrl } from "../../lib/releases/cards";
 import type { PageActions } from "./ReleasesPage";
+import { TargetTag } from "./TargetTag";
 
 function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	const t = g.target;
@@ -29,6 +30,18 @@ function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 			<>
 				Merged on every platform. Its cards ship in Train <b>{trainLabel(board, t.train)}</b>
 				{tr?.freeze ? ` (freeze ${dayLabel(tr.freeze)})` : ""}.
+			</>
+		);
+	} else if (t.kind === "epic") {
+		tone = urgency(g, board);
+		text = (
+			<>
+				Aims at <b>{trainLabel(board, t.train)}</b> from epic <b>{t.epic}</b>: {t.covered} of {t.total} cards sit under
+				it, and the {trainLabel(board, t.train)} page lists it
+				{t.also?.length
+					? ` (the ${t.also.map((x) => trainLabel(board, x)).join(", ")} page too, the earliest wins)`
+					: ""}
+				. No plan names a train yet; confirm it below or pick another.
 			</>
 		);
 	} else if (t.kind === "dropped") text = "Marked dropped. Its cards will not ship.";
@@ -75,6 +88,7 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 		setDraft({ ...draft, ...patch });
 	};
 	const choice = draft.targetKind === "train" ? (draft.targetTrain ?? "") : draft.targetKind;
+	const suggested = g.target.kind === "epic" && choice !== g.target.train ? g.target : null;
 	const others = board.llbs
 		.flatMap((x) => x.branches)
 		.filter((b) => !b.landing?.mergedOn && !draft.branches.some((d) => d.app === b.app && d.branch === b.branch));
@@ -114,6 +128,21 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 			</label>
 			<input id="plan-name" value={draft.name} onChange={(e) => set({ name: e.target.value })} />
 			<div className="fl2">Target train</div>
+			{suggested && (
+				<div className="status-line" data-st="accent" data-testid="plan-epic-suggestion">
+					<span>
+						Epic {suggested.epic} suggests <b>{trainLabel(board, suggested.train)}</b> ({suggested.covered} of{" "}
+						{suggested.total} cards).{" "}
+						<button
+							type="button"
+							className="lnk"
+							onClick={() => set({ targetKind: "train", targetTrain: suggested.train })}
+						>
+							Use {trainLabel(board, suggested.train)}
+						</button>
+					</span>
+				</div>
+			)}
 			<div className="tchips2" role="group" aria-label="Target train">
 				<button
 					type="button"
@@ -407,11 +436,7 @@ export function llbsSheet(
 					<GitFork className="size-3.5 text-[var(--purple)]" aria-hidden="true" />
 					{g.plan?.name ?? g.name}
 				</span>
-				{chip && (
-					<span className={`tgt${chip.tone ? "" : " none"}`} data-st={chip.tone ?? undefined}>
-						{chip.text}
-					</span>
-				)}
+				<TargetTag chip={chip} />
 				<span className="sub">
 					{g.branches.map((b) => {
 						const st = branchState(g, b);

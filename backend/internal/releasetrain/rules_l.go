@@ -133,7 +133,6 @@ func mrsByApp(cfg Config, snap Snapshot) map[AppID][]MRFact {
 	return out
 }
 
-// aimedTrain is the train an open group is meant for: a plan's, or an epic's when no plan names one.
 func aimedTrain(t LLBTarget) (TrainID, bool) {
 	switch t := t.(type) {
 	case LLBPlanned:

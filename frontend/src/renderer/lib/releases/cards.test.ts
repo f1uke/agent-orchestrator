@@ -129,6 +129,20 @@ describe("card groups", () => {
 		]);
 	});
 
+	it("nests a branch whose epic aims it at this train, like a plan", () => {
+		const epic = board({
+			trains: [t21],
+			llbs: [
+				{
+					...wallet,
+					plan: undefined,
+					target: { kind: "epic", train: "21-2026", epic: "DEMO-500", covered: 2, total: 3 },
+				},
+			],
+		});
+		expect(cardGroups(epic, "di")[0].llbs.map((x) => x.branch.branch)).toEqual(["feature/demo-wallet"]);
+	});
+
 	it("does not nest a branch whose group targets another train", () => {
 		const other = board({ trains: [t21], llbs: [{ ...wallet, target: { kind: "planned", train: "22-2026" } }] });
 		expect(cardGroups(other, "di")[0].llbs).toEqual([]);

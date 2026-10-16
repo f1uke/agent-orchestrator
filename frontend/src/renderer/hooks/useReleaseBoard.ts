@@ -4,7 +4,7 @@ import { boardFetcher } from "../lib/releases/boardFetch";
 import { demoBoard, demoResponse, failedSourceBoard, fixesBoard, unknownIdentityBoard } from "../lib/releases/fixture";
 import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
 import { previewConfirm, previewPlan, previewUndo, type PreviewFixStore } from "../lib/releases/fixPreview";
-import { PlanConflictError, planInput, type PlanDraft } from "../lib/releases/plan";
+import { PlanConflictError, planInput, targetAfterPlan, type PlanDraft } from "../lib/releases/plan";
 import type { Board, BoardResponse, Fix, FixPlan, HitId, LlbPlan } from "../lib/releases/types";
 import { useApiReady } from "./useApiReady";
 
@@ -155,13 +155,7 @@ function applyPlan(b: Board, { id, draft }: PlanWrite, at: string): LlbPlan {
 	if (g) {
 		g.plan = plan;
 		g.name = plan.name;
-		if (g.target.kind !== "landed")
-			g.target =
-				plan.targetKind === "train" && plan.targetTrain
-					? { kind: "planned", train: plan.targetTrain }
-					: plan.targetKind === "dropped"
-						? { kind: "dropped" }
-						: { kind: "none" };
+		g.target = targetAfterPlan(g, plan);
 	}
 	return plan;
 }

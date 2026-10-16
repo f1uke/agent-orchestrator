@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DW, timeline } from "./layout";
-import { branchState, llbGroupsFor, llbLanes, llbWire, LLB_LANE_TOP } from "./llb";
+import { branchState, llbGroupsFor, llbLanes, llbWire, LLB_LANE_TOP, targetChip, targetTrain } from "./llb";
 import { board, train, version } from "./testkit";
 import type { LLBGroup, LongLivedBranch } from "./types";
 
@@ -104,6 +104,42 @@ describe("long-lived lanes", () => {
 		expect(branchState(none, none.branches[0])).toEqual({ label: "deleted", tone: "todo" });
 		expect(branchState(landed, landed.branches[0])).toEqual({ label: "accepted", tone: "done" });
 		expect(branchState(planned, planned.branches[0])).toEqual({ label: "parked", tone: "hotfix" });
+	});
+});
+
+describe("an epic target", () => {
+	const epic: LLBGroup = {
+		id: "demo-pay",
+		name: "demo-pay",
+		branches: [branch("feature/demo-pay")],
+		target: { kind: "epic", train: "22-2026", epic: "DEMO-500", covered: 10, total: 11 },
+	};
+	const twoPages: LLBGroup = {
+		...epic,
+		target: { kind: "epic", train: "21-2026", epic: "DEMO-500", covered: 2, total: 2, also: ["22-2026"] },
+	};
+	const eb = board({ today: "2026-10-14", trains: [t21, t22], llbs: [epic] });
+
+	it("labels the chip with its source and names the epic and coverage in the tooltip", () => {
+		expect(targetChip(epic, eb)).toEqual({
+			text: "→ #22 · epic",
+			tone: "accent",
+			epic: true,
+			title: "From epic DEMO-500: 10 of 11 cards sit under it, and the #22 page lists it. Not a plan yet.",
+		});
+	});
+
+	it("names the later train whose page lists the same epic", () => {
+		expect(targetChip(twoPages, eb)?.title).toBe(
+			"From epic DEMO-500: 2 of 2 cards sit under it, and the #21 page lists it (the #22 page too, the earliest wins). Not a plan yet.",
+		);
+	});
+
+	it("aims the lane at the epic's train like a plan does", () => {
+		const l = llbLanes(eb, "di", timeline(eb)).find((x) => x.branch.branch === "feature/demo-pay")!;
+		expect(l.train).toBe("22-2026");
+		expect(l.xr).toBe(timeline(eb).x("2026-10-27") + DW / 2);
+		expect(targetTrain(epic)).toBe("22-2026");
 	});
 });
 

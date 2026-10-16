@@ -1,6 +1,7 @@
 import { GitFork } from "lucide-react";
 import { LLB_LINE_H, llbBlockH } from "../../lib/releases/layout";
-import { llbWire, shortBranch, targetTrain, urgency, type LLBLane } from "../../lib/releases/llb";
+import { epicNote, llbWire, shortBranch, targetTrain, urgency, type LLBLane } from "../../lib/releases/llb";
+import { TargetTag } from "./TargetTag";
 import type { Board, LLBGroup, Train, TrainKey } from "../../lib/releases/types";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Chev } from "./CardGroups";
@@ -50,8 +51,15 @@ export function LongLivedSummary({
 						{due.length > 0 && focus && (
 							<>
 								<span className="sep">·</span>
-								<span className="c" data-st={urgency(due[0], board)}>
-									{due.map((g) => g.plan?.name ?? g.name).join(", ")} → {focus.label}
+								<span className="c" data-st={urgency(due[0], board)} data-testid="llb-due">
+									{due.map((g, i) => (
+										<span key={g.id} title={epicNote(g, board) ?? undefined}>
+											{i > 0 && ", "}
+											{g.plan?.name ?? g.name}
+											{g.target.kind === "epic" && " (epic)"}
+										</span>
+									))}{" "}
+									→ {focus.label}
 								</span>
 							</>
 						)}
@@ -136,11 +144,7 @@ function LaneRow({
 			{!l.open && <span className="lb-end" style={{ right: l.xr - l.x1 - 6 }} />}
 			<span className="lb-lbl" data-sticky>
 				<b>{shortBranch(l.branch.branch)}</b>
-				{l.target && (
-					<span className={`tgt${l.target.tone ? "" : " none"}`} data-st={l.target.tone ?? undefined}>
-						{l.target.text}
-					</span>
-				)}
+				<TargetTag chip={l.target} />
 				<span>
 					{l.keys} card{l.keys === 1 ? "" : "s"}
 				</span>

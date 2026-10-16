@@ -168,6 +168,13 @@ describe("destination blocks", () => {
 		});
 		expect(destHead(b, wallet, [cards[1]])).toMatchObject({ to: "⑂ demo-wallet", target: { text: "then → #22" } });
 		expect(destHead(b2, wallet, [cards[1]]).target).toEqual({ text: "landed in #21", tone: "done" });
+		const b3 = {
+			...b,
+			llbs: [
+				{ ...b.llbs[0], target: { kind: "epic" as const, train: "22-2026", epic: "DEMO-500", covered: 3, total: 4 } },
+			],
+		};
+		expect(destHead(b3, wallet, [cards[1]]).target).toMatchObject({ text: "then → #22 · epic" });
 		expect(destHead(b, { kind: "off" }, []).tail).toBe("straight into develop or another branch");
 		expect(destHead(b, { kind: "none" }, []).tail).toBe("no MR in any repo");
 		expect(destHead(b, null, cards.slice(4)).tail).toBe(

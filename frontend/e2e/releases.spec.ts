@@ -25,7 +25,7 @@ test.describe("releases page", () => {
 		const barBox = await focused.boundingBox();
 		expect(markerTops.length).toBe(6 - 1);
 		for (const top of markerTops) expect(top).toBeGreaterThan((barBox?.y ?? 0) + (barBox?.height ?? 0));
-		await expect(page.getByTestId("llb-summary").first()).toContainText("3 long-lived");
+		await expect(page.getByTestId("llb-summary").first()).toContainText("4 long-lived");
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-1512.png` });
 	});
 
@@ -377,9 +377,9 @@ test.describe("releases page", () => {
 		const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]");
 		await sum.click();
 		const app = page.locator('.rel-app[data-app="di"]');
-		await expect(app.getByTestId("llb-lane")).toHaveCount(3);
+		await expect(app.getByTestId("llb-lane")).toHaveCount(4);
 		const wires = app.getByTestId("llb-wires");
-		await expect(wires.locator("g")).toHaveCount(2);
+		await expect(wires.locator("g")).toHaveCount(3);
 		await settle(page);
 		await expect(wires.locator('g[data-wire="feature/demo-wallet"] path')).toHaveClass("plan");
 		await expect(wires.locator('g[data-wire="feature/demo-search"] path')).not.toHaveClass("plan");
@@ -418,6 +418,72 @@ test.describe("releases page", () => {
 		await expect(page.locator('[data-testid="llb-lane"][data-branch="feature/demo-chat"]')).toContainText("→ #22");
 	});
 
+	test("an epic-targeted group shows its source on the line, the lane and the sheet, and confirming it makes it a plan", async ({
+		page,
+	}) => {
+		await open(page, "?focus=22-2026");
+		const line = page.locator('[data-testid="llb-summary"][data-app="di"]');
+		await expect(line.getByTestId("llb-due")).toHaveText("Wallet, demo-pay (epic) → #22");
+		await expect(line.getByTestId("llb-due").locator("span", { hasText: "demo-pay" })).toHaveAttribute(
+			"title",
+			/From epic DEMO-500: 3 of 4 cards/,
+		);
+		await line.locator(".ls[aria-expanded]").click();
+		await expect(page.getByTestId("llb-wires").locator('g[data-wire="feature/demo-pay"] path')).toHaveClass("plan");
+		const lane = page.locator('[data-testid="llb-lane"][data-branch="feature/demo-pay"]');
+		const chip = lane.getByTestId("llb-target");
+		await expect(chip).toHaveText("→ #22 · epic");
+		await expect(chip).toHaveClass(/\bepic\b/);
+		await expect(chip).toHaveAttribute(
+			"title",
+			"From epic DEMO-500: 3 of 4 cards sit under it, and the #22 page lists it. Not a plan yet.",
+		);
+		const planned = page
+			.locator('[data-testid="llb-lane"][data-branch="feature/demo-wallet"]')
+			.getByTestId("llb-target");
+		await expect(planned).toHaveText("→ #22");
+		await expect(planned).not.toHaveClass(/\bepic\b/);
+		const [epicStyle, planStyle] = await Promise.all(
+			[chip, planned].map((c) =>
+				c.evaluate((e) => `${getComputedStyle(e).borderStyle} ${getComputedStyle(e).backgroundColor}`),
+			),
+		);
+		expect(epicStyle).not.toBe(planStyle);
+
+		await page.getByTestId("llbs-button").click();
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		const row = sheet.locator(".lbrow", { hasText: "demo-pay" });
+		await expect(row.getByTestId("llb-target")).toHaveText("→ #22 · epic");
+		await row.click();
+		await expect(page.getByTestId("llb-status")).toContainText("Aims at #22 from epic DEMO-500: 3 of 4 cards");
+		const form = page.getByTestId("plan-form");
+		await expect(form.getByTestId("plan-epic-suggestion")).toContainText("Epic DEMO-500 suggests #22 (3 of 4 cards)");
+		await form.getByRole("button", { name: "Use #22" }).click();
+		await expect(
+			form.getByRole("group", { name: "Target train" }).getByRole("button", { name: /#22/ }),
+		).toHaveAttribute("aria-pressed", "true");
+		await expect(form.getByTestId("plan-epic-suggestion")).toHaveCount(0);
+		await form.getByRole("button", { name: "Save plan" }).click();
+		await expect(form).toContainText("Saved");
+		await expect(page.getByTestId("llb-status")).toContainText("Targets #22");
+		await page.keyboard.press("Escape");
+		await expect(lane.getByTestId("llb-target")).toHaveText("→ #22");
+		await expect(lane.getByTestId("llb-target")).not.toHaveClass(/\bepic\b/);
+		await expect(line.getByTestId("llb-due")).toHaveText("Wallet, demo-pay → #22");
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-llb-epic-confirmed.png` });
+	});
+
+	test("overriding an epic suggestion with another train plans that train", async ({ page }) => {
+		await open(page, "?sheet=llb:demo-pay");
+		const form = page.getByTestId("plan-form");
+		await expect(form.getByTestId("plan-epic-suggestion")).toContainText("suggests #22");
+		await form.getByRole("group", { name: "Target train" }).getByRole("button", { name: /#21/ }).click();
+		await expect(form.getByTestId("plan-epic-suggestion")).toBeVisible();
+		await form.getByRole("button", { name: "Save plan" }).click();
+		await expect(page.getByTestId("llb-status")).toContainText("Targets #21");
+		await expect(form.getByTestId("plan-epic-suggestion")).toHaveCount(0);
+	});
+
 	test("a stale plan version shows the conflict and keeps the edit", async ({ page }) => {
 		await open(page, "?sheet=llb:demo-wallet");
 		const form = page.getByTestId("plan-form");
@@ -448,11 +514,11 @@ test.describe("releases page", () => {
 		await expect(page.locator('.rule[data-rule="L9"]')).toBeVisible();
 		await page.keyboard.press("Escape");
 		const entry = page.getByTestId("llbs-button");
-		await expect(entry).toHaveText(/Long-lived\s*2/);
+		await expect(entry).toHaveText(/Long-lived\s*3/);
 		await entry.click();
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		await expect(sheet).toContainText("Long-lived branches");
-		await expect(sheet).toContainText("Open 2");
+		await expect(sheet).toContainText("Open 3");
 		await sheet.getByRole("button", { name: /Wallet/ }).click();
 		await expect(page.getByTestId("plan-form")).toBeVisible();
 	});
@@ -464,7 +530,7 @@ test.describe("releases page", () => {
 			(globalThis as Seam).__aoReleaseBoard!.board.llbs.find((x) => x.id === "demo-chat")!.target = { kind: "dropped" };
 		});
 		await page.getByRole("button", { name: "Refresh sources" }).click();
-		await expect(page.locator('[data-testid="llb-summary"][data-app="di"]')).toContainText("2 long-lived");
+		await expect(page.locator('[data-testid="llb-summary"][data-app="di"]')).toContainText("3 long-lived");
 		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByTestId("llbs-from-line").click();
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		const row = sheet.locator(".lbrow", { hasText: "demo-chat" });
@@ -614,7 +680,7 @@ test.describe("releases page", () => {
 
 		const wallet = page.getByTestId("cards-di:22-2026");
 		await wallet.locator(".csum").click();
-		await wallet.locator(".crow.lbr").click();
+		await wallet.locator(".crow.lbr", { hasText: "demo-wallet" }).click();
 		await expect(wallet.locator(".nest .crow")).toHaveCount(3);
 		await expect(wallet.locator('.nest .crow[data-key="DEMO-108"]').getByTestId("mine-face")).toHaveAttribute(
 			"aria-label",

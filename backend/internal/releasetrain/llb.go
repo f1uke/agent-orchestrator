@@ -433,7 +433,6 @@ func llbTarget(g LLBGroup, trains []Train, epics pageEpics) LLBTarget {
 	return LLBNoTarget{}
 }
 
-// pageEpics maps an epic key to the unpublished trains whose pages list it, earliest first.
 type pageEpics map[string][]TrainID
 
 func pageEpicsOf(trains []Train, snap Snapshot, today Day) pageEpics {

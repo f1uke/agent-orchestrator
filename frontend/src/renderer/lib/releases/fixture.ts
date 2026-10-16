@@ -625,6 +625,37 @@ function demoLlbs(b: Board): Board["llbs"] {
 			],
 			target: { kind: "none" },
 		},
+		{
+			id: "demo-pay",
+			name: "demo-pay",
+			branches: [
+				{
+					app: "di",
+					branch: "feature/demo-pay",
+					openedOn: addDays(today, -26),
+					lastIn: addDays(today, -4),
+					state: "open",
+					cards: [
+						["DEMO-120", "Pay by QR", 306, -24, 1],
+						["DEMO-121", "Pay by QR receipts", 307, -18, 2],
+						["DEMO-122", "Saved payees", 308, -11, 3],
+						["DEMO-123", "Payment limits copy", 309, -4, 4],
+					].map(([key, summary, iid, days, who], i) => ({
+						...llbCardOf(
+							key as string,
+							summary as string,
+							"feature/demo-pay",
+							iid as number,
+							addDays(today, days as number),
+							addDays(today, (days as number) + 1),
+							who as number,
+						),
+						...(i < 3 ? { epic: "DEMO-500" } : {}),
+					})),
+				},
+			],
+			target: { kind: "epic", train: "22-2026", epic: "DEMO-500", covered: 3, total: 4 },
+		},
 	];
 }
 
@@ -892,6 +923,7 @@ export function unknownIdentityBoard(today: string): Board {
 
 export function failedSourceBoard(today: string): Board {
 	const b = demoBoard(today);
+	const lastRead = new Date(Date.now() - 20 * 60_000).toISOString();
 	const missing = [
 		{
 			kind: "gitlab.mrs",
@@ -899,10 +931,10 @@ export function failedSourceBoard(today: string): Board {
 			app: "di",
 			failures: 4,
 			errorClass: "unavailable" as const,
-			completeAt: `${today}T01:40:00Z`,
+			completeAt: lastRead,
 		},
 	];
-	b.sources = b.sources.map((s) => (s.system === "gitlab" ? { ...s, asOf: `${today}T01:40:00Z`, issues: missing } : s));
+	b.sources = b.sources.map((s) => (s.system === "gitlab" ? { ...s, asOf: lastRead, issues: missing } : s));
 	b.alerts.rules = [...b.alerts.rules, { rule: "B1", app: "di", on: true, outcome: { kind: "unknown", missing } }];
 	b.alerts.badge = { ...b.alerts.badge, unknown: 1 };
 	const t21 = b.trains[1];
