@@ -34,6 +34,7 @@ type LLBCard struct {
 	Status         string       `json:"status,omitempty"`
 	StatusCategory string       `json:"statusCategory,omitempty"`
 	Assignee       *Person      `json:"assignee,omitempty"`
+	Epic           string       `json:"epic,omitempty"`
 	MR             MRFact       `json:"mr"`
 	Mine           []MineReason `json:"mine,omitempty"`
 }
@@ -68,6 +69,17 @@ type LLBPlanned struct {
 	Train TrainID `json:"train"`
 }
 
+// LLBFromEpic means no plan names a train, but an epic a train page lists
+// holds more than half of the group's cards. Also names later unpublished
+// trains whose pages list the same epic.
+type LLBFromEpic struct {
+	Train   TrainID   `json:"train"`
+	Epic    string    `json:"epic"`
+	Covered int       `json:"covered"`
+	Total   int       `json:"total"`
+	Also    []TrainID `json:"also,omitempty"`
+}
+
 // LLBNoTarget means nobody has said where the group goes.
 type LLBNoTarget struct{}
 
@@ -76,6 +88,7 @@ type LLBDropped struct{}
 
 func (LLBLandedIn) llbTarget() {}
 func (LLBPlanned) llbTarget()  {}
+func (LLBFromEpic) llbTarget() {}
 func (LLBNoTarget) llbTarget() {}
 func (LLBDropped) llbTarget()  {}
 
@@ -184,6 +197,9 @@ func llbOf(app App, name string, ins, outs []MRFact, snap Snapshot, jira map[str
 			c := LLBCard{Key: k, MR: m}
 			if is, ok := jira[k]; ok {
 				c.Summary, c.Status, c.StatusCategory, c.Assignee = is.Summary, is.Status, is.StatusCategory, is.Assignee
+				if is.ParentType == IssueTypeEpic {
+					c.Epic = is.Parent
+				}
 			}
 			b.Cards = append(b.Cards, c)
 		}
@@ -234,7 +250,7 @@ func llbState(b LongLivedBranch, ins []MRFact, cutover Day, hasCutover bool) LLB
 
 // A plan naming no branches takes the derived group with its id, so
 // `ao train plan set <id> --target dropped` needs no --branch.
-func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, cfg Config) []LLBGroup {
+func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epics pageEpics, cfg Config) []LLBGroup {
 	claimed := map[PlanBranch]bool{}
 	used := map[string]bool{}
 	for _, p := range plans {
@@ -314,7 +330,7 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, cfg 
 			}
 			return g.Branches[a].Branch < g.Branches[b].Branch
 		})
-		g.Target = llbTarget(*g, trains)
+		g.Target = llbTarget(*g, trains, epics)
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
 	return groups
@@ -386,7 +402,8 @@ func planSafe(s string) string {
 	return s
 }
 
-func llbTarget(g LLBGroup, trains []Train) LLBTarget {
+// A plan naming a train or dropped beats the epic; an unplanned plan does not.
+func llbTarget(g LLBGroup, trains []Train, epics pageEpics) LLBTarget {
 	var landedIn *TrainID
 	allMerged := len(g.Branches) > 0
 	for _, b := range g.Branches {
@@ -400,18 +417,68 @@ func llbTarget(g LLBGroup, trains []Train) LLBTarget {
 	if landedIn != nil && allMerged {
 		return LLBLandedIn{Train: *landedIn}
 	}
-	if g.Plan == nil {
-		return LLBNoTarget{}
-	}
-	switch g.Plan.TargetKind {
-	case TargetDropped:
-		return LLBDropped{}
-	case TargetTrain:
-		if g.Plan.TargetTrain != nil {
-			return LLBPlanned{Train: *g.Plan.TargetTrain}
+	if g.Plan != nil {
+		switch g.Plan.TargetKind {
+		case TargetDropped:
+			return LLBDropped{}
+		case TargetTrain:
+			if g.Plan.TargetTrain != nil {
+				return LLBPlanned{Train: *g.Plan.TargetTrain}
+			}
 		}
 	}
+	if t, ok := epicTarget(g, epics); ok {
+		return t
+	}
 	return LLBNoTarget{}
+}
+
+type pageEpics map[string][]TrainID
+
+func pageEpicsOf(trains []Train, snap Snapshot, today Day) pageEpics {
+	out := pageEpics{}
+	for _, t := range trains {
+		if t.Publish != nil && t.Publish.Before(today) {
+			continue
+		}
+		for _, p := range t.Pages {
+			for _, is := range Items(snap, KindPageCards, PageScope(p.ID)) {
+				if is.IssueType == IssueTypeEpic && !slices.Contains(out[is.Key], t.ID) {
+					out[is.Key] = append(out[is.Key], t.ID)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func epicTarget(g LLBGroup, epics pageEpics) (LLBFromEpic, bool) {
+	epicOf := map[string]string{}
+	for _, b := range g.Branches {
+		for _, c := range b.Cards {
+			if epicOf[c.Key] == "" {
+				epicOf[c.Key] = c.Epic
+			}
+		}
+	}
+	covered := map[string]int{}
+	for _, e := range epicOf {
+		if e != "" {
+			covered[e]++
+		}
+	}
+	for e, n := range covered {
+		trains := epics[e]
+		if 2*n <= len(epicOf) || len(trains) == 0 {
+			continue
+		}
+		t := LLBFromEpic{Train: trains[0], Epic: e, Covered: n, Total: len(epicOf)}
+		if len(trains) > 1 {
+			t.Also = slices.Clone(trains[1:])
+		}
+		return t, true
+	}
+	return LLBFromEpic{}, false
 }
 
 // Sprint N's branch ships in train N+1; any other target ships in the

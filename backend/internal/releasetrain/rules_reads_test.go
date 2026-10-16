@@ -31,7 +31,13 @@ func everyRuleFires(t *testing.T) *fixture {
 	f.mr("di", "DEMO-3 wallet", "feat/DEMO-3", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
 	f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
 	live.forceUpdate("REQ-1", "To Do", "new", "")
-	f.page("demo", "21", "2026-09-20", "2026-10-08", liveDue)
+	p21 := f.page("demo", "21", "2026-09-20", "2026-10-08", liveDue)
+	live.issue("DEMO-11", "In Progress", "indeterminate")
+	f.mr("di", "DEMO-11 pay", "feat/DEMO-11", "feature/demo-pay", MRMerged, "2026-09-05", "2026-09-06")
+	f.mr("di", "DEMO-12 pay", "feat/DEMO-12", "feature/demo-pay", MRMerged, "2026-09-07", "2026-09-08")
+	f.parent("DEMO-11", "DEMO-700", IssueTypeEpic)
+	f.parent("DEMO-12", "DEMO-700", IssueTypeEpic)
+	f.epic(p21, "DEMO-700")
 
 	noApprovers := f.version("da", "21", "3.5.1", liveFreeze, liveDue)
 	noApprovers.jira.Name = "Android 3.5.2"

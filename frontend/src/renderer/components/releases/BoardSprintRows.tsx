@@ -157,7 +157,7 @@ function DestSummary({
 			<Chev open={open} />
 			<span className="to">{h.to}</span>
 			{h.target && (
-				<span className="tgt c" data-st={h.target.tone}>
+				<span className="tgt c" data-st={h.target.tone} title={h.target.title}>
 					{h.target.text}
 				</span>
 			)}

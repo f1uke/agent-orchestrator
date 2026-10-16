@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { draftDirty, draftFrom, planInput, PlanConflictError, planProblems, targetChoices } from "./plan";
+import {
+	draftDirty,
+	draftFrom,
+	planInput,
+	PlanConflictError,
+	planProblems,
+	targetAfterPlan,
+	targetChoices,
+} from "./plan";
 import { board, train, version } from "./testkit";
 import type { LLBGroup } from "./types";
 
@@ -108,6 +116,31 @@ describe("plan draft", () => {
 		expect(e).toBeInstanceOf(Error);
 		expect(e.current).toBe(4);
 		expect(e.message).toBe("This plan changed elsewhere. Reload it to see the change; your edit is kept here.");
+	});
+});
+
+describe("targetAfterPlan", () => {
+	const epic = { kind: "epic", train: "22-2026", epic: "DEMO-500", covered: 2, total: 3 } as const;
+	const withEpic: LLBGroup = { ...group, target: epic };
+
+	it("a train plan confirms or overrides the epic, dropped drops it, unplanned leaves the epic's suggestion", () => {
+		expect(targetAfterPlan(withEpic, { targetKind: "train", targetTrain: "22-2026" })).toEqual({
+			kind: "planned",
+			train: "22-2026",
+		});
+		expect(targetAfterPlan(withEpic, { targetKind: "train", targetTrain: "23-2026" })).toEqual({
+			kind: "planned",
+			train: "23-2026",
+		});
+		expect(targetAfterPlan(withEpic, { targetKind: "dropped" })).toEqual({ kind: "dropped" });
+		expect(targetAfterPlan(withEpic, { targetKind: "unplanned" })).toEqual(epic);
+	});
+
+	it("keeps a landing and turns an epic-less unplanned group into none", () => {
+		const landed: LLBGroup = { ...group, target: { kind: "landed", train: "21-2026" } };
+		expect(targetAfterPlan(landed, { targetKind: "dropped" })).toEqual({ kind: "landed", train: "21-2026" });
+		const planned: LLBGroup = { ...group, target: { kind: "planned", train: "21-2026" } };
+		expect(targetAfterPlan(planned, { targetKind: "unplanned" })).toEqual({ kind: "none" });
 	});
 });
 

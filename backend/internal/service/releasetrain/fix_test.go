@@ -185,6 +185,8 @@ func (w *boardWorld) seedParked() {
 			State: rt.MROpened, Author: "Rae Example", CreatedOn: rt.Day{Y: 2026, M: 10, D: 12}, MilestoneID: &ms}),
 		item(t, rt.KindMRs, rt.MRFact{Project: 1001, IID: 310, Title: "DEMO-7 wallet", SourceBranch: "feat/DEMO-7", TargetBranch: "feature/demo-wallet",
 			State: rt.MRMerged, Author: "Kai", CreatedOn: merged, MergedOn: &merged}))
+	w.write(rt.KindLLBCards.Name, rt.LLBCardsScope, item(t, rt.KindLLBCards, rt.IssueFact{
+		Key: "DEMO-7", Summary: "Wallet", Status: "In Progress", StatusCategory: "indeterminate", URL: "https://jira.example.com/browse/DEMO-7"}))
 	train22 := rt.TrainID{Number: 22, Year: 2026}
 	if _, err := w.svc.PutPlan(context.Background(), rt.LlbPlan{ID: "demo-wallet", Name: "Wallet", TargetKind: rt.TargetTrain, TargetTrain: &train22,
 		Branches: []rt.PlanBranch{{App: "di", Branch: "feature/demo-wallet"}}, Accepted: []rt.PlanAccepted{}, UpdatedBy: "cli"}, 0); err != nil {

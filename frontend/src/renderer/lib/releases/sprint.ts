@@ -1,7 +1,7 @@
 import { appMark } from "./appMark";
 import { statusTone } from "./cards";
 import { shortDay } from "./day";
-import { shortBranch, trainLabel, urgency } from "./llb";
+import { aimedTrain, epicNote, shortBranch, trainLabel, urgency } from "./llb";
 import type {
 	AppId,
 	AppVersion,
@@ -208,7 +208,7 @@ export type DestHead = {
 	freeze?: Day;
 	note?: string;
 	tail?: string;
-	target?: { text: string; tone: Tone };
+	target?: { text: string; tone: Tone; title?: string };
 };
 
 const READY_NOTE = (cards: readonly SprintCard[]) =>
@@ -231,13 +231,15 @@ export function destHead(b: Board, to: Dest | null, cards: readonly SprintCard[]
 		}
 		case "llb": {
 			const g = b.llbs.find((x) => x.id === to.group);
+			const aimed = g ? aimedTrain(g) : (to.via ?? null);
 			const target =
 				g?.target.kind === "landed"
 					? { text: `landed in ${trainLabel(b, g.target.train)}`, tone: "done" as const }
-					: g?.target.kind === "planned" || (!g && to.via)
+					: aimed
 						? {
-								text: `then → ${trainLabel(b, g?.target.kind === "planned" ? g.target.train : (to.via ?? ""))}`,
+								text: `then → ${trainLabel(b, aimed)}${g?.target.kind === "epic" ? " · epic" : ""}`,
 								tone: g ? urgency(g, b) : ("accent" as const),
+								...(g && epicNote(g, b) ? { title: epicNote(g, b) ?? undefined } : {}),
 							}
 						: { text: "no target train", tone: "todo" as const };
 			return { ...head, target };

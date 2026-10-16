@@ -186,12 +186,12 @@ for (const reduced of [false, true]) {
 			await act(
 				page,
 				() => sum.click(),
-				() => expect(lanes).toHaveCount(3),
+				() => expect(lanes).toHaveCount(4),
 				"DIV.di",
 			);
-			if (reduced) expect((await bar.boundingBox())!.y).toBe(y0 + 3 * 24 + 2);
+			if (reduced) expect((await bar.boundingBox())!.y).toBe(y0 + 4 * 24 + 2);
 			await expectSameAsColdLoad(page);
-			expect((await bar.boundingBox())!.y).toBe(y0 + 3 * 24 + 2);
+			expect((await bar.boundingBox())!.y).toBe(y0 + 4 * 24 + 2);
 			await act(
 				page,
 				() => sum.click(),

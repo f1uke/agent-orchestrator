@@ -274,6 +274,8 @@ func (r routing) RouteOf(key string, app AppID, mrs []SprintMR) Route {
 			switch t := g.Target.(type) {
 			case LLBPlanned:
 				to.Via = &t.Train
+			case LLBFromEpic:
+				to.Via = &t.Train
 			case LLBLandedIn:
 				to.Via = &t.Train
 			}

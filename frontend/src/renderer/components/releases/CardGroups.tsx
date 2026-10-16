@@ -2,7 +2,7 @@ import { ChevronRight, GitFork } from "lucide-react";
 import type { ReactNode } from "react";
 import { branchFoldKey, statusTone, type BranchCard, type CardGroup } from "../../lib/releases/cards";
 import { shortDay } from "../../lib/releases/day";
-import { branchState, shortBranch, targetChip } from "../../lib/releases/llb";
+import { aimedTrain, branchState, shortBranch, targetChip } from "../../lib/releases/llb";
 import { mineText } from "../../lib/releases/sprint";
 import type { Board, CardUnit, IdentityKnown, MineReason, Person } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
@@ -10,6 +10,7 @@ import { useReleasesUi } from "../../stores/releases-ui";
 import { Avatar } from "./Avatar";
 import { Unfold } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
+import { TargetTag } from "./TargetTag";
 
 export function Chev({ open }: { open: boolean }) {
 	return <ChevronRight className="chev" style={{ rotate: open ? "90deg" : "0deg" }} aria-hidden="true" />;
@@ -188,7 +189,7 @@ function GroupRows({
 				const open = isOpen(fk);
 				const st = branchState(group, branch);
 				const landed = !!branch.landing?.mergedOn;
-				const tgt = group.target.kind === "planned" ? targetChip(group, board) : null;
+				const tgt = aimedTrain(group) ? targetChip(group, board) : null;
 				return (
 					<div key={fk} className="llbgrp" data-st={st.tone}>
 						<div
@@ -215,11 +216,7 @@ function GroupRows({
 								<span className="passive">
 									{cards.length} card{cards.length === 1 ? "" : "s"}
 								</span>
-								{tgt && (
-									<span className="tgt" data-st={tgt.tone ?? undefined}>
-										{tgt.text}
-									</span>
-								)}
+								{tgt && <TargetTag chip={tgt} />}
 							</span>
 							<span className="spill">
 								{landed && st.label !== "accepted" ? `merged ${shortDay(branch.landing?.mergedOn ?? "")}` : st.label}

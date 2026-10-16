@@ -30,13 +30,15 @@ func goldenRouting(t *testing.T) routing {
 	landed := &LongLivedBranch{App: "di", Branch: "feature/demo-wallet",
 		Landing: &MRFact{TargetBranch: "feature/sprint-2026-6", State: MRMerged, MergedOn: dayPtr(t, "2026-09-30")}}
 	parked := &LongLivedBranch{App: "di", Branch: "feature/demo-chat"}
+	byEpic := &LongLivedBranch{App: "di", Branch: "feature/demo-pay"}
 	return routing{
 		sprint: 7, year: 2026, start: day(t, "2026-10-06"),
 		cutover: map[AppID]Day{"di": day(t, "2026-09-01")},
-		llbs:    map[AppID]map[string]*LongLivedBranch{"di": {landed.Branch: landed, parked.Branch: parked}},
+		llbs:    map[AppID]map[string]*LongLivedBranch{"di": {landed.Branch: landed, parked.Branch: parked, byEpic.Branch: byEpic}},
 		groups: map[AppID]map[string]*LLBGroup{"di": {
 			parked.Branch: {ID: "demo-chat", Target: LLBPlanned{Train: routeTrain(9)}},
 			landed.Branch: {ID: "demo-wallet", Target: LLBLandedIn{Train: routeTrain(7)}},
+			byEpic.Branch: {ID: "demo-pay", Target: LLBFromEpic{Train: routeTrain(8), Epic: "DEMO-500", Covered: 3, Total: 4}},
 		}},
 		trains: []Train{
 			trainOn(t, 6, "2026-09-28", "2026-10-05", "di"),
@@ -73,6 +75,9 @@ func TestRouteOfGoldenCases(t *testing.T) {
 		{"parked in a long-lived branch names the group and its plan", 0, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 6, "feature/demo-chat", MRMerged, "2026-10-07", "2026-10-08")}
 		}, Route{Kind: DestLLB, To: ToLLB{Group: "demo-chat", Branch: "feature/demo-chat", Via: ptrTrain(9)}, MR: 6}},
+		{"parked in a long-lived branch its epic aims at a train, which the page agrees with", 8, false, func(t *testing.T) []SprintMR {
+			return []SprintMR{smr(t, 19, "feature/demo-pay", MRMerged, "2026-10-07", "2026-10-08")}
+		}, Route{Kind: DestLLB, To: ToLLB{Group: "demo-pay", Branch: "feature/demo-pay", Via: ptrTrain(8)}, Plan: ptrTrain(8), MR: 19}},
 		{"merged into develop after cutover goes off flow", 0, false, func(t *testing.T) []SprintMR {
 			return []SprintMR{smr(t, 7, "develop", MRMerged, "2026-10-07", "2026-10-08")}
 		}, Route{Kind: DestDevelop, To: OffFlow{}, MR: 7}},

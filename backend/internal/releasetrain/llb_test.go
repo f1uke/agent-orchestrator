@@ -29,6 +29,16 @@ func (f *fixture) ahead(app AppID, branch string, commits int) {
 	f.compares = append(f.compares, c)
 }
 
+// epic lists key on page p as an epic, as Jira reads it.
+func (f *fixture) epic(p *PageFact, key string) {
+	f.card(p, key).IssueType = IssueTypeEpic
+}
+
+// parent makes the long-lived card key a child of parent, of type kind.
+func (f *fixture) parent(key, parent, kind string) {
+	f.llbCards = append(f.llbCards, &IssueFact{Key: key, Summary: "Card " + key, IssueType: "Story", Parent: parent, ParentType: kind})
+}
+
 func llbBranches(b Board) []string {
 	var out []string
 	for _, g := range b.LLBs {
@@ -309,5 +319,130 @@ func TestLLBTarget(t *testing.T) {
 				t.Fatalf("target %#v state %s, want %#v %s", g.Target, br.State, tc.want, tc.state)
 			}
 		})
+	}
+}
+
+func TestLLBTargetFromEpic(t *testing.T) {
+	train := func(n int) TrainID { return TrainID{Number: n, Year: fixtureYear} }
+	wallet := func(f *fixture, keys ...string) {
+		for _, k := range keys {
+			f.mr("di", k+" wallet", "feat/"+k, "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+		}
+	}
+	under := func(f *fixture, epic string, keys ...string) {
+		for _, k := range keys {
+			f.parent(k, epic, IssueTypeEpic)
+		}
+	}
+	for _, tc := range []struct {
+		name  string
+		setup func(f *fixture, p20, p21, p22 *PageFact)
+		plan  *LlbPlan
+		want  LLBTarget
+	}{
+		{"an epic listed on a train page covering most cards sets the target", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2", "DEMO-3")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.epic(p22, "DEMO-500")
+		}, nil, LLBFromEpic{Train: train(22), Epic: "DEMO-500", Covered: 2, Total: 3}},
+		{"an unplanned plan still takes the epic's train", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2", "DEMO-3")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.epic(p22, "DEMO-500")
+		}, &LlbPlan{TargetKind: TargetUnplanned}, LLBFromEpic{Train: train(22), Epic: "DEMO-500", Covered: 2, Total: 3}},
+		{"a plan naming a train beats the epic", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.epic(p22, "DEMO-500")
+		}, &LlbPlan{TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 21, Year: fixtureYear}}, LLBPlanned{Train: train(21)}},
+		{"a dropped plan beats the epic", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.epic(p22, "DEMO-500")
+		}, &LlbPlan{TargetKind: TargetDropped}, LLBDropped{}},
+		{"the observed landing beats the epic", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.epic(p22, "DEMO-500")
+			f.mr("di", "wallet", "feature/demo-wallet", "feature/sprint-20-2026", MRMerged, "2026-10-05", "2026-10-05")
+		}, nil, LLBLandedIn{Train: train(21)}},
+		{"exactly half is not a majority", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2", "DEMO-3", "DEMO-4")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			under(f, "DEMO-600", "DEMO-3", "DEMO-4")
+			f.epic(p22, "DEMO-500")
+		}, nil, LLBNoTarget{}},
+		{"cards with no epic count against the coverage", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2", "DEMO-3", "DEMO-4")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.parent("DEMO-3", "DEMO-2", "Story")
+			f.epic(p22, "DEMO-500")
+		}, nil, LLBNoTarget{}},
+		{"a parent that is not an epic is no epic, even when a page lists it", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2")
+			f.parent("DEMO-1", "DEMO-500", "Story")
+			f.parent("DEMO-2", "DEMO-500", "Story")
+			f.card(p22, "DEMO-500")
+		}, nil, LLBNoTarget{}},
+		{"an epic no page lists gives none", func(f *fixture, _, _, _ *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+		}, nil, LLBNoTarget{}},
+		{"a card on two platforms counts once", func(f *fixture, _, _, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-1", "DEMO-2", "DEMO-3")
+			f.mr("da", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+			under(f, "DEMO-500", "DEMO-1")
+			f.epic(p22, "DEMO-500")
+		}, nil, LLBNoTarget{}},
+		{"two pages: the earliest unpublished train wins and the other is named", func(f *fixture, _, p21, p22 *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.epic(p22, "DEMO-500")
+			f.epic(p21, "DEMO-500")
+		}, nil, LLBFromEpic{Train: train(21), Epic: "DEMO-500", Covered: 2, Total: 2, Also: []TrainID{train(22)}}},
+		{"a published train's epic is ignored", func(f *fixture, p20, _, _ *PageFact) {
+			wallet(f, "DEMO-1", "DEMO-2")
+			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
+			f.epic(p20, "DEMO-500")
+		}, nil, LLBNoTarget{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, today)
+			f.version("di", "20", "3.4.0", "2026-10-01", "2026-10-09")
+			f.version("di", "21", "3.5.0", liveFreeze, liveDue)
+			f.version("di", "22", "3.6.0", "2026-10-20", "2026-10-27")
+			f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-19-2026", MRMerged, "2026-09-20", "2026-09-20")
+			p20 := f.page("demo", "20", "2026-09-10", "2026-10-01", "2026-10-09")
+			p21 := f.page("demo", "21", "2026-09-20", liveFreeze, liveDue)
+			p22 := f.page("demo", "22", "2026-10-01", "2026-10-20", "2026-10-27")
+			tc.setup(f, p20, p21, p22)
+			if tc.plan != nil {
+				p := *tc.plan
+				p.ID, p.Name = "demo-wallet", "Wallet"
+				f.human.Plans = []LlbPlan{p}
+			}
+			g, _ := llbBranch(t, f.reconcile(), "di", "feature/demo-wallet")
+			if !reflect.DeepEqual(g.Target, tc.want) {
+				t.Fatalf("target = %#v, want %#v", g.Target, tc.want)
+			}
+		})
+	}
+}
+
+func TestLLBCardsNameTheirEpicOnlyWhenTheParentIsAnEpic(t *testing.T) {
+	f := newFixture(t, today)
+	f.version("di", "21", "3.5.0", liveFreeze, liveDue)
+	for _, k := range []string{"DEMO-1", "DEMO-2", "DEMO-3"} {
+		f.mr("di", k+" wallet", "feat/"+k, "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+	}
+	f.parent("DEMO-1", "DEMO-500", IssueTypeEpic)
+	f.parent("DEMO-2", "DEMO-1", "Story")
+	_, br := llbBranch(t, f.reconcile(), "di", "feature/demo-wallet")
+	got := map[string]string{}
+	for _, c := range br.Cards {
+		got[c.Key] = c.Epic
+	}
+	if want := map[string]string{"DEMO-1": "DEMO-500", "DEMO-2": "", "DEMO-3": ""}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("card epics = %v, want %v", got, want)
 	}
 }

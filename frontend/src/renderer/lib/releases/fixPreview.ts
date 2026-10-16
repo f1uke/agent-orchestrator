@@ -1,4 +1,5 @@
 import { fixFailure } from "./fix";
+import { targetAfterPlan } from "./plan";
 import type { AlertHit, Board, Fix, FixEvent, FixPlan, FixStep } from "./types";
 
 /** A fake of the daemon's fix routes over the fictional Board, for the browser preview and Playwright. */
@@ -301,13 +302,7 @@ function applyTarget(b: Board, s: FixStep, dir: 1 | -1): void {
 	if (!g?.plan) return;
 	const to = dir === 1 ? e.after : e.before;
 	g.plan = { ...g.plan, targetKind: to.targetKind, targetTrain: to.targetTrain, version: g.plan.version + 1 };
-	if (g.target.kind !== "landed")
-		g.target =
-			to.targetKind === "train" && to.targetTrain
-				? { kind: "planned", train: to.targetTrain }
-				: to.targetKind === "dropped"
-					? { kind: "dropped" }
-					: { kind: "none" };
+	g.target = targetAfterPlan(g, to);
 }
 
 export function previewUndo(b: Board, store: PreviewFixStore, id: string, at: string): Fix {

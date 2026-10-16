@@ -1358,6 +1358,10 @@
 		border: 1px dashed var(--fg-off);
 		font-weight: 500;
 	}
+	.rel .tgt.epic {
+		background: transparent;
+		border: 1px dashed color-mix(in srgb, var(--c) 60%, transparent);
+	}
 
 	.rel-llb {
 		position: absolute;

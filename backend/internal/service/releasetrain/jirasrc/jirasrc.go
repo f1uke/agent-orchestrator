@@ -245,7 +245,7 @@ func (r reader) issues(ctx context.Context, kind rt.Kind[rt.IssueFact], jql stri
 	for _, row := range rows {
 		f := rt.IssueFact{
 			Key: row.Key, Summary: row.Summary, Status: row.Status, StatusCategory: row.StatusCategory, Subtask: row.Subtask,
-			ReleaseTicket: ticket != nil && !row.Subtask && ticket.MatchString(row.Summary), FixVersions: row.FixVersionIDs, Parent: row.ParentKey, URL: row.URL,
+			ReleaseTicket: ticket != nil && !row.Subtask && ticket.MatchString(row.Summary), FixVersions: row.FixVersionIDs, IssueType: row.IssueType, Parent: row.ParentKey, ParentType: row.ParentType, URL: row.URL,
 		}
 		if a := row.Assignee; a != nil {
 			f.Assignee = &rt.Person{AccountID: a.AccountID, Name: a.DisplayName}

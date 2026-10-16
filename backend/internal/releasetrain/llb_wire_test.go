@@ -80,6 +80,46 @@ func TestBoardJSONCarriesLongLivedGroupsTheirTargetKindAndCutover(t *testing.T) 
 	}
 }
 
+func TestBoardJSONCarriesAnEpicTargetAndEachCardsEpic(t *testing.T) {
+	f := newFixture(t, today)
+	f.version("di", "21", "3.5.0", liveFreeze, liveDue)
+	f.version("di", "22", "3.6.0", "2026-10-20", "2026-10-27")
+	f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
+	f.mr("di", "DEMO-1 pay", "feat/DEMO-1", "feature/demo-pay", MRMerged, "2026-09-01", "2026-09-02")
+	f.mr("di", "DEMO-2 pay", "feat/DEMO-2", "feature/demo-pay", MRMerged, "2026-09-03", "2026-09-04")
+	f.parent("DEMO-1", "DEMO-500", IssueTypeEpic)
+	f.parent("DEMO-2", "DEMO-500", IssueTypeEpic)
+	f.epic(f.page("demo", "22", "2026-10-01", "2026-10-20", "2026-10-27"), "DEMO-500")
+	f.epic(f.page("demo", "21", "2026-09-20", liveFreeze, liveDue), "DEMO-500")
+	raw, err := json.Marshal(f.reconcile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w struct {
+		LLBs []struct {
+			Target   map[string]any `json:"target"`
+			Branches []struct {
+				Cards []struct {
+					Key  string `json:"key"`
+					Epic string `json:"epic"`
+				} `json:"cards"`
+			} `json:"branches"`
+		} `json:"llbs"`
+	}
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"kind": "epic", "train": "21-2026", "epic": "DEMO-500", "covered": 2.0, "total": 2.0, "also": []any{"22-2026"}}
+	if len(w.LLBs) != 1 || !reflect.DeepEqual(w.LLBs[0].Target, want) {
+		t.Fatalf("llbs = %+v, want one group whose target is %v", w.LLBs, want)
+	}
+	for _, c := range w.LLBs[0].Branches[0].Cards {
+		if c.Epic != "DEMO-500" {
+			t.Fatalf("card %s epic = %q, want DEMO-500", c.Key, c.Epic)
+		}
+	}
+}
+
 func TestBoardJSONHasEmptyLongLivedListsNotNull(t *testing.T) {
 	raw, err := json.Marshal(newFixture(t, today).reconcile())
 	if err != nil {

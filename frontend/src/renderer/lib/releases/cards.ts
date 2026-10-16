@@ -1,5 +1,6 @@
 import type { AppId, Board, CardUnit, CodeState, LLBGroup, LongLivedBranch, MineReason, Person, Train } from "./types";
 import type { Tone } from "./vocab";
+import { aimedTrain } from "./llb";
 
 const READY = new Set(["ready for uat", "uat approved", "ready to deploy", "ready to deliver", "deployed", "done"]);
 const CATEGORY_TONE: Readonly<Record<string, Tone>> = { done: "done", indeterminate: "running", new: "todo" };
@@ -40,7 +41,7 @@ export function branchFoldKey(g: CardGroup, b: LongLivedBranch): string {
 
 function ridesTrain(g: LLBGroup, b: LongLivedBranch, train: string): boolean {
 	if (b.landing?.mergedOn) return b.train === train;
-	return g.target.kind === "planned" && g.target.train === train;
+	return aimedTrain(g) === train;
 }
 
 function branchesForTrain(board: Board, app: AppId, train: string): { group: LLBGroup; branch: LongLivedBranch }[] {
