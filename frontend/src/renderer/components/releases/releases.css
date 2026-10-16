@@ -1772,17 +1772,59 @@
 	.rel-sched > .rel-sprow > .rel-lab.top {
 		height: auto;
 		display: flex;
+		align-items: stretch;
+		padding: 0;
+		background: var(--bg-1);
+	}
+	.rel-sched > .rel-sprow > .rel-lab.top:hover,
+	.rel-sched > .rel-sprow > .rel-lab.top:focus-within {
+		background: var(--bg-2);
+	}
+	.rel-lab.top > .open {
+		flex: 1;
+		min-width: 0;
+		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
 		justify-content: flex-start;
 		gap: 2px;
-		padding: 8px 16px 0;
+		padding: 8px 36px 0 16px;
 		text-align: left;
-		background: var(--bg-1);
-		cursor: pointer;
 	}
-	.rel-sched > .rel-sprow > .rel-lab.top:hover {
-		background: var(--bg-2);
+	.rel-lab.top > .hide {
+		position: absolute;
+		top: 6px;
+		right: 8px;
+		display: grid;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 4px;
+		color: var(--fg-passive);
+		opacity: 0;
+	}
+	.rel-lab.top > .hide svg {
+		width: 14px;
+		height: 14px;
+	}
+	.rel-lab.top:hover > .hide,
+	.rel-lab.top > .hide:focus-visible {
+		opacity: 1;
+	}
+	.rel-lab.top > .hide:hover {
+		color: var(--fg);
+		background: var(--hover);
+	}
+	.rel-sched > .rel-row > .rel-lab .rel-hid {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		margin-left: auto;
+		color: var(--fg-muted);
+	}
+	.rel-hid svg {
+		width: 12px;
+		height: 12px;
 	}
 	.rel-lab.top .spn {
 		display: flex;

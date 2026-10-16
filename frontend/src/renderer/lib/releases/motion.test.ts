@@ -137,14 +137,16 @@ describe("releases motion", () => {
 	it("moves rows when apps, Only me, hotfixes or a layer change, and blocks also on a fold, never on focus or a refetch", () => {
 		const url = parseReleasesSearch({});
 		const folds = new Set(["di:21-2026"]);
-		const base = moveKeys(url, DEFAULT_LAYERS, folds);
-		expect(moveKeys(parseReleasesSearch({}), DEFAULT_LAYERS, new Set(folds))).toEqual(base);
-		expect(moveKeys({ ...url, focus: "20-2026", sheet: { kind: "key" } }, DEFAULT_LAYERS, folds)).toEqual(base);
+		const none = new Set<string>();
+		const base = moveKeys(url, DEFAULT_LAYERS, folds, none);
+		expect(moveKeys(parseReleasesSearch({}), DEFAULT_LAYERS, new Set(folds), none)).toEqual(base);
+		expect(moveKeys({ ...url, focus: "20-2026", sheet: { kind: "key" } }, DEFAULT_LAYERS, folds, none)).toEqual(base);
 		const filters = [
-			moveKeys({ ...url, apps: new Set(["di"]) }, DEFAULT_LAYERS, folds),
-			moveKeys({ ...url, me: true }, DEFAULT_LAYERS, folds),
-			moveKeys({ ...url, hotfixes: !url.hotfixes }, DEFAULT_LAYERS, folds),
-			moveKeys(url, { ...DEFAULT_LAYERS, sprint: true }, folds),
+			moveKeys({ ...url, apps: new Set(["di"]) }, DEFAULT_LAYERS, folds, none),
+			moveKeys({ ...url, me: true }, DEFAULT_LAYERS, folds, none),
+			moveKeys({ ...url, hotfixes: !url.hotfixes }, DEFAULT_LAYERS, folds, none),
+			moveKeys(url, { ...DEFAULT_LAYERS, sprint: true }, folds, none),
+			moveKeys(url, DEFAULT_LAYERS, folds, new Set(["PILOT"])),
 		];
 		for (const k of filters) {
 			expect(k.rows).not.toBe(base.rows);
@@ -152,14 +154,17 @@ describe("releases motion", () => {
 		}
 		expect(new Set(filters.map((k) => k.rows)).size).toBe(filters.length);
 		for (const k of [
-			moveKeys(url, DEFAULT_LAYERS, new Set([...folds, "di:llbs"])),
-			moveKeys(url, DEFAULT_LAYERS, new Set()),
+			moveKeys(url, DEFAULT_LAYERS, new Set([...folds, "di:llbs"]), none),
+			moveKeys(url, DEFAULT_LAYERS, new Set(), none),
 		]) {
 			expect(k.rows, "a fold grows its own row, it does not FLIP the rows").toBe(base.rows);
 			expect(k.blocks).not.toBe(base.blocks);
 		}
-		expect(moveKeys({ ...url, apps: new Set(["da", "di"]) }, DEFAULT_LAYERS, folds)).toEqual(
-			moveKeys({ ...url, apps: new Set(["di", "da"]) }, DEFAULT_LAYERS, folds),
+		expect(moveKeys(url, DEFAULT_LAYERS, folds, new Set(["A", "B"]))).toEqual(
+			moveKeys(url, DEFAULT_LAYERS, folds, new Set(["B", "A"])),
+		);
+		expect(moveKeys({ ...url, apps: new Set(["da", "di"]) }, DEFAULT_LAYERS, folds, none)).toEqual(
+			moveKeys({ ...url, apps: new Set(["di", "da"]) }, DEFAULT_LAYERS, folds, none),
 		);
 	});
 });

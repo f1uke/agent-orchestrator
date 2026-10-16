@@ -21,7 +21,7 @@ import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
-import { BoardSprintRow } from "./BoardSprintRows";
+import { BoardSprintRow, HiddenBoardsMenu } from "./BoardSprintRows";
 import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
 import { MoveRoot, Moving, useReleaseMotion } from "./ReleaseMotion";
@@ -116,16 +116,31 @@ export function Timeline({
 
 	usePan(sc, mo);
 
+	const hiddenTrigger = useRef<HTMLButtonElement>(null);
+	const focusTrigger = useRef(false);
+	useEffect(() => {
+		if (!focusTrigger.current) return;
+		focusTrigger.current = false;
+		hiddenTrigger.current?.focus();
+	}, [lens.hiddenBoards]);
+	const hideBoard = (key: string) => {
+		focusTrigger.current = true;
+		actions.setHiddenBoards(new Set([...lens.hiddenBoards, key]));
+	};
+
 	return (
 		<div className="rel-sc" ref={sc} data-testid="release-timeline">
-			<MoveRoot keys={moveKeys(url, layers, folds)}>
+			<MoveRoot keys={moveKeys(url, layers, folds, lens.hiddenBoards)}>
 				<div className="rel-canvas" ref={canvas} style={{ width: LABEL_W + tl.width }}>
 					<Background tl={tl} />
-					<Axis tl={tl} layers={layers} />
+					<Axis tl={tl} layers={layers} actions={actions} />
 					<div className="rel-sched">
 						<div className="rel-row">
 							<div className="rel-lab">
 								<span className="rel-eyebrow">Sprint</span>
+								{layers.sprint && (
+									<HiddenBoardsMenu board={board} lens={lens} actions={actions} trigger={hiddenTrigger} />
+								)}
 							</div>
 							<div className="rel-trk" style={{ width: tl.width, height: 30 }}>
 								{board.sprints
@@ -148,8 +163,16 @@ export function Timeline({
 							</div>
 						</div>
 						{layers.sprint &&
-							board.sprints.map((row) => (
-								<BoardSprintRow key={row.board.key} row={row} board={board} tl={tl} lens={lens} actions={actions} />
+							lens.sprintRows.map((row) => (
+								<BoardSprintRow
+									key={row.board.key}
+									row={row}
+									board={board}
+									tl={tl}
+									lens={lens}
+									actions={actions}
+									onHide={hideBoard}
+								/>
 							))}
 					</div>
 					{lens.apps.map((a) => (
@@ -292,8 +315,7 @@ function Background({ tl }: { tl: TL }) {
 	);
 }
 
-function Axis({ tl, layers }: { tl: TL; layers: Layers }) {
-	const setLayer = useReleasesUi((s) => s.setLayer);
+function Axis({ tl, layers, actions }: { tl: TL; layers: Layers; actions: PageActions }) {
 	const days = Array.from({ length: tl.days }, (_, i) => addDays(tl.start, i));
 	const months = days.filter((d, i) => i === 0 || dayOfMonth(d) === 1);
 	return (
@@ -307,7 +329,7 @@ function Axis({ tl, layers }: { tl: TL; layers: Layers }) {
 							type="button"
 							className="rel-lyr"
 							aria-pressed={layers[k]}
-							onClick={() => setLayer(k, !layers[k])}
+							onClick={() => actions.setLayers({ ...layers, [k]: !layers[k] })}
 						>
 							{LAYER_NAMES[k]}
 						</button>

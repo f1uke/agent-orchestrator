@@ -86,6 +86,31 @@ export function DropdownMenuRadioItem({
 	);
 }
 
+export function DropdownMenuCheckboxItem({
+	className,
+	children,
+	...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
+	return (
+		<DropdownMenuPrimitive.CheckboxItem
+			className={cn(
+				"relative flex cursor-default select-none items-center gap-2.5 rounded-md py-1.5 pr-2 pl-8 text-[13px] outline-none transition-colors",
+				"text-muted-foreground focus:bg-surface focus:text-foreground data-[state=checked]:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+				"[&_svg]:size-[15px] [&_svg]:shrink-0",
+				className,
+			)}
+			{...props}
+		>
+			<span className="absolute left-2 flex size-[15px] items-center justify-center">
+				<DropdownMenuPrimitive.ItemIndicator>
+					<Check aria-hidden="true" />
+				</DropdownMenuPrimitive.ItemIndicator>
+			</span>
+			{children}
+		</DropdownMenuPrimitive.CheckboxItem>
+	);
+}
+
 export function DropdownMenuLabel({
 	className,
 	inset,

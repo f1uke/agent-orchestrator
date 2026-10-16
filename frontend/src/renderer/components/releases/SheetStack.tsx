@@ -709,6 +709,14 @@ function keySheet(c: Ctx): Sheet {
 					))}
 					<div className="kr">A dashed marker is a conventional date, not one a system records.</div>
 				</Sec>
+				<Sec title="Sprint rows">
+					<div className="kr">
+						The Sprint cards layer adds one row per board. Hide a board&apos;s row with the eye on its label; &quot;N
+						hidden&quot; on the Sprint line lists every board to show it again. A hidden board&apos;s cards leave the
+						sprint counts, but its alerts stay in Needs attention: hiding a row is a view choice, not &quot;not
+						mine&quot;.
+					</div>
+				</Sec>
 				<Sec title="Fixes">
 					<div className="kr">
 						Fix › on an alert shows the exact request a fix would send. Every fix except L3 is a dry run: AO records it

@@ -8,6 +8,8 @@ import {
 	destLabel,
 	destTally,
 	destTone,
+	hiddenBoardsText,
+	lensSprintCards,
 	mineText,
 	mrPills,
 	versionMineText,
@@ -197,6 +199,24 @@ describe("destination blocks", () => {
 		expect(carriedTo(b, cards[4])).toEqual({ text: "went to #21", tone: "passive" });
 		expect(carriedTo(b, cards[5])).toEqual({ text: "parked in ⑂ demo-wallet", tone: "hotfix" });
 		expect(carriedTo(b, card("DEMO-12", [], { active: false }))).toBeNull();
+	});
+});
+
+describe("hidden boards", () => {
+	const pilot: SprintRow = { ...fullRow, board: { id: 2, key: "PILOT", ownsSprintBranch: false } };
+	const lens = { me: false, apps: null, hidden: new Set(["PILOT", "GONE"]) };
+
+	it("drops every card of a hidden board and keeps the other boards whole", () => {
+		expect(lensSprintCards(pilot, lens)).toEqual([]);
+		expect(lensSprintCards(fullRow, lens).map((c) => c.key)).toEqual(cards.map((c) => c.key));
+		expect(boardLabel(pilot, b, lensSprintCards(pilot, lens)).scope).toBe("0 new");
+	});
+
+	it("counts only hidden boards that have a row, and says nothing when none is hidden", () => {
+		expect(hiddenBoardsText([fullRow, pilot], lens.hidden)).toBe("1 hidden");
+		expect(hiddenBoardsText([fullRow, pilot], new Set(["DEMO", "PILOT"]))).toBe("2 hidden");
+		expect(hiddenBoardsText([fullRow, pilot], new Set(["GONE"]))).toBeNull();
+		expect(hiddenBoardsText([fullRow, pilot], new Set())).toBeNull();
 	});
 });
 

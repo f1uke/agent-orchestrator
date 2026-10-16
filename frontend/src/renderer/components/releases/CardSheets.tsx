@@ -232,6 +232,20 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 	const row = c.board.sprints.find((s) => s.board.key === boardKey);
 	if (!row)
 		return { title: boardKey, body: <div className="sec empty">This board has no active sprint on the Board.</div> };
+	if (c.lens.hiddenBoards.has(boardKey)) {
+		const show = new Set([...c.lens.hiddenBoards].filter((k) => k !== boardKey));
+		return {
+			title: row.sprint.name,
+			body: (
+				<div className="sec empty" data-testid="sprint-sheet-hidden">
+					You hid this board&apos;s sprint row, so its cards are off the page.{" "}
+					<button type="button" className="lnk" onClick={() => c.actions.setHiddenBoards(show)}>
+						Show {boardKey} sprint
+					</button>
+				</div>
+			),
+		};
+	}
 	const ships = row.board.ownsSprintBranch ? sprintShipsIn(c.board, row) : undefined;
 	const cards = c.lens.sprintCards(row);
 	const active = cards.filter((x) => x.active);
