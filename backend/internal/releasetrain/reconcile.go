@@ -16,7 +16,7 @@ func Reconcile(in Inputs, env Env) Board {
 	phases(b.Trains, b.Today)
 	branches, cutover := detectLLBs(in.Config, in.Snap)
 	b.LLBs, b.Cutover = groupLLBs(branches, in.Human.Plans, b.Trains, pageEpicsOf(b.Trains, in.Snap, b.Today), in.Config), cutover
-	b.Sources, b.Kinds = rs.sources(b.Trains, b.LLBs), kindList()
+	b.Sources, b.Kinds = rs.freshness(b.Trains, b.LLBs)
 	mrs, llbs := indexMRs(in.Config, in.Snap), llbsByApp(b.LLBs)
 	jira, live := branchCards(in.Snap), liveTrains(b.Trains, *rs)
 	for i := range b.Trains {

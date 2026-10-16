@@ -5067,9 +5067,13 @@ export interface components {
             project: number;
         };
         ReleaseTrainKindFreshness: {
+            /** Format: date-time */
+            asOf?: null | string;
             budgetSeconds: number;
+            issues: components["schemas"]["ReleaseTrainResourceStatus"][];
             kind: string;
             label: string;
+            resources: number;
             system: string;
         };
         ReleaseTrainLLBCard: {

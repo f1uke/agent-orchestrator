@@ -102,12 +102,16 @@ type SourceFreshness struct {
 	Issues    []ResourceStatus `json:"issues"`
 }
 
-// KindFreshness is one fact kind as a source tag names it.
+// KindFreshness is one fact kind as a source tag names it, with the same
+// freshness SourceFreshness gives its system, judged on this kind's reads alone.
 type KindFreshness struct {
-	Kind          KindName `json:"kind"`
-	System        string   `json:"system"`
-	Label         string   `json:"label"`
-	BudgetSeconds int      `json:"budgetSeconds"`
+	Kind          KindName         `json:"kind"`
+	System        string           `json:"system"`
+	Label         string           `json:"label"`
+	BudgetSeconds int              `json:"budgetSeconds"`
+	Resources     int              `json:"resources"`
+	AsOf          *time.Time       `json:"asOf,omitempty"`
+	Issues        []ResourceStatus `json:"issues"`
 }
 
 // AppVersion is one app's version on one train.
@@ -206,9 +210,10 @@ func phases(trains []Train, today Day) {
 	}
 }
 
-// sources skips what the latest pass did not plan (never fetched again, it lingers
+// freshness skips what the latest pass did not plan (never fetched again, it lingers
 // until the unplanned sweep) and a gone branch's compare, which can never complete.
-func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
+// A settled version's per-entity read is judged by SettledBudget and does not age its kind.
+func (r *readSet) freshness(trains []Train, llbs []LLBGroup) ([]SourceFreshness, []KindFreshness) {
 	live, gone := r.liveEntities(trains), goneCompares(llbs, r.cfg)
 	all := r.snap.all()
 	var lastPlan time.Time
@@ -217,35 +222,52 @@ func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
 			lastPlan = st.PlannedAt
 		}
 	}
-	bySystem := map[string]*SourceFreshness{}
-	system := func(k KindName) *SourceFreshness {
-		name := systemOf(k)
-		s := bySystem[name]
-		if s == nil {
-			s = &SourceFreshness{System: name, Issues: []ResourceStatus{}}
-			bySystem[name] = s
-		}
-		return s
-	}
-	for _, k := range ReadKinds() {
-		system(k)
+	byKind := map[KindName]*KindFreshness{}
+	for name, meta := range kinds {
+		byKind[name] = &KindFreshness{Kind: name, System: systemOf(name), Label: meta.Label,
+			BudgetSeconds: int(meta.Budget.Seconds()), Issues: []ResourceStatus{}}
 	}
 	for _, st := range all {
-		if gone[resKey{st.Kind, st.Scope}] || st.PlannedAt.Before(lastPlan) {
+		k := byKind[st.Kind]
+		if k == nil || gone[resKey{st.Kind, st.Scope}] || st.PlannedAt.Before(lastPlan) {
 			continue
 		}
-		s := system(st.Kind)
-		s.Resources++
+		k.Resources++
 		budget, settled := st.budget(), kinds[st.Kind].cover == perEntity && !live[resKey{st.Kind, st.Scope}]
 		if settled {
 			budget = SettledBudget
 		}
 		if st.ErrorClass != "" || st.CompleteAt == nil || r.now.Sub(*st.CompleteAt) > budget {
-			s.Issues = append(s.Issues, st)
+			k.Issues = append(k.Issues, st)
 		}
-		if !settled && st.CompleteAt != nil && (s.AsOf == nil || st.CompleteAt.Before(*s.AsOf)) {
-			at := *st.CompleteAt
-			s.AsOf = &at
+		if !settled && st.CompleteAt != nil {
+			k.AsOf = older(k.AsOf, *st.CompleteAt)
+		}
+	}
+	kindList := make([]KindFreshness, 0, len(byKind))
+	for _, k := range byKind {
+		kindList = append(kindList, *k)
+	}
+	sort.Slice(kindList, func(i, j int) bool { return kindList[i].Kind < kindList[j].Kind })
+	return systemsOf(kindList), kindList
+}
+
+// systemsOf rolls kinds up by system; only systems a rule or a stage reads are listed.
+func systemsOf(kindList []KindFreshness) []SourceFreshness {
+	bySystem := map[string]*SourceFreshness{}
+	for _, k := range ReadKinds() {
+		bySystem[systemOf(k)] = &SourceFreshness{System: systemOf(k), Issues: []ResourceStatus{}}
+	}
+	for _, k := range kindList {
+		s := bySystem[k.System]
+		if s == nil {
+			s = &SourceFreshness{System: k.System, Issues: []ResourceStatus{}}
+			bySystem[k.System] = s
+		}
+		s.Resources += k.Resources
+		s.Issues = append(s.Issues, k.Issues...)
+		if k.AsOf != nil {
+			s.AsOf = older(s.AsOf, *k.AsOf)
 		}
 	}
 	out := make([]SourceFreshness, 0, len(bySystem))
@@ -256,13 +278,11 @@ func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
 	return out
 }
 
-func kindList() []KindFreshness {
-	out := make([]KindFreshness, 0, len(kinds))
-	for name, meta := range kinds {
-		out = append(out, KindFreshness{Kind: name, System: systemOf(name), Label: meta.Label, BudgetSeconds: int(meta.Budget.Seconds())})
+func older(cur *time.Time, at time.Time) *time.Time {
+	if cur != nil && !at.Before(*cur) {
+		return cur
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Kind < out[j].Kind })
-	return out
+	return &at
 }
 
 func systemOf(k KindName) string {

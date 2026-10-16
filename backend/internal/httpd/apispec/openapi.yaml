@@ -14330,12 +14330,23 @@ components:
       type: object
     ReleaseTrainKindFreshness:
       properties:
+        asOf:
+          format: date-time
+          type:
+          - "null"
+          - string
         budgetSeconds:
           type: integer
+        issues:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainResourceStatus'
+          type: array
         kind:
           type: string
         label:
           type: string
+        resources:
+          type: integer
         system:
           type: string
       required:
@@ -14343,6 +14354,8 @@ components:
       - system
       - label
       - budgetSeconds
+      - resources
+      - issues
       type: object
     ReleaseTrainLLBCard:
       properties:
