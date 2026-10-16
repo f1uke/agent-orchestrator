@@ -180,10 +180,11 @@ export function TopBar({
 					type="button"
 					className="rel-chip"
 					data-testid="llbs-button"
+					aria-label={`Long-lived ${board.llbs.filter(isOpenLlb).length}`}
 					onClick={() => actions.openSheet({ kind: "llbs" })}
 				>
 					<GitFork className="size-3 text-[var(--purple)]" aria-hidden="true" />
-					Long-lived
+					<span className="wide-only">Long-lived</span>
 					<b className="n">{board.llbs.filter(isOpenLlb).length}</b>
 				</button>
 			</SimpleTooltip>

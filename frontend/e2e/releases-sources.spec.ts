@@ -173,6 +173,15 @@ for (const [width, height] of [
 		const report = await labelOverlaps(page);
 		expect(report.n).toBeGreaterThan(10);
 		expect(report.overlaps).toEqual([]);
+		const top = await page.evaluate(() => {
+			const kids = [...document.querySelectorAll(".rel-top > *")].map((e) => e.getBoundingClientRect());
+			const box = document.querySelector(".rel-top")!.getBoundingClientRect();
+			const hits: number[] = [];
+			for (let i = 1; i < kids.length; i++) if (kids[i].width > 0 && kids[i].left < kids[i - 1].right - 1) hits.push(i);
+			return { hits, inside: kids.every((r) => r.right <= box.right + 1) };
+		});
+		expect(top.hits, "top bar items never overlap").toEqual([]);
+		expect(top.inside, "top bar items stay inside the bar").toBe(true);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sources-${width}.png` });
 	});
 }
