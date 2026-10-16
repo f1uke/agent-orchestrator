@@ -161,7 +161,15 @@ describe("destination blocks", () => {
 	});
 
 	it("heads a train block with its freeze and versions, a long-lived block with its target, the rest with what they mean", () => {
-		const b2 = { ...b, llbs: [{ ...b.llbs[0], target: { kind: "landed" as const, train: "21-2026" } }] };
+		const b2 = {
+			...b,
+			llbs: [
+				{
+					...b.llbs[0],
+					target: { kind: "landed" as const, train: "21-2026", app: "di", branch: "feature/demo-wallet" },
+				},
+			],
+		};
 		expect(destHead(b, t21Dest, cards.slice(0, 2))).toEqual({
 			to: "→ #21",
 			tone: "accent",

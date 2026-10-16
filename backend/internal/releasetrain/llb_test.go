@@ -289,13 +289,13 @@ func TestLLBTarget(t *testing.T) {
 	}{
 		{"landed into a sprint branch rides the next train", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "feature/sprint-21-2026", MRMerged, "2026-10-12", "2026-10-12")
-		}, nil, LLBLandedIn{Train: train(22)}, LLBLanded},
+		}, nil, LLBLandedIn{Train: train(22), App: "di", Branch: "feature/demo-wallet"}, LLBLanded},
 		{"landed into develop rides the first train frozen after it", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-09-20", "2026-09-21")
-		}, nil, LLBLandedIn{Train: train(21)}, LLBLanded},
+		}, nil, LLBLandedIn{Train: train(21), App: "di", Branch: "feature/demo-wallet"}, LLBLanded},
 		{"landed into develop after the cutover is still landed, in the wrong place", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-12", "2026-10-12")
-		}, nil, LLBLandedIn{Train: train(22)}, LLBLandedWrong},
+		}, nil, LLBLandedIn{Train: train(22), App: "di", Branch: "feature/demo-wallet"}, LLBLandedWrong},
 		{"planned", func(*fixture) {}, &LlbPlan{TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 22, Year: fixtureYear}},
 			LLBPlanned{Train: train(22)}, LLBOpen},
 		{"no plan", func(*fixture) {}, nil, LLBNoTarget{}, LLBOpen},
@@ -365,7 +365,7 @@ func TestLLBTargetFromEpic(t *testing.T) {
 			under(f, "DEMO-500", "DEMO-1", "DEMO-2")
 			f.epic(p22, "DEMO-500")
 			f.mr("di", "wallet", "feature/demo-wallet", "feature/sprint-20-2026", MRMerged, "2026-10-05", "2026-10-05")
-		}, nil, LLBLandedIn{Train: train(21)}},
+		}, nil, LLBLandedIn{Train: train(21), App: "di", Branch: "feature/demo-wallet"}},
 		{"exactly half is not a majority", func(f *fixture, _, _, p22 *PageFact) {
 			wallet(f, "DEMO-1", "DEMO-2", "DEMO-3", "DEMO-4")
 			under(f, "DEMO-500", "DEMO-1", "DEMO-2")

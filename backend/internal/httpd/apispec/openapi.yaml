@@ -14474,6 +14474,12 @@ components:
       type: object
     ReleaseTrainLLBLandedIn:
       properties:
+        app:
+          description: The app of the landing that chose the train.
+          type: string
+        branch:
+          description: The long-lived branch whose landing chose the train.
+          type: string
         kind:
           const: landed
           type: string
@@ -14483,6 +14489,8 @@ components:
       required:
       - kind
       - train
+      - app
+      - branch
       type: object
     ReleaseTrainLLBNoTarget:
       properties:

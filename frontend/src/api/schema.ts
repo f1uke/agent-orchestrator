@@ -5125,6 +5125,10 @@ export interface components {
             target: components["schemas"]["ReleaseTrainLLBTarget"];
         };
         ReleaseTrainLLBLandedIn: {
+            /** @description The app of the landing that chose the train. */
+            app: string;
+            /** @description The long-lived branch whose landing chose the train. */
+            branch: string;
             /** @constant */
             kind: "landed";
             /** @description Train key, "21-2026" or "20-1-2026". */

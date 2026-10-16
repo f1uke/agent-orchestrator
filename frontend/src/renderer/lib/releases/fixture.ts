@@ -630,7 +630,7 @@ function demoLlbs(b: Board): Board["llbs"] {
 					},
 				},
 			],
-			target: { kind: "landed", train: "21-2026" },
+			target: { kind: "landed", train: "21-2026", app: "di", branch: "feature/demo-search" },
 		},
 		{
 			id: "demo-chat",
