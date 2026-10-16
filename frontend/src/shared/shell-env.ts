@@ -69,34 +69,19 @@ function normalizeTerm(term: string | undefined): string {
 	return trimmed;
 }
 
-// AO_* env vars that scope to a single WORKER SESSION and must never define the
-// daemon's own behaviour. When the desktop app is (re)launched from inside a
-// worker's shell (its tmux pane), Electron's process.env carries these — and left
-// unscrubbed they leak into the daemon: a stale AO_SESSION_IDLE_CLOSE silently
-// overrides the user's ~/.zshrc so the idle sweep closes finished workers early,
-// and AO_SESSION_ID gives the daemon a worker's identity. The daemon then
-// re-propagates them to every worker it spawns, so the stale value perpetuates
-// across app restarts. AO_SESSION_ID being present is the tell that the launch
-// context is a worker shell (a daemon has no session of its own).
-export const WORKER_SCOPED_AO_KEYS = ["AO_SESSION_ID", "AO_ISSUE_ID", "AO_OWNER", "AO_SESSION_IDLE_CLOSE"] as const;
+const CALLER_SESSION_KEYS = new Set(["CLAUDECODE", "TMUX", "TMUX_PANE"]);
+const CALLER_SESSION_PREFIXES = ["ANTHROPIC_", "CLAUDE_CODE_", "AO_"];
+const LAUNCH_TARGET_AO_KEYS = new Set(["AO_DATA_DIR", "AO_RUN_FILE", "AO_PORT"]);
 
-// Drop worker-session-scoped AO_* keys from a launch env when it is a worker
-// shell's env (marked by AO_SESSION_ID), so the daemon derives config from the
-// clean login-shell profile + explicit overrides rather than from whatever worker
-// pane happened to spawn the app. A non-worker env is returned unchanged.
-export function stripWorkerScopedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	if (!env.AO_SESSION_ID) return env;
-	const clean: NodeJS.ProcessEnv = { ...env };
-	for (const key of WORKER_SCOPED_AO_KEYS) delete clean[key];
-	return clean;
+function isCallerSessionKey(key: string): boolean {
+	if (LAUNCH_TARGET_AO_KEYS.has(key)) return false;
+	return CALLER_SESSION_KEYS.has(key) || CALLER_SESSION_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
-// Base = shell env, overlaid by processEnv so Electron/AO runtime vars win, then
-// PATH forced to the shell's PATH (with floor), TERM forced to a tmux-usable
-// value, then explicit overrides. The process.env base is first scrubbed of
-// worker-session-scoped AO_* keys (see stripWorkerScopedEnv) so a launch from
-// inside a worker shell cannot corrupt daemon-global config.
-//
+export function withoutCallerSessionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	return Object.fromEntries(Object.entries(env).filter(([key]) => !isCallerSessionKey(key)));
+}
+
 // TERM defaults to xterm-256color (what the renderer's xterm.js emulates): a
 // Finder/Dock launch starts under launchd with no controlling tty, so TERM is
 // unset, and the daemon's tmux attach client inherits that and dies with
@@ -106,25 +91,26 @@ export function buildDaemonEnv(
 	processEnv: NodeJS.ProcessEnv,
 	shellEnv: Record<string, string> | null,
 	overrides: Record<string, string>,
+	defaults: Record<string, string> = {},
 ): NodeJS.ProcessEnv {
-	const base = stripWorkerScopedEnv(processEnv);
-	const merged: NodeJS.ProcessEnv = { TERM: "xterm-256color", ...(shellEnv ?? {}), ...base };
+	const base = withoutCallerSessionEnv(processEnv);
+	const merged: NodeJS.ProcessEnv = { TERM: "xterm-256color", ...defaults, ...(shellEnv ?? {}), ...base };
 	merged.PATH = withFallbackPath(shellEnv?.PATH ?? base.PATH);
 	merged.TERM = normalizeTerm(merged.TERM);
 	return { ...merged, ...overrides };
 }
 
-export type ShellRunner = (shellPath: string, args: string[]) => Promise<string | null>;
+export type ShellRunner = (shellPath: string, args: string[], env: NodeJS.ProcessEnv) => Promise<string | null>;
 
 // Run the probe via an injected runner (main.ts supplies the real spawn).
 // Returns null on any failure or if the result lacks PATH; the caller then falls
 // back to the static floor.
 export async function resolveShellEnv(
-	env: Record<string, string | undefined>,
+	env: NodeJS.ProcessEnv,
 	run: ShellRunner,
 ): Promise<Record<string, string> | null> {
 	try {
-		const stdout = await run(resolveShellPath(env), shellEnvArgs());
+		const stdout = await run(resolveShellPath(env), shellEnvArgs(), withoutCallerSessionEnv(env));
 		if (stdout == null) return null;
 		const parsed = parseEnvBlock(stdout);
 		return parsed.PATH ? parsed : null;

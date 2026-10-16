@@ -7,9 +7,7 @@ import {
 	resolveShellPath,
 	SHELL_ENV_SENTINEL,
 	type ShellRunner,
-	stripWorkerScopedEnv,
 	withFallbackPath,
-	WORKER_SCOPED_AO_KEYS,
 } from "./shell-env";
 
 describe("parseEnvBlock", () => {
@@ -100,39 +98,7 @@ describe("buildDaemonEnv", () => {
 		expect(env.TERM).toBe("xterm-256color");
 	});
 
-	it("lets the profile's idle-close win when launched from a worker shell (leak scrubbed)", () => {
-		// Regression: the app relaunched from inside a worker pane carried a stale
-		// AO_SESSION_IDLE_CLOSE=3h in process.env, which used to override the user's
-		// ~/.zshrc 48h and idle-close finished workers early.
-		const env = buildDaemonEnv(
-			{ ...minimalProcessEnv, AO_SESSION_ID: "agent-orchestrator-48", AO_SESSION_IDLE_CLOSE: "3h" },
-			{ PATH: "/opt/homebrew/bin", AO_SESSION_IDLE_CLOSE: "48h" },
-			{},
-		);
-		expect(env.AO_SESSION_IDLE_CLOSE).toBe("48h");
-		expect(env.AO_SESSION_ID).toBeUndefined();
-	});
-
-	it("still honors a process-env idle-close when NOT launched from a worker shell", () => {
-		const env = buildDaemonEnv(
-			{ ...minimalProcessEnv, AO_SESSION_IDLE_CLOSE: "24h" },
-			{ PATH: "/opt/homebrew/bin" },
-			{},
-		);
-		expect(env.AO_SESSION_IDLE_CLOSE).toBe("24h");
-	});
-
-	it("keeps non-worker-scoped AO vars (data dir) when scrubbing a worker-shell launch", () => {
-		const env = buildDaemonEnv(
-			{ ...minimalProcessEnv, AO_SESSION_ID: "agent-orchestrator-48", AO_DATA_DIR: "/Users/me/.ao/data" },
-			null,
-			{},
-		);
-		expect(env.AO_DATA_DIR).toBe("/Users/me/.ao/data");
-		expect(env.AO_SESSION_ID).toBeUndefined();
-	});
-
-	it("lets AO_OWNER override win even when a worker-shell AO_OWNER is scrubbed", () => {
+	it("lets AO_OWNER override win over a caller session's AO_OWNER", () => {
 		const env = buildDaemonEnv(
 			{ ...minimalProcessEnv, AO_SESSION_ID: "agent-orchestrator-48", AO_OWNER: "leaked" },
 			null,
@@ -140,27 +106,104 @@ describe("buildDaemonEnv", () => {
 		);
 		expect(env.AO_OWNER).toBe("app");
 	});
+
+	it("puts a default under the login shell and process env", () => {
+		const env = buildDaemonEnv(
+			minimalProcessEnv,
+			{ PATH: "/opt/homebrew/bin", AO_TELEMETRY_EVENTS: "off" },
+			{},
+			{ AO_TELEMETRY_EVENTS: "on", AO_TELEMETRY_REMOTE: "posthog" },
+		);
+		expect(env.AO_TELEMETRY_EVENTS).toBe("off");
+		expect(env.AO_TELEMETRY_REMOTE).toBe("posthog");
+	});
 });
 
-describe("stripWorkerScopedEnv", () => {
-	it("returns the env unchanged when AO_SESSION_ID is absent", () => {
-		const env = { PATH: "/usr/bin", AO_SESSION_IDLE_CLOSE: "3h" };
-		expect(stripWorkerScopedEnv(env)).toBe(env);
+const callerSessionEnv: NodeJS.ProcessEnv = {
+	PATH: "/usr/bin:/bin",
+	HOME: "/Users/me",
+	SSH_AUTH_SOCK: "/private/tmp/launchd/Listeners",
+	ANTHROPIC_BASE_URL: "http://127.0.0.1:20130",
+	ANTHROPIC_AUTH_TOKEN: "caller-token",
+	CLAUDECODE: "1",
+	CLAUDE_CODE_SESSION_ID: "6f1c",
+	CLAUDE_CODE_CHILD_SESSION: "1",
+	CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/claude.sock",
+	CLAUDE_CODE_MESSAGING_TOKEN: "caller-token",
+	CLAUDE_CODE_ENTRYPOINT: "cli",
+	CLAUDE_CODE_EXECPATH: "/opt/homebrew/bin/claude",
+	CLAUDE_CODE_SESSION_ATTENDED: "1",
+	CLAUDE_CODE_DISABLE_AGENT_VIEW: "1",
+	AO_SESSION_ID: "agent-orchestrator-355",
+	AO_SESSION_KIND: "orchestrator",
+	AO_PROJECT_ID: "agent-orchestrator",
+	AO_WORKSPACE: "/Users/me/.ao/data/worktrees/agent-orchestrator/x",
+	AO_AGENT_PARENT_PID: "4242",
+	AO_CREW_ID: "agent-orchestrator-355",
+	AO_ISSUE_ID: "",
+	AO_OWNER: "app",
+	AO_SESSION_IDLE_CLOSE: "3h",
+	AO_JIRA_URL: "https://caller.example",
+	AO_TELEMETRY_EVENTS: "on",
+	AO_INSTALL_DETACHED: "1",
+	TMUX: "/Users/me/.ao/data/tmux/ao-355,1,0",
+	TMUX_PANE: "%0",
+	AO_DATA_DIR: "/Users/me/.ao/data",
+	AO_RUN_FILE: "/Users/me/.ao/running.json",
+	AO_PORT: "4021",
+};
+
+const callerSessionKeys = Object.keys(callerSessionEnv).filter(
+	(key) => !["PATH", "HOME", "SSH_AUTH_SOCK", "AO_DATA_DIR", "AO_RUN_FILE", "AO_PORT"].includes(key),
+);
+
+describe("launching from inside an agent session", () => {
+	it("gives the daemon none of the caller session's identity or provider", () => {
+		const env = buildDaemonEnv(callerSessionEnv, { PATH: "/opt/homebrew/bin" }, {});
+		for (const key of callerSessionKeys) expect(env, key).not.toHaveProperty(key);
 	});
 
-	it("drops every worker-scoped AO_* key when AO_SESSION_ID is present", () => {
-		const env = {
-			PATH: "/usr/bin",
-			AO_SESSION_ID: "agent-orchestrator-48",
-			AO_ISSUE_ID: "",
-			AO_OWNER: "app",
-			AO_SESSION_IDLE_CLOSE: "3h",
-			AO_DATA_DIR: "/Users/me/.ao/data",
+	it("keeps the data dir, run file and port the caller pointed the app at", () => {
+		const env = buildDaemonEnv(callerSessionEnv, { PATH: "/opt/homebrew/bin" }, {});
+		expect(env.AO_DATA_DIR).toBe("/Users/me/.ao/data");
+		expect(env.AO_RUN_FILE).toBe("/Users/me/.ao/running.json");
+		expect(env.AO_PORT).toBe("4021");
+		expect(env.SSH_AUTH_SOCK).toBe("/private/tmp/launchd/Listeners");
+	});
+
+	it("takes provider, Claude Code and AO config from the login shell instead", () => {
+		const shellEnv = {
+			PATH: "/opt/homebrew/bin",
+			ANTHROPIC_API_KEY: "shell-key",
+			CLAUDE_CODE_USE_BEDROCK: "1",
+			AO_JIRA_URL: "https://jira.example",
+			AO_GITLAB_HOST: "gitlab.example",
+			AO_SESSION_IDLE_CLOSE: "48h",
 		};
-		const out = stripWorkerScopedEnv(env);
-		for (const key of WORKER_SCOPED_AO_KEYS) expect(out[key]).toBeUndefined();
-		expect(out.AO_DATA_DIR).toBe("/Users/me/.ao/data");
-		expect(out.PATH).toBe("/usr/bin");
+		const env = buildDaemonEnv(callerSessionEnv, shellEnv, {});
+		expect(env.ANTHROPIC_API_KEY).toBe("shell-key");
+		expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+		expect(env.AO_JIRA_URL).toBe("https://jira.example");
+		expect(env.AO_GITLAB_HOST).toBe("gitlab.example");
+		expect(env.AO_SESSION_IDLE_CLOSE).toBe("48h");
+	});
+
+	it("probes the login shell without the caller session's env, so the probe cannot echo it back", async () => {
+		let probeEnv: NodeJS.ProcessEnv | undefined;
+		const run: ShellRunner = async (_shell, _args, env) => {
+			probeEnv = env;
+			const dump = Object.entries(env)
+				.map(([key, value]) => `${key}=${value}`)
+				.join("\0");
+			return `${SHELL_ENV_SENTINEL}${dump}\0`;
+		};
+		const shellEnv = await resolveShellEnv(callerSessionEnv, run);
+		for (const key of callerSessionKeys) {
+			expect(probeEnv, key).not.toHaveProperty(key);
+			expect(shellEnv, key).not.toHaveProperty(key);
+		}
+		expect(probeEnv?.HOME).toBe("/Users/me");
+		expect(probeEnv?.AO_DATA_DIR).toBe("/Users/me/.ao/data");
 	});
 });
 
