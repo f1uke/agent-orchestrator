@@ -32,6 +32,8 @@ export function ReleasesPage() {
 	const query = useReleaseBoard();
 	const stored = useReleasesUi((s) => s.layers);
 	const layers = url.layers ?? stored;
+	const storedHidden = useReleasesUi((s) => s.hidden);
+	const hiddenBoards = url.hideBoards ?? storedHidden;
 	const { pushBack, popBack, clearBack } = useReleasesUi();
 	useEffect(() => saveSearch(releasesSearch(url)), [url]);
 
@@ -81,6 +83,7 @@ export function ReleasesPage() {
 						board={response.board}
 						url={url}
 						layers={layers ?? DEFAULT_LAYERS}
+						hiddenBoards={hiddenBoards}
 						actions={actions}
 						fetchError={fetchError}
 						updatedAt={query.dataUpdatedAt}
@@ -95,6 +98,7 @@ function Loaded({
 	board,
 	url,
 	layers,
+	hiddenBoards,
 	actions,
 	fetchError,
 	updatedAt,
@@ -102,11 +106,12 @@ function Loaded({
 	board: Board;
 	url: ReleasesSearch;
 	layers: ReleasesSearch["layers"] & object;
+	hiddenBoards: ReadonlySet<string>;
 	actions: PageActions;
 	fetchError: string | null;
 	updatedAt: number;
 }) {
-	const lens = useMemo(() => makeLens(board, url), [board, url]);
+	const lens = useMemo(() => makeLens(board, url, hiddenBoards), [board, url, hiddenBoards]);
 	return (
 		<>
 			<TopBar board={board} url={url} lens={lens} actions={actions} fetchError={fetchError} updatedAt={updatedAt} />

@@ -1,5 +1,5 @@
 import type { Transition } from "motion/react";
-import { LAYER_ORDER, type Layers, type ReleasesSearch } from "./url";
+import { boardKeysParam, LAYER_ORDER, type Layers, type ReleasesSearch } from "./url";
 
 /** Motion's own values only: a raw `transform` with a 'none' keyframe collapsed to scaleX(0) in d3. */
 export type MotionValues = Partial<
@@ -107,12 +107,18 @@ export function releaseMotion(reduced: boolean): ReleaseMotion {
 
 export type MoveKeys = { rows: string; blocks: string };
 
-export function moveKeys(url: ReleasesSearch, layers: Layers, folds: ReadonlySet<string>): MoveKeys {
+export function moveKeys(
+	url: ReleasesSearch,
+	layers: Layers,
+	folds: ReadonlySet<string>,
+	hidden: ReadonlySet<string>,
+): MoveKeys {
 	const rows = [
 		url.apps ? [...url.apps].sort().join(",") : "*",
 		url.me ? "me" : "",
 		url.hotfixes ? "hf" : "",
 		LAYER_ORDER.filter((k) => layers[k]).join(","),
+		boardKeysParam(hidden),
 	].join("|");
 	return { rows, blocks: `${rows}|${[...folds].sort().join(",")}` };
 }

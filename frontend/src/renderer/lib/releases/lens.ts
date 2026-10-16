@@ -98,11 +98,14 @@ export type Lens = {
 	face: IdentityKnown | null;
 	keepVersion: (v: AppVersion) => boolean;
 	keepHotfix: (h: Hotfix) => boolean;
+	/** Hiding a row is a view choice, so the hidden board's alerts still count. */
+	hiddenBoards: ReadonlySet<string>;
+	sprintRows: SprintRow[];
 	sprintCards: (row: SprintRow) => SprintCard[];
 	llbs: LLBGroup[];
 };
 
-export function makeLens(b: Board, url: ReleasesSearch): Lens {
+export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySet<string>): Lens {
 	const on = shown(url.apps);
 	const me = url.me && b.identity.kind === "known";
 	const keep = <T extends { mine?: readonly MineReason[] }>(x: T) => !me || isMine(x);
@@ -123,7 +126,9 @@ export function makeLens(b: Board, url: ReleasesSearch): Lens {
 		face: me && b.identity.kind === "known" ? b.identity : null,
 		keepVersion: keep,
 		keepHotfix: keep,
-		sprintCards: (row) => lensSprintCards(row, { me, apps: url.apps }),
+		hiddenBoards,
+		sprintRows: b.sprints.filter((r) => !hiddenBoards.has(r.board.key)),
+		sprintCards: (row) => lensSprintCards(row, { me, apps: url.apps, hidden: hiddenBoards }),
 		llbs: b.llbs.filter(keep),
 	};
 }

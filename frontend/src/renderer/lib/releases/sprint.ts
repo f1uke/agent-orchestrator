@@ -272,15 +272,21 @@ export function sprintFoldKey(row: SprintRow): string {
 	return `sp-${row.board.key}`;
 }
 
-export type SprintLens = { me: boolean; apps: ReadonlySet<AppId> | null };
+export type SprintLens = { me: boolean; apps: ReadonlySet<AppId> | null; hidden: ReadonlySet<string> };
 
 export function lensSprintCards(row: SprintRow, lens: SprintLens): SprintCard[] {
+	if (lens.hidden.has(row.board.key)) return [];
 	return row.cards.filter(
 		(c) =>
 			c.status !== "Abandoned" &&
 			(!lens.me || (c.mine?.length ?? 0) > 0) &&
 			(!lens.apps || !c.mrs.length || c.mrs.some((m) => lens.apps?.has(m.app))),
 	);
+}
+
+export function hiddenBoardsText(rows: readonly SprintRow[], hidden: ReadonlySet<string>): string | null {
+	const n = rows.filter((r) => hidden.has(r.board.key)).length;
+	return n ? `${n} hidden` : null;
 }
 
 export type PillApp = {

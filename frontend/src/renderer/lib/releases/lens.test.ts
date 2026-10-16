@@ -98,7 +98,7 @@ describe("lens", () => {
 	});
 
 	it("puts per-app alerts on the label, worst first, from the badge bucket only", () => {
-		const lens = makeLens(b, parseReleasesSearch({}));
+		const lens = makeLens(b, parseReleasesSearch({}), new Set());
 		expect(lens.appHits("di").map((h) => h.id)).toEqual(["B1~v/21-2026/di"]);
 		expect(lens.attention.map((h) => h.id)).toEqual(["B1~v/21-2026/di", "B1~v/21-2026/da", "F1~t/21-2026"]);
 		expect(lens.history.map((h) => h.id)).toEqual(["C1~v/20-2026/di"]);
@@ -336,8 +336,8 @@ describe("Only me", () => {
 			staleHides: [],
 		},
 	});
-	const me = makeLens(b, parseReleasesSearch({ me: "1" }));
-	const all = makeLens(b, parseReleasesSearch({}));
+	const me = makeLens(b, parseReleasesSearch({ me: "1" }), new Set());
+	const all = makeLens(b, parseReleasesSearch({}), new Set());
 
 	it("keeps only my versions, sprint cards, long-lived groups, hotfixes and hits", () => {
 		expect(me.me).toBe(true);
@@ -378,14 +378,24 @@ describe("Only me", () => {
 				sprintCard("DEMO-22", false),
 			],
 		};
-		const onlyDi = makeLens(b, parseReleasesSearch({ apps: "di" }));
+		const onlyDi = makeLens(b, parseReleasesSearch({ apps: "di" }), new Set());
 		expect(onlyDi.sprintCards(row).map((c) => c.key)).toEqual(["DEMO-21", "DEMO-22"]);
+	});
+
+	it("takes a hidden board's row and cards off the page but leaves its alerts in Needs attention", () => {
+		const hid = makeLens(b, parseReleasesSearch({}), new Set(["DEMO"]));
+		expect(hid.sprintRows).toEqual([]);
+		expect(hid.sprintCards(b.sprints[0])).toEqual([]);
+		expect(hid.attention).toEqual(all.attention);
+		expect(hid.badge).toEqual(all.badge);
+		expect(all.sprintRows.map((r) => r.board.key)).toEqual(["DEMO"]);
 	});
 
 	it("ignores ?me=1 when the identity is unknown, so nothing filters to empty", () => {
 		const blind = makeLens(
 			{ ...b, identity: { kind: "unknown", reason: "gitlab.user never read" } },
 			parseReleasesSearch({ me: "1" }),
+			new Set(),
 		);
 		expect(blind.me).toBe(false);
 		expect(blind.face).toBeNull();

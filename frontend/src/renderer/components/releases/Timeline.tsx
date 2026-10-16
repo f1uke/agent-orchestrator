@@ -118,7 +118,7 @@ export function Timeline({
 
 	return (
 		<div className="rel-sc" ref={sc} data-testid="release-timeline">
-			<MoveRoot keys={moveKeys(url, layers, folds)}>
+			<MoveRoot keys={moveKeys(url, layers, folds, lens.hiddenBoards)}>
 				<div className="rel-canvas" ref={canvas} style={{ width: LABEL_W + tl.width }}>
 					<Background tl={tl} />
 					<Axis tl={tl} layers={layers} />
@@ -148,7 +148,7 @@ export function Timeline({
 							</div>
 						</div>
 						{layers.sprint &&
-							board.sprints.map((row) => (
+							lens.sprintRows.map((row) => (
 								<BoardSprintRow key={row.board.key} row={row} board={board} tl={tl} lens={lens} actions={actions} />
 							))}
 					</div>
