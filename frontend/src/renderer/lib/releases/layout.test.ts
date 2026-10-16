@@ -5,6 +5,7 @@ import {
 	cardGroupTop,
 	DW,
 	FOCUS_LANE,
+	hotfixStages,
 	LABEL_H,
 	llbBlockH,
 	markerSpots,
@@ -184,6 +185,18 @@ describe("row height and markers", () => {
 		expect(spots.map((s) => [s.stage.key, s.left])).toEqual([
 			["tag", centre - 7.5],
 			["publish", centre + 7.5],
+		]);
+	});
+});
+
+describe("hotfixStages", () => {
+	it("reads the tag and the milestone, so each hotfix stage can name its sources", () => {
+		const h = hotfix("di", "2.3.1", "2026-10-15", "2026-10-16", {
+			tag: { name: "2.3.1", project: 1, url: "", commitOn: "2026-10-15", newest: true, mergesAfter: [] },
+		});
+		expect(hotfixStages(h, "2026-10-14").map((s) => [s.key, s.reads])).toEqual([
+			["tag", ["gitlab.tags", "gitlab.milestones"]],
+			["publish", ["gitlab.tags", "gitlab.milestones"]],
 		]);
 	});
 });

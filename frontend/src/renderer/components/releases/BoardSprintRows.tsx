@@ -29,12 +29,14 @@ import {
 	type DestBlock,
 	type MrPill,
 } from "../../lib/releases/sprint";
+import { derivedOf, planSaysText, sprintCardOf } from "../../lib/releases/sources";
 import type { Board, BoardApp, Dest, SprintCard, SprintRow } from "../../lib/releases/types";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { PlatformGlyph } from "./AppMark";
 import { CardLine, Chev } from "./CardGroups";
 import { Moving, Unfold, Wire, WireText } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
+import { SourceTag } from "./Sources";
 
 const SRC_TOP = 6;
 const SUM_H = 26;
@@ -46,6 +48,27 @@ const ROW_BORDER = 1;
 const DESTS_TOP = SRC_TOP + SUM_H;
 const INDENT = 44;
 const BLOCK_W = 683;
+
+const SCOPE_P = derivedOf(
+	"New and carried",
+	[
+		{ kind: "jira.this_sprint", text: 'new = in the board\'s "This Sprint" set' },
+		{ kind: "gitlab.mrs", text: "carried with MRs = an MR opened or merged since the sprint started" },
+		{ kind: "jira.sprint_cards", text: "carried, done = the rest of the sprint's cards" },
+	],
+	undefined,
+	"SprintCard.active, activeWhy",
+);
+
+const DESTS_P = derivedOf(
+	"Where the cards ship",
+	[
+		{ kind: "gitlab.mrs", text: "each card's MR target: sprint branch, long-lived branch, release" },
+		{ kind: "gitlab.milestones", text: "the train that branch ships in" },
+	],
+	"Sprint N branch ships in train N + 1.",
+	"SprintCard.routes",
+);
 
 function Pills({ pills, card, here }: { pills: MrPill[]; card: SprintCard; here: string | null }) {
 	return (
@@ -95,9 +118,11 @@ function SprintCardRow({
 	apps,
 	here,
 	carried,
+	row,
 	actions,
 }: {
 	card: SprintCard;
+	row: SprintRow;
 	board: Board;
 	apps: readonly BoardApp[];
 	here: string | null;
@@ -121,7 +146,12 @@ function SprintCardRow({
 			summary={
 				<>
 					{card.summary}
-					{!card.onBoard && <span className="ob">not on the board</span>}
+					{!card.onBoard && (
+						<span className="ob">
+							not on the board
+							<SourceTag p={sprintCardOf(card, row)} />
+						</span>
+					)}
 					{!carried && card.active && !card.activeWhy.includes("new this sprint") && (
 						<span className="ob passive">carried over</span>
 					)}
@@ -133,7 +163,7 @@ function SprintCardRow({
 					{via && <span className="ob hf">via ⑂ {via.replace(/^feature\//, "")}</span>}
 					{mismatch?.plan && (
 						<span className="ob c" data-st="failed">
-							page says {trainLabel(board, mismatch.plan)}
+							{planSaysText(mismatch.planFrom)} says {trainLabel(board, mismatch.plan)}
 						</span>
 					)}
 				</>
@@ -141,6 +171,7 @@ function SprintCardRow({
 			extra={<Pills pills={mrPills(card, apps)} card={card} here={carried ? null : here} />}
 			status={card.status}
 			statusCategory={card.statusCategory}
+			statusKind={card.onBoard ? "jira.sprint_cards" : "jira.branch_cards"}
 			onOpen={() => actions.openSheet({ kind: "card", key: card.key }, "push")}
 		/>
 	);
@@ -358,10 +389,26 @@ export function BoardSprintRow({
 				>
 					<span className="spn">
 						<b>{label.title}</b>
+						<SourceTag
+							p={{
+								title: `${row.board.key} board`,
+								how: "read",
+								lines: [
+									{
+										kind: "ao.config",
+										text: `board ${row.board.id} is followed${row.board.ownsSprintBranch ? ", and owns the sprint branch" : ""}`,
+									},
+									{ kind: "jira.board_sprints", text: `active sprint "${row.sprint.name}"` },
+								],
+								note: "One row per followed board with an active sprint. A board with no active sprint has no row.",
+								field: "SprintRow.board, sprint",
+							}}
+						/>
 						<small>{label.dates}</small>
 					</span>
 					<small className="sps" data-testid="sprint-scope">
 						{label.scope}
+						<SourceTag p={SCOPE_P} />
 					</small>
 					<span className="spt" data-testid="sprint-dests">
 						{label.dests.length ? (
@@ -373,6 +420,7 @@ export function BoardSprintRow({
 						) : (
 							<span className="passive">{lens.me ? "nothing of mine" : "no cards"}</span>
 						)}
+						<SourceTag p={DESTS_P} />
 					</span>
 				</button>
 				<button
@@ -439,6 +487,7 @@ export function BoardSprintRow({
 										apps={lens.apps}
 										here={bk.to ? bk.key : null}
 										carried={!bk.to}
+										row={row}
 										actions={actions}
 									/>
 								))}

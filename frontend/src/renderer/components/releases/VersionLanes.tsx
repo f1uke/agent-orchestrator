@@ -1,6 +1,9 @@
 import { Snowflake } from "lucide-react";
 import { Fragment } from "react";
-import { barLine, hotfixLine, type BarPart } from "../../lib/releases/barLine";
+import { barLine, hotfixLine, nextStage, type BarPart } from "../../lib/releases/barLine";
+import { derivedOf, readOf, stageOf, type Provenance } from "../../lib/releases/sources";
+import type { AppVersion, Hotfix } from "../../lib/releases/types";
+import { SourceTag, SourceValue } from "./Sources";
 import { dayLabel, shortDay } from "../../lib/releases/day";
 import { barBox, DW, markerSpots, type AppLanes, type LaneItem, type Timeline } from "../../lib/releases/layout";
 import { unknownText, worstTone, type Lens } from "../../lib/releases/lens";
@@ -17,6 +20,7 @@ export function StageMark({
 	style,
 	onClick,
 	now,
+	...rest
 }: {
 	stage: Stage;
 	hotfix?: boolean;
@@ -24,12 +28,13 @@ export function StageMark({
 	style?: React.CSSProperties;
 	onClick?: () => void;
 	now: number;
-}) {
+} & Omit<React.ComponentPropsWithRef<"button">, "onClick">) {
 	const tone = hotfix && stage.status !== "done" ? "hotfix" : stageTone(stage.status);
 	const status = stage.status === "unknown" ? unknownText(stage.missing, now) : STATUS_TEXT[stage.status];
 	const title = `${STAGE_META[stage.key].label} · ${stage.date ? dayLabel(stage.date) : "no date"} · ${status}${stage.detail ? `\n${stage.detail}` : ""}`;
 	return (
 		<button
+			{...rest}
 			type="button"
 			className={`rel-mk${stage.conventional ? " conv" : ""} ${className}`}
 			data-st={tone}
@@ -48,7 +53,7 @@ export function StageMark({
 	);
 }
 
-function Line2({ parts }: { parts: BarPart[] }) {
+function Line2({ parts, src }: { parts: BarPart[]; src?: (p: BarPart) => Provenance | null }) {
 	return (
 		<span className="l2">
 			{parts.map((p, i) => (
@@ -64,11 +69,56 @@ function Line2({ parts }: { parts: BarPart[] }) {
 						) : (
 							p.text
 						)}
+						{src && <SourceTag p={src(p)} />}
 					</span>
 				</Fragment>
 			))}
 		</span>
 	);
+}
+
+function versionPartOf(v: AppVersion, today: string) {
+	return (p: BarPart): Provenance | null => {
+		if (p.id === "mr")
+			return {
+				title: "Release MR",
+				how: "read",
+				lines: [
+					{
+						kind: "gitlab.mrs",
+						text: v.releaseMr ? `!${v.releaseMr.mr.iid} release → main: state` : "no MR from release/* into main",
+					},
+					{ kind: "gitlab.mr_detail", text: "conflicts, head pipeline" },
+				],
+				field: "releaseMr",
+			};
+		if (p.id === "tag")
+			return readOf(
+				"Version tag",
+				"gitlab.tags",
+				v.tag ? `tag ${v.tag.name}` : `no tag named ${v.version}`,
+				"Version.tag",
+			);
+		const next = nextStage(v, today);
+		return next
+			? stageOf(next)
+			: derivedOf(
+					"Published",
+					[
+						{ kind: "gitlab.milestones", text: "due date passed" },
+						{ kind: "gitlab.tags", text: "version tag exists" },
+					],
+					undefined,
+					"Stage publish",
+				);
+	};
+}
+
+function hotfixPartOf(h: Hotfix) {
+	return (p: BarPart): Provenance | null =>
+		p.id === "tag"
+			? readOf("Hotfix tag", "gitlab.tags", h.tag ? `tag ${h.tag.name}` : "no tag yet", "Hotfix.tag")
+			: readOf("Hotfix title", "gitlab.milestones", "milestone title", "Hotfix.milestone.title");
 }
 
 function TrainBar({
@@ -134,9 +184,19 @@ function TrainBar({
 					<span className={`dt${it.offDates ? " off" : ""}`} data-part="dates">
 						{shortDay(it.freeze)} → {shortDay(it.publish)}
 						{it.offDates ? ` · not ${t.label}'s dates` : ""}
+						{focused && (
+							<SourceTag
+								p={readOf(
+									"Bar dates",
+									"gitlab.milestones",
+									`${it.version.milestone.title}: start ${it.version.milestone.start ?? "-"}, due ${it.version.milestone.due ?? "-"}`,
+									"Version.milestone.start, due",
+								)}
+							/>
+						)}
 					</span>
 				</span>
-				<Line2 parts={barLine(it.version, today)} />
+				<Line2 parts={barLine(it.version, today)} src={focused ? versionPartOf(it.version, today) : undefined} />
 			</span>
 			{flag && (
 				<span className="fl" data-st={SEVERITY_META[flag.severity].tone} title={SEVERITY_META[flag.severity].label}>
@@ -178,9 +238,19 @@ function HotfixBar({
 					<span className="hft">hotfix</span>
 					<span className="dt" data-part="dates">
 						{shortDay(it.freeze)} → {shortDay(it.publish)}
+						{it.markers && (
+							<SourceTag
+								p={readOf(
+									"Hotfix window",
+									"gitlab.milestones",
+									`start ${it.hotfix.milestone.start ?? "-"}, due ${it.hotfix.milestone.due ?? "-"}`,
+									"Hotfix.milestone",
+								)}
+							/>
+						)}
 					</span>
 				</span>
-				<Line2 parts={hotfixLine(it.hotfix)} />
+				<Line2 parts={hotfixLine(it.hotfix)} src={it.markers ? hotfixPartOf(it.hotfix) : undefined} />
 			</span>
 		</div>
 	);
@@ -213,14 +283,9 @@ function Markers({
 			{lo < f && <div className="rel-mtrack out" style={{ left: lo, width: f - lo, top: y + 8 }} />}
 			{hi > p && <div className="rel-mtrack out" style={{ left: p, width: hi - p, top: y + 8 }} />}
 			{markerSpots(tl, it.stages).map(({ stage, left }) => (
-				<StageMark
-					key={stage.key}
-					stage={stage}
-					hotfix={it.kind === "hotfix"}
-					style={{ left, top: y }}
-					onClick={open}
-					now={now}
-				/>
+				<SourceValue key={stage.key} p={stageOf(stage)}>
+					<StageMark stage={stage} hotfix={it.kind === "hotfix"} style={{ left, top: y }} onClick={open} now={now} />
+				</SourceValue>
 			))}
 		</>
 	);

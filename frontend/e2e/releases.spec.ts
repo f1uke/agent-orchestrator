@@ -332,12 +332,14 @@ test.describe("releases page", () => {
 		await expect(page.getByRole("dialog", { name: "Release details" })).toHaveCount(0);
 	});
 
-	test("a failed source shows unknown with its age, never a blank", async ({ page }) => {
+	test("a failed source shows unknown on its mark and its age in the mark's card, never a blank", async ({ page }) => {
 		await open(page, "", "failed-source");
-		await expect(page.getByTestId("release-sources").locator('[data-source="gitlab"]')).toHaveText(
-			/gitlab unknown · \d+[mhd]/,
-		);
-		await expect(page.getByTestId("release-sources").locator('[data-source="jira"]')).not.toContainText("unknown");
+		const gitlab = page.getByTestId("release-sources").locator('[data-source="gitlab"]');
+		await expect(gitlab).toHaveText("Gunknown");
+		await expect(page.getByTestId("release-sources").locator('[data-source="jira"]')).toHaveText("J");
+		await gitlab.hover();
+		await expect(page.getByTestId("source-card")).toContainText(/GitLab · unknown, last read \d+[mhd] ago/);
+		await page.mouse.move(700, 600);
 		await expect(page.getByTestId("attention-count")).toHaveText("8 · 1 unknown");
 		await expect(page.locator('.rel-app[data-app="di"] .rel-mk[data-stage="scan"]')).toHaveAttribute(
 			"data-st",
@@ -720,7 +722,7 @@ test.describe("releases page", () => {
 		await expect(glyphs.nth(1)).toHaveAttribute("href", /merge_requests\/402$/);
 		const split = t21.locator('.crow[data-key="DEMO-302"]').getByTestId("mr-glyph");
 		await expect(split.and(page.locator('[data-app="di"]'))).toHaveClass(/away/);
-		await expect(t21.locator('.crow[data-key="DEMO-305"]')).toContainText("page says #22");
+		await expect(t21.locator('.crow[data-key="DEMO-305"]')).toContainText("fixVersion says #22");
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-unfolded.png` });
 		await demo.locator(".spsrc .csum").click();
 		await expect(demo.getByTestId("sprint-dest-block")).toHaveCount(0);
@@ -1129,7 +1131,7 @@ for (const [width, height] of [
 		for (const s of await page.getByTestId("llb-summary").all()) await s.locator(".ls[aria-expanded]").click();
 		for (const g of await page.locator(".rel-cg .csum").all()) await g.click();
 		for (const d of await page.locator(".rel-cg.dest .dsum").all()) await d.click();
-		await page.waitForTimeout(100);
+		await settle(page);
 		const report = await labelOverlaps(page);
 		expect(report.n).toBeGreaterThan(10);
 		expect(report.overlaps).toEqual([]);

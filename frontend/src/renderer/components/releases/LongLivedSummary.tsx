@@ -1,6 +1,8 @@
 import { GitFork } from "lucide-react";
 import { LLB_LINE_H, llbBlockH } from "../../lib/releases/layout";
-import { epicNote, llbWire, shortBranch, targetTrain, urgency, type LLBLane } from "../../lib/releases/llb";
+import { epicNote, llbWire, shortBranch, targetTrain, trainLabel, urgency, type LLBLane } from "../../lib/releases/llb";
+import { derivedOf, llbTargetOf } from "../../lib/releases/sources";
+import { SourceTag } from "./Sources";
 import { TargetTag } from "./TargetTag";
 import type { Board, LLBGroup, Train, TrainKey } from "../../lib/releases/types";
 import { useReleasesUi } from "../../stores/releases-ui";
@@ -9,6 +11,13 @@ import { Fade, Unfold } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 
 export type BarSpot = { left: number; right: number; top: number };
+
+const LLBS_P = derivedOf(
+	"Long-lived branches",
+	[{ kind: "gitlab.mrs", text: "feature branches with card MRs in, and their merge-out MR" }],
+	"The target names its own source.",
+	"llbs[]",
+);
 
 export function LongLivedSummary({
 	app,
@@ -45,6 +54,7 @@ export function LongLivedSummary({
 					<button type="button" className="ls" aria-expanded={open} onClick={() => toggle(key)}>
 						<Chev open={open} />
 						<GitFork className="ic size-3" aria-hidden="true" />
+						<SourceTag p={LLBS_P} />
 						<b>
 							{groups.length} long-lived{mine ? " of mine" : ""}
 						</b>
@@ -60,6 +70,9 @@ export function LongLivedSummary({
 										</span>
 									))}{" "}
 									→ {focus.label}
+									{due.map((g) => (
+										<SourceTag key={g.id} p={llbTargetOf(g, (t) => trainLabel(board, t))} />
+									))}
 								</span>
 							</>
 						)}
@@ -145,6 +158,7 @@ function LaneRow({
 			<span className="lb-lbl" data-sticky>
 				<b>{shortBranch(l.branch.branch)}</b>
 				<TargetTag chip={l.target} />
+				<SourceTag p={llbTargetOf(l.group, (t) => trainLabel(board, t))} />
 				<span>
 					{l.keys} card{l.keys === 1 ? "" : "s"}
 				</span>

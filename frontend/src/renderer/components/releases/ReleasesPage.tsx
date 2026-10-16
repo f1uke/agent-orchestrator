@@ -1,7 +1,8 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
 import { makeLens } from "../../lib/releases/lens";
+import { sourceIndex } from "../../lib/releases/sources";
 import type { Board } from "../../lib/releases/types";
 import {
 	DEFAULT_LAYERS,
@@ -14,6 +15,7 @@ import {
 import { saveSearch, useReleasesUi } from "../../stores/releases-ui";
 import { ReleaseMotionRoot } from "./ReleaseMotion";
 import { SheetStack } from "./SheetStack";
+import { SourcesProvider } from "./Sources";
 import { SummaryStrip } from "./SummaryStrip";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
@@ -84,7 +86,7 @@ export function ReleasesPage() {
 
 	return (
 		<ReleaseMotionRoot>
-			<div className="rel" data-testid="releases-page">
+			<div className="rel" data-testid="releases-page" data-src={layers.src || undefined}>
 				{!response ? (
 					<div className="rel-empty">{fetchError ? `Release trains: ${fetchError}` : "Loading release trains…"}</div>
 				) : !response.board ? (
@@ -123,14 +125,31 @@ function Loaded({
 	updatedAt: number;
 }) {
 	const lens = useMemo(() => makeLens(board, url, hiddenBoards), [board, url, hiddenBoards]);
+	const now = useNow(30_000);
+	const boardError = fetchError
+		? `${fetchError}; board last read ${Math.max(0, Math.round((now - updatedAt) / 60_000))}m ago`
+		: null;
+	const sources = useMemo(
+		() => ({ on: layers.src, idx: sourceIndex(board, now, boardError) }),
+		[board, now, boardError, layers.src],
+	);
 	return (
-		<>
-			<TopBar board={board} url={url} lens={lens} actions={actions} fetchError={fetchError} updatedAt={updatedAt} />
+		<SourcesProvider value={sources}>
+			<TopBar board={board} url={url} lens={lens} actions={actions} idx={sources.idx} />
 			<SummaryStrip board={board} lens={lens} history={layers.past} actions={actions} />
 			<Timeline board={board} url={url} lens={lens} layers={layers} actions={actions} />
 			<SheetStack board={board} url={url} lens={lens} actions={actions} />
-		</>
+		</SourcesProvider>
 	);
+}
+
+function useNow(ms: number): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const id = window.setInterval(() => setNow(Date.now()), ms);
+		return () => window.clearInterval(id);
+	}, [ms]);
+	return now;
 }
 
 function NoConfig({ state, message, path }: { state: string; message?: string; path: string }) {

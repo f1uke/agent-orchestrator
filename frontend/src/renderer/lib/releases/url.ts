@@ -12,11 +12,11 @@ export type SheetEntry =
 	| { kind: "fixes"; fix?: string }
 	| { kind: "attention" | "rules" | "key" | "llbs" };
 
-export type Layer = "sprint" | "llb" | "cards" | "past";
+export type Layer = "sprint" | "llb" | "cards" | "past" | "src";
 export type Layers = Readonly<Record<Layer, boolean>>;
 
-export const LAYER_ORDER: readonly Layer[] = ["sprint", "llb", "cards", "past"];
-export const DEFAULT_LAYERS: Layers = { sprint: false, llb: true, cards: true, past: false };
+export const LAYER_ORDER: readonly Layer[] = ["sprint", "llb", "cards", "past", "src"];
+export const DEFAULT_LAYERS: Layers = { sprint: false, llb: true, cards: true, past: false, src: false };
 
 export type ReleasesSearch = {
 	focus: TrainKey | null;
@@ -118,7 +118,7 @@ export function sheetParam(s: SheetEntry): string {
 function parseLayers(raw: string | null): Layers | null {
 	if (raw === null) return null;
 	const on = new Set(raw.split(","));
-	return { sprint: on.has("sprint"), llb: on.has("llb"), cards: on.has("cards"), past: on.has("past") };
+	return Object.fromEntries(LAYER_ORDER.map((k) => [k, on.has(k)])) as Record<Layer, boolean>;
 }
 
 export function parseBoardKeys(raw: string): ReadonlySet<string> {

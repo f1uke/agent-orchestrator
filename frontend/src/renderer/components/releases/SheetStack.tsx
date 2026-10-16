@@ -15,8 +15,10 @@ import {
 	unknownText,
 	versionOf,
 	type Lens,
+	type Owner,
 } from "../../lib/releases/lens";
-import type { Board, FixState, RuleOutcome, Stage } from "../../lib/releases/types";
+import { derivedOf, readOf, stageOf, type Provenance } from "../../lib/releases/sources";
+import type { AppVersion, Board, FixState, RuleOutcome, Stage } from "../../lib/releases/types";
 import type { ReleasesSearch, SheetEntry } from "../../lib/releases/url";
 import {
 	RULE_GROUPS,
@@ -40,6 +42,7 @@ import type { PageActions } from "./ReleasesPage";
 import { Stepper } from "./StickyAppLabel";
 import { phaseTone } from "./SummaryStrip";
 import { StageMark } from "./VersionLanes";
+import { SourceTag } from "./Sources";
 
 type Ctx = { board: Board; lens: Lens; actions: PageActions; now: number };
 type Sheet = { title: ReactNode; body: ReactNode; tabs?: ReactNode };
@@ -135,9 +138,12 @@ function StageRows({ stages, now }: { stages: Stage[]; now: number }) {
 	return (
 		<>
 			{stages.map((st) => (
-				<div key={st.key} className="srow">
+				<div key={st.key} className="srow" data-testid="stage-row">
 					<StageMark stage={st} className="static" now={now} />
-					<span>{STAGE_META[st.key].label}</span>
+					<span>
+						{STAGE_META[st.key].label}
+						<SourceTag p={stageOf(st)} wide />
+					</span>
 					<span className="muted">{st.date ? dayLabel(st.date) : "-"}</span>
 					<span className="d">
 						<span className="c" data-st={stageTone(st.status)}>
@@ -150,6 +156,68 @@ function StageRows({ stages, now }: { stages: Stage[]; now: number }) {
 		</>
 	);
 }
+
+const TRAIN_FREEZE_P = derivedOf(
+	"Freeze",
+	[{ kind: "gitlab.milestones", text: "earliest milestone start over the train's apps" }],
+	"The page's freeze cell only feeds rule A6.",
+	"Train.freeze",
+);
+const TRAIN_PUBLISH_P = derivedOf(
+	"Publish",
+	[{ kind: "gitlab.milestones", text: "latest milestone due over the train's apps" }],
+	"The page's publish cell only feeds rule A6.",
+	"Train.publish",
+);
+const TRAIN_PAGE_P = readOf(
+	"Train page",
+	"confluence.pages",
+	"newest page per family, created 0-60 days before freeze",
+	"Train.pages",
+);
+const VERSION_MILESTONE_P = readOf(
+	"Milestone",
+	"gitlab.milestones",
+	"milestone with the train label in its description",
+	"Version.milestone",
+);
+const RELEASE_MR_P: Provenance = {
+	title: "Release MR",
+	how: "read",
+	lines: [
+		{ kind: "gitlab.mrs", text: "oldest MR from release/* into main in this milestone" },
+		{ kind: "gitlab.mr_detail", text: "conflicts, head pipeline" },
+	],
+	field: "releaseMr",
+};
+const JIRA_RELEASE_P = readOf(
+	"Jira release",
+	"jira.versions",
+	"version with the train label and this version's name",
+	"Version.jira",
+);
+const HOTFIX_MILESTONE_P = readOf(
+	"Milestone",
+	"gitlab.milestones",
+	"milestone without a train label",
+	"Hotfix.milestone",
+);
+
+function ownerOf(own: Owner, v: AppVersion): Provenance {
+	return own.from === "release MR author"
+		? readOf("Owner", "gitlab.mrs", `release MR !${v.releaseMr?.mr.iid} author`, "releaseMr.mr.author")
+		: readOf("Owner", "jira.cards", "release ticket assignee", "ticket.assignee");
+}
+
+const APPROVERS_P: Provenance = {
+	title: "Approvers",
+	how: "read",
+	lines: [
+		{ kind: "jira.versions", text: "release approvers and status" },
+		{ kind: "jira.users", text: "names and faces" },
+	],
+	field: "Version.jira.approvers",
+};
 
 function trainSheet(id: string, c: Ctx): Sheet {
 	const t = c.board.trains.find((x) => x.id === id);
@@ -172,9 +240,15 @@ function trainSheet(id: string, c: Ctx): Sheet {
 			<>
 				<div className="sec kv">
 					<span>Freeze</span>
-					<span>{t.freeze ? dayLabel(t.freeze) : "-"}</span>
+					<span>
+						{t.freeze ? dayLabel(t.freeze) : "-"}
+						<SourceTag p={TRAIN_FREEZE_P} wide />
+					</span>
 					<span>Publish</span>
-					<span>{t.publish ? dayLabel(t.publish) : "-"}</span>
+					<span>
+						{t.publish ? dayLabel(t.publish) : "-"}
+						<SourceTag p={TRAIN_PUBLISH_P} wide />
+					</span>
 					<span>Train page</span>
 					<span>
 						{t.pages.length ? (
@@ -186,6 +260,7 @@ function trainSheet(id: string, c: Ctx): Sheet {
 						) : (
 							<span className="passive">none</span>
 						)}
+						<SourceTag p={TRAIN_PAGE_P} wide />
 					</span>
 				</div>
 				{t.id !== c.lens.focus?.id && (
@@ -229,7 +304,7 @@ function trainSheet(id: string, c: Ctx): Sheet {
 						);
 					})}
 				</Sec>
-				<Sec title="Approvers">
+				<Sec title="Approvers" source={APPROVERS_P}>
 					{people.length ? (
 						people.map((p) => (
 							<div key={p.accountId} className="prow" data-testid="approver-row">
@@ -284,11 +359,15 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 			<>
 				<div className="sec kv">
 					<span>Owner</span>
-					<span>{own ? `${own.name} (${own.from})` : "-"}</span>
+					<span>
+						{own ? `${own.name} (${own.from})` : "-"}
+						<SourceTag p={own && ownerOf(own, v)} wide />
+					</span>
 					<span>Milestone</span>
 					<span>
 						<Ext url={v.milestone.url}>{v.milestone.title}</Ext>
 						{t.datesSplit.includes(app) && <span className="c" data-st="failed">{` · not ${t.label}'s dates`}</span>}
+						<SourceTag p={VERSION_MILESTONE_P} wide />
 					</span>
 					<span>Release MR</span>
 					<span>
@@ -323,13 +402,18 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 						) : (
 							<span className="passive">not open</span>
 						)}
+						<SourceTag p={RELEASE_MR_P} wide />
 					</span>
 					<span>Jira release</span>
 					<span>
 						{v.jira ? <Ext url={v.jira.url}>{v.jira.name + (v.jira.released ? " · released" : "")}</Ext> : "-"}
+						<SourceTag p={JIRA_RELEASE_P} wide />
 					</span>
 					<span>Tag</span>
-					<span>{v.tag ? <Ext url={v.tag.url}>{v.tag.name}</Ext> : "-"}</span>
+					<span>
+						{v.tag ? <Ext url={v.tag.url}>{v.tag.name}</Ext> : "-"}
+						<SourceTag p={readOf("Tag", "gitlab.tags", `tag named ${v.version}`, "Version.tag")} wide />
+					</span>
 				</div>
 				<AlertList title="Needs attention" hits={hits} c={c} />
 				<Sec title="Stages">
@@ -337,6 +421,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 				</Sec>
 				<Sec
 					title="Approvers"
+					source={APPROVERS_P}
 					extra={
 						ap.total > 0 && (
 							<span className="badge" data-st={ap.ok === ap.total ? "done" : "waiting"}>
@@ -390,16 +475,24 @@ function hotfixSheet(app: string, version: string, c: Ctx): Sheet {
 					<span>Milestone</span>
 					<span>
 						<Ext url={h.milestone.url}>{h.milestone.title}</Ext>
+						<SourceTag p={HOTFIX_MILESTONE_P} wide />
 					</span>
 					<span>Dates</span>
 					<span>
 						{h.milestone.start ? dayLabel(h.milestone.start) : "-"} →{" "}
 						{h.milestone.due ? dayLabel(h.milestone.due) : "-"}
+						<SourceTag p={readOf("Dates", "gitlab.milestones", "start and due dates", "Hotfix.milestone")} wide />
 					</span>
 					<span>Jira release</span>
-					<span>{h.jira ? <Ext url={h.jira.url}>{h.jira.name}</Ext> : "-"}</span>
+					<span>
+						{h.jira ? <Ext url={h.jira.url}>{h.jira.name}</Ext> : "-"}
+						<SourceTag p={readOf("Jira release", "jira.versions", "version by name", "Hotfix.jira")} wide />
+					</span>
 					<span>Tag</span>
-					<span>{h.tag ? <Ext url={h.tag.url}>{h.tag.name}</Ext> : <span className="passive">no tag yet</span>}</span>
+					<span>
+						{h.tag ? <Ext url={h.tag.url}>{h.tag.name}</Ext> : <span className="passive">no tag yet</span>}
+						<SourceTag p={readOf("Tag", "gitlab.tags", "tag named after the version", "Hotfix.tag")} wide />
+					</span>
 				</div>
 				<Sec title="Stages">
 					<StageRows stages={hotfixStages(h, c.board.today)} now={c.now} />
@@ -750,6 +843,43 @@ function keySheet(c: Ctx): Sheet {
 					<div className="kr">
 						<span className="dot" data-st="passive" />
 						{STATUS_TEXT.not_observable}: no system records it yet
+					</div>
+				</Sec>
+				<Sec title="Sources (Show → Sources)">
+					<div className="kr" data-testid="key-sources">
+						J Jira · G GitLab · C Confluence in the top bar. Hover one for when AO last read it; an unknown one says so
+						in amber.
+					</div>
+					<div className="kr">
+						<span className="kstag">Jira</span>
+						read straight from one system
+					</div>
+					<div className="kr">
+						<span className="kstag" data-how="derived">
+							GitLab + Jira
+						</span>
+						worked out by AO from these systems
+					</div>
+					<div className="kr">
+						<span className="kstag" data-how="merged">
+							page + sprint MR
+						</span>
+						a card in a train: only the sources that matched, in the order fixVersion, page, sprint MR
+					</div>
+					<div className="kr">
+						<span className="kstag" data-how="rule">
+							rule C5
+						</span>
+						an alert: the rule that fired and what it reads
+					</div>
+					<div className="kr">
+						<span className="kstag" data-unknown="">
+							Jira
+						</span>
+						amber dot: what it reads is not fresh, so the value may be old
+					</div>
+					<div className="kr">
+						Click a tag, or hover a value for a moment, to see each source, its fact kind and when AO last read it.
 					</div>
 				</Sec>
 			</>

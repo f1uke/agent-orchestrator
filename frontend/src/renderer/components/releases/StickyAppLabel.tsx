@@ -1,6 +1,8 @@
 import { useRef } from "react";
 import { approvals, nowStage, owner, unknownText, versionOf, type Lens } from "../../lib/releases/lens";
-import type { BoardApp, Stage } from "../../lib/releases/types";
+import { derivedOf, readOf, ruleTagOf, stageOf } from "../../lib/releases/sources";
+import type { BoardApp, RuleInfo, Stage } from "../../lib/releases/types";
+import { SourceTag, SourceValue } from "./Sources";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
 import { versionMineText } from "../../lib/releases/sprint";
 import { appMark } from "../../lib/releases/appMark";
@@ -32,6 +34,7 @@ function MineLine({ app, lens }: { app: string; lens: Lens }) {
 	return bits.length ? (
 		<div className="meline" data-testid="label-mine">
 			{bits.join(" · ")}
+			<SourceTag p={MINE_P} />
 		</div>
 	) : (
 		<div className="meline off" data-testid="label-mine">
@@ -40,7 +43,49 @@ function MineLine({ app, lens }: { app: string; lens: Lens }) {
 	);
 }
 
-export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Lens; actions: PageActions }) {
+const STAGES_P = derivedOf(
+	"Stages",
+	[
+		{ kind: "gitlab.milestones", text: "freeze and publish dates" },
+		{ kind: "gitlab.mrs", text: "release MR" },
+		{ kind: "gitlab.jobs", text: "pipeline" },
+		{ kind: "jira.versions", text: "approvers" },
+		{ kind: "gitlab.tags", text: "tag" },
+	],
+	"One dot per stage. The version sheet tags each stage with its own source.",
+	"Version.stages[].reads",
+);
+
+const MERGED_P = derivedOf(
+	"Cards merged",
+	[{ kind: "gitlab.mrs", text: "each card's MRs: merged into the release or not" }],
+	"Out of the cards in the train (fixVersion, page or sprint-branch MR).",
+	"Version.cards[].code",
+);
+
+const MINE_P = derivedOf(
+	"Mine",
+	[
+		{ kind: "gitlab.mrs", text: "release MR or card MRs you authored" },
+		{ kind: "jira.versions", text: "you are an approver" },
+		{ kind: "jira.cards", text: "cards assigned to you" },
+		{ kind: "jira.my_subtasks", text: "subtasks assigned to you" },
+	],
+	undefined,
+	"Version.mine, cards[].mine",
+);
+
+export function StickyAppLabel({
+	app,
+	lens,
+	catalogue,
+	actions,
+}: {
+	app: BoardApp;
+	lens: Lens;
+	catalogue: readonly RuleInfo[];
+	actions: PageActions;
+}) {
 	const t = lens.focus;
 	const v = t ? versionOf(t, app.id) : undefined;
 	const root = useRef<HTMLElement>(null);
@@ -74,6 +119,12 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 	const ap = approvals(v);
 	const merged = v.cards.filter((c) => c.code.kind === "merged").length;
 	const nowAt = Date.now();
+	const jiraName = v.jira?.name ?? "the Jira release (none found)";
+	const ownerP =
+		own &&
+		(own.from === "release MR author"
+			? readOf(`Owner: ${own.name}`, "gitlab.mrs", `release MR !${v.releaseMr?.mr.iid} author`, "releaseMr.mr.author")
+			: readOf(`Owner: ${own.name}`, "jira.cards", "release ticket assignee", "ticket.assignee"));
 	return (
 		<button
 			type="button"
@@ -85,14 +136,30 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 			{head}
 			<div className="ver">
 				<span className="mono">{v.version}</span>
+				<SourceTag
+					p={derivedOf(
+						`Version ${v.version}`,
+						[
+							{ kind: "gitlab.milestones", text: `milestone "${v.milestone.title}"` },
+							{ kind: "jira.versions", text: `release ${jiraName}` },
+						],
+						"Rule A1 fires when the two name different versions.",
+						"Version.version",
+					)}
+				/>
 				<span className="passive mono">{t.label}</span>
-				<Stepper stages={v.stages} />
+				<SourceValue p={STAGES_P}>
+					<span className="inline-flex">
+						<Stepper stages={v.stages} />
+					</span>
+				</SourceValue>
 			</div>
 			<div data-testid="label-stage">
 				{now ? (
 					<span className="now" data-st={stageTone(now.status)}>
 						{STAGE_META[now.key].short} ·{" "}
 						{now.status === "unknown" ? unknownText(now.missing, nowAt) : STATUS_TEXT[now.status]}
+						<SourceTag p={stageOf(now)} />
 					</span>
 				) : (
 					<span className="now" data-st="done">
@@ -103,6 +170,7 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 			<div className="why" data-testid="label-blocker" data-st={top ? SEVERITY_META[top.severity].tone : undefined}>
 				{top ? (
 					<>
+						<SourceTag p={ruleTagOf(catalogue, top.rule)} />
 						<b>{SEVERITY_META[top.severity].label}</b> {top.text}
 					</>
 				) : now?.detail ? (
@@ -121,6 +189,7 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 								{merged}/{v.cards.length}
 							</b>{" "}
 							merged
+							<SourceTag p={MERGED_P} />
 						</span>
 					)}
 					<span>
@@ -128,8 +197,14 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 							{ap.ok}/{ap.total}
 						</b>{" "}
 						approved
+						<SourceTag p={readOf("Approvals", "jira.versions", `approvers on ${jiraName}`, "Version.jira.approvers")} />
 					</span>
-					{own && <span title={`${own.name} (${own.from})`}>{own.name.split(" ")[0]}</span>}
+					{own && (
+						<span title={`${own.name} (${own.from})`}>
+							{own.name.split(" ")[0]}
+							<SourceTag p={ownerP} />
+						</span>
+					)}
 				</div>
 			)}
 		</button>

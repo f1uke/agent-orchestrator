@@ -8,11 +8,18 @@ describe("releases UI layers", () => {
 
 	it("starts from the default layers and remembers a toggle across a reload", async () => {
 		const first = await import("./releases-ui");
-		expect(first.useReleasesUi.getState().layers).toEqual({ sprint: false, llb: true, cards: true, past: false });
-		first.useReleasesUi.getState().setLayers({ ...first.useReleasesUi.getState().layers, past: true });
+		expect(first.useReleasesUi.getState().layers).toEqual({
+			sprint: false,
+			llb: true,
+			cards: true,
+			past: false,
+			src: false,
+		});
+		first.useReleasesUi.getState().setLayers({ ...first.useReleasesUi.getState().layers, past: true, src: true });
 		vi.resetModules();
 		const reloaded = await import("./releases-ui");
 		expect(reloaded.useReleasesUi.getState().layers.past).toBe(true);
+		expect(reloaded.useReleasesUi.getState().layers.src).toBe(true);
 	});
 
 	it("keeps folds open across a reload and closes them on a second toggle", async () => {

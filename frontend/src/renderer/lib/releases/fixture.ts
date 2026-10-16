@@ -43,8 +43,25 @@ function st(
 	detail = "",
 	conventional = false,
 ): Stage {
-	return { key, date, status, detail, reads: [], ...(conventional ? { conventional } : {}) };
+	const dated = date !== undefined && (key === "scan" || key === "approve");
+	return {
+		key,
+		date,
+		status,
+		detail,
+		reads: STAGE_READS[key],
+		...(conventional || dated ? { conventional: true } : {}),
+	};
 }
+
+const STAGE_READS: Readonly<Record<Stage["key"], string[]>> = {
+	freeze: ["gitlab.milestones", "gitlab.mrs"],
+	scan: ["gitlab.milestones", "gitlab.mrs", "gitlab.mr_detail", "gitlab.jobs"],
+	approve: ["gitlab.milestones", "jira.versions"],
+	tag: ["gitlab.milestones", "gitlab.mrs", "gitlab.tags"],
+	publish: ["gitlab.milestones", "jira.versions", "gitlab.tags"],
+	force: ["gitlab.milestones", "jira.techreq"],
+};
 
 function approvers(n: number, ok: number) {
 	return PEOPLE.slice(0, n).map(([accountId, name], i) => ({
@@ -135,7 +152,22 @@ function trainOf(
 		families: ["demo", "pilot"],
 		versions: specs.map((s) => appVersion(id, s)),
 		datesSplit,
-		pages: [],
+		pages:
+			phase === "past"
+				? []
+				: [
+						{
+							id: `page-${id}`,
+							family: "demo",
+							number: Number(id.split("-")[0]),
+							title: `Demo release train #${id.split("-")[0]}`,
+							url: `https://wiki.example.com/pages/${id}`,
+							created: addDays(freeze, -10),
+							keys: [],
+							tasks: 0,
+							ticked: 0,
+						},
+					],
 	};
 }
 
@@ -174,6 +206,30 @@ const RULES: [string, Severity, string][] = [
 	["E1", "hygiene", "Published but the Jira release is not marked released"],
 	["F1", "info", "Two trains overlap"],
 	["L9", "risk", "MR into a branch that is not a sprint branch, a long-lived branch or develop"],
+];
+
+const KINDS: readonly [string, string, number][] = [
+	["confluence.pages", "train pages", 15],
+	["gitlab.compare", "branch compares", 30],
+	["gitlab.jobs", "pipeline jobs", 2],
+	["gitlab.milestones", "milestones", 10],
+	["gitlab.mr_detail", "release MR detail", 2],
+	["gitlab.mrs", "merge requests", 2],
+	["gitlab.tags", "tags", 10],
+	["gitlab.user", "my GitLab account", 1440],
+	["jira.board_sprints", "active sprints", 30],
+	["jira.branch_cards", "sprint branch cards", 5],
+	["jira.cards", "fixVersion cards", 5],
+	["jira.llb_cards", "long-lived branch cards", 10],
+	["jira.my_subtasks", "my subtasks", 5],
+	["jira.myself", "my Jira account", 1440],
+	["jira.page_cards", "page cards (Jira)", 5],
+	["jira.relatedwork", "related work", 15],
+	["jira.sprint_cards", "sprint cards", 5],
+	["jira.techreq", "force-update tickets", 30],
+	["jira.this_sprint", "This Sprint set", 10],
+	["jira.users", "people", 1440],
+	["jira.versions", "Jira releases", 5],
 ];
 
 const MS = "gitlab.milestones";
@@ -422,7 +478,19 @@ function baseBoard(today: string): Board {
 			{ system: "jira", resources: 30, asOf: `${today}T02:57:00Z`, issues: [] },
 			{ system: "confluence", resources: 2, asOf: `${today}T02:50:00Z`, issues: [] },
 		],
-		kinds: [],
+		kinds: KINDS.map(([kind, label, budget]) => {
+			const system = kind.startsWith("confluence.") ? "confluence" : kind.split(".")[0];
+			const minute = { gitlab: 58, jira: 57, confluence: 50 }[system] ?? 50;
+			return {
+				kind,
+				system,
+				label,
+				budgetSeconds: budget * 60,
+				resources: 2,
+				asOf: `${today}T02:${minute}:00Z`,
+				issues: [],
+			};
+		}),
 		cutover: null,
 		identity: { kind: "known", jiraAccountId: "acc-ada", gitlabUsername: "ada", displayName: "Ada Example" },
 		alerts: {
@@ -492,14 +560,43 @@ function unitOf(
 	};
 }
 
+/** Membership reasons, in wire order, so the page has to put them in the fixed order itself. */
+const ALSO_IN: Readonly<Record<string, Unit["why"]>> = {
+	"DEMO-103": ["sprint branch", "fixVersion"],
+	"DEMO-104": ["release train page"],
+	"DEMO-106": ["fixVersion", "release train page", "sprint branch"],
+};
+
+function withReasons(u: Unit, t: Train): Unit {
+	const why = ALSO_IN[u.key];
+	if (!why) return u;
+	const page = t.pages[0];
+	const fv = u.evidence.fixVersion;
+	return {
+		...u,
+		why,
+		factsFrom: why.includes("fixVersion") ? "jira.cards" : "jira.page_cards",
+		evidence: {
+			...(why.includes("fixVersion") && fv ? { fixVersion: fv } : {}),
+			...(why.includes("release train page") && page
+				? { page: { id: page.id, title: page.title, url: page.url } }
+				: {}),
+			...(why.includes("sprint branch")
+				? { sprintMR: { branch: "feature/sprint-2026-20", mrs: [400 + u.key.length] } }
+				: {}),
+		},
+	};
+}
+
 function attachCards(b: Board): void {
 	const t21 = b.trains.find((t) => t.id === "21-2026");
 	const t22 = b.trains.find((t) => t.id === "22-2026");
 	for (const v of t21?.versions ?? []) {
 		const n = v.app === "di" ? CARD_SPECS.length : v.app === "da" ? 4 : 2;
-		v.cards = CARD_SPECS.slice(0, n).map(([k, s, kind, st, cat, who]) =>
-			unitOf(k, s, v, v.app === "di" || kind !== "parked" ? kind : "merged", st, cat, who),
-		);
+		v.cards = CARD_SPECS.slice(0, n).map(([k, s, kind, st, cat, who]) => {
+			const u = unitOf(k, s, v, v.app === "di" || kind !== "parked" ? kind : "merged", st, cat, who);
+			return t21 ? withReasons(u, t21) : u;
+		});
 	}
 	for (const v of t22?.versions ?? []) {
 		if (v.app === "di" || v.app === "da")
@@ -864,7 +961,7 @@ function demoSprints(b: Board): Board["sprints"] {
 			review,
 			["new this sprint"],
 			[sprintMr("di", 406, sprintBranch, "sprint", 4, day(5))],
-			[route("di", "sprint", t21, 406, { plan: "22-2026", mismatch: true })],
+			[route("di", "sprint", t21, 406, { plan: "22-2026", planFrom: ["fixVersion"], mismatch: true })],
 		),
 		sprintCard(
 			"DEMO-306",
@@ -973,6 +1070,21 @@ export function failedSourceBoard(today: string): Board {
 	t21.versions[0].stages = t21.versions[0].stages.map((s) =>
 		s.key === "scan" ? { ...s, status: "unknown", detail: "", missing } : s,
 	);
+	return b;
+}
+
+export function staleKindBoard(today: string): Board {
+	const b = demoBoard(today);
+	const lastRead = new Date(Date.now() - 47 * 60_000).toISOString();
+	const issue = {
+		kind: "jira.versions",
+		scope: "global",
+		failures: 3,
+		errorClass: "unavailable" as const,
+		completeAt: lastRead,
+	};
+	b.kinds = b.kinds.map((k) => (k.kind === "jira.versions" ? { ...k, asOf: lastRead, issues: [issue] } : k));
+	b.sources = b.sources.map((s) => (s.system === "jira" ? { ...s, asOf: lastRead, issues: [issue] } : s));
 	return b;
 }
 

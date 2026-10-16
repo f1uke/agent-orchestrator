@@ -20,16 +20,26 @@ import { appMarkOf } from "../../lib/releases/appMark";
 import { AlertList } from "./Alerts";
 import { AppMark } from "./AppMark";
 import { CardLine, Face, JiraKey } from "./CardGroups";
+import { SourceTag } from "./Sources";
+import {
+	derivedOf,
+	membershipOf,
+	planSaysText,
+	readOf,
+	sprintCardOf,
+	type Provenance,
+} from "../../lib/releases/sources";
 import type { PageActions } from "./ReleasesPage";
 
 type Ctx = { board: Board; lens: Lens; actions: PageActions };
 type Sheet = { title: ReactNode; body: ReactNode };
 
-function Sec({ title, children }: { title: string; children: ReactNode }) {
+function Sec({ title, source, children }: { title: string; source?: Provenance; children: ReactNode }) {
 	return (
 		<div className="sec">
 			<div className="sec-h">
 				<span className="rel-eyebrow">{title}</span>
+				{source && <SourceTag p={source} wide />}
 			</div>
 			{children}
 		</div>
@@ -47,6 +57,28 @@ function Mine({ mine }: { mine: MineReason[] | undefined }) {
 		</>
 	);
 }
+
+const SHIPS_IN_P: Provenance = {
+	title: "Cards shipping",
+	how: "merged",
+	lines: [
+		{ kind: "jira.cards", text: "fixVersion", on: true, short: "fixVersion" },
+		{ kind: "confluence.pages", text: "Release train page", on: true, short: "page" },
+		{ kind: "gitlab.mrs", text: "MR into the sprint branch", on: true, short: "sprint MR" },
+	],
+	note: "Each row says which matched for it.",
+	field: "CardUnit.why",
+};
+
+const ROUTES_P = derivedOf(
+	"Where the code goes",
+	[
+		{ kind: "gitlab.mrs", text: "each MR's target branch and state" },
+		{ kind: "gitlab.milestones", text: "the train that branch ships in" },
+	],
+	undefined,
+	"SprintCard.routes",
+);
 
 export function findSprintCard(b: Board, key: string): { row: SprintRow; card: SprintCard } | null {
 	for (const row of b.sprints) {
@@ -72,6 +104,11 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 	const summary = sp?.card.summary ?? units[0]?.unit.summary ?? llbCard?.summary ?? "";
 	const url = sp?.card.url ?? units[0]?.unit.url ?? jiraUrl(b, key);
 	const mine = sp?.card.mine ?? units.find((u) => u.unit.mine?.length)?.unit.mine;
+	const factsKind = sp
+		? sp.card.onBoard
+			? "jira.sprint_cards"
+			: "jira.branch_cards"
+		: (units[0]?.unit.factsFrom ?? "jira.llb_cards");
 	return {
 		title: (
 			<>
@@ -96,6 +133,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 						) : (
 							"-"
 						)}
+						<SourceTag p={readOf("Assignee", factsKind, "issue assignee", "assignee")} wide />
 					</span>
 					{sp && (
 						<>
@@ -114,6 +152,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 										Not on the {sp.row.board.key} board, but has an MR into the sprint branch
 									</span>
 								)}
+								<SourceTag p={sprintCardOf(sp.card, sp.row)} wide />
 							</span>
 						</>
 					)}
@@ -130,7 +169,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 					)}
 				</div>
 				{units.length > 0 && (
-					<Sec title="Ships in">
+					<Sec title="Ships in" source={SHIPS_IN_P}>
 						{units.map(({ train, unit }) => {
 							const m = CODE_META[unit.code.kind];
 							const into =
@@ -157,14 +196,17 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 											{into}
 										</span>
 									</span>
-									<span className="passive text-[11.5px]">{unit.why.join(", ")}</span>
+									<span className="passive text-[11.5px]">
+										{unit.why.join(", ")}
+										<SourceTag p={membershipOf(unit, train.label)} wide />
+									</span>
 								</div>
 							);
 						})}
 					</Sec>
 				)}
 				{sp && sp.card.routes.length > 0 && (
-					<Sec title="Where the code goes">
+					<Sec title="Where the code goes" source={ROUTES_P}>
 						{sp.card.routes.map((r) => {
 							const m = DEST_META[r.kind];
 							const mrs = sp.card.mrs.filter((x) => x.app === r.app);
@@ -182,7 +224,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 										{r.mismatch && (
 											<span className="c" data-st="failed">
 												{" "}
-												· not where its page or fixVersion says
+												· not where its {planSaysText(r.planFrom)} says
 											</span>
 										)}
 									</span>
@@ -204,7 +246,10 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 					</Sec>
 				)}
 				{sp && sp.card.subtasks.length > 0 && (
-					<Sec title={`Subtasks (${sp.card.subtasks.length})`}>
+					<Sec
+						title={`Subtasks (${sp.card.subtasks.length})`}
+						source={readOf("Subtasks", "jira.sprint_cards", "subtasks: assignee, status")}
+					>
 						{sp.card.subtasks.map((s) => (
 							<CardLine
 								key={s.key}
@@ -265,10 +310,24 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 			<>
 				<div className="sec kv">
 					<span>Board</span>
-					<span>{row.board.key}</span>
+					<span>
+						{row.board.key}
+						<SourceTag
+							p={{
+								title: "Board",
+								how: "read",
+								lines: [
+									{ kind: "ao.config", text: `board ${row.board.id} is followed` },
+									{ kind: "jira.board_sprints", text: "board name" },
+								],
+							}}
+							wide
+						/>
+					</span>
 					<span>Dates</span>
 					<span>
 						{row.sprint.start ? shortDay(row.sprint.start) : "-"} → {row.sprint.end ? shortDay(row.sprint.end) : "-"}
+						<SourceTag p={readOf("Dates", "jira.board_sprints", "active sprint start and end")} wide />
 					</span>
 					{row.board.ownsSprintBranch && (
 						<>
@@ -292,6 +351,14 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 					<span data-testid="sprint-sheet-cards">
 						{isNew} new this sprint, {active.length - isNew} carried over with MRs or open mobile work,{" "}
 						{cards.length - active.length} carried over with mobile done. {row.total} on the board in all.{shown}
+						<SourceTag
+							p={derivedOf("Cards", [
+								{ kind: "jira.this_sprint", text: 'new = "This Sprint" set' },
+								{ kind: "gitlab.mrs", text: "carried with MRs this sprint" },
+								{ kind: "jira.sprint_cards", text: "the rest of the sprint" },
+							])}
+							wide
+						/>
 					</span>
 					<span>Jira</span>
 					<span>
@@ -300,7 +367,7 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 						</a>
 					</span>
 				</div>
-				<Sec title="Where each card ships">
+				<Sec title="Where each card ships" source={ROUTES_P}>
 					{destBlocks(row, cards).map((bk) => {
 						const h = destHead(c.board, bk.to, bk.cards);
 						return (
