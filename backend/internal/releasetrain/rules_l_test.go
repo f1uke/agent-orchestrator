@@ -167,6 +167,14 @@ func TestL3FollowsAnEpicTarget(t *testing.T) {
 	}
 }
 
+func TestTargetTextNamesTheLaterPagesThatListTheSameEpic(t *testing.T) {
+	t21, t22, t23 := TrainID{Number: 21, Year: fixtureYear}, TrainID{Number: 22, Year: fixtureYear}, TrainID{Number: 23, Year: fixtureYear}
+	got := targetText(LLBFromEpic{Train: t21, Epic: "DEMO-500", Covered: 2, Total: 3, Also: []TrainID{t22, t23}})
+	if want := "targets #21 from epic DEMO-500, 2 of 3 cards; #22 and #23 pages list it too"; got != want {
+		t.Fatalf("targetText = %q, want %q", got, want)
+	}
+}
+
 func TestL3QuietOnceTheBranchLandsInTheSourceSprint(t *testing.T) {
 	f := newFixture(t, today)
 	v := f.version("di", "21", "3.5.0", liveFreeze, liveDue)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 var trunkRE = regexp.MustCompile(`^(develop|main|master)$`)
@@ -148,7 +149,15 @@ func targetText(t LLBTarget) string {
 	case LLBPlanned:
 		return "targets " + t.Train.String()
 	case LLBFromEpic:
-		return fmt.Sprintf("targets %s from epic %s, %d of %d cards", t.Train, t.Epic, t.Covered, t.Total)
+		text := fmt.Sprintf("targets %s from epic %s, %d of %d cards", t.Train, t.Epic, t.Covered, t.Total)
+		if len(t.Also) > 0 {
+			also := make([]string, len(t.Also))
+			for i, a := range t.Also {
+				also[i] = a.String()
+			}
+			text += fmt.Sprintf("; %s pages list it too", strings.Join(also, " and "))
+		}
+		return text
 	case LLBLandedIn:
 		return "landed for " + t.Train.String()
 	case LLBDropped:
