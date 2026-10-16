@@ -5335,6 +5335,7 @@ export interface components {
             hint?: string;
             id: string;
             on: boolean;
+            reads: string[];
             severity: components["schemas"]["ReleaseTrainSeverity"];
             title: string;
         };

@@ -176,6 +176,33 @@ const RULES: [string, Severity, string][] = [
 	["L9", "risk", "MR into a branch that is not a sprint branch, a long-lived branch or develop"],
 ];
 
+const MS = "gitlab.milestones";
+const CARD_READS = [
+	MS,
+	"jira.versions",
+	"jira.cards",
+	"gitlab.mrs",
+	"confluence.pages",
+	"jira.page_cards",
+	"jira.llb_cards",
+];
+const READS: Readonly<Record<string, string[]>> = {
+	A1: [MS, "jira.versions"],
+	A5: [MS, "jira.versions"],
+	A6: [MS, "confluence.pages"],
+	A7: [MS],
+	B1: [MS, "gitlab.mrs"],
+	C1: [MS, "gitlab.mrs", "gitlab.mr_detail", "gitlab.jobs"],
+	C5: [MS, "gitlab.mrs", "gitlab.mr_detail"],
+	D1: [MS, "jira.versions"],
+	D3: [MS, "jira.versions", "gitlab.tags"],
+	E1: [MS, "jira.versions", "gitlab.tags"],
+	F1: [MS],
+	G5: [...CARD_READS, "jira.branch_cards"],
+	L3: CARD_READS,
+	L9: ["gitlab.mrs"],
+};
+
 const FIX_KINDS: Readonly<Record<string, FixKind>> = {
 	A5: "choose",
 	C1: "queue",
@@ -363,6 +390,7 @@ function baseBoard(today: string): Board {
 		title,
 		on: id !== "F1",
 		defaultOn: true,
+		reads: READS[id],
 		...(FIX_KINDS[id] ? { fix: FIX_KINDS[id] } : {}),
 	}));
 	const badge = hits.filter((h) => h.bucket === "badge");
@@ -1011,7 +1039,16 @@ export function fixesBoard(today: string): Board {
 		["G5", "risk", "Card ships with a train but is not on its release train page"],
 		["L3", "risk", "Card is on a train page but parked in a long-lived branch that does not target it"],
 	] as const)
-		b.catalogue.push({ id, group: "G", severity, title, on: true, defaultOn: true, fix: FIX_KINDS[id] });
+		b.catalogue.push({
+			id,
+			group: "G",
+			severity,
+			title,
+			on: true,
+			defaultOn: true,
+			fix: FIX_KINDS[id],
+			reads: READS[id],
+		});
 	b.alerts.rules = b.catalogue.map((r) => {
 		const ids = b.alerts.hits.filter((h) => h.rule === r.id && h.bucket === "badge").map((h) => h.id);
 		return {

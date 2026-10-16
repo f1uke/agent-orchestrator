@@ -14993,6 +14993,10 @@ components:
           type: string
         "on":
           type: boolean
+        reads:
+          items:
+            type: string
+          type: array
         severity:
           $ref: '#/components/schemas/ReleaseTrainSeverity'
         title:
@@ -15004,6 +15008,7 @@ components:
       - defaultOn
       - "on"
       - title
+      - reads
       type: object
     ReleaseTrainRuleOutcome:
       properties:
