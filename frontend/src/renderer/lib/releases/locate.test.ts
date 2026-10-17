@@ -95,6 +95,23 @@ describe("locate", () => {
 		expect(locate(hit("G2~c/DEMO-304").subject, b, view()).notMine).toBe(false);
 	});
 
+	it("finds a missing page card on any app of the family, past keys no list carries", () => {
+		const r = locate(
+			{ kind: "pageFamily", train: "21-2026", family: "demo", bucket: "open", keys: ["DEMO-999", "DEMO-109"] },
+			b,
+			view(),
+		);
+		expect(r.target).toBe("card-row");
+		expect(r.selector).toContain('"DEMO-109"');
+		const none = locate(
+			{ kind: "pageFamily", train: "21-2026", family: "demo", bucket: "open", keys: ["DEMO-999"] },
+			b,
+			view(),
+		);
+		expect(none.target).toBe("version-bar");
+		expect(none.fallback).toMatch(/^at its train's bar/);
+	});
+
 	it("says where Show lands when the subject has no mark of its own", () => {
 		expect(locate(hit("L9~mr/da/415").subject, b, view()).fallback).toBe(
 			"at its app: the timeline draws no lane for feat/DEMO-201-base",

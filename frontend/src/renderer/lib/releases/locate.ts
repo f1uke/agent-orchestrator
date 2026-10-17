@@ -179,11 +179,12 @@ export const LOCATORS: { [K in SubjectKind]: Locator<K> } = {
 		plan("sprint-band", ".rel-spr", { fallback: "at the sprint: the card is on no board's row" }),
 	mr,
 	pageFamily: (s, b) => {
-		const t = b.trains.find((x) => x.id === s.train);
-		const app = t?.versions.find((v) => b.apps.find((a) => a.id === v.app)?.family === s.family)?.app;
-		return app
-			? cardOnTrain(b, s.train, app, s.keys[0] ?? "")
-			: trainChip(s.train, "at the train: no app of the family is on it");
+		const apps = (b.trains.find((x) => x.id === s.train)?.versions ?? [])
+			.map((v) => v.app)
+			.filter((app) => b.apps.find((a) => a.id === app)?.family === s.family);
+		if (!apps.length) return trainChip(s.train, "at the train: no app of the family is on it");
+		const tries = apps.flatMap((app) => s.keys.map((key) => cardOnTrain(b, s.train, app, key)));
+		return tries.find((r) => r.target === "card-row") ?? tries[0] ?? bar(b, s.train, apps[0]);
 	},
 };
 
