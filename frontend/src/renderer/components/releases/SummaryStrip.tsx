@@ -64,6 +64,7 @@ export function SummaryStrip({
 						key={x.id}
 						type="button"
 						className={`rel-tchip${x.phase === "current" ? " cur" : ""}`}
+						data-train={x.id}
 						aria-pressed={x.id === t?.id}
 						onClick={() => actions.setSearch({ focus: x.id })}
 					>

@@ -151,11 +151,9 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 				<SubjectLine h={h} c={c} open={hidden ? null : target} />
 				<div className="tx">{h.text}</div>
 				<div className="acts">
-					{target && !hidden && (
-						<button type="button" onClick={() => c.actions.openSheet(target, "push")}>
-							Show
-						</button>
-					)}
+					<button type="button" data-testid="hit-show" onClick={() => c.actions.reveal(h.subject)}>
+						Show
+					</button>
 					<HitLinks h={h} />
 					<FixButton h={h} hidden={hidden} c={c} />
 					{hidden && (

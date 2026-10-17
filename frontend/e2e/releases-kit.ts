@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 export async function open(
 	page: Page,
 	query = "",
-	variant?: "failed-source" | "identity-unknown" | "fixes" | "stale-kind",
+	variant?: "failed-source" | "identity-unknown" | "fixes" | "stale-kind" | "subjects",
 ) {
 	await page.addInitScript((v) => {
 		try {

@@ -284,7 +284,14 @@ function Markers({
 			{hi > p && <div className="rel-mtrack out" style={{ left: p, width: hi - p, top: y + 8 }} />}
 			{markerSpots(tl, it.stages).map(({ stage, left }) => (
 				<SourceValue key={stage.key} p={stageOf(stage)}>
-					<StageMark stage={stage} hotfix={it.kind === "hotfix"} style={{ left, top: y }} onClick={open} now={now} />
+					<StageMark
+						stage={stage}
+						hotfix={it.kind === "hotfix"}
+						style={{ left, top: y }}
+						onClick={open}
+						now={now}
+						data-key={it.key}
+					/>
 				</SourceValue>
 			))}
 		</>

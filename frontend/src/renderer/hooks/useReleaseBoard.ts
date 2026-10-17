@@ -7,6 +7,7 @@ import {
 	failedSourceBoard,
 	fixesBoard,
 	staleKindBoard,
+	subjectsBoard,
 	unknownIdentityBoard,
 } from "../lib/releases/fixture";
 import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
@@ -29,6 +30,7 @@ const VARIANTS = {
 	"failed-source": failedSourceBoard,
 	"identity-unknown": unknownIdentityBoard,
 	fixes: fixesBoard,
+	subjects: subjectsBoard,
 	"stale-kind": staleKindBoard,
 } as const;
 

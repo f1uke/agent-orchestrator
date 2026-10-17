@@ -1273,6 +1273,139 @@ export function fixesBoard(today: string): Board {
 	return b;
 }
 
+const SUBJECT_HITS: [string, Severity, string, Subject][] = [
+	[
+		"A2~jv/7001",
+		"data",
+		"Jira release Android 2.5.0 says train #22, but no milestone has that label",
+		{
+			kind: "jiraVersion",
+			id: "7001",
+			app: "da",
+			name: "Android 2.5.0",
+		},
+	],
+	[
+		"A3~m/pi/9001",
+		"data",
+		"Milestone Release 1.0.2 has no Jira release with the train #21 label",
+		{
+			kind: "milestone",
+			app: "pi",
+			id: 9001,
+			title: "Release 1.0.2",
+		},
+	],
+	[
+		"E1~h/da/2.3.1",
+		"hygiene",
+		"Hotfix shipped, Jira release still unreleased",
+		{
+			kind: "hotfix",
+			app: "da",
+			version: "2.3.1",
+		},
+	],
+	[
+		"F2~ht/da/2.3.1/21-2026",
+		"risk",
+		"Hotfix 2.3.1 runs inside train #21",
+		{
+			kind: "hotfixTrain",
+			app: "da",
+			version: "2.3.1",
+			train: "21-2026",
+		},
+	],
+	[
+		"L3~ct/21-2026/di/DEMO-109",
+		"risk",
+		"DEMO-109 is on train #21, but its code sits in feature/demo-search",
+		{
+			kind: "cardOnTrain",
+			train: "21-2026",
+			app: "di",
+			key: "DEMO-109",
+		},
+	],
+	[
+		"G2~c/DEMO-304",
+		"risk",
+		"No MR yet, DEMO 20 ends soon · Jira To Do",
+		{ kind: "card", key: "DEMO-304", board: "DEMO" },
+	],
+	[
+		"G2~c/PIL-12",
+		"risk",
+		"No MR yet, PILOT 20 ends soon · Jira Pull Request",
+		{
+			kind: "card",
+			key: "PIL-12",
+			board: "PILOT",
+		},
+	],
+	[
+		"L1~mr/di/330",
+		"block",
+		"!330 feature/demo-wallet → develop is open; land it in the sprint branch instead",
+		{
+			kind: "mr",
+			app: "di",
+			iid: 330,
+			source: "feature/demo-wallet",
+			target: "develop",
+		},
+	],
+	[
+		"L8~mr/pi/405",
+		"risk",
+		"Pilot iOS !405 merged into develop; it should go to the sprint branch",
+		{
+			kind: "mr",
+			app: "pi",
+			iid: 405,
+			source: "feat/DEMO-303",
+			target: "develop",
+		},
+	],
+	[
+		"G5~pf/21-2026/demo/open",
+		"info",
+		"1 card(s) not on the #21 Demo page: DEMO-103",
+		{
+			kind: "pageFamily",
+			train: "21-2026",
+			family: "demo",
+			bucket: "open",
+			keys: ["DEMO-103"],
+		},
+	],
+];
+
+/** One alert per subject kind, for Show. */
+export function subjectsBoard(today: string): Board {
+	const b = demoBoard(today);
+	const at = `${today}T02:00:00Z`;
+	const f1 = b.alerts.hits.find((h) => h.rule === "F1");
+	if (f1) f1.bucket = "badge";
+	for (const [id, severity, text, subject] of SUBJECT_HITS)
+		b.alerts.hits.push({
+			id,
+			rule: id.slice(0, id.indexOf("~")),
+			subject,
+			severity,
+			bucket: "badge",
+			text,
+			evidence: {},
+			links: [{ label: "Open", url: `${HOST}/x` }],
+			asOf: at,
+			...("app" in subject ? { app: subject.app } : {}),
+		});
+	for (const r of b.catalogue) r.on = true;
+	b.alerts.badge = { ...b.alerts.badge, count: b.alerts.hits.filter((h) => h.bucket === "badge").length };
+	return b;
+}
+
 export function demoResponse(board: Board): BoardResponse {
 	return { config: { state: "ok", path: "~/.ao/data/release-train.json" }, board };
 }

@@ -1,7 +1,16 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DURATION, enterKeyframes, momentumDistance, moveKeys, releaseMotion, type Presence } from "./motion";
+import {
+	ASIDE_STRIP,
+	DURATION,
+	enterKeyframes,
+	momentumDistance,
+	moveKeys,
+	releaseMotion,
+	SHEET_W,
+	type Presence,
+} from "./motion";
 import { DEFAULT_LAYERS, parseReleasesSearch } from "./url";
 
 const COMPONENTS = path.resolve(__dirname, "../../components/releases");
@@ -96,7 +105,8 @@ describe("releases motion", () => {
 			expect(keysOf(s.unfold)).toEqual(["height", "opacity"]);
 			expect(keysOf(s.appear)).toEqual(["opacity"]);
 			for (const i of [0, 1, 4]) expect(keysOf(s.label(i)), `label(${i}) has no offset`).toEqual(["opacity"]);
-			expect(keysOf(s.sheet)).toEqual(s.reduced ? ["opacity"] : ["opacity", "x"]);
+			expect(keysOf(s.sheet)).toEqual(["opacity", "x"]);
+			expect(s.sheet.aside, "aside slides the sheet on x only").toEqual({ opacity: 1, x: SHEET_W - ASIDE_STRIP });
 		}
 		expect(releaseMotion(false).unfold.animate.height).toBe("auto");
 		expect(releaseMotion(false).unfold.exit).toEqual({ height: 0, opacity: 0 });
