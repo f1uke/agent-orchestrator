@@ -12,6 +12,7 @@ import {
 	undoVerb,
 } from "../../lib/releases/fix";
 import { agoText } from "../../lib/releases/lens";
+import { subjectLabel } from "../../lib/releases/subject";
 import type { Board, Fix, FixPlan, FixRef, FixStep } from "../../lib/releases/types";
 import { HitWho, Sec } from "./Alerts";
 import type { PageActions } from "./ReleasesPage";
@@ -126,7 +127,7 @@ function FixBody({ hitId, choice, c }: { hitId: string; choice?: string; c: Ctx 
 					<span className="who">
 						<HitWho board={c.board} train={hit.train} app={hit.app} />
 					</span>{" "}
-					· {hit.text}
+					· {subjectLabel(hit.subject, c.board).text} · {hit.text}
 				</div>
 			)}
 			{p.mode !== "blocked" && (

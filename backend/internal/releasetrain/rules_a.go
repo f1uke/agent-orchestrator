@@ -4,7 +4,8 @@ import "fmt"
 
 var ruleA1 = rule{
 	ID: "A1", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
-	Title: "Milestone and Jira release name different versions",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "Milestone and Jira release name different versions",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchVersion, func(m Mismatch) (Subject, string, *Day) {
 			return SubjVersion{Train: *m.Train, App: m.App},
@@ -15,10 +16,11 @@ var ruleA1 = rule{
 
 var ruleA2 = rule{
 	ID: "A2", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
-	Title: "Jira release has a train label but no milestone",
+	Subjects: []SubjectKind{SubjectJiraVersion},
+	Title:    "Jira release has a train label but no milestone",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchNoMilestone, func(m Mismatch) (Subject, string, *Day) {
-			return SubjJiraVersion{ID: m.Jira.ID},
+			return SubjJiraVersion{ID: m.Jira.ID, App: m.App, Name: m.Jira.Name},
 				fmt.Sprintf("Jira release %s says train %s, but no GitLab milestone has that label for this app", m.Jira.Name, m.Train), m.Jira.ReleaseDate
 		})
 	},
@@ -26,10 +28,11 @@ var ruleA2 = rule{
 
 var ruleA3 = rule{
 	ID: "A3", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
-	Title: "Milestone has a train label but no Jira release",
+	Subjects: []SubjectKind{SubjectMilestone},
+	Title:    "Milestone has a train label but no Jira release",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchNoJira, func(m Mismatch) (Subject, string, *Day) {
-			return SubjMilestone{App: m.App, ID: m.Milestone.ID},
+			return SubjMilestone{App: m.App, ID: m.Milestone.ID, Title: m.Milestone.Title},
 				fmt.Sprintf("Milestone %s has no Jira release with the train %s label", m.Milestone.Title, m.Train), m.Milestone.Due
 		})
 	},
@@ -37,10 +40,11 @@ var ruleA3 = rule{
 
 var ruleA4 = rule{
 	ID: "A4", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
-	Title: "Jira release has no train label and no hotfix milestone",
+	Subjects: []SubjectKind{SubjectJiraVersion},
+	Title:    "Jira release has no train label and no hotfix milestone",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchNoLabel, func(m Mismatch) (Subject, string, *Day) {
-			return SubjJiraVersion{ID: m.Jira.ID},
+			return SubjJiraVersion{ID: m.Jira.ID, App: m.App, Name: m.Jira.Name},
 				fmt.Sprintf("Jira release %s has no train label and matches no hotfix milestone", m.Jira.Name), m.Jira.ReleaseDate
 		})
 	},
@@ -48,7 +52,8 @@ var ruleA4 = rule{
 
 var ruleA5 = rule{
 	ID: "A5", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
-	Title: "Jira release date differs from milestone due date",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "Jira release date differs from milestone due date",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			if v.Jira == nil || v.Jira.ReleaseDate == nil || v.Milestone.Due == nil || *v.Jira.ReleaseDate == *v.Milestone.Due {
@@ -63,7 +68,8 @@ var ruleA5 = rule{
 
 var ruleA6 = rule{
 	ID: "A6", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: []KindName{KindMilestones.Name, KindPages.Name},
-	Title: "Release train page dates differ from the milestone",
+	Subjects: []SubjectKind{SubjectVersionDate},
+	Title:    "Release train page dates differ from the milestone",
 	Check: func(b *Board) []Hit {
 		var out []Hit
 		for i := range b.Trains {
@@ -109,7 +115,8 @@ func pageDateHits(t *Train, v *AppVersion) []Hit {
 
 var ruleA7 = rule{
 	ID: "A7", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: []KindName{KindMilestones.Name},
-	Title: "An app's milestone dates differ from the rest of its train",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "An app's milestone dates differ from the rest of its train",
 	Check: func(b *Board) []Hit {
 		var out []Hit
 		for i := range b.Trains {

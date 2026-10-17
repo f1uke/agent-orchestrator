@@ -1,14 +1,16 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
-import { makeLens } from "../../lib/releases/lens";
+import { focusTrain, makeLens } from "../../lib/releases/lens";
 import { sourceIndex } from "../../lib/releases/sources";
-import type { Board } from "../../lib/releases/types";
+import { locate, sheetReveal, type RevealView } from "../../lib/releases/locate";
+import type { Board, Subject } from "../../lib/releases/types";
 import {
 	DEFAULT_LAYERS,
 	parseReleasesSearch,
 	releasesSearch,
 	type Layers,
+	sheetParam,
 	type ReleasesSearch,
 	type SheetEntry,
 } from "../../lib/releases/url";
@@ -28,6 +30,9 @@ export type PageActions = {
 	back: () => void;
 	setLayers: (layers: Layers) => void;
 	setHiddenBoards: (keys: ReadonlySet<string>) => void;
+	reveal: (s: Subject) => void;
+	whereIs: (s: Subject) => string | null;
+	openPart: (s: SheetEntry, part: string | null) => void;
 };
 
 export function ReleasesPage() {
@@ -35,12 +40,26 @@ export function ReleasesPage() {
 	const url = useMemo(() => parseReleasesSearch(raw), [raw]);
 	const navigate = useNavigate();
 	const query = useReleaseBoard();
+	const response = query.data;
+	const board = response?.board ?? null;
 	const stored = useReleasesUi((s) => s.layers);
 	const layers = url.layers ?? stored;
 	const storedHidden = useReleasesUi((s) => s.hidden);
 	const hiddenBoards = url.hideBoards ?? storedHidden;
-	const { pushBack, popBack, clearBack, setLayers, setHidden } = useReleasesUi();
+	const { pushBack, popBack, clearBack, setLayers, setHidden, openFolds, setPending, setAside } = useReleasesUi();
 	useEffect(() => saveSearch(releasesSearch(url)), [url]);
+	const sheetKey = url.sheet ? sheetParam(url.sheet) : null;
+	useEffect(() => setAside(false), [sheetKey, setAside]);
+	const view: RevealView = useMemo(
+		() => ({
+			layers,
+			hiddenBoards,
+			apps: url.apps,
+			focus: board ? (focusTrain(board, url.focus)?.id ?? null) : null,
+			me: url.me,
+		}),
+		[layers, hiddenBoards, url.apps, url.focus, url.me, board],
+	);
 
 	const setSearch = useCallback(
 		(patch: Partial<ReleasesSearch>) =>
@@ -58,13 +77,18 @@ export function ReleasesPage() {
 			openSheet: (s, from) => {
 				if (from === "push" && url.sheet) pushBack(url.sheet);
 				else clearBack();
+				setAside(false);
 				setSearch({ sheet: s });
 			},
 			closeSheet: () => {
 				clearBack();
+				setAside(false);
 				setSearch({ sheet: null });
 			},
-			back: () => setSearch({ sheet: popBack() ?? null }),
+			back: () => {
+				setAside(false);
+				setSearch({ sheet: popBack() ?? null });
+			},
 			setLayers: (l) => {
 				setLayers(l);
 				if (url.layers) setSearch({ layers: l });
@@ -73,11 +97,63 @@ export function ReleasesPage() {
 				setHidden(keys);
 				if (url.hideBoards) setSearch({ hideBoards: keys });
 			},
+			reveal: (subject) => {
+				if (!board) return;
+				const r = locate(subject, board, view);
+				const patch: Partial<ReleasesSearch> = {};
+				if (r.notMine && url.me) patch.me = false;
+				const nextLayers = { ...layers, ...Object.fromEntries(r.layers.map((k) => [k, true])) };
+				if (r.layers.some((k) => !layers[k])) {
+					setLayers(nextLayers);
+					if (url.layers) patch.layers = nextLayers;
+				}
+				if (r.unhide.some((k) => hiddenBoards.has(k))) {
+					const keys = new Set([...hiddenBoards].filter((k) => !r.unhide.includes(k)));
+					setHidden(keys);
+					if (url.hideBoards) patch.hideBoards = keys;
+				}
+				if (url.apps && r.apps.some((a) => !url.apps?.has(a))) patch.apps = new Set([...url.apps, ...r.apps]);
+				if (r.hotfixes && !url.hotfixes) patch.hotfixes = true;
+				if (r.focus && r.focus !== view.focus) patch.focus = r.focus;
+				openFolds(r.folds);
+				setPending(r);
+				if (url.sheet) setAside(true);
+				if (Object.keys(patch).length) setSearch(patch);
+			},
+			whereIs: (subject) => (board ? locate(subject, board, view).fallback : null),
+			openPart: (s, part) => {
+				const here = url.sheet && sheetParam(url.sheet) === sheetParam(s);
+				if (!here) {
+					if (url.sheet) pushBack(url.sheet);
+					setSearch({ sheet: s });
+				}
+				setAside(false);
+				if (part) setPending(sheetReveal(part));
+			},
 		}),
-		[setSearch, url.sheet, url.layers, url.hideBoards, pushBack, popBack, clearBack, setLayers, setHidden],
+		[
+			setSearch,
+			url.sheet,
+			url.layers,
+			url.hideBoards,
+			url.apps,
+			url.hotfixes,
+			url.me,
+			view,
+			board,
+			layers,
+			hiddenBoards,
+			pushBack,
+			popBack,
+			clearBack,
+			setLayers,
+			setHidden,
+			openFolds,
+			setPending,
+			setAside,
+		],
 	);
 
-	const response = query.data;
 	const fetchError = query.isError
 		? query.error instanceof Error
 			? query.error.message

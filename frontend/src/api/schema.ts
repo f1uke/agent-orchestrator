@@ -4650,6 +4650,7 @@ export interface components {
             openFix?: components["schemas"]["ReleaseTrainFixRef"];
             rule: string;
             severity: components["schemas"]["ReleaseTrainSeverity"];
+            subject: components["schemas"]["ReleaseTrainSubject"];
             text: string;
             /** @description Train key, "21-2026" or "20-1-2026". */
             train?: string;
@@ -5370,6 +5371,7 @@ export interface components {
             on: boolean;
             reads: string[];
             severity: components["schemas"]["ReleaseTrainSeverity"];
+            subjects: components["schemas"]["ReleaseTrainSubjectKind"][];
             title: string;
         };
         ReleaseTrainRuleOutcome: {
@@ -5486,6 +5488,96 @@ export interface components {
             hiddenAt: string;
             id: string;
             reason?: string;
+        };
+        ReleaseTrainSubject: components["schemas"]["ReleaseTrainSubjectVersion"] | components["schemas"]["ReleaseTrainSubjectVersionDate"] | components["schemas"]["ReleaseTrainSubjectJiraVersion"] | components["schemas"]["ReleaseTrainSubjectMilestone"] | components["schemas"]["ReleaseTrainSubjectHotfix"] | components["schemas"]["ReleaseTrainSubjectTrainPair"] | components["schemas"]["ReleaseTrainSubjectHotfixTrain"] | components["schemas"]["ReleaseTrainSubjectCardOnTrain"] | components["schemas"]["ReleaseTrainSubjectMR"] | components["schemas"]["ReleaseTrainSubjectCard"] | components["schemas"]["ReleaseTrainSubjectPageFamily"];
+        ReleaseTrainSubjectCard: {
+            /** @description The board whose sprint row lists the card. */
+            board: string;
+            key: string;
+            /** @constant */
+            kind: "card";
+        };
+        ReleaseTrainSubjectCardOnTrain: {
+            app: string;
+            key: string;
+            /** @constant */
+            kind: "cardOnTrain";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+        };
+        ReleaseTrainSubjectHotfix: {
+            app: string;
+            /** @constant */
+            kind: "hotfix";
+            version: string;
+        };
+        ReleaseTrainSubjectHotfixTrain: {
+            app: string;
+            /** @constant */
+            kind: "hotfixTrain";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+            version: string;
+        };
+        ReleaseTrainSubjectJiraVersion: {
+            app: string;
+            id: string;
+            /** @constant */
+            kind: "jiraVersion";
+            name: string;
+        };
+        /** @enum {string} */
+        ReleaseTrainSubjectKind: "version" | "versionDate" | "jiraVersion" | "milestone" | "hotfix" | "trainPair" | "hotfixTrain" | "cardOnTrain" | "mr" | "card" | "pageFamily";
+        ReleaseTrainSubjectMR: {
+            app: string;
+            iid: number;
+            /** @constant */
+            kind: "mr";
+            /** @description The MR's source branch. */
+            source: string;
+            /** @description The MR's target branch. */
+            target: string;
+        };
+        ReleaseTrainSubjectMilestone: {
+            app: string;
+            id: number;
+            /** @constant */
+            kind: "milestone";
+            title: string;
+        };
+        ReleaseTrainSubjectPageFamily: {
+            /** @enum {string} */
+            bucket: "merged" | "open";
+            family: string;
+            keys: string[];
+            /** @constant */
+            kind: "pageFamily";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+        };
+        ReleaseTrainSubjectTrainPair: {
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            a: string;
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            b: string;
+            /** @constant */
+            kind: "trainPair";
+        };
+        ReleaseTrainSubjectVersion: {
+            app: string;
+            /** @constant */
+            kind: "version";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+        };
+        ReleaseTrainSubjectVersionDate: {
+            app: string;
+            /** @enum {string} */
+            field: "freeze" | "publish" | "page";
+            /** @constant */
+            kind: "versionDate";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
         };
         ReleaseTrainTag: {
             commitOn: components["schemas"]["ReleaseTrainDay"];

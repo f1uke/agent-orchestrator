@@ -11,9 +11,10 @@ var trunkRE = regexp.MustCompile(`^(develop|main|master)$`)
 
 var ruleL1 = rule{
 	ID: "L1", Group: "G", Severity: SevBlock, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMRs.Name},
-	Title: "Long-lived branch has an open MR into develop or main after cutover",
-	Hint:  "Catches the wrong landing before it merges; it should go into the sprint branch.",
+	Subjects: []SubjectKind{SubjectMR},
+	Reads:    []KindName{KindMRs.Name},
+	Title:    "Long-lived branch has an open MR into develop or main after cutover",
+	Hint:     "Catches the wrong landing before it merges; it should go into the sprint branch.",
 	Check: func(b *Board) []Hit {
 		var out []Hit
 		for _, g := range b.LLBs {
@@ -27,7 +28,7 @@ var ruleL1 = rule{
 						continue
 					}
 					out = append(out, Hit{
-						Subject: SubjMR{App: br.App, IID: mr.IID}, App: br.App,
+						Subject: SubjMR{App: br.App, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: br.App,
 						Evidence: Evidence{"group": g.ID, "branch": br.Branch, "mr": mr.IID, "target": mr.TargetBranch, "cutover": cutover},
 						Text:     fmt.Sprintf("!%d %s → %s is open; land it in the sprint branch instead", mr.IID, br.Branch, mr.TargetBranch),
 						Links:    []Link{{Label: "Open MR", URL: mr.URL}},
@@ -54,9 +55,10 @@ func accepted(p *LlbPlan, app AppID, iid int) bool {
 
 var ruleL3 = rule{
 	ID: "L3", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name, KindMRs.Name, KindPages.Name, KindPageCards.Name, KindLLBCards.Name},
-	Title: "Card is on a train page but parked in a long-lived branch that does not target it",
-	Hint:  "Its code will not ride this train unless the branch lands in the sprint branch before the cut.",
+	Subjects: []SubjectKind{SubjectCardOnTrain},
+	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name, KindMRs.Name, KindPages.Name, KindPageCards.Name, KindLLBCards.Name},
+	Title:    "Card is on a train page but parked in a long-lived branch that does not target it",
+	Hint:     "Its code will not ride this train unless the branch lands in the sprint branch before the cut.",
 	Check: func(b *Board) []Hit {
 		groups := groupsByBranch(b.LLBs)
 		var out []Hit
@@ -94,9 +96,10 @@ var ruleL3 = rule{
 
 var ruleL9 = rule{
 	ID: "L9", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMRs.Name},
-	Title: "MR into a branch that is not a sprint branch, a long-lived branch or develop",
-	Hint:  "No train takes code from that branch, so the change stays there until someone moves it on.",
+	Subjects: []SubjectKind{SubjectMR},
+	Reads:    []KindName{KindMRs.Name},
+	Title:    "MR into a branch that is not a sprint branch, a long-lived branch or develop",
+	Hint:     "No train takes code from that branch, so the change stays there until someone moves it on.",
 	Check: func(b *Board) []Hit {
 		llbs := groupsByBranch(b.LLBs)
 		var out []Hit
@@ -113,7 +116,7 @@ var ruleL9 = rule{
 					continue
 				}
 				out = append(out, Hit{
-					Subject: SubjMR{App: app.ID, IID: mr.IID}, App: app.ID,
+					Subject: SubjMR{App: app.ID, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: app.ID,
 					Evidence: Evidence{"mr": mr.IID, "source": mr.SourceBranch, "target": mr.TargetBranch, "state": mr.State},
 					Text:     fmt.Sprintf("!%d %s → %s: not a sprint branch, a long-lived branch or develop", mr.IID, mr.SourceBranch, mr.TargetBranch),
 					Links:    []Link{{Label: "Open MR", URL: mr.URL}},

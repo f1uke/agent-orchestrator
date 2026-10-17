@@ -23,6 +23,7 @@ import { parseReleasesSearch } from "./url";
 const hit = (id: string, over: Partial<AlertHit> = {}): AlertHit => ({
 	id,
 	rule: id.split("~")[0],
+	subject: { kind: "version", train: "21-2026", app: "di" },
 	severity: "risk",
 	bucket: "badge",
 	text: id,

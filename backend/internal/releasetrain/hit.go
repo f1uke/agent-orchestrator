@@ -85,7 +85,7 @@ type Link struct {
 type Hit struct {
 	ID       HitID        `json:"id"`
 	Rule     RuleID       `json:"rule"`
-	Subject  Subject      `json:"-"`
+	Subject  Subject      `json:"subject"`
 	Severity Severity     `json:"severity"`
 	Train    *TrainID     `json:"train,omitempty"`
 	App      AppID        `json:"app,omitempty"`

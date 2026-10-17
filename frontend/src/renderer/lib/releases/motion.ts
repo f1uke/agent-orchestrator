@@ -14,11 +14,15 @@ export type Presence = {
 	exitTransition?: Transition;
 };
 
+export const SHEET_W = 460;
+export const ASIDE_STRIP = 36;
+const ASIDE_X = SHEET_W - ASIDE_STRIP;
+
 export type ReleaseMotion = {
 	reduced: boolean;
 	unfold: Presence;
 	appear: Presence;
-	sheet: Presence;
+	sheet: Presence & { aside: MotionValues };
 	label: (i: number) => Presence;
 	fold: Transition;
 	row: Transition;
@@ -27,6 +31,8 @@ export type ReleaseMotion = {
 };
 
 export const DURATION = { micro: 0.08, short: 0.16, medium: 0.24 } as const;
+
+export const PULSE_MS = 1500;
 
 const ease = {
 	enter: [0, 0, 0.2, 1],
@@ -58,6 +64,7 @@ const MOVING: ReleaseMotion = {
 	sheet: {
 		initial: { opacity: 0, x: 16 },
 		animate: { opacity: 1, x: 0 },
+		aside: { opacity: 1, x: ASIDE_X },
 		exit: { opacity: 0, x: 14 },
 		transition: { duration: DURATION.medium, ease: ease.enter },
 		exitTransition: { duration: DURATION.short, ease: ease.exit },
@@ -82,7 +89,13 @@ const STILL: ReleaseMotion = {
 	reduced: true,
 	unfold: still(MOVING.unfold),
 	appear: still(MOVING.appear),
-	sheet: { initial: false, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: instant },
+	sheet: {
+		initial: false,
+		animate: { opacity: 1, x: 0 },
+		aside: { opacity: 1, x: ASIDE_X },
+		exit: { opacity: 0 },
+		transition: instant,
+	},
 	label: () => still(MOVING.label(0)),
 	fold: instant,
 	row: instant,

@@ -57,15 +57,8 @@ export function undoVerb(s: FixState): "Withdraw" | "Undo" | null {
 	return s === "dry_run" ? "Withdraw" : s === "applied" ? "Undo" : null;
 }
 
-function subjectCard(id: string): string | null {
-	const subject = id.slice(id.indexOf("~") + 1);
-	if (subject.startsWith("c/")) return subject.slice(2);
-	if (subject.startsWith("ct/")) return subject.split("/")[3] ?? null;
-	return null;
-}
-
 export function cardHits(hits: readonly AlertHit[], key: string): AlertHit[] {
-	return hits.filter((h) => subjectCard(h.id) === key);
+	return hits.filter((h) => (h.subject.kind === "card" || h.subject.kind === "cardOnTrain") && h.subject.key === key);
 }
 
 const VIA: Readonly<Record<string, string>> = { app: "the app", cli: "the CLI", api: "an API call" };

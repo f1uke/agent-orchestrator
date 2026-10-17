@@ -817,6 +817,30 @@ test.describe("releases page", () => {
 		await expect(group.locator(".crow.mine")).toHaveCount(0);
 	});
 
+	test("every alert names what it is about on a line of its own, and no two alerts read the same", async ({ page }) => {
+		await open(page, "?sheet=attention");
+		const rows = page.locator(".rel-sheet .al[data-hit]");
+		await expect(rows.first()).toBeVisible();
+		const lines = await rows.evaluateAll((els) =>
+			els.map((el) => {
+				const subj = el.querySelector<HTMLElement>("[data-testid=hit-subject]");
+				const mark = subj?.querySelector("[role=img]")?.getAttribute("aria-label") ?? "";
+				return {
+					subject: subj?.innerText.trim() ?? "",
+					line: `${mark} ${subj?.innerText} ${el.querySelector(".tx")?.textContent}`,
+				};
+			}),
+		);
+		expect(lines.filter((l) => !l.subject)).toEqual([]);
+		expect(new Set(lines.map((l) => l.line)).size).toBe(lines.length);
+		await expect(
+			page.locator('.al[data-hit="L9~mr/da/415"] [data-testid=hit-subject] > span:not(.appmark)'),
+		).toHaveText("!415 feat/DEMO-203 → feat/DEMO-201-base");
+		await expect(
+			page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"] [data-testid=hit-subject] > span:not(.appmark)'),
+		).toHaveText("2.4.0 · #21 · freeze date");
+	});
+
 	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="L9~mr/da/415"]');
@@ -878,7 +902,9 @@ test.describe("releases page", () => {
 		await noLongName(page.getByRole("dialog", { name: "Release details" }).locator(".sh-h"));
 	});
 
-	test("an A6 hit opens both sources it compares, in Attention and the version sheet", async ({ page }) => {
+	test("an A6 hit opens both sources it compares, in Attention and, from its subject line, the version sheet", async ({
+		page,
+	}) => {
 		const expectBoth = async (scope: ReturnType<Page["locator"]>) => {
 			await expect(scope.getByRole("link", { name: "Open page" })).toHaveAttribute(
 				"href",
@@ -893,13 +919,16 @@ test.describe("releases page", () => {
 		const hit = page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"]');
 		await expect(hit).toContainText("Page says freeze");
 		await expectBoth(hit);
-		await hit.getByRole("button", { name: "Show" }).click();
+		await hit.getByTestId("hit-subject").click();
+		await expect(page).toHaveURL(/sheet=version/);
 		await expectBoth(page.locator('.rel-sheet .al[data-hit="A6~vd/21-2026/di/freeze"]'));
 	});
 
-	test("an A1 hit's mismatch sheet opens the Jira release and the milestone", async ({ page }) => {
+	test("an A1 hit's subject line opens the mismatch sheet with the Jira release and the milestone", async ({
+		page,
+	}) => {
 		await open(page, "?sheet=attention");
-		await page.locator('.al[data-hit="A1~v/21-2026/pi"]').getByRole("button", { name: "Show" }).click();
+		await page.locator('.al[data-hit="A1~v/21-2026/pi"]').getByTestId("hit-subject").click();
 		const links = page.locator(".rel-sheet .kv .links");
 		await expect(links.getByRole("link", { name: "Open Jira release" })).toBeVisible();
 		await expect(links.getByRole("link", { name: "Open milestone" })).toBeVisible();

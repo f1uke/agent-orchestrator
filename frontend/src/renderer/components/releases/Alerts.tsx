@@ -1,10 +1,12 @@
-import { X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useHideHit, useUnhideHit } from "../../hooks/useReleaseBoard";
 import { FIX_STATE_META, fixAction } from "../../lib/releases/fix";
 import type { AlertHit, Board } from "../../lib/releases/types";
 import type { SheetEntry } from "../../lib/releases/url";
 import { appMarkOf } from "../../lib/releases/appMark";
+import { sheetPart } from "../../lib/releases/sheetPart";
+import { subjectLabel, subjectSheet } from "../../lib/releases/subject";
 import { SEVERITY_META } from "../../lib/releases/vocab";
 import { AppMark } from "./AppMark";
 import type { PageActions } from "./ReleasesPage";
@@ -28,15 +30,17 @@ export function Sec({
 	title,
 	extra,
 	source,
+	part,
 	children,
 }: {
 	title: string;
 	extra?: ReactNode;
 	source?: Provenance | null;
+	part?: string;
 	children: ReactNode;
 }) {
 	return (
-		<div className="sec">
+		<div className="sec" data-part={part}>
 			<div className="sec-h">
 				<span className="rel-eyebrow">{title}</span>
 				{source && <SourceTag p={source} wide />}
@@ -78,9 +82,33 @@ function RuleId({ board, rule }: { board: Board; rule: string }) {
 
 function sheetFor(h: AlertHit): SheetEntry | null {
 	if (/^A[1-4]$/.test(h.rule)) return { kind: "mismatch", hit: h.id };
-	if (h.train && h.app) return { kind: "version", train: h.train, app: h.app };
-	if (h.train) return { kind: "train", train: h.train };
-	return null;
+	return subjectSheet(h.subject, h.id);
+}
+
+function SubjectLine({ h, c, open }: { h: AlertHit; c: AlertCtx; open: SheetEntry | null }) {
+	const l = subjectLabel(h.subject, c.board);
+	const body = (
+		<>
+			{l.app && <AppMark mark={appMarkOf(c.board.apps, l.app)} size="sm" />}
+			<span>{l.text}</span>
+		</>
+	);
+	return open ? (
+		<button
+			type="button"
+			className="subj"
+			data-testid="hit-subject"
+			title="Open its details"
+			onClick={() => c.actions.openPart(open, sheetPart(h))}
+		>
+			{body}
+			<ChevronRight className="size-3" aria-hidden="true" />
+		</button>
+	) : (
+		<div className="subj" data-testid="hit-subject">
+			{body}
+		</div>
+	);
 }
 
 function FixButton({ h, hidden, c }: { h: AlertHit; hidden: boolean; c: AlertCtx }) {
@@ -111,12 +139,12 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	const hide = useHideHit();
 	const unhide = useUnhideHit();
 	const target = sheetFor(h);
+	const where = c.actions.whereIs(h.subject);
 	return (
 		<div className={`al${hidden ? " dim" : ""}`} data-st={SEVERITY_META[h.severity].tone} data-hit={h.id}>
 			<div>
 				<div className="who">
 					<span className="sev">{SEVERITY_META[h.severity].label}</span>
-					<HitWho board={c.board} train={h.train} app={h.app} />
 					<RuleId board={c.board} rule={h.rule} />
 					{h.changedSinceHidden && (
 						<span className="spill" data-st="waiting">
@@ -124,13 +152,17 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 						</span>
 					)}
 				</div>
+				<SubjectLine h={h} c={c} open={hidden ? null : target} />
 				<div className="tx">{h.text}</div>
 				<div className="acts">
-					{target && !hidden && (
-						<button type="button" onClick={() => c.actions.openSheet(target, "push")}>
-							Show
-						</button>
-					)}
+					<button
+						type="button"
+						data-testid="hit-show"
+						aria-describedby={where ? `${h.id}-where` : undefined}
+						onClick={() => c.actions.reveal(h.subject)}
+					>
+						Show
+					</button>
 					<HitLinks h={h} />
 					<FixButton h={h} hidden={hidden} c={c} />
 					{hidden && (
@@ -139,6 +171,11 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 						</button>
 					)}
 				</div>
+				{where && (
+					<div className="where" id={`${h.id}-where`} data-testid="hit-where">
+						Show lands {where}
+					</div>
+				)}
 			</div>
 			{hidden ? (
 				<span />
