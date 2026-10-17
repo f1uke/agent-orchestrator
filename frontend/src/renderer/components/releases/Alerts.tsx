@@ -173,7 +173,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 				</div>
 				{where && (
 					<div className="where" id={`${h.id}-where`} data-testid="hit-where">
-						Show goes {where}
+						Show lands {where}
 					</div>
 				)}
 			</div>

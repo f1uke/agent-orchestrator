@@ -155,7 +155,7 @@ test.describe("Show on an alert", () => {
 		await open(page, "?sheet=attention", "subjects");
 		const where = (hit: string) => page.locator(`.rel-sheet .al[data-hit="${hit}"]`).getByTestId("hit-where");
 		await expect(where("L9~mr/da/415")).toHaveText(
-			"Show goes at its app: the timeline draws no lane for feat/DEMO-201-base",
+			"Show lands at its app: the timeline draws no lane for feat/DEMO-201-base",
 		);
 		await expect(where("A2~jv/7001")).toContainText("at its app");
 		await expect(where("A3~m/pi/9001")).toContainText("at its app");
