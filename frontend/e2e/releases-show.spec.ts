@@ -141,6 +141,71 @@ test.describe("Show on an alert", () => {
 		expect(await inOpenView(mk)).toBe("");
 	});
 
+	test("a row whose subject has no mark says where Show goes; a row with a mark says nothing", async ({ page }) => {
+		await open(page, "?sheet=attention", "subjects");
+		const where = (hit: string) => page.locator(`.rel-sheet .al[data-hit="${hit}"]`).getByTestId("hit-where");
+		await expect(where("L9~mr/da/415")).toHaveText(
+			"Show goes at its app: the timeline draws no lane for feat/DEMO-201-base",
+		);
+		await expect(where("A2~jv/7001")).toContainText("at its app");
+		await expect(where("A3~m/pi/9001")).toContainText("at its app");
+		await expect(where("F1~tt/21-2026/22-2026")).toContainText("at the later train");
+		await expect(where("C5~v/21-2026/di")).toHaveCount(0);
+		await expect(
+			page.locator('.rel-sheet .al[data-hit="L9~mr/da/415"]').getByTestId("hit-show"),
+		).toHaveAccessibleDescription(/draws no lane/);
+	});
+
+	test("the later train's chip scrolls the timeline to that train", async ({ page }) => {
+		await open(page, "?sheet=attention", "subjects");
+		await settle(page);
+		const before = await page.locator(".rel-sc").evaluate((el) => el.scrollLeft);
+		await show(page, "F1~tt/21-2026/22-2026");
+		await expect(page).toHaveURL(/focus=22-2026/);
+		await expect.poll(() => page.locator(".rel-sc").evaluate((el) => el.scrollLeft)).toBeGreaterThan(before + 100);
+	});
+
+	test("an alert of mine on a card Only me does not draw turns Only me off to show it", async ({ page }) => {
+		await open(page, "?sheet=attention&me=1", "subjects");
+		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
+		await show(page, "G2~c/DEMO-304");
+		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "false");
+		await expect(page.locator('[data-testid="sprint-row-DEMO"] .crow[data-key="DEMO-304"]')).toHaveAttribute(
+			"data-pulse",
+			"motion",
+		);
+	});
+
+	test("an alert of mine keeps Only me on and shows the version without writing the focus", async ({ page }) => {
+		await open(page, "?sheet=attention&me=1", "subjects");
+		await show(page, "A6~vd/21-2026/di/freeze");
+		await expect(
+			page.locator('.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]'),
+		).toHaveAttribute("data-pulse", "motion");
+		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
+		expect(page.url()).not.toContain("focus=");
+	});
+
+	for (const [name, query, hit, selector] of [
+		["train", "?sheet=train:21-2026", "D3~v/21-2026/da", '[data-testid="bar-da-21-2026"]'],
+		[
+			"version",
+			"?sheet=version:21-2026:di",
+			"A6~vd/21-2026/di/freeze",
+			'.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]',
+		],
+		["card", "?sheet=card:DEMO-109", "L3~ct/21-2026/di/DEMO-109", '.crow[data-key="DEMO-109"]'],
+	] as const)
+		test(`from the ${name} sheet, Show slides the sheet aside and pulses the subject`, async ({ page }) => {
+			await open(page, query, "subjects");
+			await show(page, hit);
+			await expect(sheet(page)).toHaveAttribute("data-aside", "true");
+			const target = page.locator(`.rel-sc ${selector}`);
+			await expect(target).toHaveAttribute("data-pulse", "motion");
+			await settle(page);
+			expect(await inOpenView(target)).toBe("");
+		});
+
 	test("every alert row, hidden ones too, has a Show button", async ({ page }) => {
 		await open(page, "?sheet=attention", "subjects");
 		await page.getByRole("button", { name: /hidden/ }).click();

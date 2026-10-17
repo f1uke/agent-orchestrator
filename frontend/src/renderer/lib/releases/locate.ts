@@ -27,7 +27,9 @@ export type Reveal = {
 	hotfixes: boolean;
 	/** Apps the app filter must show for the target's row to exist. */
 	apps: readonly AppId[];
-	/** Set when the subject has no mark of its own on the timeline and the target is where it lives. */
+	/** Only me must go off: the target is not mine, so Only me does not draw it. */
+	notMine: boolean;
+	/** Where Show lands when the subject has no mark of its own on the timeline, for the row to say. */
 	fallback: string | null;
 };
 
@@ -36,6 +38,7 @@ export type RevealView = {
 	hiddenBoards: ReadonlySet<string>;
 	apps: ReadonlySet<AppId> | null;
 	focus: TrainKey | null;
+	me: boolean;
 };
 
 const css = (v: string) => JSON.stringify(v);
@@ -50,6 +53,7 @@ function plan(target: Target, selector: string, over: Partial<Reveal> = {}): Rev
 		focus: null,
 		hotfixes: false,
 		apps: [],
+		notMine: false,
 		fallback: null,
 		...over,
 	};
@@ -66,9 +70,9 @@ function trainChip(train: TrainKey, fallback: string): Reveal {
 function bar(b: Board, train: TrainKey, app: AppId, over: Partial<Reveal> = {}): Reveal {
 	const t = b.trains.find((x) => x.id === train);
 	const v = t?.versions.find((x) => x.app === app);
-	if (!v) return appLabel(app, "its train has no milestone for this app");
+	if (!v) return appLabel(app, "at its app: its train has no milestone for this app");
 	const publish = v.milestone.due ?? t?.publish;
-	if (!publish || publish < timeline(b).start) return appLabel(app, "its train is older than the timeline");
+	if (!publish || publish < timeline(b).start) return appLabel(app, "at its app: its train is older than the timeline");
 	return plan("version-bar", `[data-testid=${css(`bar-${app}-${train}`)}]`, { apps: [app], ...over });
 }
 
@@ -84,15 +88,20 @@ function stageMarker(b: Board, train: TrainKey, app: AppId, stage: "freeze" | "p
 	};
 }
 
-function hotfix(b: Board, app: AppId, version: string): Reveal {
-	return b.hotfixes.some((h) => h.app === app && h.version === version)
-		? plan("hotfix-bar", `[data-testid=${css(`hotfix-${app}-${version}`)}]`, { hotfixes: true, apps: [app] })
-		: appLabel(app, "the hotfix is no longer on the Board");
+function hotfix(b: Board, app: AppId, version: string, view: RevealView): Reveal {
+	const h = b.hotfixes.find((x) => x.app === app && x.version === version);
+	return h
+		? plan("hotfix-bar", `[data-testid=${css(`hotfix-${app}-${version}`)}]`, {
+				hotfixes: true,
+				apps: [app],
+				notMine: view.me && !h.mine?.length,
+			})
+		: appLabel(app, "at its app: the hotfix is no longer on the Board");
 }
 
 function cardOnTrain(b: Board, train: TrainKey, app: AppId, key: string): Reveal {
 	const g = cardGroups(b, app).find((x) => x.train.id === train);
-	if (!g) return bar(b, train, app, { fallback: "a published train keeps its cards in its bar" });
+	if (!g) return bar(b, train, app, { fallback: "at its train's bar: a published train lists no cards" });
 	const row = (folds: string[]) =>
 		plan("card-row", `[data-testid=${css(`cards-${g.key}`)}] .crow[data-key=${css(key)}]`, {
 			layers: ["cards"],
@@ -102,7 +111,7 @@ function cardOnTrain(b: Board, train: TrainKey, app: AppId, key: string): Reveal
 	if (g.direct.some((u) => u.key === key)) return row([g.key]);
 	const via = g.llbs.find((l) => l.cards.some((c) => c.key === key));
 	if (via) return row([g.key, branchFoldKey(g, via.branch)]);
-	return bar(b, train, app, { fallback: "the card is not in the train's card list" });
+	return bar(b, train, app, { fallback: "at its train's bar: the card is not in the train's card list" });
 }
 
 function sprintCard(b: Board, key: string, view: RevealView, app?: AppId): Reveal | null {
@@ -122,6 +131,7 @@ function sprintCard(b: Board, key: string, view: RevealView, app?: AppId): Revea
 				layers: ["sprint"],
 				unhide: view.hiddenBoards.has(row.board.key) ? [row.board.key] : [],
 				apps,
+				notMine: view.me && !card.mine?.length,
 				folds: [fk, `${fk}:${block}`],
 			},
 		);
@@ -139,6 +149,7 @@ function mr(s: Extract<Subject, { kind: "mr" }>, b: Board, view: RevealView): Re
 				{
 					layers: ["llb"],
 					apps: [s.app],
+					notMine: view.me && !g.mine?.length,
 					folds: [`${s.app}:llbs`],
 				},
 			);
@@ -148,7 +159,7 @@ function mr(s: Extract<Subject, { kind: "mr" }>, b: Board, view: RevealView): Re
 		const r = card && sprintCard(b, card.key, view, s.app);
 		if (r) return r;
 	}
-	return appLabel(s.app, `${s.target} is no branch the timeline draws, so the MR shows under its app`);
+	return appLabel(s.app, `at its app: the timeline draws no lane for ${s.target}`);
 }
 
 type Locator<K extends SubjectKind> = (s: Extract<Subject, { kind: K }>, b: Board, view: RevealView) => Reveal;
@@ -157,21 +168,22 @@ export const LOCATORS: { [K in SubjectKind]: Locator<K> } = {
 	version: (s, b) => bar(b, s.train, s.app),
 	versionDate: (s, b, view) =>
 		s.field === "page" ? bar(b, s.train, s.app) : stageMarker(b, s.train, s.app, s.field, view),
-	jiraVersion: (s) => appLabel(s.app, "a Jira release on no train has no place on the timeline"),
-	milestone: (s) => appLabel(s.app, "a milestone with no Jira release has no place on the timeline"),
-	hotfix: (s, b) => hotfix(b, s.app, s.version),
-	hotfixTrain: (s, b) => hotfix(b, s.app, s.version),
-	trainPair: (s) => trainChip(s.b, "two trains have no single mark, so the later one is focused"),
+	jiraVersion: (s) => appLabel(s.app, "at its app: a Jira release on no train has no mark on the timeline"),
+	milestone: (s) => appLabel(s.app, "at its app: a milestone with no Jira release has no mark on the timeline"),
+	hotfix: (s, b, view) => hotfix(b, s.app, s.version, view),
+	hotfixTrain: (s, b, view) => hotfix(b, s.app, s.version, view),
+	trainPair: (s) => trainChip(s.b, "at the later train: two trains have no single mark"),
 	cardOnTrain: (s, b) => cardOnTrain(b, s.train, s.app, s.key),
 	card: (s, b, view) =>
-		sprintCard(b, s.key, view) ?? plan("sprint-band", ".rel-spr", { fallback: "the card is on no sprint row" }),
+		sprintCard(b, s.key, view) ??
+		plan("sprint-band", ".rel-spr", { fallback: "at the sprint: the card is on no board's row" }),
 	mr,
 	pageFamily: (s, b) => {
 		const t = b.trains.find((x) => x.id === s.train);
 		const app = t?.versions.find((v) => b.apps.find((a) => a.id === v.app)?.family === s.family)?.app;
 		return app
 			? cardOnTrain(b, s.train, app, s.keys[0] ?? "")
-			: trainChip(s.train, "no app of the family is on the train");
+			: trainChip(s.train, "at the train: no app of the family is on it");
 	},
 };
 

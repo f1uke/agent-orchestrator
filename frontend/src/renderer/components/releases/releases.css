@@ -1155,6 +1155,12 @@
 	.rel-sheet .al .acts button {
 		color: var(--accent);
 	}
+	.rel-sheet .al .where {
+		margin-top: 2px;
+		font-size: 11px;
+		color: var(--fg-passive);
+		overflow-wrap: anywhere;
+	}
 	.rel-sheet .al.dim {
 		opacity: 0.65;
 	}

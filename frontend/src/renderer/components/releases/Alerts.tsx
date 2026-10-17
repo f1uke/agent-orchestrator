@@ -136,6 +136,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	const hide = useHideHit();
 	const unhide = useUnhideHit();
 	const target = sheetFor(h);
+	const where = c.actions.whereIs(h.subject);
 	return (
 		<div className={`al${hidden ? " dim" : ""}`} data-st={SEVERITY_META[h.severity].tone} data-hit={h.id}>
 			<div>
@@ -151,7 +152,12 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 				<SubjectLine h={h} c={c} open={hidden ? null : target} />
 				<div className="tx">{h.text}</div>
 				<div className="acts">
-					<button type="button" data-testid="hit-show" onClick={() => c.actions.reveal(h.subject)}>
+					<button
+						type="button"
+						data-testid="hit-show"
+						aria-describedby={where ? `${h.id}-where` : undefined}
+						onClick={() => c.actions.reveal(h.subject)}
+					>
 						Show
 					</button>
 					<HitLinks h={h} />
@@ -162,6 +168,11 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 						</button>
 					)}
 				</div>
+				{where && (
+					<div className="where" id={`${h.id}-where`} data-testid="hit-where">
+						Show goes {where}
+					</div>
+				)}
 			</div>
 			{hidden ? (
 				<span />

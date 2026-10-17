@@ -10,6 +10,7 @@ const view = (over: Partial<RevealView> = {}): RevealView => ({
 	hiddenBoards: new Set(),
 	apps: null,
 	focus: "21-2026",
+	me: false,
 	...over,
 });
 
@@ -83,6 +84,23 @@ describe("locate", () => {
 		expect(locate(s, b, view({ focus: "22-2026" })).focus).toBe("21-2026");
 		expect(locate(s, b, view({ focus: "21-2026" })).focus).toBeNull();
 		expect(locate(s, b, view({ focus: "22-2026", layers: { ...DEFAULT_LAYERS, past: true } })).focus).toBeNull();
+	});
+
+	it("turns Only me off for a target Only me does not draw, and leaves it on for one of mine", () => {
+		const me = view({ me: true });
+		expect(locate(hit("G2~c/DEMO-304").subject, b, me).notMine).toBe(true);
+		expect(locate({ kind: "card", key: "DEMO-301", board: "DEMO" }, b, me).notMine).toBe(false);
+		expect(locate(hit("L1~mr/di/330").subject, b, me).notMine).toBe(false);
+		expect(locate(hit("E1~h/da/2.3.1").subject, b, me).notMine).toBe(false);
+		expect(locate(hit("G2~c/DEMO-304").subject, b, view()).notMine).toBe(false);
+	});
+
+	it("says where Show lands when the subject has no mark of its own", () => {
+		expect(locate(hit("L9~mr/da/415").subject, b, view()).fallback).toBe(
+			"at its app: the timeline draws no lane for feat/DEMO-201-base",
+		);
+		expect(locate(hit("F1~tt/21-2026/22-2026").subject, b, view()).fallback).toMatch(/^at the later train/);
+		expect(locate(hit("C5~v/21-2026/di").subject, b, view()).fallback).toBeNull();
 	});
 
 	it("opens the app's long-lived lanes for an MR out of a long-lived branch", () => {

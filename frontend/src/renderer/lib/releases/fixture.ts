@@ -1400,6 +1400,7 @@ export function subjectsBoard(today: string): Board {
 			links: [{ label: "Open", url: `${HOST}/x` }],
 			asOf: at,
 			...("app" in subject ? { app: subject.app } : {}),
+			...(id === "G2~c/DEMO-304" ? { mine: [{ why: "subtask" as const, ref: "DEMO-314" }] } : {}),
 		});
 	for (const r of b.catalogue) r.on = true;
 	b.alerts.badge = { ...b.alerts.badge, count: b.alerts.hits.filter((h) => h.bucket === "badge").length };

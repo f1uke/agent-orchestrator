@@ -1,9 +1,9 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
-import { makeLens } from "../../lib/releases/lens";
+import { focusTrain, makeLens } from "../../lib/releases/lens";
 import { sourceIndex } from "../../lib/releases/sources";
-import { locate } from "../../lib/releases/locate";
+import { locate, type RevealView } from "../../lib/releases/locate";
 import type { Board, Subject } from "../../lib/releases/types";
 import {
 	DEFAULT_LAYERS,
@@ -30,6 +30,7 @@ export type PageActions = {
 	setLayers: (layers: Layers) => void;
 	setHiddenBoards: (keys: ReadonlySet<string>) => void;
 	reveal: (s: Subject) => void;
+	whereIs: (s: Subject) => string | null;
 };
 
 export function ReleasesPage() {
@@ -45,6 +46,16 @@ export function ReleasesPage() {
 	const hiddenBoards = url.hideBoards ?? storedHidden;
 	const { pushBack, popBack, clearBack, setLayers, setHidden, openFolds, setPending, setAside } = useReleasesUi();
 	useEffect(() => saveSearch(releasesSearch(url)), [url]);
+	const view: RevealView = useMemo(
+		() => ({
+			layers,
+			hiddenBoards,
+			apps: url.apps,
+			focus: board ? (focusTrain(board, url.focus)?.id ?? null) : null,
+			me: url.me,
+		}),
+		[layers, hiddenBoards, url.apps, url.focus, url.me, board],
+	);
 
 	const setSearch = useCallback(
 		(patch: Partial<ReleasesSearch>) =>
@@ -84,8 +95,9 @@ export function ReleasesPage() {
 			},
 			reveal: (subject) => {
 				if (!board) return;
-				const r = locate(subject, board, { layers, hiddenBoards, apps: url.apps, focus: url.focus });
+				const r = locate(subject, board, view);
 				const patch: Partial<ReleasesSearch> = {};
+				if (r.notMine && url.me) patch.me = false;
 				const nextLayers = { ...layers, ...Object.fromEntries(r.layers.map((k) => [k, true])) };
 				if (r.layers.some((k) => !layers[k])) {
 					setLayers(nextLayers);
@@ -98,12 +110,13 @@ export function ReleasesPage() {
 				}
 				if (url.apps && r.apps.some((a) => !url.apps?.has(a))) patch.apps = new Set([...url.apps, ...r.apps]);
 				if (r.hotfixes && !url.hotfixes) patch.hotfixes = true;
-				if (r.focus && r.focus !== url.focus) patch.focus = r.focus;
+				if (r.focus && r.focus !== view.focus) patch.focus = r.focus;
 				openFolds(r.folds);
 				setPending(r);
 				if (url.sheet) setAside(true);
 				if (Object.keys(patch).length) setSearch(patch);
 			},
+			whereIs: (subject) => (board ? locate(subject, board, view).fallback : null),
 		}),
 		[
 			setSearch,
@@ -112,7 +125,8 @@ export function ReleasesPage() {
 			url.hideBoards,
 			url.apps,
 			url.hotfixes,
-			url.focus,
+			url.me,
+			view,
 			board,
 			layers,
 			hiddenBoards,

@@ -63,7 +63,8 @@ export function Timeline({
 
 	useLayoutEffect(() => {
 		const el = sc.current;
-		if (useReleasesUi.getState().pending) return;
+		const pending = useReleasesUi.getState().pending;
+		if (pending && pending.target !== "train-chip") return;
 		const saved = useReleasesUi.getState().scroll;
 		if (el && saved && saved.focus === focusId) {
 			el.scrollLeft = saved.left;
