@@ -48,6 +48,8 @@ export function ReleasesPage() {
 	const hiddenBoards = url.hideBoards ?? storedHidden;
 	const { pushBack, popBack, clearBack, setLayers, setHidden, openFolds, setPending, setAside } = useReleasesUi();
 	useEffect(() => saveSearch(releasesSearch(url)), [url]);
+	const sheetKey = url.sheet ? sheetParam(url.sheet) : null;
+	useEffect(() => setAside(false), [sheetKey, setAside]);
 	const view: RevealView = useMemo(
 		() => ({
 			layers,

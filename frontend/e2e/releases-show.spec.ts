@@ -110,6 +110,16 @@ test.describe("Show on an alert", () => {
 		).toBe(at);
 	});
 
+	test("a sheet that arrives by the URL is in front, not left aside", async ({ page }) => {
+		await open(page, "?sheet=attention", "subjects");
+		await show(page, "C5~v/21-2026/di");
+		await expect(sheet(page)).toHaveAttribute("data-aside", "true");
+		await page.evaluate(() => (location.hash = "#/releases?sheet=version:21-2026:di"));
+		await expect(page).toHaveURL(/sheet=version/);
+		await expect(sheet(page)).not.toHaveAttribute("data-aside");
+		await expect(page.locator(".rel-scrim")).toHaveCount(1);
+	});
+
 	test("a card on a hidden board turns on Sprint cards, shows the board and opens its folds", async ({ page }) => {
 		await open(page, "?sheet=attention&hideBoards=PILOT", "subjects");
 		await expect(layer(page, "Sprint cards")).toHaveAttribute("aria-pressed", "false");
