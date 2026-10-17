@@ -5,6 +5,7 @@ import { FIX_STATE_META, fixAction } from "../../lib/releases/fix";
 import type { AlertHit, Board } from "../../lib/releases/types";
 import type { SheetEntry } from "../../lib/releases/url";
 import { appMarkOf } from "../../lib/releases/appMark";
+import { sheetPart } from "../../lib/releases/sheetPart";
 import { subjectLabel, subjectSheet } from "../../lib/releases/subject";
 import { SEVERITY_META } from "../../lib/releases/vocab";
 import { AppMark } from "./AppMark";
@@ -29,15 +30,17 @@ export function Sec({
 	title,
 	extra,
 	source,
+	part,
 	children,
 }: {
 	title: string;
 	extra?: ReactNode;
 	source?: Provenance | null;
+	part?: string;
 	children: ReactNode;
 }) {
 	return (
-		<div className="sec">
+		<div className="sec" data-part={part}>
 			<div className="sec-h">
 				<span className="rel-eyebrow">{title}</span>
 				{source && <SourceTag p={source} wide />}
@@ -96,7 +99,7 @@ function SubjectLine({ h, c, open }: { h: AlertHit; c: AlertCtx; open: SheetEntr
 			className="subj"
 			data-testid="hit-subject"
 			title="Open its details"
-			onClick={() => c.actions.openSheet(open, "push")}
+			onClick={() => c.actions.openPart(open, sheetPart(h))}
 		>
 			{body}
 			<ChevronRight className="size-3" aria-hidden="true" />

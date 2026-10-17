@@ -154,7 +154,7 @@ function StageRows({ stages, now }: { stages: Stage[]; now: number }) {
 	return (
 		<>
 			{stages.map((st) => (
-				<div key={st.key} className="srow" data-testid="stage-row">
+				<div key={st.key} className="srow" data-testid="stage-row" data-stage={st.key}>
 					<StageMark stage={st} className="static" now={now} />
 					<span>
 						{STAGE_META[st.key].label}
@@ -386,7 +386,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 						<SourceTag p={VERSION_MILESTONE_P} wide />
 					</span>
 					<span>Release MR</span>
-					<span>
+					<span data-part="mr">
 						{mr ? (
 							<>
 								<Ext url={mr.mr.url}>!{mr.mr.iid}</Ext> · {mr.mr.state}
@@ -421,12 +421,12 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 						<SourceTag p={RELEASE_MR_P} wide />
 					</span>
 					<span>Jira release</span>
-					<span>
+					<span data-part="jira">
 						{v.jira ? <Ext url={v.jira.url}>{v.jira.name + (v.jira.released ? " · released" : "")}</Ext> : "-"}
 						<SourceTag p={JIRA_RELEASE_P} wide />
 					</span>
 					<span>Tag</span>
-					<span>
+					<span data-part="tag">
 						{v.tag ? <Ext url={v.tag.url}>{v.tag.name}</Ext> : "-"}
 						<SourceTag p={readOf("Tag", "gitlab.tags", `tag named ${v.version}`, "Version.tag")} wide />
 					</span>
@@ -437,6 +437,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 				</Sec>
 				<Sec
 					title="Approvers"
+					part="approvers"
 					source={APPROVERS_P}
 					extra={
 						ap.total > 0 && (
@@ -454,7 +455,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 						[...v.jira.approvers]
 							.sort((a, b) => Number(a.status === "APPROVED") - Number(b.status === "APPROVED"))
 							.map((p) => (
-								<div key={p.accountId} className="prow">
+								<div key={p.accountId} className="prow" data-name={p.name}>
 									<Avatar accountId={p.accountId} name={p.name} />
 									{p.name}
 									<span className="st c" data-st={p.status === "APPROVED" ? "done" : "waiting"}>

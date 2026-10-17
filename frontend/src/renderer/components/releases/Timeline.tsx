@@ -422,11 +422,14 @@ function useReveal(sc: React.RefObject<HTMLDivElement | null>, mo: ReleaseMotion
 			if (el.contains(target)) {
 				glide(el.scrollLeft, dx, (v) => (el.scrollLeft = v));
 				glide(el.scrollTop, dy, (v) => (el.scrollTop = v));
-			}
+			} else target.scrollIntoView({ block: "nearest", behavior: mo.reduced ? "auto" : "smooth" });
 			const mark = mo.reduced ? "static" : "motion";
-			target.dataset.pulse = mark;
+			const all = target.closest(".rel-sheet")
+				? [...document.querySelectorAll<HTMLElement>(pending.selector)]
+				: [target];
+			for (const t of all) t.dataset.pulse = mark;
 			window.setTimeout(() => {
-				if (target.dataset.pulse === mark) delete target.dataset.pulse;
+				for (const t of all) if (t.dataset.pulse === mark) delete t.dataset.pulse;
 			}, PULSE_MS);
 			finish();
 		};

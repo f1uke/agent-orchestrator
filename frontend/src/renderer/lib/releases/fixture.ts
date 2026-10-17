@@ -470,6 +470,7 @@ function baseBoard(today: string): Board {
 			{
 				app: "da",
 				train: "21-2026",
+				evidence: { pending: PEOPLE.map(([, name]) => name), total: PEOPLE.length },
 			},
 		),
 		hit(

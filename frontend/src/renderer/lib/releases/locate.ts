@@ -15,7 +15,8 @@ export type Target =
 	| "llb-lane"
 	| "app-label"
 	| "train-chip"
-	| "sprint-band";
+	| "sprint-band"
+	| "sheet-part";
 
 export type Reveal = {
 	target: Target;
@@ -187,6 +188,10 @@ export const LOCATORS: { [K in SubjectKind]: Locator<K> } = {
 		return tries.find((r) => r.target === "card-row") ?? tries[0] ?? bar(b, s.train, apps[0]);
 	},
 };
+
+export function sheetReveal(selector: string): Reveal {
+	return plan("sheet-part", `.rel-sheet :is(${selector})`);
+}
 
 export function locate(s: Subject, b: Board, view: RevealView): Reveal {
 	return (LOCATORS[s.kind] as Locator<Subject["kind"]>)(s as never, b, view);

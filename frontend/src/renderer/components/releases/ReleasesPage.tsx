@@ -3,13 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
 import { focusTrain, makeLens } from "../../lib/releases/lens";
 import { sourceIndex } from "../../lib/releases/sources";
-import { locate, type RevealView } from "../../lib/releases/locate";
+import { locate, sheetReveal, type RevealView } from "../../lib/releases/locate";
 import type { Board, Subject } from "../../lib/releases/types";
 import {
 	DEFAULT_LAYERS,
 	parseReleasesSearch,
 	releasesSearch,
 	type Layers,
+	sheetParam,
 	type ReleasesSearch,
 	type SheetEntry,
 } from "../../lib/releases/url";
@@ -31,6 +32,7 @@ export type PageActions = {
 	setHiddenBoards: (keys: ReadonlySet<string>) => void;
 	reveal: (s: Subject) => void;
 	whereIs: (s: Subject) => string | null;
+	openPart: (s: SheetEntry, part: string | null) => void;
 };
 
 export function ReleasesPage() {
@@ -117,6 +119,15 @@ export function ReleasesPage() {
 				if (Object.keys(patch).length) setSearch(patch);
 			},
 			whereIs: (subject) => (board ? locate(subject, board, view).fallback : null),
+			openPart: (s, part) => {
+				const here = url.sheet && sheetParam(url.sheet) === sheetParam(s);
+				if (!here) {
+					if (url.sheet) pushBack(url.sheet);
+					setSearch({ sheet: s });
+				}
+				setAside(false);
+				if (part) setPending(sheetReveal(part));
+			},
 		}),
 		[
 			setSearch,

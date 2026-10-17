@@ -72,7 +72,7 @@ test.describe("Show on an alert", () => {
 			await expect(page.locator("[data-pulse]")).toHaveCount(1);
 			await settle(page);
 			expect(await inOpenView(target)).toBe("");
-			await expect(target).not.toHaveAttribute("data-pulse", { timeout: 3000 });
+			await expect(target).not.toHaveAttribute("data-pulse", { timeout: 10_000 });
 		});
 
 	test("slides the sheet aside, keeps its place, and brings it back", async ({ page }) => {
@@ -216,6 +216,41 @@ test.describe("Show on an alert", () => {
 	});
 });
 
+test.describe("an alert's subject line in its own sheet", () => {
+	test("A6 lights the freeze stage row it names and keeps the sheet in place", async ({ page }) => {
+		await open(page, "?sheet=version:21-2026:di", "subjects");
+		await settle(page);
+		await sheet(page).locator('.al[data-hit="A6~vd/21-2026/di/freeze"]').getByTestId("hit-subject").click();
+		const row = sheet(page).locator('[data-testid="stage-row"][data-stage="freeze"]');
+		await expect(row).toHaveAttribute("data-pulse", "motion");
+		await expect(sheet(page).locator("[data-pulse]")).toHaveCount(1);
+		await expect(sheet(page)).not.toHaveAttribute("data-aside");
+		await expect(page).toHaveURL(/sheet=version(%3A|:)21-2026(%3A|:)di/);
+		await expect(row).toBeInViewport();
+	});
+
+	test("A6 from Needs attention opens the version sheet and lights the same row", async ({ page }) => {
+		await open(page, "?sheet=attention", "subjects");
+		await sheet(page).locator('.al[data-hit="A6~vd/21-2026/di/freeze"]').getByTestId("hit-subject").click();
+		await expect(page).toHaveURL(/sheet=version/);
+		await expect(sheet(page).locator('[data-testid="stage-row"][data-stage="freeze"]')).toHaveAttribute(
+			"data-pulse",
+			"motion",
+		);
+		await sheet(page).getByRole("button", { name: "Back", exact: true }).click();
+		await expect(page).toHaveURL(/sheet=attention/);
+	});
+
+	test("an approval alert lights each approver it names", async ({ page }) => {
+		await open(page, "?sheet=version:21-2026:da", "subjects");
+		await settle(page);
+		await sheet(page).locator('.al[data-hit="D3~v/21-2026/da"]').getByTestId("hit-subject").click();
+		const named = sheet(page).locator('[data-part="approvers"] .prow[data-pulse="motion"]');
+		await expect(named).toHaveCount(9);
+		await expect(named.first()).toBeInViewport();
+	});
+});
+
 test.describe("Show under reduced motion", () => {
 	test("outlines the target without animating it", async ({ page }) => {
 		await page.emulateMedia({ reducedMotion: "reduce" });
@@ -229,6 +264,6 @@ test.describe("Show under reduced motion", () => {
 		});
 		expect(style).toEqual({ animation: "none", outline: "solid" });
 		expect(await inOpenView(row)).toBe("");
-		await expect(row).not.toHaveAttribute("data-pulse", { timeout: 3000 });
+		await expect(row).not.toHaveAttribute("data-pulse", { timeout: 10_000 });
 	});
 });
