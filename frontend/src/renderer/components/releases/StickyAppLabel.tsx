@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { mergedOf } from "../../lib/releases/cards";
 import { approvals, nowStage, owner, unknownText, versionOf, type Lens } from "../../lib/releases/lens";
 import { derivedOf, readOf, ruleTagOf, stageOf } from "../../lib/releases/sources";
 import type { BoardApp, RuleInfo, Stage } from "../../lib/releases/types";
@@ -59,7 +60,7 @@ const STAGES_P = derivedOf(
 const MERGED_P = derivedOf(
 	"Cards merged",
 	[{ kind: "gitlab.mrs", text: "each card's MRs: merged into the release or not" }],
-	"Out of the cards in the train (fixVersion, page or sprint-branch MR).",
+	"Out of the cards in the train (fixVersion, page or sprint-branch MR), less those marked No MR needed in AO.",
 	"Version.cards[].code",
 );
 
@@ -117,7 +118,7 @@ export function StickyAppLabel({
 	const now = nowStage(v.stages);
 	const own = owner(v);
 	const ap = approvals(v);
-	const merged = v.cards.filter((c) => c.code.kind === "merged").length;
+	const { merged, needCode } = mergedOf(v.cards);
 	const nowAt = Date.now();
 	const jiraName = v.jira?.name ?? "the Jira release (none found)";
 	const ownerP =
@@ -183,10 +184,10 @@ export function StickyAppLabel({
 				<MineLine app={app.id} lens={lens} />
 			) : (
 				<div className="meta">
-					{v.cards.length > 0 && (
+					{needCode > 0 && (
 						<span>
 							<b>
-								{merged}/{v.cards.length}
+								{merged}/{needCode}
 							</b>{" "}
 							merged
 							<SourceTag p={MERGED_P} />

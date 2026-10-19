@@ -20,6 +20,7 @@ import { appMarkOf } from "../../lib/releases/appMark";
 import { AlertList } from "./Alerts";
 import { AppMark } from "./AppMark";
 import { CardLine, Face, JiraKey } from "./CardGroups";
+import { NoMrLine } from "./NoMr";
 import { SourceTag } from "./Sources";
 import {
 	derivedOf,
@@ -156,6 +157,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 							</span>
 						</>
 					)}
+					<NoMrLine board={b} k={key} />
 					<Mine mine={mine} />
 					{url && (
 						<>

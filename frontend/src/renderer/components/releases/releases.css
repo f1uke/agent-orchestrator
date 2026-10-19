@@ -1791,6 +1791,42 @@
 	.rel .crow.sp.mine .av {
 		box-shadow: 0 0 0 1.5px var(--accent);
 	}
+	.rel .crow.nomr .t {
+		color: var(--fg-muted);
+	}
+	.rel .crow .nomrb {
+		display: inline-grid;
+		place-items: center;
+		width: 18px;
+		height: 18px;
+		margin-left: 4px;
+		vertical-align: -4px;
+		border-radius: 4px;
+		color: var(--fg-passive);
+		opacity: 0;
+	}
+	.rel .crow .nomrb svg {
+		width: 12px;
+		height: 12px;
+	}
+	.rel .crow:hover .nomrb,
+	.rel .crow .nomrb:focus-visible,
+	.rel .crow .nomrb[data-on] {
+		opacity: 1;
+	}
+	.rel .crow .nomrb:hover {
+		color: var(--fg);
+		background: var(--bg-3);
+	}
+	.rel-sheet .nomrline {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 4px 10px;
+	}
+	.rel-sheet .nomrline button {
+		color: var(--accent);
+	}
 	.rel .crow .mecell {
 		display: inline-grid;
 		place-items: center;
