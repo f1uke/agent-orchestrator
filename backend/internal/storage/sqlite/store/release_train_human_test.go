@@ -8,6 +8,7 @@ import (
 	"time"
 
 	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
 var humanAt = time.Date(2026, 10, 15, 3, 0, 0, 0, time.UTC)
@@ -154,5 +155,68 @@ func TestReleasePlanRefusesABranchAnotherPlanHolds(t *testing.T) {
 	}
 	if _, err := s.PutReleaseLlbPlan(ctx, demoPlan(), 1); err != nil {
 		t.Fatalf("a plan rewriting its own branches = %v, want no conflict with itself", err)
+	}
+}
+
+func TestReleaseNoMRMarksRoundTripAndUnmarkReportsWhetherOneExisted(t *testing.T) {
+	s, ctx := newTestStore(t), context.Background()
+	mark := rt.NoMRMark{Note: "config only", MarkedBy: "app", MarkedAt: humanAt}
+	if err := s.MarkReleaseCardNoMR(ctx, "DEMO-7", mark); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkReleaseCardNoMR(ctx, "DEMO-8", rt.NoMRMark{MarkedBy: "cli", MarkedAt: humanAt}); err != nil {
+		t.Fatal(err)
+	}
+	again := rt.NoMRMark{Note: "still config", MarkedBy: "cli", MarkedAt: humanAt.Add(time.Hour)}
+	if err := s.MarkReleaseCardNoMR(ctx, "DEMO-7", again); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadReleaseHumanState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]rt.NoMRMark{"DEMO-7": again, "DEMO-8": {MarkedBy: "cli", MarkedAt: humanAt}}; !reflect.DeepEqual(got.NoMR, want) {
+		t.Fatalf("marks = %+v, want %+v", got.NoMR, want)
+	}
+
+	for _, step := range []struct {
+		key  string
+		want bool
+	}{{"DEMO-7", true}, {"DEMO-7", false}, {"DEMO-404", false}} {
+		removed, err := s.UnmarkReleaseCardNoMR(ctx, step.key)
+		if err != nil || removed != step.want {
+			t.Fatalf("unmark %s = %v, %v; want %v", step.key, removed, err, step.want)
+		}
+	}
+	got, _ = s.LoadReleaseHumanState(ctx)
+	if _, ok := got.NoMR["DEMO-7"]; ok || len(got.NoMR) != 1 {
+		t.Fatalf("marks after unmark = %+v, want only DEMO-8", got.NoMR)
+	}
+}
+
+func TestReleaseNoMRMarkSurvivesAReopen(t *testing.T) {
+	dir, ctx := t.TempDir(), context.Background()
+	first, err := sqlite.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mark := rt.NoMRMark{Note: "config only", MarkedBy: "app", MarkedAt: humanAt}
+	if err := first.MarkReleaseCardNoMR(ctx, "DEMO-7", mark); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := sqlite.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	got, err := second.LoadReleaseHumanState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NoMR["DEMO-7"] != mark {
+		t.Fatalf("mark after reopen = %+v, want %+v", got.NoMR, mark)
 	}
 }

@@ -20,13 +20,22 @@ type Inputs struct {
 	Human  HumanState
 }
 
-// HumanState is what people set: rule toggles, hides and long-lived-branch plans.
+// HumanState is what people set: rule toggles, hides, long-lived-branch plans
+// and the cards marked "No MR needed".
 type HumanState struct {
 	RuleSettings map[RuleID]bool
 	Hides        map[HitID]Hide
 	Plans        []LlbPlan
 	// OpenFixes is each hit's live fix, so the Board shows it without a second request.
 	OpenFixes map[HitID]FixRef
+	NoMR      map[string]NoMRMark
+}
+
+// NoMRMark says a person decided a card needs no MR; it lives in AO only.
+type NoMRMark struct {
+	Note     string    `json:"note,omitempty"`
+	MarkedBy string    `json:"markedBy"`
+	MarkedAt time.Time `json:"markedAt"`
 }
 
 // Hide records a hidden hit's evidence and severity at hide time.

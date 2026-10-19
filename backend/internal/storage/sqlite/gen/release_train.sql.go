@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+const deleteReleaseCardNoMR = `-- name: DeleteReleaseCardNoMR :execrows
+DELETE FROM release_card_no_mr WHERE card_key = ?
+`
+
+func (q *Queries) DeleteReleaseCardNoMR(ctx context.Context, cardKey string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteReleaseCardNoMR, cardKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteReleaseHitHide = `-- name: DeleteReleaseHitHide :execrows
 DELETE FROM release_hit_hide WHERE hit_id = ?
 `
@@ -219,6 +231,38 @@ type InsertReleaseLlbPlanBranchParams struct {
 func (q *Queries) InsertReleaseLlbPlanBranch(ctx context.Context, arg InsertReleaseLlbPlanBranchParams) error {
 	_, err := q.db.ExecContext(ctx, insertReleaseLlbPlanBranch, arg.PlanID, arg.AppID, arg.Branch)
 	return err
+}
+
+const listReleaseCardNoMRs = `-- name: ListReleaseCardNoMRs :many
+SELECT card_key, note, marked_by, marked_at FROM release_card_no_mr ORDER BY card_key
+`
+
+func (q *Queries) ListReleaseCardNoMRs(ctx context.Context) ([]ReleaseCardNoMr, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseCardNoMRs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseCardNoMr{}
+	for rows.Next() {
+		var i ReleaseCardNoMr
+		if err := rows.Scan(
+			&i.CardKey,
+			&i.Note,
+			&i.MarkedBy,
+			&i.MarkedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listReleaseFixEvents = `-- name: ListReleaseFixEvents :many
@@ -662,6 +706,28 @@ func (q *Queries) SetReleaseFixState(ctx context.Context, arg SetReleaseFixState
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertReleaseCardNoMR = `-- name: UpsertReleaseCardNoMR :exec
+INSERT INTO release_card_no_mr (card_key, note, marked_by, marked_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (card_key) DO UPDATE SET note = excluded.note, marked_by = excluded.marked_by, marked_at = excluded.marked_at
+`
+
+type UpsertReleaseCardNoMRParams struct {
+	CardKey  string
+	Note     string
+	MarkedBy string
+	MarkedAt time.Time
+}
+
+func (q *Queries) UpsertReleaseCardNoMR(ctx context.Context, arg UpsertReleaseCardNoMRParams) error {
+	_, err := q.db.ExecContext(ctx, upsertReleaseCardNoMR,
+		arg.CardKey,
+		arg.Note,
+		arg.MarkedBy,
+		arg.MarkedAt,
+	)
+	return err
 }
 
 const upsertReleaseHitHide = `-- name: UpsertReleaseHitHide :exec

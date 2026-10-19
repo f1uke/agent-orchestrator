@@ -119,6 +119,16 @@ DELETE FROM release_llb_plan_accepted WHERE plan_id = ?;
 -- name: InsertReleaseLlbPlanAccepted :exec
 INSERT INTO release_llb_plan_accepted (plan_id, mr_ref, reason) VALUES (?, ?, ?);
 
+-- name: ListReleaseCardNoMRs :many
+SELECT * FROM release_card_no_mr ORDER BY card_key;
+
+-- name: UpsertReleaseCardNoMR :exec
+INSERT INTO release_card_no_mr (card_key, note, marked_by, marked_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (card_key) DO UPDATE SET note = excluded.note, marked_by = excluded.marked_by, marked_at = excluded.marked_at;
+
+-- name: DeleteReleaseCardNoMR :execrows
+DELETE FROM release_card_no_mr WHERE card_key = ?;
+
 -- name: GetLiveReleaseFix :one
 SELECT * FROM release_fix
 WHERE hit_id = ? AND plan_fingerprint = ? AND state IN ('dry_run', 'applying', 'applied');

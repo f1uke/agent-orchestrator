@@ -207,3 +207,54 @@ func TestMigration0086ReleaseTrainFixOutbox(t *testing.T) {
 		t.Fatalf("release_llb_plan after Down = %d, want the seed kept", n)
 	}
 }
+
+func TestMigration0087ReleaseTrainNoMR(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "ao.db")+pragmas)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+
+	exec := func(what string, stmts ...string) {
+		t.Helper()
+		for _, stmt := range stmts {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("%s (%s): %v", what, stmt, err)
+			}
+		}
+	}
+	count := func(q string) int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	upTo(t, db, 86)
+	exec("seed at 0086",
+		`INSERT INTO release_hit_hide (hit_id, evidence, severity, hidden_at) VALUES ('G2~c/DEMO-7', 'e', 'risk', '2026-10-19')`)
+	changeLogBefore := count(`SELECT COUNT(*) FROM change_log`)
+
+	upTo(t, db, 87)
+	exec("mark a card", `INSERT INTO release_card_no_mr (card_key, marked_by, marked_at) VALUES ('DEMO-7', 'app', '2026-10-19')`)
+	if _, err := db.Exec(`INSERT INTO release_card_no_mr (card_key, marked_by, marked_at) VALUES ('DEMO-7', 'cli', '2026-10-19')`); err == nil {
+		t.Fatal("a second mark for the same card was accepted")
+	}
+	if n := count(`SELECT COUNT(*) FROM release_card_no_mr WHERE note = ''`); n != 1 {
+		t.Fatalf("marks with an empty default note = %d, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM change_log`); n != changeLogBefore {
+		t.Fatalf("change_log grew from %d to %d; no-MR marks are not CDC", changeLogBefore, n)
+	}
+
+	downTo(t, db, 86)
+	if n := count(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'release_card_no_mr'`); n != 0 {
+		t.Fatal("release_card_no_mr after Down")
+	}
+	if n := count(`SELECT COUNT(*) FROM release_hit_hide`); n != 1 {
+		t.Fatalf("release_hit_hide after Down = %d, want the seed kept", n)
+	}
+}
