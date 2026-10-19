@@ -29,8 +29,15 @@ func (s *Store) LoadReleaseHumanState(ctx context.Context) (rt.HumanState, error
 	if err != nil {
 		return rt.HumanState{}, fmt.Errorf("list release fixes: %w", err)
 	}
+	noMR, err := s.qr.ListReleaseCardNoMRs(ctx)
+	if err != nil {
+		return rt.HumanState{}, fmt.Errorf("list release no-MR marks: %w", err)
+	}
 	human := rt.HumanState{RuleSettings: make(map[rt.RuleID]bool, len(settings)), Hides: make(map[rt.HitID]rt.Hide, len(hides)), Plans: plans,
-		OpenFixes: openFixes(fixes)}
+		OpenFixes: openFixes(fixes), NoMR: make(map[string]rt.NoMRMark, len(noMR))}
+	for _, m := range noMR {
+		human.NoMR[m.CardKey] = rt.NoMRMark{Note: m.Note, MarkedBy: m.MarkedBy, MarkedAt: m.MarkedAt.UTC()}
+	}
 	for _, r := range settings {
 		human.RuleSettings[rt.RuleID(r.RuleID)] = r.Enabled
 	}
@@ -91,6 +98,29 @@ func (s *Store) UnhideReleaseHits(ctx context.Context, ids []rt.HitID) ([]rt.Hit
 		return nil
 	})
 	return removed, err
+}
+
+// MarkReleaseCardNoMR stores or replaces a card's "No MR needed" mark.
+func (s *Store) MarkReleaseCardNoMR(ctx context.Context, key string, m rt.NoMRMark) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qw.UpsertReleaseCardNoMR(ctx, gen.UpsertReleaseCardNoMRParams{
+		CardKey: key, Note: m.Note, MarkedBy: m.MarkedBy, MarkedAt: m.MarkedAt.UTC(),
+	}); err != nil {
+		return fmt.Errorf("mark release card %s no MR: %w", key, err)
+	}
+	return nil
+}
+
+// UnmarkReleaseCardNoMR deletes a card's mark and says whether it had one.
+func (s *Store) UnmarkReleaseCardNoMR(ctx context.Context, key string) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.DeleteReleaseCardNoMR(ctx, key)
+	if err != nil {
+		return false, fmt.Errorf("unmark release card %s no MR: %w", key, err)
+	}
+	return n > 0, nil
 }
 
 // ListReleaseLlbPlans reads every long-lived-branch plan with its branches and accepted MRs.

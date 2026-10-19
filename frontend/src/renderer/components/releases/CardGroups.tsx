@@ -20,6 +20,7 @@ import { Avatar } from "./Avatar";
 import { Unfold } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 import { SourceCell, SourceTag, SourceValue } from "./Sources";
+import { NoMrButton } from "./NoMr";
 import { TargetTag } from "./TargetTag";
 
 export function Chev({ open }: { open: boolean }) {
@@ -76,8 +77,10 @@ export function CardLine({
 	glyphSource,
 	statusKind = "jira.cards",
 	onOpen,
+	action,
 	className = "",
 }: {
+	action?: ReactNode;
 	source?: ReactNode;
 	glyphSource?: Provenance;
 	statusKind?: string;
@@ -110,7 +113,10 @@ export function CardLine({
 			</SourceValue>
 			<Face person={person} />
 			<JiraKey k={k} url={url} />
-			<span className="t">{summary}</span>
+			<span className="t">
+				{summary}
+				{action}
+			</span>
 			{extra ?? <span />}
 			<SourceValue p={status ? statusOf(status, statusKind) : null}>
 				<span className="spill" data-st={statusTone(status, statusCategory)}>
@@ -124,12 +130,14 @@ export function CardLine({
 
 function UnitRow({
 	u,
+	board,
 	train,
 	focused,
 	face,
 	actions,
 }: {
 	u: CardUnit;
+	board: Board;
 	train: string;
 	focused: boolean;
 	face: IdentityKnown | null;
@@ -163,7 +171,10 @@ function UnitRow({
 				)
 			}
 			extra={<MineFace face={face} mine={u.mine} />}
-			className={face && u.mine?.length ? "mine" : ""}
+			action={
+				(u.code.kind === "none" || u.code.kind === "no_mr") && <NoMrButton board={board} k={u.key} variant="row" />
+			}
+			className={`${face && u.mine?.length ? "mine" : ""}${u.code.kind === "no_mr" ? " nomr" : ""}`}
 			onOpen={() => actions.openSheet({ kind: "card", key: u.key })}
 		/>
 	);
@@ -246,7 +257,15 @@ function GroupRows({
 	return (
 		<>
 			{g.direct.map((u) => (
-				<UnitRow key={u.key} u={u} train={g.train.label} focused={focused} face={face} actions={actions} />
+				<UnitRow
+					key={u.key}
+					u={u}
+					board={board}
+					train={g.train.label}
+					focused={focused}
+					face={face}
+					actions={actions}
+				/>
 			))}
 			{g.llbs.map(({ group, branch, cards }) => {
 				const fk = branchFoldKey(g, branch);
@@ -310,7 +329,7 @@ function GroupRows({
 const CODE_TALLY_P = derivedOf(
 	"Code state",
 	[{ kind: "gitlab.mrs", text: "MRs whose title or source branch names the card" }],
-	"One bucket per card: merged + MR open + parked + elsewhere + no MR = cards.",
+	"One bucket per card: merged + MR open + parked + elsewhere + no MR + no code = cards. No code is a No MR needed mark set in AO.",
 	"CardUnit.code",
 );
 
@@ -383,6 +402,7 @@ export function CardGroupBox({
 					{t.open ? ` · ${t.open} MR open` : ""}
 					{t.parked ? ` · ${t.parked} parked` : ""}
 					{t.elsewhere ? ` · ${t.elsewhere} elsewhere` : ""}
+					{t.no_mr ? ` · ${t.no_mr} no code` : ""}
 					{focused && <SourceTag p={CODE_TALLY_P} />}
 				</span>
 				<span className="passive">

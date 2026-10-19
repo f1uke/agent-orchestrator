@@ -39,6 +39,8 @@ type BoardStore interface {
 	UnhideReleaseHits(ctx context.Context, ids []rt.HitID) ([]rt.HitID, error)
 	ListReleaseLlbPlans(ctx context.Context) ([]rt.LlbPlan, error)
 	PutReleaseLlbPlan(ctx context.Context, p rt.LlbPlan, ifVersion int) (rt.LlbPlan, error)
+	MarkReleaseCardNoMR(ctx context.Context, key string, m rt.NoMRMark) error
+	UnmarkReleaseCardNoMR(ctx context.Context, key string) (bool, error)
 }
 
 // BoardDeps wires a BoardService.
@@ -169,7 +171,13 @@ func humanFingerprint(h rt.HumanState) string {
 		fixes = append(fixes, fmt.Sprintf("%s\x00%s@%s", hit, f.ID, f.State))
 	}
 	sort.Strings(fixes)
-	sum := sha256.Sum256([]byte(strings.Join(rules, "\n") + "\n\n" + strings.Join(hides, "\n") + "\n\n" + strings.Join(plans, "\n") + "\n\n" + strings.Join(fixes, "\n")))
+	noMR := make([]string, 0, len(h.NoMR))
+	for key, m := range h.NoMR {
+		noMR = append(noMR, fmt.Sprintf("%s\x00%s\x00%s\x00%s", key, m.Note, m.MarkedBy, m.MarkedAt.Format(time.RFC3339Nano)))
+	}
+	sort.Strings(noMR)
+	sum := sha256.Sum256([]byte(strings.Join(rules, "\n") + "\n\n" + strings.Join(hides, "\n") + "\n\n" + strings.Join(plans, "\n") +
+		"\n\n" + strings.Join(fixes, "\n") + "\n\n" + strings.Join(noMR, "\n")))
 	return hex.EncodeToString(sum[:])
 }
 

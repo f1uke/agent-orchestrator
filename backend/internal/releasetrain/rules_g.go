@@ -89,10 +89,10 @@ var ruleG2 = rule{
 	Subjects: []SubjectKind{SubjectCard},
 	Reads:    readsSprint,
 	Title:    "Sprint card has no MR and the sprint ends within 3 working days",
-	Hint:     "Active cards only (new this sprint, or with open mobile work).",
+	Hint:     "Active cards only (new this sprint, or with open mobile work). A card marked No MR needed is skipped.",
 	Check: func(b *Board) []Hit {
 		return forEachSprintCard(b, func(row *SprintRow, c *SprintCard) []Hit {
-			if row.Sprint.End == nil || !c.Active || c.abandoned() || len(c.MRs) > 0 {
+			if row.Sprint.End == nil || !c.Active || c.abandoned() || len(c.MRs) > 0 || c.NoMR != nil {
 				return nil
 			}
 			left := workDaysLeft(b.Today, *row.Sprint.End)
@@ -189,7 +189,7 @@ var ruleG5 = rule{
 					}
 					for _, c := range v.Cards {
 						switch c.Code.(type) {
-						case CodeNone:
+						case CodeNone, CodeNoMR:
 							continue
 						}
 						if containsWhy(c.Why, WhyPage) {

@@ -49,6 +49,7 @@ export type FixRef = S["ReleaseTrainFixRef"];
 export type FixState = S["ReleaseTrainFixState"];
 export type FixStep = S["ReleaseTrainFixStep"];
 export type ShownRequest = S["ReleaseTrainShownRequest"];
+export type NoMRMark = S["ReleaseTrainNoMRMark"];
 
 /** "2026-10-15": a civil date in the Board's timezone, never a Date. */
 export type Day = string;

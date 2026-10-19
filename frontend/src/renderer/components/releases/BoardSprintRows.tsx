@@ -31,8 +31,10 @@ import {
 } from "../../lib/releases/sprint";
 import { derivedOf, planSaysText, sprintCardOf } from "../../lib/releases/sources";
 import type { Board, BoardApp, Dest, SprintCard, SprintRow } from "../../lib/releases/types";
+import { CODE_META } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { PlatformGlyph } from "./AppMark";
+import { NoMrButton } from "./NoMr";
 import { CardLine, Chev } from "./CardGroups";
 import { Moving, Unfold, Wire, WireText } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
@@ -130,7 +132,7 @@ function SprintCardRow({
 	actions: PageActions;
 }) {
 	const routes = here ? card.routes.filter((r) => destKey(r.to) === here) : card.routes;
-	const lead = DEST_META[leadKind(routes)];
+	const lead = !routes.length && card.noMr ? CODE_META.no_mr : DEST_META[leadKind(routes)];
 	const mismatch = routes.find((r) => r.mismatch);
 	const via = routes.find((r) => r.viaLlb)?.viaLlb;
 	const went = carried ? carriedTo(board, card) : null;
@@ -142,7 +144,8 @@ function SprintCardRow({
 			person={card.assignee}
 			k={card.key}
 			url={card.url}
-			className={`sp${isSplit(card) ? " split" : ""}${card.mine?.length ? " mine" : ""}`}
+			className={`sp${isSplit(card) ? " split" : ""}${card.mine?.length ? " mine" : ""}${card.noMr ? " nomr" : ""}`}
+			action={!card.mrs.length && <NoMrButton board={board} k={card.key} variant="row" />}
 			summary={
 				<>
 					{card.summary}

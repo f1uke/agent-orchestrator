@@ -38,11 +38,15 @@ type CodeElsewhere struct {
 // CodeNone means the card has no MR in this repo.
 type CodeNone struct{}
 
+// CodeNoMR means the card has no MR and a person marked it as needing none.
+type CodeNoMR NoMRMark
+
 func (CodeMerged) codeState()    {}
 func (CodeOpen) codeState()      {}
 func (CodeElsewhere) codeState() {}
 func (CodeParked) codeState()    {}
 func (CodeNone) codeState()      {}
+func (CodeNoMR) codeState()      {}
 
 // CardUnit is one card on one app's version.
 type CardUnit struct {
@@ -234,7 +238,7 @@ var whyKind = map[CardWhy]KindName{
 	WhySprintBranch: KindBranchCards.Name,
 }
 
-func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, fromBranch []branchMember, llbs map[string]*LongLivedBranch) []CardUnit {
+func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, fromBranch []branchMember, llbs map[string]*LongLivedBranch, noMR map[string]NoMRMark) []CardUnit {
 	byKey := mrs[v.App]
 	var cut *Day
 	if v.ReleaseMR != nil {
@@ -252,9 +256,13 @@ func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, fromB
 		if !ok {
 			i = len(units)
 			at[is.Key] = i
+			code := codeOf(byKey[is.Key], cut, source, hasSource, llbs)
+			if m, marked := noMR[is.Key]; marked && code == (CodeNone{}) {
+				code = CodeNoMR(m)
+			}
 			units = append(units, CardUnit{
 				Key: is.Key, URL: is.URL, Summary: is.Summary, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
-				FactsFrom: whyKind[why], Code: codeOf(byKey[is.Key], cut, source, hasSource, llbs),
+				FactsFrom: whyKind[why], Code: code,
 			})
 		}
 		if !slices.Contains(units[i].Why, why) {

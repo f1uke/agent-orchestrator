@@ -60,17 +60,22 @@ type OffFlow struct{}
 // NotRouted means the card has no MR in this app.
 type NotRouted struct{}
 
+// NoMRNeeded means the card has no MR and a person marked it as needing none.
+type NoMRNeeded struct{}
+
 func (ToTrain) dest()          {}
 func (ToLLB) dest()            {}
 func (BeforeFirstTrain) dest() {}
 func (OffFlow) dest()          {}
 func (NotRouted) dest()        {}
+func (NoMRNeeded) dest()       {}
 
 func (d ToTrain) destKey() string          { return "t:" + d.Train.Key() }
 func (d ToLLB) destKey() string            { return "l:" + string(d.Group) }
 func (d BeforeFirstTrain) destKey() string { return "early" }
 func (OffFlow) destKey() string            { return "off" }
 func (NotRouted) destKey() string          { return "none" }
+func (NoMRNeeded) destKey() string         { return "nomr" }
 
 // Route is where one app's code of one sprint card goes.
 type Route struct {
@@ -113,6 +118,7 @@ type routing struct {
 	groups  map[AppID]map[string]*LLBGroup
 	trains  []Train
 	plans   map[string]plannedOn
+	noMR    map[string]NoMRMark
 }
 
 var (

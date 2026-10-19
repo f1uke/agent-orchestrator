@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardGroups, groupRowCount, statusTone } from "./cards";
+import { cardGroups, groupRowCount, mergedOf, statusTone } from "./cards";
 import { board, train, version } from "./testkit";
 import type { CardUnit, LLBGroup, LongLivedBranch } from "./types";
 
@@ -83,7 +83,7 @@ describe("card groups", () => {
 
 	it("tallies code states, ready cards and the long-lived branches that ride the train", () => {
 		const g = cardGroups(b, "di")[0];
-		expect(g.tally).toEqual({ merged: 1, open: 1, parked: 1, elsewhere: 0, none: 1 });
+		expect(g.tally).toEqual({ merged: 1, open: 1, parked: 1, elsewhere: 0, none: 1, no_mr: 0 });
 		expect(g.ready).toBe(1);
 		expect(g.llbs.map((x) => x.branch.branch)).toEqual(["feature/demo-wallet"]);
 	});
@@ -159,5 +159,27 @@ describe("statusTone", () => {
 		["To Do", "new", "todo"],
 	] as const)("%s (%s) paints %s", (status, cat, want) => {
 		expect(statusTone(status, cat)).toBe(want);
+	});
+});
+
+describe("cards marked No MR needed in a train group", () => {
+	const noMr = { kind: "no_mr", markedBy: "app", markedAt: "2026-10-14T03:00:00Z" } as const;
+	const units = [
+		unit("DEMO-1", { kind: "merged", mrs: [1] }),
+		unit("DEMO-2", noMr, "Ready for UAT"),
+		unit("DEMO-3", { kind: "none" }),
+	];
+	const t21 = train("21-2026", "2026-10-13", "2026-10-20", "current", [
+		version("21-2026", "di", "2.4.0", "2026-10-13", "2026-10-20", { cards: units }),
+	]);
+
+	it("tally as no code, apart from cards that still have no MR", () => {
+		const [g] = cardGroups(board({ trains: [t21] }), "di");
+		expect(g.tally).toEqual({ merged: 1, open: 0, parked: 0, elsewhere: 0, none: 1, no_mr: 1 });
+		expect(g.ready).toBe(1);
+	});
+
+	it("leave the merged ratio's denominator, since they have nothing to merge", () => {
+		expect(mergedOf(units)).toEqual({ merged: 1, needCode: 2 });
 	});
 });

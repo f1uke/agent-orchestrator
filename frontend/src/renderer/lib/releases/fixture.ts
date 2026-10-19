@@ -624,7 +624,9 @@ function unitOf(
 					? { kind, mrs: [250 + who] }
 					: kind === "elsewhere"
 						? { kind, branch: "feature/demo-other", on: "2026-01-01" }
-						: { kind };
+						: kind === "no_mr"
+							? { kind, markedBy: "app", markedAt: "2026-01-01T03:00:00Z" }
+							: { kind };
 	const jira = v.jira;
 	return {
 		key,
@@ -927,12 +929,12 @@ function sprintCard(
 
 const destId = (d: Dest) =>
 	d.kind === "train" ? `t:${d.train}` : d.kind === "llb" ? `l:${d.group}` : d.kind === "before" ? "early" : d.kind;
-const DEST_RANK: Readonly<Record<Dest["kind"], number>> = { before: 0, train: 1, llb: 2, off: 3, none: 4 };
+const DEST_RANK: Readonly<Record<Dest["kind"], number>> = { before: 0, train: 1, llb: 2, off: 3, none: 4, nomr: 5 };
 
 function sprintRow(board: Board["sprints"][number]["board"], start: string, end: string, cards: SprintCard[]) {
 	const dests = new Map<string, { to: Dest; count: number; keys: string[] }>();
 	for (const c of cards.filter((x) => x.active))
-		for (const to of c.routes.length ? c.routes.map((r) => r.to) : [{ kind: "none" } as Dest]) {
+		for (const to of c.routes.length ? c.routes.map((r) => r.to) : [{ kind: c.noMr ? "nomr" : "none" } as Dest]) {
 			const d = dests.get(destId(to)) ?? { to, count: 0, keys: [] as string[] };
 			if (!d.keys.includes(c.key)) {
 				d.keys.push(c.key);

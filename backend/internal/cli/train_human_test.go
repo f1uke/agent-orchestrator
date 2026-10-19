@@ -200,6 +200,59 @@ func TestTrainPlanLs(t *testing.T) {
 	}
 }
 
+func TestTrainNoMRMarksACardWithItsNote(t *testing.T) {
+	resp := `{"key":"DEMO-7","mark":{"note":"config only","markedBy":"cli","markedAt":"2026-10-15T03:00:00Z"}}`
+	out, call, err := runTrainHuman(t, http.StatusOK, resp, "nomr", "DEMO-7", "--note", "config only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call.method != http.MethodPut || call.rawPath != "/api/v1/release-trains/no-mr/DEMO-7" || call.body != `{"via":"cli","note":"config only"}` {
+		t.Fatalf("request = %+v", call)
+	}
+	if out != "marked DEMO-7 No MR needed\n" {
+		t.Fatalf("output = %q", out)
+	}
+	_, _, err = runTrainHuman(t, http.StatusNotFound, `{"code":"RELEASE_CARD_NOT_FOUND","message":"no such card on the board"}`, "nomr", "NOPE-1")
+	if ExitCode(err) != 2 {
+		t.Fatalf("mark of an unknown card = %v (exit %d), want a usage error", err, ExitCode(err))
+	}
+	if _, _, err := runTrainHuman(t, http.StatusOK, `{}`, "nomr"); ExitCode(err) != 2 {
+		t.Fatalf("nomr with no card = %v, want a usage error", err)
+	}
+}
+
+func TestTrainNoMRUndo(t *testing.T) {
+	out, call, err := runTrainHuman(t, http.StatusNoContent, ``, "nomr", "undo", "DEMO-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call.method != http.MethodDelete || call.rawPath != "/api/v1/release-trains/no-mr/DEMO-7" || out != "unmarked DEMO-7\n" {
+		t.Fatalf("undo = %+v %q", call, out)
+	}
+	_, _, err = runTrainHuman(t, http.StatusNotFound, `{"code":"RELEASE_NO_MR_NOT_FOUND","message":"DEMO-7 is not marked No MR needed"}`, "nomr", "undo", "DEMO-7")
+	if ExitCode(err) != 2 {
+		t.Fatalf("undo of an unmarked card = %v (exit %d), want a usage error", err, ExitCode(err))
+	}
+}
+
+func TestTrainNoMRLs(t *testing.T) {
+	resp := `{"marks":{"DEMO-9":{"markedBy":"app","markedAt":"2026-10-16T03:00:00Z"},"DEMO-7":{"note":"config only","markedBy":"cli:demo-7","markedAt":"2026-10-15T03:00:00Z"}}}`
+	out, call, err := runTrainHuman(t, http.StatusOK, resp, "nomr", "ls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `CARD    MARKED BY   MARKED AT   NOTE
+DEMO-7  cli:demo-7  2026-10-15  config only
+DEMO-9  app         2026-10-16  -
+`
+	if call.method != http.MethodGet || call.rawPath != "/api/v1/release-trains/no-mr" || out != want {
+		t.Fatalf("nomr ls = %+v\n%s\nwant\n%s", call, out, want)
+	}
+	if out, _, _ := runTrainHuman(t, http.StatusOK, `{"marks":{}}`, "nomr", "ls"); out != "no cards marked No MR needed\n" {
+		t.Fatalf("nomr ls with none = %q", out)
+	}
+}
+
 func TestTrainAlertsHiddenShowsChangedAndStaleHides(t *testing.T) {
 	body := strings.Replace(trainBoardJSON,
 		`"text": "1 card(s) not Done", "bucket": "hidden"}`,

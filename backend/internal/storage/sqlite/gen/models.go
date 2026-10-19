@@ -362,6 +362,13 @@ type PromptFingerprint struct {
 	MatchedAt       sql.NullTime
 }
 
+type ReleaseCardNoMr struct {
+	CardKey  string
+	Note     string
+	MarkedBy string
+	MarkedAt time.Time
+}
+
 type ReleaseFix struct {
 	ID              string
 	HitID           string

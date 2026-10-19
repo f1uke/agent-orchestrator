@@ -9,6 +9,7 @@ import { sheetPart } from "../../lib/releases/sheetPart";
 import { subjectLabel, subjectSheet } from "../../lib/releases/subject";
 import { SEVERITY_META } from "../../lib/releases/vocab";
 import { AppMark } from "./AppMark";
+import { NoMrButton } from "./NoMr";
 import type { PageActions } from "./ReleasesPage";
 import { ruleTagOf, type Provenance } from "../../lib/releases/sources";
 import { SourceTag, useSources } from "./Sources";
@@ -165,6 +166,9 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 					</button>
 					<HitLinks h={h} />
 					<FixButton h={h} hidden={hidden} c={c} />
+					{h.rule === "G2" && h.subject.kind === "card" && !hidden && (
+						<NoMrButton board={c.board} k={h.subject.key} variant="link" />
+					)}
 					{hidden && (
 						<button type="button" onClick={() => unhide.mutate(h.id)}>
 							Restore

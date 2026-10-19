@@ -122,6 +122,78 @@ func TestReleaseTrainUnhideStaleRoute(t *testing.T) {
 	}
 }
 
+func (f *boardFixture) seedSprintCard(key string) {
+	f.t.Helper()
+	ctx := context.Background()
+	start, end := rt.Day{Y: 2026, M: 10, D: 6}, rt.Day{Y: 2026, M: 10, D: 16}
+	sprints := rt.SpecFor(rt.KindBoardSprints, rt.BoardScope(42), "")
+	cards := rt.SpecFor(rt.KindSprintCards, rt.SprintScope(7021), "")
+	isNew := rt.SpecFor(rt.KindThisSprint, rt.SprintScope(7021), "")
+	sprint, err := rt.EncodeItem(rt.KindBoardSprints, rt.SprintFact{Board: 42, ID: 7021, Name: "DEMO 2026-21", Start: &start, End: &end}, nil)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	card, err := rt.EncodeItem(rt.KindSprintCards, rt.IssueFact{Key: key, Summary: "Config flag", Status: "Ready for UAT", StatusCategory: "indeterminate"}, nil)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	member, err := rt.EncodeItem(rt.KindThisSprint, rt.SprintMemberFact{Key: key}, nil)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.store.PlanReleaseResources(ctx, []rt.ResourceSpec{sprints, cards, isNew}, f.now); err != nil {
+		f.t.Fatal(err)
+	}
+	for _, w := range []struct {
+		spec  rt.ResourceSpec
+		items []rt.Item
+	}{{sprints, []rt.Item{sprint}}, {cards, []rt.Item{card}}, {isNew, []rt.Item{member}}} {
+		if err := f.store.WriteReleaseSnapshot(ctx, w.spec, w.items, f.now); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+
+func TestReleaseTrainNoMRRoutes(t *testing.T) {
+	f := newBoardFixture(t)
+	f.seedSprintCard("DEMO-7")
+	etag := f.get("").Header().Get("ETag")
+
+	w := f.do(http.MethodPut, "/release-trains/no-mr/DEMO-7", `{"via":"cli","session":"demo-7","note":"config only"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"key":"DEMO-7"`) ||
+		!strings.Contains(w.Body.String(), `"markedBy":"cli:demo-7"`) || !strings.Contains(w.Body.String(), `"note":"config only"`) {
+		t.Fatalf("mark = %d %s", w.Code, w.Body)
+	}
+	board := f.get(etag)
+	if board.Code != http.StatusOK || !strings.Contains(board.Body.String(), `"noMr":{"note":"config only","markedBy":"cli:demo-7"`) ||
+		!strings.Contains(board.Body.String(), `"to":{"kind":"nomr"}`) {
+		t.Fatalf("board after mark = %d, want a new body with the card in the no-MR block", board.Code)
+	}
+	if w := f.do(http.MethodGet, "/release-trains/no-mr", ``); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"DEMO-7":{"note":"config only"`) {
+		t.Fatalf("list = %d %s", w.Code, w.Body)
+	}
+	if w := f.do(http.MethodPut, "/release-trains/no-mr/DEMO-7", `{}`); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"markedBy":"api"`) {
+		t.Fatalf("remark with no via = %d %s, want the api actor", w.Code, w.Body)
+	}
+
+	if w := f.do(http.MethodPut, "/release-trains/no-mr/NOPE-1", ``); w.Code != http.StatusNotFound || errCode(t, w) != "RELEASE_CARD_NOT_FOUND" {
+		t.Fatalf("mark of a card not on the board = %d %s", w.Code, w.Body)
+	}
+	if w := f.do(http.MethodPut, "/release-trains/no-mr/DEMO-7", `{"note":1}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad body = %d %s", w.Code, w.Body)
+	}
+
+	if w := f.do(http.MethodDelete, "/release-trains/no-mr/DEMO-7", ``); w.Code != http.StatusNoContent {
+		t.Fatalf("unmark = %d %s", w.Code, w.Body)
+	}
+	if w := f.do(http.MethodDelete, "/release-trains/no-mr/DEMO-7", ``); w.Code != http.StatusNotFound || errCode(t, w) != "RELEASE_NO_MR_NOT_FOUND" {
+		t.Fatalf("second unmark = %d %s", w.Code, w.Body)
+	}
+	if w := f.do(http.MethodGet, "/release-trains/no-mr", ``); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"marks":{}`) {
+		t.Fatalf("list after unmark = %d %s", w.Code, w.Body)
+	}
+}
+
 func TestReleaseTrainPlanRoutes(t *testing.T) {
 	f := newBoardFixture(t)
 	if w := f.do(http.MethodGet, "/release-trains/llb-plans", ``); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"plans":[]`) {

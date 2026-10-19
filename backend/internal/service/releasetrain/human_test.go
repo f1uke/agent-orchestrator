@@ -173,3 +173,57 @@ func TestPutPlanStampsTheTimeAndValidates(t *testing.T) {
 		t.Fatalf("Plans = %+v, %v", plans, err)
 	}
 }
+
+const g2Hit = rt.HitID("G2~c/DEMO-7")
+
+func (w *boardWorld) seedConfigCard() {
+	t := w.t
+	start, end := rt.Day{Y: 2026, M: 10, D: 6}, rt.Day{Y: 2026, M: 10, D: 16}
+	w.write(rt.KindBoardSprints.Name, rt.BoardScope(42), item(t, rt.KindBoardSprints, rt.SprintFact{
+		Board: 42, ID: 7021, Name: "DEMO 2026-21", Start: &start, End: &end}))
+	w.write(rt.KindSprintCards.Name, rt.SprintScope(7021), item(t, rt.KindSprintCards, rt.IssueFact{
+		Key: "DEMO-7", Summary: "Config flag", Status: "Ready for UAT", StatusCategory: "indeterminate"}))
+	w.write(rt.KindThisSprint.Name, rt.SprintScope(7021), item(t, rt.KindThisSprint, rt.SprintMemberFact{Key: "DEMO-7"}))
+	w.write(rt.KindBoardSprints.Name, rt.BoardScope(43))
+	w.write(rt.KindBranchCards.Name, rt.BranchCardsScope)
+	w.write(rt.KindMRs.Name, rt.ProjectScope(1002))
+}
+
+func TestMarkNoMRChangesTheETagAndTakesG2OffTheBoardUntilUnmarked(t *testing.T) {
+	w := newBoardWorld(t)
+	w.seed()
+	w.seedConfigCard()
+	ctx := context.Background()
+	body, etag := w.mustBoard()
+	if got := probe(t, body).bucket(g2Hit); got != "badge" {
+		t.Fatalf("G2 for DEMO-7 before marking = %q, want badge", got)
+	}
+
+	mark, err := w.svc.MarkNoMR(ctx, "DEMO-7", "config only", "app")
+	if err != nil || mark.MarkedBy != "app" || mark.Note != "config only" || !mark.MarkedAt.Equal(w.now) {
+		t.Fatalf("MarkNoMR = %+v, %v", mark, err)
+	}
+	body, marked := w.mustBoard()
+	if marked == etag || probe(t, body).bucket(g2Hit) != "" {
+		t.Fatalf("after marking: etag same=%v G2 bucket=%q, want a new ETag and no G2", marked == etag, probe(t, body).bucket(g2Hit))
+	}
+
+	if _, err := w.svc.MarkNoMR(ctx, "NOPE-1", "", "cli"); !errors.Is(err, ErrUnknownCard) {
+		t.Fatalf("MarkNoMR of a card not on the board = %v, want ErrUnknownCard", err)
+	}
+
+	if err := w.svc.UnmarkNoMR(ctx, "DEMO-7"); err != nil {
+		t.Fatal(err)
+	}
+	body, unmarked := w.mustBoard()
+	if unmarked == marked || probe(t, body).bucket(g2Hit) != "badge" {
+		t.Fatalf("after unmarking: etag same=%v G2 bucket=%q, want G2 back", unmarked == marked, probe(t, body).bucket(g2Hit))
+	}
+	if err := w.svc.UnmarkNoMR(ctx, "DEMO-7"); !errors.Is(err, ErrUnknownCard) {
+		t.Fatalf("second unmark = %v, want ErrUnknownCard", err)
+	}
+	marks, err := w.svc.NoMRMarks(ctx)
+	if err != nil || len(marks) != 0 {
+		t.Fatalf("NoMRMarks = %+v, %v; want none", marks, err)
+	}
+}

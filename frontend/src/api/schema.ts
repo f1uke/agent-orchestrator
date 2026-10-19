@@ -981,6 +981,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/release-trains/no-mr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the cards marked No MR needed */
+        get: operations["listReleaseTrainNoMRMarks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/no-mr/{cardKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mark a card on the current Board as needing no MR, in AO only; G2 and G5 then skip it */
+        put: operations["markReleaseTrainNoMR"];
+        post?: never;
+        /** Remove a card's No MR needed mark */
+        delete: operations["unmarkReleaseTrainNoMR"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/release-trains/refresh": {
         parameters: {
             query?: never;
@@ -4756,6 +4791,15 @@ export interface components {
             /** @description The long-lived branch that carried the MRs into the train. */
             via?: string;
         };
+        ReleaseTrainCodeNoMR: {
+            /** @constant */
+            kind: "no_mr";
+            /** Format: date-time */
+            markedAt: string;
+            /** @description Who marked it: app, cli or api, with the AO session when one was set. */
+            markedBy: string;
+            note?: string;
+        };
         ReleaseTrainCodeNone: {
             /** @constant */
             kind: "none";
@@ -4771,7 +4815,7 @@ export interface components {
             kind: "parked";
             mrs: number[];
         };
-        ReleaseTrainCodeState: components["schemas"]["ReleaseTrainCodeMerged"] | components["schemas"]["ReleaseTrainCodeOpen"] | components["schemas"]["ReleaseTrainCodeParked"] | components["schemas"]["ReleaseTrainCodeElsewhere"] | components["schemas"]["ReleaseTrainCodeNone"];
+        ReleaseTrainCodeState: components["schemas"]["ReleaseTrainCodeMerged"] | components["schemas"]["ReleaseTrainCodeOpen"] | components["schemas"]["ReleaseTrainCodeParked"] | components["schemas"]["ReleaseTrainCodeElsewhere"] | components["schemas"]["ReleaseTrainCodeNone"] | components["schemas"]["ReleaseTrainCodeNoMR"];
         ReleaseTrainCommitFact: {
             createdOn: components["schemas"]["ReleaseTrainDay"];
             title: string;
@@ -4786,7 +4830,7 @@ export interface components {
         };
         /** Format: date */
         ReleaseTrainDay: string;
-        ReleaseTrainDest: components["schemas"]["ReleaseTrainDestToTrain"] | components["schemas"]["ReleaseTrainDestToLLB"] | components["schemas"]["ReleaseTrainDestBefore"] | components["schemas"]["ReleaseTrainDestOff"] | components["schemas"]["ReleaseTrainDestNone"];
+        ReleaseTrainDest: components["schemas"]["ReleaseTrainDestToTrain"] | components["schemas"]["ReleaseTrainDestToLLB"] | components["schemas"]["ReleaseTrainDestBefore"] | components["schemas"]["ReleaseTrainDestOff"] | components["schemas"]["ReleaseTrainDestNone"] | components["schemas"]["ReleaseTrainDestNoMR"];
         ReleaseTrainDestBefore: {
             /** @constant */
             kind: "before";
@@ -4795,6 +4839,10 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainDestKind: "sprint" | "sprint_open" | "llb" | "llb_open" | "prev" | "back" | "before" | "develop" | "develop_open" | "release" | "other" | "none";
+        ReleaseTrainDestNoMR: {
+            /** @constant */
+            kind: "nomr";
+        };
         ReleaseTrainDestNone: {
             /** @constant */
             kind: "none";
@@ -5243,7 +5291,7 @@ export interface components {
             why: components["schemas"]["ReleaseTrainMineWhy"];
         };
         /** @enum {string} */
-        ReleaseTrainMineWhy: "assignee" | "subtask" | "mr_author" | "release_mr_author" | "release_ticket_assignee" | "approver" | "card" | "landing_author";
+        ReleaseTrainMineWhy: "assignee" | "subtask" | "mr_author" | "release_mr_author" | "release_ticket_assignee" | "approver" | "card" | "landing_author" | "no_mr";
         ReleaseTrainMismatch: {
             app: string;
             jira?: components["schemas"]["ReleaseTrainJiraVersionFact"];
@@ -5255,6 +5303,33 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainMismatchKind: "version" | "no-milestone" | "no-jira" | "no-label";
+        ReleaseTrainNoMRMark: {
+            /** Format: date-time */
+            markedAt: string;
+            markedBy: string;
+            note?: string;
+        };
+        ReleaseTrainNoMRMarksResponse: {
+            /** @description Each marked card's key and its mark. */
+            marks: {
+                [key: string]: components["schemas"]["ReleaseTrainNoMRMark"];
+            } | null;
+        };
+        ReleaseTrainNoMRRequest: {
+            /** @description Why the card needs no MR; shown on the card. */
+            note?: string;
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
+        };
+        ReleaseTrainNoMRResponse: {
+            key: string;
+            mark: components["schemas"]["ReleaseTrainNoMRMark"];
+        };
         ReleaseTrainOutcome: components["schemas"]["ReleaseTrainOutcomeClean"] | components["schemas"]["ReleaseTrainOutcomeFired"] | components["schemas"]["ReleaseTrainOutcomeUnknown"];
         ReleaseTrainOutcomeClean: {
             /** Format: date-time */
@@ -5410,6 +5485,7 @@ export interface components {
             key: string;
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             mrs: components["schemas"]["ReleaseTrainSprintMR"][];
+            noMr?: components["schemas"]["ReleaseTrainNoMRMark"];
             onBoard: boolean;
             routes: components["schemas"]["ReleaseTrainRoute"][];
             status: string;
@@ -10369,6 +10445,155 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listReleaseTrainNoMRMarks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainNoMRMarksResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    markReleaseTrainNoMR: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Jira card key, e.g. DEMO-7. */
+                cardKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainNoMRRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainNoMRResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    unmarkReleaseTrainNoMR: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Jira card key, e.g. DEMO-7. */
+                cardKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -74,10 +74,19 @@ test.describe("releases sources layer", () => {
 
 	test("hovering a value opens its card after the delay, and not before", async ({ page }) => {
 		await open(page, "?layers=llb,cards,src");
-		await page.getByTestId("label-di").locator(".ver [data-srcv]").hover();
-		await page.waitForTimeout(150);
-		await expect(card(page)).toHaveCount(0);
+		const value = page.getByTestId("label-di").locator(".ver [data-srcv]");
+		await value.evaluate((el) => {
+			const w = window as unknown as { __hover: { in?: number; card?: number } };
+			w.__hover = {};
+			el.addEventListener("pointerenter", () => (w.__hover.in ??= performance.now()));
+			new MutationObserver(() => {
+				if (document.querySelector('[data-testid="source-card"]')) w.__hover.card ??= performance.now();
+			}).observe(document.body, { childList: true, subtree: true });
+		});
+		await value.hover();
 		await expect(card(page)).toContainText("One dot per stage");
+		const t = await page.evaluate(() => (window as unknown as { __hover: { in: number; card: number } }).__hover);
+		expect(t.card - t.in, "the card opened before the 400 ms value delay").toBeGreaterThanOrEqual(380);
 	});
 
 	test("with the layer off a value hover opens nothing", async ({ page }) => {

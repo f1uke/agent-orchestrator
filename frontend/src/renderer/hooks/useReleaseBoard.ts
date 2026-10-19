@@ -12,6 +12,7 @@ import {
 } from "../lib/releases/fixture";
 import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
 import { previewConfirm, previewPlan, previewUndo, type PreviewFixStore } from "../lib/releases/fixPreview";
+import { applyNoMr } from "../lib/releases/noMr";
 import { PlanConflictError, planInput, targetAfterPlan, type PlanDraft } from "../lib/releases/plan";
 import type { Board, BoardResponse, Fix, FixPlan, HitId, LlbPlan } from "../lib/releases/types";
 import { useApiReady } from "./useApiReady";
@@ -132,6 +133,21 @@ export function useUnhideHit() {
 	return useBoardMutation<HitId>(
 		(id) => must(apiClient.DELETE("/api/v1/release-trains/hides/{hitId}", { params: { path: { hitId: id } } })),
 		(b, id) => moveHit(b, id, "badge"),
+	);
+}
+
+export function useMarkNoMr() {
+	return useBoardMutation<{ key: string; on: boolean }>(
+		({ key, on }) =>
+			must(
+				on
+					? apiClient.PUT("/api/v1/release-trains/no-mr/{cardKey}", {
+							params: { path: { cardKey: key } },
+							body: { via: "app" },
+						})
+					: apiClient.DELETE("/api/v1/release-trains/no-mr/{cardKey}", { params: { path: { cardKey: key } } }),
+			),
+		(b, { key, on }) => applyNoMr(b, key, on ? { markedBy: "app", markedAt: new Date().toISOString() } : null),
 	);
 }
 
