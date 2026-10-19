@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { subjectsBoard } from "../src/renderer/lib/releases/fixture";
-import { VIEWPORTS, expectSpotted, freezeRings, open } from "./releases-kit";
+import { NARROW, VIEWPORTS, expectSpotted, freezeRings, open } from "./releases-kit";
+
+test.use({ viewport: NARROW });
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 
