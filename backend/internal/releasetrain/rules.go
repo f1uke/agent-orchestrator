@@ -20,6 +20,7 @@ type rule struct {
 	Title     string
 	Hint      string
 	Reads     []KindName
+	Subjects  []SubjectKind
 	Scope     ruleScope
 	Check     func(b *Board) []Hit
 }
@@ -55,6 +56,8 @@ type RuleInfo struct {
 	Fix       FixKind  `json:"fix,omitempty"`
 	// Reads is every fact kind the rule reads, so an alert can name its sources.
 	Reads []KindName `json:"reads"`
+	// Subjects is every kind of subject the rule's hits are about, so the page can find each on the timeline.
+	Subjects []SubjectKind `json:"subjects"`
 }
 
 // LookupRule returns the catalogue row of id under settings, or false when no rule has that id.
@@ -72,7 +75,7 @@ func catalogue(settings map[RuleID]bool) []RuleInfo {
 	out := make([]RuleInfo, len(table))
 	for i, r := range table {
 		out[i] = RuleInfo{ID: r.ID, Group: r.Group, Severity: r.Severity, DefaultOn: r.DefaultOn,
-			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID), Reads: r.Reads}
+			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID), Reads: r.Reads, Subjects: r.Subjects}
 	}
 	return out
 }

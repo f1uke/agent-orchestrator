@@ -11,7 +11,8 @@ var semgrepNotPassed = map[string]bool{"missing": true, "failed": true, "cancele
 
 var ruleC1 = rule{
 	ID: "C1", Group: "C", Severity: SevBlock, DefaultOn: true, Scope: scopePerApp, Reads: readsReleaseJobs,
-	Title: "Release MR pipeline failed on a required job",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "Release MR pipeline failed on a required job",
 	Check: func(b *Board) []Hit {
 		return openReleaseMRHits(b, func(t *Train, v *AppVersion, r *ReleaseMR) *Hit {
 			failed := r.failedRequired()
@@ -26,7 +27,8 @@ var ruleC1 = rule{
 
 var ruleC2 = rule{
 	ID: "C2", Group: "C", Severity: SevInfo, DefaultOn: false, Scope: scopePerApp, Reads: readsReleaseJobs,
-	Title: "Release MR pipeline failed only on allowed-to-fail jobs",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "Release MR pipeline failed only on allowed-to-fail jobs",
 	Check: func(b *Board) []Hit {
 		return openReleaseMRHits(b, func(t *Train, v *AppVersion, r *ReleaseMR) *Hit {
 			allowed := r.failedAllowed()
@@ -41,7 +43,8 @@ var ruleC2 = rule{
 
 var ruleC3 = rule{
 	ID: "C3", Group: "C", Severity: SevInfo, DefaultOn: false, Scope: scopePerApp, Reads: readsReleaseMR,
-	Title: "Release pipeline took longer than 60 minutes",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "Release pipeline took longer than 60 minutes",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			r := v.ReleaseMR
@@ -60,7 +63,8 @@ var ruleC3 = rule{
 
 var ruleC5 = rule{
 	ID: "C5", Group: "C", Severity: SevBlock, DefaultOn: true, Scope: scopePerApp, Reads: readsReleaseMR,
-	Title: "Release MR has conflicts",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "Release MR has conflicts",
 	Check: func(b *Board) []Hit {
 		return openReleaseMRHits(b, func(t *Train, v *AppVersion, r *ReleaseMR) *Hit {
 			if r.Detail == nil || !r.Detail.Conflicts {
@@ -74,7 +78,8 @@ var ruleC5 = rule{
 
 var ruleC6 = rule{
 	ID: "C6", Group: "C", Severity: SevBlock, DefaultOn: true, Scope: scopePerApp, Reads: readsReleaseJobs,
-	Title: "semgrep-sast missing or not passed on the release pipeline",
+	Subjects: []SubjectKind{SubjectVersion},
+	Title:    "semgrep-sast missing or not passed on the release pipeline",
 	Check: func(b *Board) []Hit {
 		return openReleaseMRHits(b, func(t *Train, v *AppVersion, r *ReleaseMR) *Hit {
 			if r.Jobs == nil {
@@ -97,8 +102,9 @@ var ruleC6 = rule{
 
 var ruleC7 = rule{
 	ID: "C7", Group: "C", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindTags.Name, KindCompare.Name},
-	Title: "Branches merged into main after the version tag",
+	Subjects: []SubjectKind{SubjectVersion},
+	Reads:    []KindName{KindMilestones.Name, KindTags.Name, KindCompare.Name},
+	Title:    "Branches merged into main after the version tag",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			if v.Tag == nil || !v.Tag.Newest || len(v.Tag.MergesAfter) == 0 {

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { Reveal } from "../lib/releases/locate";
 import {
 	DEFAULT_LAYERS,
 	LAYER_ORDER,
@@ -95,6 +96,10 @@ type ReleasesUi = {
 	/** Kept for a board with no active sprint too, so its row stays hidden when the next sprint starts. */
 	hidden: ReadonlySet<string>;
 	setHidden: (keys: ReadonlySet<string>) => void;
+	pending: Reveal | null;
+	setPending: (r: Reveal | null) => void;
+	aside: boolean;
+	setAside: (aside: boolean) => void;
 };
 
 export const useReleasesUi = create<ReleasesUi>((set, get) => ({
@@ -136,4 +141,8 @@ export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 		writeKeys(HIDDEN_KEY, hidden);
 		set({ hidden });
 	},
+	pending: null,
+	setPending: (pending) => set({ pending }),
+	aside: false,
+	setAside: (aside) => set({ aside }),
 }));

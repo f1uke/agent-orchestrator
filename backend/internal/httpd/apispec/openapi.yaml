@@ -13210,6 +13210,8 @@ components:
           type: string
         severity:
           $ref: '#/components/schemas/ReleaseTrainSeverity'
+        subject:
+          $ref: '#/components/schemas/ReleaseTrainSubject'
         text:
           type: string
         train:
@@ -13218,6 +13220,7 @@ components:
       required:
       - id
       - rule
+      - subject
       - severity
       - evidence
       - text
@@ -15086,6 +15089,10 @@ components:
           type: array
         severity:
           $ref: '#/components/schemas/ReleaseTrainSeverity'
+        subjects:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainSubjectKind'
+          type: array
         title:
           type: string
       required:
@@ -15096,6 +15103,7 @@ components:
       - "on"
       - title
       - reads
+      - subjects
       type: object
     ReleaseTrainRuleOutcome:
       properties:
@@ -15426,6 +15434,234 @@ components:
       required:
       - id
       - hiddenAt
+      type: object
+    ReleaseTrainSubject:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainSubjectVersion'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectVersionDate'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectJiraVersion'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectMilestone'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectHotfix'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectTrainPair'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectHotfixTrain'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectCardOnTrain'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectMR'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectCard'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectPageFamily'
+      type: object
+    ReleaseTrainSubjectCard:
+      properties:
+        board:
+          description: The board whose sprint row lists the card.
+          type: string
+        key:
+          type: string
+        kind:
+          const: card
+          type: string
+      required:
+      - kind
+      - key
+      - board
+      type: object
+    ReleaseTrainSubjectCardOnTrain:
+      properties:
+        app:
+          type: string
+        key:
+          type: string
+        kind:
+          const: cardOnTrain
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      - app
+      - key
+      type: object
+    ReleaseTrainSubjectHotfix:
+      properties:
+        app:
+          type: string
+        kind:
+          const: hotfix
+          type: string
+        version:
+          type: string
+      required:
+      - kind
+      - app
+      - version
+      type: object
+    ReleaseTrainSubjectHotfixTrain:
+      properties:
+        app:
+          type: string
+        kind:
+          const: hotfixTrain
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        version:
+          type: string
+      required:
+      - kind
+      - app
+      - version
+      - train
+      type: object
+    ReleaseTrainSubjectJiraVersion:
+      properties:
+        app:
+          type: string
+        id:
+          type: string
+        kind:
+          const: jiraVersion
+          type: string
+        name:
+          type: string
+      required:
+      - kind
+      - id
+      - app
+      - name
+      type: object
+    ReleaseTrainSubjectKind:
+      enum:
+      - version
+      - versionDate
+      - jiraVersion
+      - milestone
+      - hotfix
+      - trainPair
+      - hotfixTrain
+      - cardOnTrain
+      - mr
+      - card
+      - pageFamily
+      type: string
+    ReleaseTrainSubjectMR:
+      properties:
+        app:
+          type: string
+        iid:
+          type: integer
+        kind:
+          const: mr
+          type: string
+        source:
+          description: The MR's source branch.
+          type: string
+        target:
+          description: The MR's target branch.
+          type: string
+      required:
+      - kind
+      - app
+      - iid
+      - source
+      - target
+      type: object
+    ReleaseTrainSubjectMilestone:
+      properties:
+        app:
+          type: string
+        id:
+          type: integer
+        kind:
+          const: milestone
+          type: string
+        title:
+          type: string
+      required:
+      - kind
+      - app
+      - id
+      - title
+      type: object
+    ReleaseTrainSubjectPageFamily:
+      properties:
+        bucket:
+          enum:
+          - merged
+          - open
+          type: string
+        family:
+          type: string
+        keys:
+          items:
+            type: string
+          type: array
+        kind:
+          const: pageFamily
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      - family
+      - bucket
+      - keys
+      type: object
+    ReleaseTrainSubjectTrainPair:
+      properties:
+        a:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        b:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        kind:
+          const: trainPair
+          type: string
+      required:
+      - kind
+      - a
+      - b
+      type: object
+    ReleaseTrainSubjectVersion:
+      properties:
+        app:
+          type: string
+        kind:
+          const: version
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      - app
+      type: object
+    ReleaseTrainSubjectVersionDate:
+      properties:
+        app:
+          type: string
+        field:
+          enum:
+          - freeze
+          - publish
+          - page
+          type: string
+        kind:
+          const: versionDate
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      - app
+      - field
       type: object
     ReleaseTrainTag:
       properties:
