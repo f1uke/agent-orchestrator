@@ -25,6 +25,9 @@ func TestEveryRuleDeclaresTheApprovedMinePolicy(t *testing.T) {
 		t.Errorf("%d rules, the approved table has %d: give a new rule its mine policy here", len(table), len(want))
 	}
 	for _, r := range table {
+		if r.Mine == "" {
+			t.Errorf("rule %s declares no mine policy: set rule.Mine", r.ID)
+		}
 		if r.Mine != want[r.ID] {
 			t.Errorf("rule %s mine policy = %q, want %q", r.ID, r.Mine, want[r.ID])
 		}

@@ -1126,6 +1126,15 @@
 		margin-top: 2px;
 		overflow-wrap: anywhere;
 	}
+	.rel-sheet .al .mine {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 2px;
+		font-size: 11.5px;
+		color: var(--accent);
+		overflow-wrap: anywhere;
+	}
 	.rel-sheet .al .acts {
 		display: flex;
 		gap: 12px;

@@ -2,6 +2,8 @@ import { ChevronRight, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useHideHit, useUnhideHit } from "../../hooks/useReleaseBoard";
 import { FIX_STATE_META, fixAction } from "../../lib/releases/fix";
+import type { Lens } from "../../lib/releases/lens";
+import { alertText, mineWhy, minePolicyOf, onlyMeSubject } from "../../lib/releases/mineWhy";
 import type { AlertHit, Board } from "../../lib/releases/types";
 import type { SheetEntry } from "../../lib/releases/url";
 import { appMarkOf } from "../../lib/releases/appMark";
@@ -11,10 +13,10 @@ import { SEVERITY_META } from "../../lib/releases/vocab";
 import { AppMark } from "./AppMark";
 import { NoMrButton } from "./NoMr";
 import type { PageActions } from "./ReleasesPage";
-import { ruleTagOf, type Provenance } from "../../lib/releases/sources";
+import { mineWhyOf, ruleTagOf, type Provenance } from "../../lib/releases/sources";
 import { SourceTag, useSources } from "./Sources";
 
-type AlertCtx = { board: Board; actions: PageActions };
+type AlertCtx = { board: Board; lens: Lens; actions: PageActions };
 
 export function HitWho({ board, train, app }: { board: Board; train?: string; app?: string }) {
 	const label = train ? board.trains.find((t) => t.id === train)?.label : null;
@@ -112,6 +114,18 @@ function SubjectLine({ h, c, open }: { h: AlertHit; c: AlertCtx; open: SheetEntr
 	);
 }
 
+function MineLine({ h, c }: { h: AlertHit; c: AlertCtx }) {
+	const why = c.lens.me ? mineWhy(h) : "";
+	const policy = minePolicyOf(c.board.catalogue, h.rule);
+	if (!why) return null;
+	return (
+		<div className="mine" data-testid="hit-mine">
+			{why}
+			{policy && <SourceTag p={mineWhyOf(h.rule, policy)} />}
+		</div>
+	);
+}
+
 function FixButton({ h, hidden, c }: { h: AlertHit; hidden: boolean; c: AlertCtx }) {
 	const a = fixAction(h, hidden);
 	if (!a) return null;
@@ -140,7 +154,8 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	const hide = useHideHit();
 	const unhide = useUnhideHit();
 	const target = sheetFor(h);
-	const where = c.actions.whereIs(h.subject);
+	const subject = onlyMeSubject(h, c.lens.me);
+	const where = c.actions.whereIs(subject);
 	return (
 		<div className={`al${hidden ? " dim" : ""}`} data-st={SEVERITY_META[h.severity].tone} data-hit={h.id}>
 			<div>
@@ -154,13 +169,14 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 					)}
 				</div>
 				<SubjectLine h={h} c={c} open={hidden ? null : target} />
-				<div className="tx">{h.text}</div>
+				<div className="tx">{alertText(h, c.lens.me)}</div>
+				<MineLine h={h} c={c} />
 				<div className="acts">
 					<button
 						type="button"
 						data-testid="hit-show"
 						aria-describedby={where ? `${h.id}-where` : undefined}
-						onClick={() => c.actions.reveal(h.subject)}
+						onClick={() => c.actions.reveal(subject)}
 					>
 						Show
 					</button>

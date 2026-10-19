@@ -3,6 +3,7 @@ import {
 	codeStateOf,
 	llbTargetOf,
 	membershipOf,
+	mineWhyOf,
 	noMrOf,
 	planSaysText,
 	ruleOf,
@@ -151,6 +152,24 @@ describe("systemOf", () => {
 
 	it("labels a kind from Board.kinds", () => {
 		expect(index().labelOf("jira.page_cards")).toBe("page cards (Jira)");
+	});
+});
+
+describe("mineWhyOf", () => {
+	it("says AO derives the why line from the rule's mine policy", () => {
+		const p = mineWhyOf("D3", "pending_approver");
+		expect(p.how).toBe("derived");
+		expect(p.lines).toEqual([{ kind: "ao.mine_policy", text: "D3: mine while your approval is pending" }]);
+		expect(index().labelOf("ao.mine_policy")).toBe("mine policy");
+		expect(tag(p)).toBe("AO");
+	});
+
+	it("says what each policy reads", () => {
+		expect(mineWhyOf("C1", "owner").lines[0].text).toBe(
+			"C1: mine when you own it: the release MR, the release ticket or a hotfix MR",
+		);
+		expect(mineWhyOf("G5", "listed_cards").lines[0].text).toBe("G5: mine through the cards it lists that are yours");
+		expect(mineWhyOf("L9", "mr").lines[0].text).toBe("L9: mine when you wrote the MR or own its card");
 	});
 });
 

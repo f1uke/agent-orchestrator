@@ -58,9 +58,8 @@ type RuleInfo struct {
 	// Reads is every fact kind the rule reads, so an alert can name its sources.
 	Reads []KindName `json:"reads"`
 	// Subjects is every kind of subject the rule's hits are about, so the page can find each on the timeline.
-	Subjects []SubjectKind `json:"subjects"`
-	// Mine is when the rule's hits are mine, so an alert can say why it is.
-	MinePolicy MinePolicy `json:"minePolicy"`
+	Subjects   []SubjectKind `json:"subjects"`
+	MinePolicy MinePolicy    `json:"minePolicy"`
 }
 
 // LookupRule returns the catalogue row of id under settings, or false when no rule has that id.

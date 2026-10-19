@@ -5,6 +5,7 @@ import type {
 	Board,
 	BoardResponse,
 	FixKind,
+	MineReason,
 	MinePolicy,
 	RuleInfo,
 	Severity,
@@ -264,6 +265,8 @@ const READS: Readonly<Record<string, string[]>> = {
 
 const MINE_POLICY: Readonly<Record<string, MinePolicy>> = {
 	A1: "never",
+	A2: "never",
+	A3: "never",
 	A5: "never",
 	A6: "never",
 	A7: "never",
@@ -273,9 +276,13 @@ const MINE_POLICY: Readonly<Record<string, MinePolicy>> = {
 	C5: "owner",
 	D1: "owner",
 	E1: "owner",
+	F2: "owner",
 	D3: "pending_approver",
+	G2: "listed_cards",
 	G5: "listed_cards",
 	L3: "listed_cards",
+	L1: "mr",
+	L8: "mr",
 	L9: "mr",
 };
 
@@ -314,7 +321,7 @@ function withCards(b: Board): Board {
 }
 
 export function demoBoard(today: string): Board {
-	return withCards(baseBoard(today));
+	return markHitMine(withCards(baseBoard(today)));
 }
 
 function baseBoard(today: string): Board {
@@ -483,7 +490,7 @@ function baseBoard(today: string): Board {
 			"D3~v/21-2026/da",
 			"D3",
 			"risk",
-			"0 of 9 approvers approved, publish in 6 days",
+			`9 of 9 not approved: ${PEOPLE.map(([, name]) => name).join(", ")}`,
 			{ kind: "version", train: "21-2026", app: "da" },
 			{
 				app: "da",
@@ -1128,13 +1135,75 @@ function markMine(b: Board): void {
 		di21.mine = [{ why: "release_mr_author", ref: "!77" }];
 		for (const u of di21.cards) if (u.assignee?.accountId === "acc-ada") u.mine = [{ why: "assignee" }];
 	}
-	for (const h of b.alerts.hits)
-		if (h.app === "di" && h.train === "21-2026") h.mine = [{ why: "release_mr_author", ref: "!77" }];
 	for (const h of b.hotfixes) h.mine = [{ why: "mr_author", ref: "!88" }];
 	const wallet = b.llbs.find((g) => g.id === "demo-wallet");
 	if (wallet) wallet.mine = [{ why: "card", ref: "DEMO-108" }];
 	for (const c of wallet?.branches[0]?.cards ?? [])
 		if (c.key === "DEMO-108") c.mine = [{ why: "mr_author", ref: "!303" }];
+}
+
+const ME = "acc-ada";
+const myName = (b: Board) => (b.identity.kind === "known" ? b.identity.displayName : "");
+
+function myCards(b: Board): Set<string> {
+	const owns = (m?: readonly MineReason[]) => m?.some((x) => x.why !== "no_mr") ?? false;
+	const keys = [
+		...b.trains.flatMap((t) => t.versions.flatMap((v) => v.cards.filter((u) => owns(u.mine)))),
+		...b.sprints.flatMap((r) => r.cards.filter((c) => owns(c.mine))),
+		...b.llbs.flatMap((g) => g.branches.flatMap((br) => br.cards.filter((c) => owns(c.mine)))),
+	].map((c) => c.key);
+	return new Set(keys);
+}
+
+function listedCards(h: AlertHit): string[] {
+	const s = h.subject;
+	if (s.kind === "pageFamily") return s.keys;
+	if (s.kind === "card" || s.kind === "cardOnTrain") return [s.key];
+	const cards = h.evidence.cards;
+	return Array.isArray(cards) ? cards.filter((k): k is string => typeof k === "string") : [];
+}
+
+function mineAsTheBackendPolicyComputes(b: Board, h: AlertHit): MineReason[] {
+	const cards = myCards(b);
+	const byCard = listedCards(h)
+		.filter((k) => cards.has(k))
+		.map((ref) => ({ why: "card" as const, ref }));
+	const s = h.subject;
+	switch (MINE_POLICY[h.rule]) {
+		case "owner": {
+			if (s.kind === "hotfix" || s.kind === "hotfixTrain")
+				return b.hotfixes.find((x) => x.app === s.app && x.version === s.version)?.mine ?? [];
+			if (s.kind !== "version") return [];
+			const v = b.trains.find((t) => t.id === s.train)?.versions.find((x) => x.app === s.app);
+			return (v?.mine ?? []).filter((m) => m.why === "release_mr_author" || m.why === "release_ticket_assignee");
+		}
+		case "pending_approver": {
+			if (s.kind !== "version") return [];
+			const v = b.trains.find((t) => t.id === s.train)?.versions.find((x) => x.app === s.app);
+			const pending = v?.jira?.approvers.some((a) => a.accountId === ME && a.status !== "APPROVED");
+			return pending ? [{ why: "approver" }] : [];
+		}
+		case "listed_cards":
+			return byCard;
+		case "mr": {
+			if (s.kind !== "mr") return byCard;
+			const mine = b.sprints
+				.flatMap((r) => r.cards.flatMap((c) => c.mrs))
+				.some((m) => m.app === s.app && m.iid === s.iid && m.author === myName(b));
+			return mine ? [{ why: "mr_author", ref: `!${s.iid}` }] : byCard;
+		}
+	}
+	return [];
+}
+
+function markHitMine(b: Board): Board {
+	if (b.identity.kind !== "known") return b;
+	for (const h of b.alerts.hits) {
+		const mine = mineAsTheBackendPolicyComputes(b, h);
+		if (mine.length) h.mine = mine;
+		else delete h.mine;
+	}
+	return b;
 }
 
 function stripMine(v: unknown): void {
@@ -1293,7 +1362,7 @@ export function fixesBoard(today: string): Board {
 		};
 	});
 	b.alerts.badge = { ...b.alerts.badge, count: b.alerts.hits.filter((h) => h.bucket === "badge").length };
-	return b;
+	return markHitMine(b);
 }
 
 const SUBJECT_HITS: [string, Severity, string, Subject][] = [
@@ -1423,11 +1492,13 @@ export function subjectsBoard(today: string): Board {
 			links: [{ label: "Open", url: `${HOST}/x` }],
 			asOf: at,
 			...("app" in subject ? { app: subject.app } : {}),
-			...(id === "G2~c/DEMO-304" ? { mine: [{ why: "subtask" as const, ref: "DEMO-314" }] } : {}),
 		});
 	for (const r of b.catalogue) r.on = true;
+	for (const v of b.trains.find((t) => t.id === "21-2026")?.versions ?? [])
+		for (const u of v.cards)
+			if (u.key === "DEMO-104" || u.key === "DEMO-106") u.mine = [{ why: "subtask", ref: u.key.replace("-10", "-11") }];
 	b.alerts.badge = { ...b.alerts.badge, count: b.alerts.hits.filter((h) => h.bucket === "badge").length };
-	return b;
+	return markHitMine(b);
 }
 
 export function demoResponse(board: Board): BoardResponse {

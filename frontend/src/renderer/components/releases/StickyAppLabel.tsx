@@ -6,6 +6,7 @@ import type { BoardApp, RuleInfo, Stage } from "../../lib/releases/types";
 import { SourceTag, SourceValue } from "./Sources";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
 import { versionMineText } from "../../lib/releases/sprint";
+import { alertText } from "../../lib/releases/mineWhy";
 import { appMark } from "../../lib/releases/appMark";
 import { AppMark } from "./AppMark";
 import { useLabelStagger } from "./ReleaseMotion";
@@ -172,7 +173,7 @@ export function StickyAppLabel({
 				{top ? (
 					<>
 						<SourceTag p={ruleTagOf(catalogue, top.rule)} />
-						<b>{SEVERITY_META[top.severity].label}</b> {top.text}
+						<b>{SEVERITY_META[top.severity].label}</b> {alertText(top, lens.me)}
 					</>
 				) : now?.detail ? (
 					now.detail

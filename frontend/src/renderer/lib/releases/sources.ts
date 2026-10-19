@@ -3,6 +3,7 @@ import type {
 	Board,
 	CardUnit,
 	LLBGroup,
+	MinePolicy,
 	NoMRMark,
 	RuleInfo,
 	SprintCard,
@@ -50,6 +51,7 @@ const AO_KINDS: Readonly<Record<KindName, { system: string; label: string }>> = 
 	"ao.no_mr": { system: "mark", label: "No MR needed marks" },
 	"ao.config": { system: "settings", label: "release-train.json" },
 	"ao.convention": { system: "ao", label: "AO convention" },
+	"ao.mine_policy": { system: "ao", label: "mine policy" },
 	"ao.today": { system: "ao", label: "today's date" },
 };
 
@@ -195,6 +197,24 @@ export function stageOf(s: Stage): Provenance {
 		lines: [...s.reads.map((kind) => ({ kind })), ...(conv ? [{ kind: "ao.convention", text: conv }] : [])],
 		note: conv ? "Its date is an AO convention, not one a system records." : undefined,
 		field: "Stage.reads",
+	};
+}
+
+const POLICY_TEXT: Readonly<Record<MinePolicy, string>> = {
+	never: "never mine: nobody owns a data check",
+	owner: "mine when you own it: the release MR, the release ticket or a hotfix MR",
+	pending_approver: "mine while your approval is pending",
+	listed_cards: "mine through the cards it lists that are yours",
+	mr: "mine when you wrote the MR or own its card",
+};
+
+export function mineWhyOf(rule: string, policy: MinePolicy): Provenance {
+	return {
+		title: "Why it is yours",
+		how: "derived",
+		lines: [{ kind: "ao.mine_policy", text: `${rule}: ${POLICY_TEXT[policy]}` }],
+		note: "AO derives it from the rule's mine policy and the reasons the hit is yours.",
+		field: "RuleInfo.minePolicy, Hit.mine",
 	};
 }
 
