@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { NARROW, VIEWPORTS, labelOverlaps, layer, open, settle } from "./releases-kit";
+import { NARROW, VIEWPORTS, WIDE, labelOverlaps, layer, open, settle } from "./releases-kit";
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 const G2 = "G2~c/DEMO-304";
@@ -31,7 +31,7 @@ async function attentionCount(page: Page) {
 }
 
 test.describe("No MR needed", () => {
-	test.use({ viewport: NARROW });
+	test.use({ viewport: SHOTS ? WIDE : NARROW });
 
 	test("from the card row: the card moves to the quiet no-code block, counts update, its G2 goes; undo restores all", async ({
 		page,
