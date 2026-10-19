@@ -338,3 +338,40 @@ describe("mineText", () => {
 		expect(versionMineText(pending, me)).toBe("your release MR !7 · approver, pending");
 	});
 });
+
+describe("cards marked No MR needed", () => {
+	const mark = { markedBy: "app", markedAt: "2026-10-14T03:00:00Z" };
+	const marked = card("DEMO-5", [], { noMr: mark, mine: [{ why: "no_mr" }] });
+	const quietRow: SprintRow = {
+		...fullRow,
+		cards: [...cards, marked],
+		dests: [...fullRow.dests, { to: { kind: "nomr" }, count: 1, keys: ["DEMO-5"] }],
+	};
+
+	it("count in their own quiet no-code chip, not under no MR", () => {
+		const l = boardLabel(quietRow, b, quietRow.cards);
+		expect(l.dests.slice(-2)).toEqual([
+			{ text: "no MR 1", tone: "todo" },
+			{ text: "no code 1", tone: "passive" },
+		]);
+		expect(l.routes.at(-2)).toEqual({ text: "no code 1", tone: "passive" });
+		expect(l.scope).toBe("3 new · 2 carried with MRs · 2 carried, done");
+	});
+
+	it("get their own block after not routed yet, with a quiet head", () => {
+		const blocks = destBlocks(quietRow, quietRow.cards);
+		expect(blocks.map((x) => x.key)).toEqual(["t:21-2026", "l:demo-wallet", "off", "none", "nomr", "carried"]);
+		expect(blocks[4].cards.map((c) => c.key)).toEqual(["DEMO-5"]);
+		expect(destHead(b, { kind: "nomr" }, [marked])).toEqual({
+			to: "∅ no code",
+			tone: "passive",
+			tail: "marked No MR needed in AO",
+		});
+		expect(destLabel(b, { kind: "nomr" })).toBe("∅ no code");
+	});
+
+	it("say marked by you under Only me", () => {
+		expect(mineText([{ why: "no_mr" }])).toBe("marked by you");
+		expect(mineText([{ why: "assignee" }, { why: "no_mr" }])).toBe("assignee · marked by you");
+	});
+});

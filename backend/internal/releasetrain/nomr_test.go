@@ -150,4 +150,7 @@ func TestAMarkIsMineAsMarkedByYou(t *testing.T) {
 	if got := b.Trains[0].Versions[0].Cards[0].Mine; !reflect.DeepEqual(got, want) {
 		t.Fatalf("train DEMO-1 mine = %+v, want %+v", got, want)
 	}
+	if got := b.Trains[0].Versions[0].Mine; got != nil {
+		t.Fatalf("version mine = %+v, want none: a mark keeps the card, not its whole version", got)
+	}
 }

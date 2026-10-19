@@ -67,6 +67,8 @@ export function destKey(d: Dest): string {
 			return "off";
 		case "none":
 			return "none";
+		case "nomr":
+			return "nomr";
 	}
 }
 
@@ -84,6 +86,8 @@ export function destTone(b: Board, d: Dest): Tone {
 			return "failed";
 		case "none":
 			return "todo";
+		case "nomr":
+			return "passive";
 	}
 }
 
@@ -99,6 +103,8 @@ export function destLabel(b: Board, d: Dest): string {
 			return "! off the sprint flow";
 		case "none":
 			return "· not routed yet";
+		case "nomr":
+			return "∅ no code";
 	}
 }
 
@@ -114,6 +120,8 @@ function destChip(b: Board, d: Dest, n: number): string {
 			return `off ${n}`;
 		case "none":
 			return `no MR ${n}`;
+		case "nomr":
+			return `no code ${n}`;
 	}
 }
 
@@ -123,6 +131,8 @@ function routeChip(b: Board, d: Dest, n: number): string {
 			return `off flow ${n}`;
 		case "none":
 			return `no MR ${n}`;
+		case "nomr":
+			return `no code ${n}`;
 		default:
 			return `${destLabel(b, d)} ${n}`;
 	}
@@ -250,6 +260,8 @@ export function destHead(b: Board, to: Dest | null, cards: readonly SprintCard[]
 			return { ...head, tail: "straight into develop or another branch" };
 		case "none":
 			return { ...head, tail: "no MR in any repo" };
+		case "nomr":
+			return { ...head, tail: "marked No MR needed in AO" };
 	}
 }
 
@@ -336,6 +348,7 @@ const MINE_TEXT: Readonly<Record<MineReason["why"], string>> = {
 	approver: "approver",
 	card: "your card",
 	landing_author: "your landing MR",
+	no_mr: "marked by you",
 };
 
 export function mineText(mine: readonly MineReason[]): string {

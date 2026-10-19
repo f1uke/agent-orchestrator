@@ -84,11 +84,11 @@ func mine(b *Board, m *me, mrs mrIndex, snap Snapshot, cfg Config) {
 			for ci := range v.Cards {
 				c := &v.Cards[ci]
 				c.Mine = m.card(c.Key, c.Assignee, mrs[v.App][c.Key])
-				if _, marked := c.Code.(CodeNoMR); marked {
-					c.Mine = append(c.Mine, MineReason{Why: MineNoMR})
-				}
 				if len(c.Mine) > 0 {
 					cards = append(cards, MineReason{Why: MineCard, Ref: c.Key})
+				}
+				if _, marked := c.Code.(CodeNoMR); marked {
+					c.Mine = append(c.Mine, MineReason{Why: MineNoMR})
 				}
 			}
 			v.Mine = append(m.version(v), cards...)

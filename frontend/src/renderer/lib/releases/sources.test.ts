@@ -3,6 +3,7 @@ import {
 	codeStateOf,
 	llbTargetOf,
 	membershipOf,
+	noMrOf,
 	planSaysText,
 	ruleOf,
 	sourceIndex,
@@ -321,5 +322,22 @@ describe("planSaysText", () => {
 		expect(planSaysText(["fixVersion"])).toBe("fixVersion");
 		expect(planSaysText(["release train page", "sprint branch"])).toBe("page + sprint MR");
 		expect(planSaysText(undefined)).toBe("page");
+	});
+});
+
+describe("No MR needed provenance", () => {
+	const mark = { note: "config only", markedBy: "app", markedAt: "2026-10-14T03:00:00Z" };
+
+	it("tags a marked card's code as AO's own mark, not GitLab, and names who marked it", () => {
+		const p = codeStateOf(unit({ code: { kind: "no_mr", ...mark } }));
+		expect(tag(p)).toBe("AO mark");
+		expect(p.lines[0]).toEqual({ kind: "ao.no_mr", text: 'marked by you · app · 2026-10-14 · "config only"' });
+		expect(p.title).toBe("Code: no code: marked No MR needed");
+	});
+
+	it("drops the note when there is none", () => {
+		expect(noMrOf("DEMO-1", { markedBy: "cli:demo-7", markedAt: mark.markedAt }).lines[0].text).toBe(
+			"marked by you · cli:demo-7 · 2026-10-14",
+		);
 	});
 });

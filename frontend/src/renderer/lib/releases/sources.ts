@@ -1,5 +1,16 @@
 import { sourceAges, type SourceAge } from "./lens";
-import type { Board, CardUnit, LLBGroup, RuleInfo, SprintCard, SprintRow, Stage, StageKey, TrainKey } from "./types";
+import type {
+	Board,
+	CardUnit,
+	LLBGroup,
+	NoMRMark,
+	RuleInfo,
+	SprintCard,
+	SprintRow,
+	Stage,
+	StageKey,
+	TrainKey,
+} from "./types";
 import { CODE_META, STAGE_META } from "./vocab";
 
 export type KindName = string;
@@ -24,6 +35,7 @@ const SYSTEMS: Readonly<Record<string, SystemMeta>> = {
 	gitlab: { name: "GitLab", short: "GitLab", mark: "G", besideOthers: true },
 	confluence: { name: "Confluence", short: "Confluence", mark: "C", besideOthers: true },
 	plan: { name: "AO plan", short: "AO plan", mark: "P", besideOthers: true },
+	mark: { name: "AO mark", short: "AO mark", mark: "M", besideOthers: true },
 	settings: { name: "AO settings", short: "Settings", mark: "S", besideOthers: false },
 	ao: { name: "AO", short: "AO", mark: "AO", besideOthers: false },
 };
@@ -35,6 +47,7 @@ export function systemMeta(system: string): SystemMeta {
 /** Kinds AO itself owns; Board.kinds lists only the kinds the poller reads. */
 const AO_KINDS: Readonly<Record<KindName, { system: string; label: string }>> = {
 	"ao.plans": { system: "plan", label: "long-lived plans" },
+	"ao.no_mr": { system: "mark", label: "No MR needed marks" },
 	"ao.config": { system: "settings", label: "release-train.json" },
 	"ao.convention": { system: "ao", label: "AO convention" },
 	"ao.today": { system: "ao", label: "today's date" },
@@ -131,8 +144,24 @@ export function planSaysText(planFrom: readonly CardWhy[] | undefined): string {
 	return on.length ? on.map((w) => WHY_SHORT[w]).join(" + ") : "page";
 }
 
+export function markedText(m: NoMRMark): string {
+	return `marked by you · ${m.markedBy} · ${m.markedAt.slice(0, 10)}${m.note ? ` · "${m.note}"` : ""}`;
+}
+
+export function noMrOf(key: string, m: NoMRMark): Provenance {
+	return {
+		title: `${key}: No MR needed`,
+		how: "read",
+		lines: [{ kind: "ao.no_mr", text: markedText(m) }],
+		note: "A person marked it in AO, on this page or with ao train nomr. Jira is not changed.",
+		field: "noMr",
+	};
+}
+
 export function codeStateOf(u: CardUnit): Provenance {
 	const c = u.code;
+	if (c.kind === "no_mr")
+		return { ...noMrOf(u.key, c), title: `Code: ${CODE_META.no_mr.label}`, field: "CardUnit.code" };
 	const text =
 		c.kind === "merged"
 			? `${mrList(c.mrs)} merged${c.via ? ` via ${c.via}` : ""}`

@@ -61,6 +61,7 @@ export const CODE_META: Readonly<Record<CodeState["kind"], Meta>> = {
 	parked: { tone: "hotfix", label: "parked in a long-lived branch", short: "parked", glyph: "⑂" },
 	elsewhere: { tone: "waiting", label: "merged elsewhere", short: "elsewhere", glyph: "!" },
 	none: { tone: "todo", label: "no MR in this repo", short: "no MR", glyph: "·" },
+	no_mr: { tone: "passive", label: "no code: marked No MR needed", short: "no code", glyph: "∅" },
 };
 
 export const LLB_STATE_META: Readonly<Record<LLBState | "gone", Omit<Meta, "glyph">>> = {

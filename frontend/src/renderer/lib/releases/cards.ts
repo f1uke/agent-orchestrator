@@ -61,7 +61,7 @@ function uniqueReasons(list: MineReason[]): MineReason[] {
 }
 
 function tally(units: CardUnit[]): CodeTally {
-	const t: CodeTally = { merged: 0, open: 0, parked: 0, elsewhere: 0, none: 0 };
+	const t: CodeTally = { merged: 0, open: 0, parked: 0, elsewhere: 0, none: 0, no_mr: 0 };
 	for (const u of units) t[u.code.kind]++;
 	return t;
 }
@@ -103,6 +103,14 @@ export function cardGroups(board: Board, app: AppId): CardGroup[] {
 			},
 		];
 	});
+}
+
+/** A card marked No MR needed has no code to merge, so it leaves the denominator. */
+export function mergedOf(units: readonly CardUnit[]): { merged: number; needCode: number } {
+	return {
+		merged: units.filter((u) => u.code.kind === "merged").length,
+		needCode: units.filter((u) => u.code.kind !== "no_mr").length,
+	};
 }
 
 export function groupRowCount(g: CardGroup, isOpen: (key: string) => boolean): number {
