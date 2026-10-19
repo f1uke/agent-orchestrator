@@ -5,6 +5,7 @@ import "fmt"
 var ruleA1 = rule{
 	ID: "A1", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineNever,
 	Title:    "Milestone and Jira release name different versions",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchVersion, func(m Mismatch) (Subject, string, *Day) {
@@ -17,6 +18,7 @@ var ruleA1 = rule{
 var ruleA2 = rule{
 	ID: "A2", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
 	Subjects: []SubjectKind{SubjectJiraVersion},
+	Mine:     MineNever,
 	Title:    "Jira release has a train label but no milestone",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchNoMilestone, func(m Mismatch) (Subject, string, *Day) {
@@ -29,6 +31,7 @@ var ruleA2 = rule{
 var ruleA3 = rule{
 	ID: "A3", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
 	Subjects: []SubjectKind{SubjectMilestone},
+	Mine:     MineNever,
 	Title:    "Milestone has a train label but no Jira release",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchNoJira, func(m Mismatch) (Subject, string, *Day) {
@@ -41,6 +44,7 @@ var ruleA3 = rule{
 var ruleA4 = rule{
 	ID: "A4", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
 	Subjects: []SubjectKind{SubjectJiraVersion},
+	Mine:     MineNever,
 	Title:    "Jira release has no train label and no hotfix milestone",
 	Check: func(b *Board) []Hit {
 		return mismatchHits(b, MismatchNoLabel, func(m Mismatch) (Subject, string, *Day) {
@@ -53,6 +57,7 @@ var ruleA4 = rule{
 var ruleA5 = rule{
 	ID: "A5", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineNever,
 	Title:    "Jira release date differs from milestone due date",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
@@ -69,6 +74,7 @@ var ruleA5 = rule{
 var ruleA6 = rule{
 	ID: "A6", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: []KindName{KindMilestones.Name, KindPages.Name},
 	Subjects: []SubjectKind{SubjectVersionDate},
+	Mine:     MineNever,
 	Title:    "Release train page dates differ from the milestone",
 	Check: func(b *Board) []Hit {
 		var out []Hit
@@ -116,6 +122,7 @@ func pageDateHits(t *Train, v *AppVersion) []Hit {
 var ruleA7 = rule{
 	ID: "A7", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: []KindName{KindMilestones.Name},
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineNever,
 	Title:    "An app's milestone dates differ from the rest of its train",
 	Check: func(b *Board) []Hit {
 		var out []Hit

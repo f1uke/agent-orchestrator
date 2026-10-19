@@ -21,6 +21,7 @@ type rule struct {
 	Hint      string
 	Reads     []KindName
 	Subjects  []SubjectKind
+	Mine      MinePolicy
 	Scope     ruleScope
 	Check     func(b *Board) []Hit
 }
@@ -136,6 +137,7 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 	a := Alerts{StaleHides: []StaleHide{}}
 	matched := map[HitID]bool{}
 	unsure := map[RuleID]bool{}
+	myCards := b.myCards()
 	for _, r := range ruleTable() {
 		on := r.effectiveOn(in.Human.RuleSettings)
 		hits := r.Check(b)
@@ -148,7 +150,7 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 			if hits[i].Severity == 0 {
 				hits[i].Severity = r.Severity
 			}
-			hits[i].Mine = mineOfSubject(b, hits[i].Subject)
+			hits[i].Mine = r.mineOf(b, myCards, hits[i])
 			matched[hits[i].ID] = true
 		}
 		for _, cell := range cells(b, in.Config, r, hits) {

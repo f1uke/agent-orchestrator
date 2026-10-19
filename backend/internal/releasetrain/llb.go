@@ -159,6 +159,14 @@ func detectLLBs(cfg Config, snap Snapshot) ([]LongLivedBranch, map[AppID]Day) {
 	return out, cutover
 }
 
+func (br LongLivedBranch) cardKeys() []string {
+	out := make([]string, len(br.Cards))
+	for i, c := range br.Cards {
+		out[i] = c.Key
+	}
+	return out
+}
+
 func longLived(name string, ins, outs []MRFact) bool {
 	own := issueKeyRE.FindAllString(name, -1)
 	if len(own) == 0 {

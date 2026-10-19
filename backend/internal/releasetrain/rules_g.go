@@ -31,7 +31,7 @@ func cardHit(row *SprintRow, c *SprintCard, text string, ev Evidence, mrs ...Spr
 	for _, m := range mrs {
 		links = append(links, Link{Label: fmt.Sprintf("Open !%d", m.IID), URL: m.URL})
 	}
-	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Text: text, Links: links}
+	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Text: text, Links: links, cards: []string{c.Key}}
 }
 
 func mrList(mrs []SprintMR, short func(AppID) string) string {
@@ -54,6 +54,7 @@ func (b *Board) appName(id AppID) string {
 var ruleG1 = rule{
 	ID: "G1", Group: "G", Severity: SevHygiene, DefaultOn: true, Scope: scopeGlobal,
 	Subjects: []SubjectKind{SubjectCard},
+	Mine:     MineListedCards,
 	Reads:    readsSprint,
 	Title:    "Jira card still in development while its code is merged",
 	Hint:     "Every MR of the card is merged, but Jira still says Ready to Dev, In Progress or Pull Request.",
@@ -87,6 +88,7 @@ func workDaysLeft(today, end Day) int {
 var ruleG2 = rule{
 	ID: "G2", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopeGlobal,
 	Subjects: []SubjectKind{SubjectCard},
+	Mine:     MineListedCards,
 	Reads:    readsSprint,
 	Title:    "Sprint card has no MR and the sprint ends within 3 working days",
 	Hint:     "Active cards only (new this sprint, or with open mobile work). A card marked No MR needed is skipped.",
@@ -112,6 +114,7 @@ var ruleG2 = rule{
 var ruleG3 = rule{
 	ID: "G3", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopeGlobal,
 	Subjects: []SubjectKind{SubjectCard},
+	Mine:     MineListedCards,
 	Reads:    readsSprintRoute,
 	Title:    "Card's code goes to a different train than its page or fixVersion says",
 	Check: func(b *Board) []Hit {
@@ -142,6 +145,7 @@ var ruleG3 = rule{
 var ruleG4 = rule{
 	ID: "G4", Group: "G", Severity: SevInfo, DefaultOn: true, Scope: scopeGlobal,
 	Subjects: []SubjectKind{SubjectCard},
+	Mine:     MineListedCards,
 	Reads:    readsSprintRoute,
 	Title:    "Card's apps go to different trains",
 	Check: func(b *Board) []Hit {
@@ -171,6 +175,7 @@ var ruleG4 = rule{
 var ruleG5 = rule{
 	ID: "G5", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopeGlobal,
 	Subjects: []SubjectKind{SubjectPageFamily},
+	Mine:     MineListedCards,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name, KindMRs.Name, KindPages.Name, KindPageCards.Name, KindBranchCards.Name, KindLLBCards.Name},
 	Title:    "Card ships with a train but is not on its release train page",
 	Hint:     "Code merged into the sprint branch: risk now. MR still open: info until 3 days before freeze. Only when that family's page exists.",
@@ -223,6 +228,7 @@ var ruleG5 = rule{
 						Evidence: Evidence{"page": pg.ID, "cards": keys, "bucket": bucket.name},
 						Text:     fmt.Sprintf("%d card(s) not on %q: %s", len(keys), pg.Title, joinNames(keys)),
 						Links:    []Link{{Label: "Open page", URL: pg.URL}},
+						cards:    keys,
 					})
 				}
 			}
@@ -243,6 +249,7 @@ func containsWhy(list []CardWhy, w CardWhy) bool {
 var ruleL8 = rule{
 	ID: "L8", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopeGlobal,
 	Subjects: []SubjectKind{SubjectMR},
+	Mine:     MineMR,
 	Reads:    []KindName{KindBoardSprints.Name, KindSprintCards.Name, KindMRs.Name, KindBranchCards.Name},
 	Title:    "Card MR into develop after the sprint-branch cutover",
 	Hint:     "The same cards the sprint row puts in \"off the sprint flow\". An open MR is caught before it merges.",
@@ -266,6 +273,7 @@ var ruleL8 = rule{
 					Evidence: Evidence{"card": c.Key, "target": m.Target, "state": m.State, "board": row.Board.Key},
 					Text:     fmt.Sprintf("%s !%d %s; it should go to the sprint branch", b.appName(m.App), m.IID, what),
 					Links:    []Link{{Label: "Open MR", URL: m.URL}},
+					cards:    []string{c.Key},
 				})
 			}
 			return out
