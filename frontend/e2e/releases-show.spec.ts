@@ -5,6 +5,7 @@ import {
 	expectSpotted,
 	freezeRings,
 	layer,
+	NARROW,
 	open,
 	outerScrolls,
 	ringLife,
@@ -13,7 +14,7 @@ import {
 } from "./releases-kit";
 import { subjectsBoard } from "../src/renderer/lib/releases/fixture";
 
-test.use({ viewport: { width: 1512, height: 945 } });
+test.use({ viewport: NARROW });
 
 const sheet = (page: Page) => page.getByRole("dialog", { name: "Release details" });
 const row = (page: Page, hit: string) => page.locator(`.rel-sheet .al[data-hit="${hit}"]`);

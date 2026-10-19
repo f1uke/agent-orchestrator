@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
+import { NARROW, VIEWPORTS, halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
 
 // dev:web (VITE_NO_ELECTRON=1) serves lib/releases/fixture.ts: a fictional Board
 // with DEMO apps, made-up people and versions. Sticky labels, clipping, pan and
@@ -8,7 +8,7 @@ import { halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 
 test.describe("releases page", () => {
-	test.use({ viewport: { width: 1512, height: 945 } });
+	test.use({ viewport: NARROW });
 
 	test("default layers: no sprint card rows, markers only on the focused train", async ({ page }) => {
 		await open(page);
@@ -26,7 +26,7 @@ test.describe("releases page", () => {
 		expect(markerTops.length).toBe(6 - 1);
 		for (const top of markerTops) expect(top).toBeGreaterThan((barBox?.y ?? 0) + (barBox?.height ?? 0));
 		await expect(page.getByTestId("llb-summary").first()).toContainText("4 long-lived");
-		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-1512.png` });
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-1920.png` });
 	});
 
 	test("focusing another train moves the markers and the label to it", async ({ page }) => {
@@ -208,7 +208,7 @@ test.describe("releases page", () => {
 			await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
 			await open(page, "?layers=sprint,llb,cards");
 			await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
-			await page.setViewportSize({ width: 1512, height: 700 });
+			await page.setViewportSize({ width: NARROW.width, height: 700 });
 			await settle(page);
 			const sc = page.getByTestId("release-timeline");
 			expect(await sc.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(400);
@@ -251,11 +251,13 @@ test.describe("releases page", () => {
 	test("a drag pans the timeline both ways at once, and a still click on a bar still opens it", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await page.setViewportSize({ width: NARROW.width, height: 700 });
 		await settle(page);
 		const sc = page.getByTestId("release-timeline");
 		const at = () => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 		const start = await sc.evaluate((el) => {
 			el.scrollTop = 0;
+			el.scrollLeft = 0;
 			return { left: el.scrollLeft, top: el.scrollTop, room: el.scrollHeight - el.clientHeight };
 		});
 		expect(start.room).toBeGreaterThan(100);
@@ -959,7 +961,7 @@ test.describe("releases page", () => {
 });
 
 test.describe("release fixes", () => {
-	test.use({ viewport: { width: 1512, height: 945 } });
+	test.use({ viewport: NARROW });
 
 	const sheet = (page: Page) => page.getByRole("dialog", { name: "Release details" });
 	const alertRow = (page: Page, hit: string) => page.locator(`.al[data-hit="${hit}"]`);
@@ -1127,10 +1129,7 @@ test.describe("release fixes", () => {
 	});
 });
 
-for (const [width, height] of [
-	[1280, 800],
-	[1512, 945],
-] as const) {
+for (const { width, height } of VIEWPORTS) {
 	test(`at ${width}x${height} every app label's stage and blocker sit inside the viewport`, async ({ page }) => {
 		await page.setViewportSize({ width, height });
 		await open(page);

@@ -1,5 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 
+export const NARROW = { width: 1920, height: 1080 } as const;
+export const WIDE = { width: 2560, height: 1440 } as const;
+export const VIEWPORTS = [NARROW, WIDE] as const;
+
 const warnings = new WeakMap<Page, string[]>();
 
 type RingWatch = { born: WeakMap<Element, number>; log: string[]; freeze: boolean };
