@@ -16,8 +16,7 @@ import {
 } from "../../lib/releases/layout";
 import type { Lens } from "../../lib/releases/lens";
 import { llbGroupsFor, llbLanes } from "../../lib/releases/llb";
-import { momentumDistance, moveKeys, PULSE_MS, type ReleaseMotion } from "../../lib/releases/motion";
-import { scrollDelta } from "../../lib/releases/reveal";
+import { momentumDistance, moveKeys, type ReleaseMotion } from "../../lib/releases/motion";
 import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib/releases/stickyFit";
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
@@ -30,6 +29,7 @@ import type { PageActions } from "./ReleasesPage";
 import { readOf } from "../../lib/releases/sources";
 import { SourceTag } from "./Sources";
 import { StickyAppLabel } from "./StickyAppLabel";
+import { useSpotlight } from "./useSpotlight";
 import { VersionLanes } from "./VersionLanes";
 
 const LAYER_NAMES: Record<Layer, string> = {
@@ -121,7 +121,7 @@ export function Timeline({
 	});
 
 	usePan(sc, mo);
-	useReveal(sc, mo);
+	useSpotlight();
 
 	const hiddenTrigger = useRef<HTMLButtonElement>(null);
 	const focusTrigger = useRef(false);
@@ -195,6 +195,7 @@ export function Timeline({
 					))}
 				</div>
 			</MoveRoot>
+			<div className="rel-halos" aria-hidden="true" />
 		</div>
 	);
 }
@@ -378,75 +379,6 @@ function Axis({ tl, layers, actions }: { tl: TL; layers: Layers; actions: PageAc
 			</div>
 		</div>
 	);
-}
-
-const REVEAL_TRIES = 40;
-
-function coveredFrom(): number {
-	return document.querySelector(".rel-sheet")?.getBoundingClientRect().left ?? Infinity;
-}
-
-function useReveal(sc: React.RefObject<HTMLDivElement | null>, mo: ReleaseMotion) {
-	const pending = useReleasesUi((s) => s.pending);
-	const glides = useRef<{ stop: () => void }[]>([]);
-	useEffect(() => {
-		const el = sc.current;
-		if (!el || !pending) return;
-		let frame = 0;
-		let tries = 0;
-		let last = "";
-		let done = false;
-		const finish = () => {
-			done = true;
-			useReleasesUi.getState().setPending(null);
-		};
-		const land = (target: HTMLElement) => {
-			const box = el.getBoundingClientRect();
-			const axis = el.querySelector(".rel-axis")?.getBoundingClientRect().bottom ?? box.top;
-			const right = Math.min(box.right, coveredFrom());
-			const r = target.getBoundingClientRect();
-			const { dx, dy } = scrollDelta(
-				r,
-				{ left: box.left + LABEL_W, top: axis, right, bottom: box.bottom },
-				{
-					sticky: !!target.closest(".rel-lab"),
-				},
-			);
-			const glide = (from: number, by: number, set: (v: number) => void) => {
-				if (!by) return;
-				if (mo.reduced) set(from + by);
-				else glides.current.push(animate(from, from + by, { ...mo.axis, onUpdate: set }));
-			};
-			for (const g of glides.current) g.stop();
-			glides.current = [];
-			if (el.contains(target)) {
-				glide(el.scrollLeft, dx, (v) => (el.scrollLeft = v));
-				glide(el.scrollTop, dy, (v) => (el.scrollTop = v));
-			} else target.scrollIntoView({ block: "nearest", behavior: mo.reduced ? "auto" : "smooth" });
-			const mark = mo.reduced ? "static" : "motion";
-			const all = target.closest(".rel-sheet")
-				? [...document.querySelectorAll<HTMLElement>(pending.selector)]
-				: [target];
-			for (const t of all) t.dataset.pulse = mark;
-			window.setTimeout(() => {
-				for (const t of all) if (t.dataset.pulse === mark) delete t.dataset.pulse;
-			}, PULSE_MS);
-			finish();
-		};
-		const look = () => {
-			if (done) return;
-			const target =
-				el.querySelector<HTMLElement>(pending.selector) ?? document.querySelector<HTMLElement>(pending.selector);
-			const r = target?.getBoundingClientRect();
-			const at = r ? `${r.left},${r.top},${r.width},${r.height},${coveredFrom()}` : "";
-			if (target && r && r.width > 0 && at === last) return land(target);
-			last = at;
-			if (++tries > REVEAL_TRIES) return finish();
-			frame = requestAnimationFrame(look);
-		};
-		frame = requestAnimationFrame(look);
-		return () => cancelAnimationFrame(frame);
-	}, [pending, sc, mo]);
 }
 
 function usePan(sc: React.RefObject<HTMLDivElement | null>, mo: ReleaseMotion) {

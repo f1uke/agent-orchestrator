@@ -14,25 +14,48 @@ export type Presence = {
 	exitTransition?: Transition;
 };
 
-export const SHEET_W = 460;
-export const ASIDE_STRIP = 36;
-const ASIDE_X = SHEET_W - ASIDE_STRIP;
-
 export type ReleaseMotion = {
 	reduced: boolean;
 	unfold: Presence;
 	appear: Presence;
-	sheet: Presence & { aside: MotionValues };
+	sheet: Presence;
 	label: (i: number) => Presence;
 	fold: Transition;
 	row: Transition;
 	axis: Transition;
 	momentum: Transition;
+	ring: Ring;
 };
 
 export const DURATION = { micro: 0.08, short: 0.16, medium: 0.24 } as const;
 
-export const PULSE_MS = 1500;
+export type Ring =
+	{ kind: "pulse"; keyframes: Keyframe[]; timing: KeyframeAnimationOptions } | { kind: "hold"; ms: number };
+
+export const RING_MS = 5000;
+const BREATHS = 6;
+const BREATH_FROM = 0.04;
+const BREATH_TO = 0.94;
+
+function breathing(): Keyframe[] {
+	const step = (BREATH_TO - BREATH_FROM) / BREATHS;
+	const breaths = Array.from({ length: BREATHS }, (_, i) => [
+		{ opacity: 0.45, offset: BREATH_FROM + step * (i + 0.5), easing: "ease-in-out" },
+		{ opacity: 1, offset: BREATH_FROM + step * (i + 1), easing: "ease-in-out" },
+	]).flat();
+	return [
+		{ opacity: 0, offset: 0 },
+		{ opacity: 1, offset: BREATH_FROM, easing: "ease-in-out" },
+		...breaths,
+		{ opacity: 0, offset: 1 },
+	];
+}
+
+const PULSE: Ring = {
+	kind: "pulse",
+	keyframes: breathing(),
+	timing: { duration: RING_MS, easing: "linear", fill: "forwards" },
+};
 
 const ease = {
 	enter: [0, 0, 0.2, 1],
@@ -64,7 +87,6 @@ const MOVING: ReleaseMotion = {
 	sheet: {
 		initial: { opacity: 0, x: 16 },
 		animate: { opacity: 1, x: 0 },
-		aside: { opacity: 1, x: ASIDE_X },
 		exit: { opacity: 0, x: 14 },
 		transition: { duration: DURATION.medium, ease: ease.enter },
 		exitTransition: { duration: DURATION.short, ease: ease.exit },
@@ -79,6 +101,7 @@ const MOVING: ReleaseMotion = {
 	row: moving,
 	axis: moving,
 	momentum: { duration: DURATION.medium, ease: ease.coast },
+	ring: PULSE,
 };
 
 function still(p: Presence): Presence {
@@ -92,7 +115,6 @@ const STILL: ReleaseMotion = {
 	sheet: {
 		initial: false,
 		animate: { opacity: 1, x: 0 },
-		aside: { opacity: 1, x: ASIDE_X },
 		exit: { opacity: 0 },
 		transition: instant,
 	},
@@ -101,6 +123,7 @@ const STILL: ReleaseMotion = {
 	row: instant,
 	axis: instant,
 	momentum: instant,
+	ring: { kind: "hold", ms: RING_MS },
 };
 
 export function enterKeyframes(p: Presence): Record<string, (number | string)[]> | null {

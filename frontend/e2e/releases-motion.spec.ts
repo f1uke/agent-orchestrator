@@ -60,7 +60,7 @@ async function startFrames(page: Page) {
 				]) {
 					if (y < 0 || y > innerHeight || r.height < 12) continue;
 					const hit = document.elementFromPoint(x, y);
-					if (hit && !lab.contains(hit) && !hit.closest(".rel-axis, .rel-sheet, .rel-scrim, .rel-top, .rel-strip"))
+					if (hit && !lab.contains(hit) && !hit.closest(".rel-axis, .rel-sheet, .rel-top, .rel-strip"))
 						w.__covered.push(`${lab.dataset.testid ?? lab.className} by ${hit.className}`);
 				}
 			}

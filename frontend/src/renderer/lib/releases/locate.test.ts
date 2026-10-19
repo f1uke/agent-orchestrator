@@ -41,7 +41,7 @@ describe("locate", () => {
 	it.each(Object.entries(EXPECTED))("finds %s on the timeline", (id, want) => {
 		const r = locate(hit(id).subject, b, view());
 		expect({ target: r.target, fallback: r.fallback !== null }).toEqual(want);
-		expect(r.selector).not.toBe("");
+		expect(r.selectors.length).toBeGreaterThan(0);
 	});
 
 	it("has an alert on the subjects board for every subject kind", () => {
@@ -59,7 +59,7 @@ describe("locate", () => {
 		expect(r.layers).toEqual(["sprint"]);
 		expect(r.folds).toEqual(["sp-DEMO", "sp-DEMO:none"]);
 		expect(r.unhide).toEqual([]);
-		expect(r.selector).toBe('[data-testid="sprint-row-DEMO"] [data-dest="none"] .crow[data-key="DEMO-304"]');
+		expect(r.selectors).toEqual(['[data-testid="sprint-row-DEMO"] [data-dest="none"] .crow[data-key="DEMO-304"]']);
 	});
 
 	it("unhides the board of a card on a hidden row", () => {
@@ -102,7 +102,7 @@ describe("locate", () => {
 			view(),
 		);
 		expect(r.target).toBe("card-row");
-		expect(r.selector).toContain('"DEMO-109"');
+		expect(r.selectors).toEqual(['[data-testid="cards-di:21-2026"] .crow[data-key="DEMO-109"]']);
 		const none = locate(
 			{ kind: "pageFamily", train: "21-2026", family: "demo", bucket: "open", keys: ["DEMO-999"] },
 			b,
@@ -110,6 +110,20 @@ describe("locate", () => {
 		);
 		expect(none.target).toBe("version-bar");
 		expect(none.fallback).toMatch(/^at its train's bar/);
+	});
+
+	it("rings every missing card of a page family, on each app of the family whose list carries it", () => {
+		const r = locate(hit("G5~pf/21-2026/demo/open").subject, b, view());
+		expect(r.target).toBe("card-row");
+		expect(r.selectors).toEqual([
+			...["DEMO-103", "DEMO-104", "DEMO-105", "DEMO-106"].map(
+				(k) => `[data-testid="cards-di:21-2026"] .crow[data-key="${k}"]`,
+			),
+			...["DEMO-103", "DEMO-104"].map((k) => `[data-testid="cards-da:21-2026"] .crow[data-key="${k}"]`),
+		]);
+		expect(r.layers).toEqual(["cards"]);
+		expect(r.folds).toEqual(["di:21-2026", "da:21-2026"]);
+		expect(r.apps).toEqual(["di", "da"]);
 	});
 
 	it("says where Show lands when the subject has no mark of its own", () => {

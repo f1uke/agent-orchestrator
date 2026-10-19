@@ -164,7 +164,7 @@ function UnitRow({
 			}
 			extra={<MineFace face={face} mine={u.mine} />}
 			className={face && u.mine?.length ? "mine" : ""}
-			onOpen={() => actions.openSheet({ kind: "card", key: u.key }, "push")}
+			onOpen={() => actions.openSheet({ kind: "card", key: u.key })}
 		/>
 	);
 }
@@ -210,7 +210,7 @@ function BranchCardRow({
 			}
 			extra={<MineFace face={face} mine={c.mine} />}
 			className={face && c.mine?.length ? "mine" : ""}
-			onOpen={() => actions.openSheet({ kind: "card", key: c.key }, "push")}
+			onOpen={() => actions.openSheet({ kind: "card", key: c.key })}
 		/>
 	);
 }
@@ -272,7 +272,7 @@ function GroupRows({
 									className="lbn"
 									onClick={(e) => {
 										e.stopPropagation();
-										actions.openSheet({ kind: "llb", id: group.id }, "push");
+										actions.openSheet({ kind: "llb", id: group.id });
 									}}
 								>
 									{shortBranch(branch.branch)}

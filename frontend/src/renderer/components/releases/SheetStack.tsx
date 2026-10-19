@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, X } from "lucide-react";
 import { AnimatePresence, m } from "motion/react";
 import { useEffect, type ReactNode } from "react";
 import { useClearStaleHides, useSetRule } from "../../hooks/useReleaseBoard";
@@ -68,55 +68,42 @@ export function SheetStack({
 	const ctx: Ctx = { board, lens, actions, now: Date.now() };
 	const sheet = s ? render(s, ctx) : null;
 	const canBack = useReleasesUi((st) => st.back.length > 0);
-	const aside = useReleasesUi((st) => st.aside);
-	const setAside = useReleasesUi((st) => st.setAside);
 	const { sheet: mo } = useReleaseMotion();
 	return (
-		<>
-			{s && !aside && <div className="rel-scrim" onClick={actions.closeSheet} aria-hidden="true" />}
-			<AnimatePresence>
-				{sheet && (
-					<m.aside
-						key="sheet"
-						className={`rel-sheet${aside ? " aside" : ""}`}
-						role="dialog"
-						aria-label="Release details"
-						data-aside={aside || undefined}
-						initial={mo.initial}
-						animate={aside ? mo.aside : mo.animate}
-						exit={{ ...mo.exit, transition: mo.exitTransition ?? mo.transition }}
-						transition={mo.transition}
-					>
-						{aside && (
-							<button
-								type="button"
-								className="sh-back"
-								data-testid="sheet-return"
-								aria-label="Bring the sheet back"
-								onClick={() => setAside(false)}
-							>
-								<ChevronLeft className="size-4" aria-hidden="true" />
+		<AnimatePresence>
+			{sheet && (
+				<m.aside
+					key="sheet"
+					className="rel-sheet"
+					role="dialog"
+					aria-modal="false"
+					aria-label="Release details"
+					initial={mo.initial}
+					animate={mo.animate}
+					exit={{ ...mo.exit, transition: mo.exitTransition ?? mo.transition }}
+					transition={mo.transition}
+				>
+					<div className="sh-h">
+						{canBack && (
+							<button type="button" className="x" aria-label="Back" onClick={actions.back}>
+								<ArrowLeft className="size-4" />
 							</button>
 						)}
-						<div className="sh-h" inert={aside || undefined}>
-							{canBack && (
-								<button type="button" className="x" aria-label="Back" onClick={actions.back}>
-									<ArrowLeft className="size-4" />
-								</button>
-							)}
-							<h2>{sheet.title}</h2>
-							<button type="button" className="x" aria-label="Close" onClick={actions.closeSheet}>
-								<X className="size-4" />
-							</button>
+						<h2>{sheet.title}</h2>
+						<button type="button" className="x" aria-label="Close" onClick={actions.closeSheet}>
+							<X className="size-4" />
+						</button>
+					</div>
+					<div className="sh-rest">
+						{sheet.tabs}
+						<div className="sh-b">
+							{sheet.body}
+							<div className="rel-halos" aria-hidden="true" />
 						</div>
-						<div className="sh-rest" inert={aside || undefined}>
-							{sheet.tabs}
-							<div className="sh-b">{sheet.body}</div>
-						</div>
-					</m.aside>
-				)}
-			</AnimatePresence>
-		</>
+					</div>
+				</m.aside>
+			)}
+		</AnimatePresence>
 	);
 }
 

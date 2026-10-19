@@ -172,7 +172,7 @@ function SprintCardRow({
 			status={card.status}
 			statusCategory={card.statusCategory}
 			statusKind={card.onBoard ? "jira.sprint_cards" : "jira.branch_cards"}
-			onOpen={() => actions.openSheet({ kind: "card", key: card.key }, "push")}
+			onOpen={() => actions.openSheet({ kind: "card", key: card.key })}
 		/>
 	);
 }
