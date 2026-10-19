@@ -35,6 +35,11 @@ type ReleaseTrainsService interface {
 	// Unhide returns rtsvc.ErrUnknownHit for a hit that is not hidden.
 	Unhide(ctx context.Context, id rt.HitID) error
 	UnhideStale(ctx context.Context) ([]rt.HitID, error)
+	// MarkNoMR returns rtsvc.ErrUnknownCard for a card not on the current Board.
+	MarkNoMR(ctx context.Context, key, note, by string) (rt.NoMRMark, error)
+	// UnmarkNoMR returns rtsvc.ErrUnknownCard for a card that is not marked.
+	UnmarkNoMR(ctx context.Context, key string) error
+	NoMRMarks(ctx context.Context) (map[string]rt.NoMRMark, error)
 	Plans(ctx context.Context) ([]rt.LlbPlan, error)
 	// PutPlan returns rt.ErrInvalidPlan, *rt.PlanVersionError or *rt.BranchTakenError.
 	PutPlan(ctx context.Context, p rt.LlbPlan, ifVersion int) (rt.LlbPlan, error)
@@ -121,6 +126,9 @@ func (c *ReleaseTrainsController) Register(r chi.Router) {
 	r.Put("/release-trains/hides/{hitId}", c.hide)
 	r.Delete("/release-trains/hides/{hitId}", c.unhide)
 	r.Delete("/release-trains/hides", c.unhideStale)
+	r.Get("/release-trains/no-mr", c.noMRMarks)
+	r.Put("/release-trains/no-mr/{cardKey}", c.markNoMR)
+	r.Delete("/release-trains/no-mr/{cardKey}", c.unmarkNoMR)
 	r.Get("/release-trains/llb-plans", c.plans)
 	r.Put("/release-trains/llb-plans/{planId}", c.putPlan)
 	r.Post("/release-trains/fixes/plan", c.planFix)

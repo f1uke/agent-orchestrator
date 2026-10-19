@@ -62,6 +62,7 @@ type SprintCard struct {
 	Active         bool            `json:"active"`
 	ActiveWhy      []ActiveWhy     `json:"activeWhy"`
 	Mine           []MineReason    `json:"mine,omitempty"`
+	NoMR           *NoMRMark       `json:"noMr,omitempty"`
 }
 
 // SprintSubtask is a subtask of a sprint card; Mobile when its summary matches the configured pattern.
@@ -316,6 +317,9 @@ func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub *regexp
 		}
 	}
 	c.Active = len(c.ActiveWhy) > 0
+	if m, ok := r.noMR[is.Key]; ok {
+		c.NoMR = &m
+	}
 	c.Routes = []Route{}
 	for _, app := range cfg.Apps {
 		route := r.RouteOf(is.Key, app.ID, c.MRs)
@@ -360,7 +364,11 @@ func rowTallies(cards []SprintCard) (SprintCounts, []SprintDest) {
 		default:
 			counts.CarriedWithMRs++
 		}
-		if len(c.Routes) == 0 {
+		switch {
+		case len(c.Routes) > 0:
+		case c.NoMR != nil:
+			add(NoMRNeeded{}, c.Key)
+		default:
 			add(NotRouted{}, c.Key)
 		}
 		for _, r := range c.Routes {
@@ -387,8 +395,10 @@ func destRank(d Dest) int {
 		return 2
 	case OffFlow:
 		return 3
+	case NotRouted:
+		return 4
 	}
-	return 4
+	return 5
 }
 
 func destLess(a, b Dest) bool {
@@ -410,6 +420,23 @@ func keyLess(a, b string) bool {
 		return len(na) < len(nb)
 	}
 	return na < nb
+}
+
+// HasCard says whether key is a sprint card or a card on a train.
+func (b *Board) HasCard(key string) bool {
+	if b.sprintCard(key) != nil {
+		return true
+	}
+	for i := range b.Trains {
+		for _, v := range b.Trains[i].Versions {
+			for _, c := range v.Cards {
+				if c.Key == key {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (b *Board) sprintCard(key string) *SprintCard {

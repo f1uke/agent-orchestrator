@@ -31,6 +31,28 @@ type ReleaseTrainPlanIDParam struct {
 	PlanID string `path:"planId" description:"Plan id: 1-64 of a-z, 0-9, '.', '_', '-'."`
 }
 
+// ReleaseTrainCardKeyParam is the path of /api/v1/release-trains/no-mr/{cardKey}.
+type ReleaseTrainCardKeyParam struct {
+	CardKey string `path:"cardKey" description:"Jira card key, e.g. DEMO-7."`
+}
+
+// ReleaseTrainNoMRRequest is the body of PUT /api/v1/release-trains/no-mr/{cardKey}.
+type ReleaseTrainNoMRRequest struct {
+	LearningDecisionBy
+	Note string `json:"note,omitempty" description:"Why the card needs no MR; shown on the card."`
+}
+
+// ReleaseTrainNoMRResponse is the mark as stored.
+type ReleaseTrainNoMRResponse struct {
+	Key  string      `json:"key"`
+	Mark rt.NoMRMark `json:"mark"`
+}
+
+// ReleaseTrainNoMRMarksResponse is the body of GET /api/v1/release-trains/no-mr.
+type ReleaseTrainNoMRMarksResponse struct {
+	Marks map[string]rt.NoMRMark `json:"marks" description:"Each marked card's key and its mark."`
+}
+
 // ReleaseTrainStaleQuery is the query of DELETE /api/v1/release-trains/hides.
 type ReleaseTrainStaleQuery struct {
 	Stale bool `query:"stale" description:"Must be true: removes every hide the Board lists as no longer matching."`
@@ -186,6 +208,58 @@ func (c *ReleaseTrainsController) unhideStale(w http.ResponseWriter, r *http.Req
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ReleaseTrainUnhideStaleResponse{Removed: removed})
+}
+
+func (c *ReleaseTrainsController) noMRMarks(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/release-trains/no-mr")
+		return
+	}
+	marks, err := c.Svc.NoMRMarks(r.Context())
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ReleaseTrainNoMRMarksResponse{Marks: marks})
+}
+
+func (c *ReleaseTrainsController) markNoMR(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/release-trains/no-mr/{cardKey}")
+		return
+	}
+	var req ReleaseTrainNoMRRequest
+	if err := decodeJSONStrict(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	key := chi.URLParam(r, "cardKey")
+	mark, err := c.Svc.MarkNoMR(r.Context(), key, req.Note, req.updatedBy())
+	switch {
+	case errors.Is(err, rtsvc.ErrUnknownCard), errors.Is(err, rtsvc.ErrNoBoard):
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "RELEASE_CARD_NOT_FOUND", err.Error(), map[string]any{"cardKey": key})
+	case err != nil:
+		envelope.WriteError(w, r, err)
+	default:
+		envelope.WriteJSON(w, http.StatusOK, ReleaseTrainNoMRResponse{Key: key, Mark: mark})
+	}
+}
+
+func (c *ReleaseTrainsController) unmarkNoMR(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/release-trains/no-mr/{cardKey}")
+		return
+	}
+	key := chi.URLParam(r, "cardKey")
+	err := c.Svc.UnmarkNoMR(r.Context(), key)
+	switch {
+	case errors.Is(err, rtsvc.ErrUnknownCard):
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "RELEASE_NO_MR_NOT_FOUND", err.Error(), map[string]any{"cardKey": key})
+	case err != nil:
+		envelope.WriteError(w, r, err)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (c *ReleaseTrainsController) plans(w http.ResponseWriter, r *http.Request) {

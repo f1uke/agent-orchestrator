@@ -13,6 +13,7 @@ var (
 	ErrUnknownRule = errors.New("release trains: unknown rule")
 	ErrUnknownHit  = errors.New("release trains: no such hit on the board")
 	ErrNoBoard     = errors.New("release trains: no board until a valid config has loaded")
+	ErrUnknownCard = errors.New("release trains: no such card on the board")
 )
 
 // SetRule stores a rule's on/off, or with nil goes back to the rule's default,
@@ -79,6 +80,44 @@ func (s *BoardService) UnhideStale(ctx context.Context) ([]rt.HitID, error) {
 		ids[i] = sh.ID
 	}
 	return s.d.Store.UnhideReleaseHits(ctx, ids)
+}
+
+// MarkNoMR marks a card on the current Board as needing no MR, or replaces
+// its mark. The mark lives in AO only.
+func (s *BoardService) MarkNoMR(ctx context.Context, key, note, by string) (rt.NoMRMark, error) {
+	c, err := s.current(ctx)
+	if err != nil {
+		return rt.NoMRMark{}, err
+	}
+	if c.board == nil {
+		return rt.NoMRMark{}, ErrNoBoard
+	}
+	if !c.board.HasCard(key) {
+		return rt.NoMRMark{}, fmt.Errorf("%w: %q", ErrUnknownCard, key)
+	}
+	m := rt.NoMRMark{Note: note, MarkedBy: by, MarkedAt: s.d.Clock().UTC()}
+	return m, s.d.Store.MarkReleaseCardNoMR(ctx, key, m)
+}
+
+// UnmarkNoMR removes a card's mark; a card with none is ErrUnknownCard.
+func (s *BoardService) UnmarkNoMR(ctx context.Context, key string) error {
+	removed, err := s.d.Store.UnmarkReleaseCardNoMR(ctx, key)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return fmt.Errorf("%w: %q is not marked No MR needed", ErrUnknownCard, key)
+	}
+	return nil
+}
+
+// NoMRMarks lists every card marked No MR needed.
+func (s *BoardService) NoMRMarks(ctx context.Context) (map[string]rt.NoMRMark, error) {
+	human, err := s.d.Store.LoadReleaseHumanState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return human.NoMR, nil
 }
 
 // Plans lists every long-lived-branch plan.

@@ -89,6 +89,12 @@ type (
 	rtCodeNone struct {
 		Kind string `json:"kind" const:"none"`
 	}
+	rtCodeNoMR struct {
+		Kind     string    `json:"kind" const:"no_mr"`
+		Note     string    `json:"note,omitempty"`
+		MarkedBy string    `json:"markedBy" description:"Who marked it: app, cli or api, with the AO session when one was set."`
+		MarkedAt time.Time `json:"markedAt"`
+	}
 
 	rtDest        struct{}
 	rtDestToTrain struct {
@@ -111,11 +117,14 @@ type (
 	rtDestNone struct {
 		Kind string `json:"kind" const:"none"`
 	}
+	rtDestNoMR struct {
+		Kind string `json:"kind" const:"nomr"`
+	}
 )
 
 // JSONSchemaOneOf lists the sprint destination variants.
 func (rtDest) JSONSchemaOneOf() []interface{} {
-	return []interface{}{rtDestToTrain{}, rtDestToLLB{}, rtDestBefore{}, rtDestOff{}, rtDestNone{}}
+	return []interface{}{rtDestToTrain{}, rtDestToLLB{}, rtDestBefore{}, rtDestOff{}, rtDestNone{}, rtDestNoMR{}}
 }
 
 // JSONSchemaOneOf lists the outcome variants.
@@ -125,7 +134,7 @@ func (rtOutcome) JSONSchemaOneOf() []interface{} {
 
 // JSONSchemaOneOf lists the code state variants.
 func (rtCodeState) JSONSchemaOneOf() []interface{} {
-	return []interface{}{rtCodeMerged{}, rtCodeOpen{}, rtCodeParked{}, rtCodeElsewhere{}, rtCodeNone{}}
+	return []interface{}{rtCodeMerged{}, rtCodeOpen{}, rtCodeParked{}, rtCodeElsewhere{}, rtCodeNone{}, rtCodeNoMR{}}
 }
 
 // JSONSchemaOneOf lists the identity variants.
@@ -225,6 +234,9 @@ func init() {
 		"ControllersReleaseTrainHideResponse":        "ReleaseTrainHideResponse",
 		"ControllersReleaseTrainUnhideStaleResponse": "ReleaseTrainUnhideStaleResponse",
 		"ControllersReleaseTrainLlbPlansResponse":    "ReleaseTrainLlbPlansResponse",
+		"ControllersReleaseTrainNoMRRequest":         "ReleaseTrainNoMRRequest",
+		"ControllersReleaseTrainNoMRResponse":        "ReleaseTrainNoMRResponse",
+		"ControllersReleaseTrainNoMRMarksResponse":   "ReleaseTrainNoMRMarksResponse",
 		"ControllersReleaseTrainLlbPlanInput":        "ReleaseTrainLlbPlanInput",
 		"ControllersReleaseTrainLlbPlanResponse":     "ReleaseTrainLlbPlanResponse",
 		"ReleasetrainLlbPlan":                        "ReleaseTrainLlbPlan",
@@ -248,6 +260,9 @@ func init() {
 		"SpecgenRtDestBefore":                        "ReleaseTrainDestBefore",
 		"SpecgenRtDestOff":                           "ReleaseTrainDestOff",
 		"SpecgenRtDestNone":                          "ReleaseTrainDestNone",
+		"SpecgenRtDestNoMR":                          "ReleaseTrainDestNoMR",
+		"SpecgenRtCodeNoMR":                          "ReleaseTrainCodeNoMR",
+		"ReleasetrainNoMRMark":                       "ReleaseTrainNoMRMark",
 	} {
 		schemaNames[name] = clean
 	}

@@ -2702,6 +2702,117 @@ paths:
         or a branch is in another plan
       tags:
       - release-trains
+  /api/v1/release-trains/no-mr:
+    get:
+      operationId: listReleaseTrainNoMRMarks
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainNoMRMarksResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the cards marked No MR needed
+      tags:
+      - release-trains
+  /api/v1/release-trains/no-mr/{cardKey}:
+    delete:
+      operationId: unmarkReleaseTrainNoMR
+      parameters:
+      - description: Jira card key, e.g. DEMO-7.
+        in: path
+        name: cardKey
+        required: true
+        schema:
+          description: Jira card key, e.g. DEMO-7.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Remove a card's No MR needed mark
+      tags:
+      - release-trains
+    put:
+      operationId: markReleaseTrainNoMR
+      parameters:
+      - description: Jira card key, e.g. DEMO-7.
+        in: path
+        name: cardKey
+        required: true
+        schema:
+          description: Jira card key, e.g. DEMO-7.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainNoMRRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainNoMRResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Mark a card on the current Board as needing no MR, in AO only; G2 and
+        G5 then skip it
+      tags:
+      - release-trains
   /api/v1/release-trains/refresh:
     post:
       operationId: refreshReleaseTrainSources
@@ -13519,6 +13630,25 @@ components:
       - kind
       - mrs
       type: object
+    ReleaseTrainCodeNoMR:
+      properties:
+        kind:
+          const: no_mr
+          type: string
+        markedAt:
+          format: date-time
+          type: string
+        markedBy:
+          description: 'Who marked it: app, cli or api, with the AO session when one
+            was set.'
+          type: string
+        note:
+          type: string
+      required:
+      - kind
+      - markedBy
+      - markedAt
+      type: object
     ReleaseTrainCodeNone:
       properties:
         kind:
@@ -13563,6 +13693,7 @@ components:
       - $ref: '#/components/schemas/ReleaseTrainCodeParked'
       - $ref: '#/components/schemas/ReleaseTrainCodeElsewhere'
       - $ref: '#/components/schemas/ReleaseTrainCodeNone'
+      - $ref: '#/components/schemas/ReleaseTrainCodeNoMR'
       type: object
     ReleaseTrainCommitFact:
       properties:
@@ -13604,6 +13735,7 @@ components:
       - $ref: '#/components/schemas/ReleaseTrainDestBefore'
       - $ref: '#/components/schemas/ReleaseTrainDestOff'
       - $ref: '#/components/schemas/ReleaseTrainDestNone'
+      - $ref: '#/components/schemas/ReleaseTrainDestNoMR'
       type: object
     ReleaseTrainDestBefore:
       properties:
@@ -13633,6 +13765,14 @@ components:
       - other
       - none
       type: string
+    ReleaseTrainDestNoMR:
+      properties:
+        kind:
+          const: nomr
+          type: string
+      required:
+      - kind
+      type: object
     ReleaseTrainDestNone:
       properties:
         kind:
@@ -14779,6 +14919,7 @@ components:
       - approver
       - card
       - landing_author
+      - no_mr
       type: string
     ReleaseTrainMismatch:
       properties:
@@ -14806,6 +14947,59 @@ components:
       - no-jira
       - no-label
       type: string
+    ReleaseTrainNoMRMark:
+      properties:
+        markedAt:
+          format: date-time
+          type: string
+        markedBy:
+          type: string
+        note:
+          type: string
+      required:
+      - markedBy
+      - markedAt
+      type: object
+    ReleaseTrainNoMRMarksResponse:
+      properties:
+        marks:
+          additionalProperties:
+            $ref: '#/components/schemas/ReleaseTrainNoMRMark'
+          description: Each marked card's key and its mark.
+          type:
+          - object
+          - "null"
+      required:
+      - marks
+      type: object
+    ReleaseTrainNoMRRequest:
+      properties:
+        note:
+          description: Why the card needs no MR; shown on the card.
+          type: string
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
+      type: object
+    ReleaseTrainNoMRResponse:
+      properties:
+        key:
+          type: string
+        mark:
+          $ref: '#/components/schemas/ReleaseTrainNoMRMark'
+      required:
+      - key
+      - mark
+      type: object
     ReleaseTrainOutcome:
       oneOf:
       - $ref: '#/components/schemas/ReleaseTrainOutcomeClean'
@@ -15199,6 +15393,8 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainSprintMR'
           type: array
+        noMr:
+          $ref: '#/components/schemas/ReleaseTrainNoMRMark'
         onBoard:
           type: boolean
         routes:

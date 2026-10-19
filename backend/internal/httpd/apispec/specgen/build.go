@@ -630,6 +630,39 @@ func releaseTrainOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/release-trains/no-mr", id: "listReleaseTrainNoMRMarks", tag: "release-trains",
+			summary: "List the cards marked No MR needed",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainNoMRMarksResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/release-trains/no-mr/{cardKey}", id: "markReleaseTrainNoMR", tag: "release-trains",
+			summary:    "Mark a card on the current Board as needing no MR, in AO only; G2 and G5 then skip it",
+			pathParams: []any{controllers.ReleaseTrainCardKeyParam{}},
+			reqBody:    controllers.ReleaseTrainNoMRRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainNoMRResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/release-trains/no-mr/{cardKey}", id: "unmarkReleaseTrainNoMR", tag: "release-trains",
+			summary:    "Remove a card's No MR needed mark",
+			pathParams: []any{controllers.ReleaseTrainCardKeyParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/release-trains/llb-plans", id: "listReleaseTrainLlbPlans", tag: "release-trains",
 			summary: "List the long-lived-branch plans",
 			resps: []respUnit{

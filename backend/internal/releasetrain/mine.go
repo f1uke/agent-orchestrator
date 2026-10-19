@@ -15,11 +15,12 @@ const (
 	MineApprover      MineWhy = "approver"
 	MineCard          MineWhy = "card"
 	MineLanding       MineWhy = "landing_author"
+	MineNoMR          MineWhy = "no_mr"
 )
 
 // Enum lists the reasons for the API schema.
 func (MineWhy) Enum() []any {
-	return []any{MineAssignee, MineSubtask, MineMRAuthor, MineReleaseMR, MineReleaseTicket, MineApprover, MineCard, MineLanding}
+	return []any{MineAssignee, MineSubtask, MineMRAuthor, MineReleaseMR, MineReleaseTicket, MineApprover, MineCard, MineLanding, MineNoMR}
 }
 
 // MineReason is why something concerns me; Ref names the card, subtask or MR behind it.
@@ -83,6 +84,9 @@ func mine(b *Board, m *me, mrs mrIndex, snap Snapshot, cfg Config) {
 			for ci := range v.Cards {
 				c := &v.Cards[ci]
 				c.Mine = m.card(c.Key, c.Assignee, mrs[v.App][c.Key])
+				if _, marked := c.Code.(CodeNoMR); marked {
+					c.Mine = append(c.Mine, MineReason{Why: MineNoMR})
+				}
 				if len(c.Mine) > 0 {
 					cards = append(cards, MineReason{Why: MineCard, Ref: c.Key})
 				}
@@ -136,6 +140,9 @@ func (m *me) sprintCard(c *SprintCard) []MineReason {
 		if mr.username != "" && mr.username == m.id.GitLabUsername {
 			out = append(out, MineReason{Why: MineMRAuthor, Ref: mrRef(MRFact{IID: mr.IID})})
 		}
+	}
+	if c.NoMR != nil {
+		out = append(out, MineReason{Why: MineNoMR})
 	}
 	return out
 }

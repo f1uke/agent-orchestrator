@@ -28,13 +28,13 @@ func Reconcile(in Inputs, env Env) Board {
 			if live[t.ID] {
 				fromBranch = branchMembers(t, v, mrs, jira)
 			}
-			v.Cards = cardUnits(t, v, mrs, fromPages[v.App], fromBranch, llbs[v.App])
+			v.Cards = cardUnits(t, v, mrs, fromPages[v.App], fromBranch, llbs[v.App], in.Human.NoMR)
 			v.Stages = stages(t, v, b.Today, rs)
 		}
 	}
 	b.Sprints = sprintRows(in.Config, in.Snap, routing{
 		cutover: b.Cutover, llbs: llbs, groups: groupsByBranch(b.LLBs),
-		trains: b.Trains, plans: planTrains(b.Trains, b.Today),
+		trains: b.Trains, plans: planTrains(b.Trains, b.Today), noMR: in.Human.NoMR,
 	})
 	b.mrs = mrsByApp(in.Config, in.Snap)
 	b.Identity = identityOf(in.Snap)
