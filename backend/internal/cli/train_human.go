@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -135,6 +136,77 @@ func newTrainUnhideCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&stale, "stale", false, "Clear every hide the Board lists as no longer matching")
 	return cmd
+}
+
+func newTrainNoMRCommand(ctx *commandContext) *cobra.Command {
+	var note string
+	cmd := &cobra.Command{
+		Use:   "nomr <CARD>",
+		Short: "Mark a card No MR needed, in AO only; G2 and G5 skip it and its row shows no code",
+		Args:  exactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := controllers.ReleaseTrainNoMRRequest{Note: note}
+			req.Via = "cli"
+			req.Session = strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+			var res controllers.ReleaseTrainNoMRResponse
+			if err := ctx.putJSON(cmd.Context(), "release-trains/no-mr/"+url.PathEscape(args[0]), req, &res); err != nil {
+				return trainNotFoundIsUsage(err)
+			}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "marked %s No MR needed\n", res.Key)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&note, "note", "", "Why the card needs no MR")
+	undo := &cobra.Command{
+		Use:   "undo <CARD>",
+		Short: "Remove a card's No MR needed mark",
+		Args:  exactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := ctx.deleteJSON(cmd.Context(), "release-trains/no-mr/"+url.PathEscape(args[0]), nil); err != nil {
+				return trainNotFoundIsUsage(err)
+			}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "unmarked %s\n", args[0])
+			return err
+		},
+	}
+	var asJSON bool
+	ls := &cobra.Command{
+		Use:   "ls",
+		Short: "List the cards marked No MR needed",
+		Args:  exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			var res controllers.ReleaseTrainNoMRMarksResponse
+			if err := ctx.getJSON(cmd.Context(), "release-trains/no-mr", &res); err != nil {
+				return err
+			}
+			if asJSON {
+				return writeJSON(cmd.OutOrStdout(), res)
+			}
+			return writeTrainNoMRMarks(cmd.OutOrStdout(), res.Marks)
+		},
+	}
+	ls.Flags().BoolVar(&asJSON, "json", false, "Print the daemon's JSON")
+	cmd.AddCommand(undo, ls)
+	return cmd
+}
+
+func writeTrainNoMRMarks(w io.Writer, marks map[string]rt.NoMRMark) error {
+	if len(marks) == 0 {
+		_, err := io.WriteString(w, "no cards marked No MR needed\n")
+		return err
+	}
+	keys := make([]string, 0, len(marks))
+	for k := range marks {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "CARD\tMARKED BY\tMARKED AT\tNOTE")
+	for _, k := range keys {
+		m := marks[k]
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", k, m.MarkedBy, m.MarkedAt.Format("2006-01-02"), orDash(m.Note))
+	}
+	return tw.Flush()
 }
 
 func newTrainPlanCommand(ctx *commandContext) *cobra.Command {
