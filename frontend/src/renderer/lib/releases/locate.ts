@@ -20,7 +20,7 @@ export type Target =
 
 export type Reveal = {
 	target: Target;
-	selector: string;
+	selectors: readonly string[];
 	layers: readonly Layer[];
 	unhide: readonly string[];
 	folds: readonly string[];
@@ -44,10 +44,10 @@ export type RevealView = {
 
 const css = (v: string) => JSON.stringify(v);
 
-function plan(target: Target, selector: string, over: Partial<Reveal> = {}): Reveal {
+function plan(target: Target, selectors: readonly string[], over: Partial<Reveal> = {}): Reveal {
 	return {
 		target,
-		selector,
+		selectors,
 		layers: [],
 		unhide: [],
 		folds: [],
@@ -61,11 +61,11 @@ function plan(target: Target, selector: string, over: Partial<Reveal> = {}): Rev
 }
 
 function appLabel(app: AppId, fallback: string): Reveal {
-	return plan("app-label", `[data-testid=${css(`label-${app}`)}]`, { apps: [app], fallback });
+	return plan("app-label", [`[data-testid=${css(`label-${app}`)}]`], { apps: [app], fallback });
 }
 
 function trainChip(train: TrainKey, fallback: string): Reveal {
-	return plan("train-chip", `.rel-tchip[data-train=${css(train)}]`, { focus: train, fallback });
+	return plan("train-chip", [`.rel-tchip[data-train=${css(train)}]`], { focus: train, fallback });
 }
 
 function bar(b: Board, train: TrainKey, app: AppId, over: Partial<Reveal> = {}): Reveal {
@@ -74,7 +74,7 @@ function bar(b: Board, train: TrainKey, app: AppId, over: Partial<Reveal> = {}):
 	if (!v) return appLabel(app, "at its app: its train has no milestone for this app");
 	const publish = v.milestone.due ?? t?.publish;
 	if (!publish || publish < timeline(b).start) return appLabel(app, "at its app: its train is older than the timeline");
-	return plan("version-bar", `[data-testid=${css(`bar-${app}-${train}`)}]`, { apps: [app], ...over });
+	return plan("version-bar", [`[data-testid=${css(`bar-${app}-${train}`)}]`], { apps: [app], ...over });
 }
 
 function stageMarker(b: Board, train: TrainKey, app: AppId, stage: "freeze" | "publish", view: RevealView): Reveal {
@@ -84,7 +84,7 @@ function stageMarker(b: Board, train: TrainKey, app: AppId, stage: "freeze" | "p
 	return {
 		...r,
 		target: "stage-marker",
-		selector: `.rel-app[data-app=${css(app)}] .rel-mk[data-key=${css(train)}][data-stage=${css(stage)}]`,
+		selectors: [`.rel-app[data-app=${css(app)}] .rel-mk[data-key=${css(train)}][data-stage=${css(stage)}]`],
 		focus: shown ? null : train,
 	};
 }
@@ -92,7 +92,7 @@ function stageMarker(b: Board, train: TrainKey, app: AppId, stage: "freeze" | "p
 function hotfix(b: Board, app: AppId, version: string, view: RevealView): Reveal {
 	const h = b.hotfixes.find((x) => x.app === app && x.version === version);
 	return h
-		? plan("hotfix-bar", `[data-testid=${css(`hotfix-${app}-${version}`)}]`, {
+		? plan("hotfix-bar", [`[data-testid=${css(`hotfix-${app}-${version}`)}]`], {
 				hotfixes: true,
 				apps: [app],
 				notMine: view.me && !h.mine?.length,
@@ -104,7 +104,7 @@ function cardOnTrain(b: Board, train: TrainKey, app: AppId, key: string): Reveal
 	const g = cardGroups(b, app).find((x) => x.train.id === train);
 	if (!g) return bar(b, train, app, { fallback: "at its train's bar: a published train lists no cards" });
 	const row = (folds: string[]) =>
-		plan("card-row", `[data-testid=${css(`cards-${g.key}`)}] .crow[data-key=${css(key)}]`, {
+		plan("card-row", [`[data-testid=${css(`cards-${g.key}`)}] .crow[data-key=${css(key)}]`], {
 			layers: ["cards"],
 			apps: [app],
 			folds,
@@ -127,7 +127,7 @@ function sprintCard(b: Board, key: string, view: RevealView, app?: AppId): Revea
 		const rowSel = `[data-testid=${css(`sprint-row-${row.board.key}`)}] [data-dest=${css(block)}] .crow[data-key=${css(key)}]`;
 		return plan(
 			app ? "mr-glyph" : "sprint-card",
-			app ? `${rowSel} [data-testid=mr-glyph][data-app=${css(app)}]` : rowSel,
+			[app ? `${rowSel} [data-testid=mr-glyph][data-app=${css(app)}]` : rowSel],
 			{
 				layers: ["sprint"],
 				unhide: view.hiddenBoards.has(row.board.key) ? [row.board.key] : [],
@@ -146,7 +146,7 @@ function mr(s: Extract<Subject, { kind: "mr" }>, b: Board, view: RevealView): Re
 		if (br)
 			return plan(
 				"llb-lane",
-				`.rel-app[data-app=${css(s.app)}] [data-testid=llb-lane][data-branch=${css(br.branch)}]`,
+				[`.rel-app[data-app=${css(s.app)}] [data-testid=llb-lane][data-branch=${css(br.branch)}]`],
 				{
 					layers: ["llb"],
 					apps: [s.app],
@@ -177,7 +177,7 @@ export const LOCATORS: { [K in SubjectKind]: Locator<K> } = {
 	cardOnTrain: (s, b) => cardOnTrain(b, s.train, s.app, s.key),
 	card: (s, b, view) =>
 		sprintCard(b, s.key, view) ??
-		plan("sprint-band", ".rel-spr", { fallback: "at the sprint: the card is on no board's row" }),
+		plan("sprint-band", [".rel-spr"], { fallback: "at the sprint: the card is on no board's row" }),
 	mr,
 	pageFamily: (s, b) => {
 		const apps = (b.trains.find((x) => x.id === s.train)?.versions ?? [])
@@ -185,12 +185,23 @@ export const LOCATORS: { [K in SubjectKind]: Locator<K> } = {
 			.filter((app) => b.apps.find((a) => a.id === app)?.family === s.family);
 		if (!apps.length) return trainChip(s.train, "at the train: no app of the family is on it");
 		const tries = apps.flatMap((app) => s.keys.map((key) => cardOnTrain(b, s.train, app, key)));
-		return tries.find((r) => r.target === "card-row") ?? tries[0] ?? bar(b, s.train, apps[0]);
+		const rows = tries.filter((r) => r.target === "card-row");
+		if (!rows.length) return tries[0] ?? bar(b, s.train, apps[0]);
+		const all = <T>(pick: (r: Reveal) => readonly T[]) => [...new Set(rows.flatMap(pick))];
+		return plan(
+			"card-row",
+			all((r) => r.selectors),
+			{
+				layers: ["cards"],
+				apps: all((r) => r.apps),
+				folds: all((r) => r.folds),
+			},
+		);
 	},
 };
 
 export function sheetReveal(selector: string): Reveal {
-	return plan("sheet-part", `.rel-sheet :is(${selector})`);
+	return plan("sheet-part", [`.rel-sheet :is(${selector})`]);
 }
 
 export function locate(s: Subject, b: Board, view: RevealView): Reveal {

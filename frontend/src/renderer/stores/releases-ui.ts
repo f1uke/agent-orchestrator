@@ -98,8 +98,6 @@ type ReleasesUi = {
 	setHidden: (keys: ReadonlySet<string>) => void;
 	pending: Reveal | null;
 	setPending: (r: Reveal | null) => void;
-	aside: boolean;
-	setAside: (aside: boolean) => void;
 };
 
 export const useReleasesUi = create<ReleasesUi>((set, get) => ({
@@ -143,6 +141,4 @@ export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 	},
 	pending: null,
 	setPending: (pending) => set({ pending }),
-	aside: false,
-	setAside: (aside) => set({ aside }),
 }));

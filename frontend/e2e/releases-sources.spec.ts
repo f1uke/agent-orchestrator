@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { labelOverlaps, layer, open, settle } from "./releases-kit";
+import { NARROW, VIEWPORTS, labelOverlaps, layer, open, settle } from "./releases-kit";
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 const APPS = ["di", "da", "pi", "pa"];
@@ -7,7 +7,7 @@ const tags = (scope: Locator) => scope.getByTestId("source-tag");
 const card = (scope: { getByTestId: Locator["getByTestId"] }) => scope.getByTestId("source-card");
 
 test.describe("releases sources layer", () => {
-	test.use({ viewport: { width: 1512, height: 945 } });
+	test.use({ viewport: NARROW });
 
 	test("off by default with no tags; on, every app label has tags and quiet bars have none", async ({ page }) => {
 		await open(page);
@@ -148,10 +148,7 @@ test.describe("releases sources layer", () => {
 	});
 });
 
-for (const [width, height] of [
-	[1280, 800],
-	[1512, 945],
-] as const) {
+for (const { width, height } of VIEWPORTS) {
 	test(`at ${width}x${height} with Sources on, 4/4 app labels sit above the fold and nothing overlaps`, async ({
 		page,
 	}) => {

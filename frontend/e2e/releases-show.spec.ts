@@ -1,159 +1,214 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { layer, open, settle } from "./releases-kit";
+import { expect, test, type Page } from "@playwright/test";
+import {
+	animationNow,
+	expectRinged,
+	expectSpotted,
+	freezeRings,
+	layer,
+	NARROW,
+	open,
+	outerScrolls,
+	ringLife,
+	ringLog,
+	settle,
+} from "./releases-kit";
+import { subjectsBoard } from "../src/renderer/lib/releases/fixture";
 
-test.use({ viewport: { width: 1280, height: 800 } });
+test.use({ viewport: NARROW });
 
 const sheet = (page: Page) => page.getByRole("dialog", { name: "Release details" });
+const row = (page: Page, hit: string) => page.locator(`.rel-sheet .al[data-hit="${hit}"]`);
+
+async function openFrozen(page: Page, query: string) {
+	await open(page, query, "subjects");
+	await freezeRings(page);
+}
 
 async function show(page: Page, hit: string) {
-	await settle(page);
-	await page.locator(`.rel-sheet .al[data-hit="${hit}"]`).getByTestId("hit-show").click();
+	await row(page, hit).getByTestId("hit-show").click();
 }
 
-async function inOpenView(target: Locator): Promise<string> {
-	return target.evaluate((el) => {
-		const r = el.getBoundingClientRect();
-		const sheetLeft = document.querySelector(".rel-sheet")?.getBoundingClientRect().left ?? Infinity;
-		const scroller = document.querySelector(".rel-sc")!;
-		const inTimeline = scroller.contains(el);
-		const sc = (inTimeline ? scroller : document.querySelector(".rel")!).getBoundingClientRect();
-		const left = !inTimeline || el.closest(".rel-lab") ? sc.left : sc.left + 280;
-		const top = inTimeline ? document.querySelector(".rel-axis")!.getBoundingClientRect().bottom : sc.top;
-		const right = Math.min(sc.right, sheetLeft);
-		const misses = [
-			r.left < left - 1 && `left ${r.left} < ${left}`,
-			r.top < top - 1 && `top ${r.top} < ${top}`,
-			Math.min(r.right, r.left + 120) > right + 1 && `right ${r.right} > ${right}`,
-			r.bottom > sc.bottom + 1 && `bottom ${r.bottom} > ${sc.bottom}`,
-		].filter(Boolean);
-		return misses.join(", ");
-	});
-}
+const BADGE = subjectsBoard(new Date().toISOString().slice(0, 10))
+	.alerts.hits.filter((h) => h.bucket === "badge")
+	.map((h) => h.id);
 
-const CASES: [string, string, string][] = [
-	["C5~v/21-2026/di", "the version bar", '[data-testid="bar-di-21-2026"]'],
+const G5_ROWS = [
+	...["DEMO-103", "DEMO-104", "DEMO-105", "DEMO-106"].map(
+		(k) => `[data-testid="cards-di:21-2026"] .crow[data-key="${k}"]`,
+	),
+	...["DEMO-103", "DEMO-104"].map((k) => `[data-testid="cards-da:21-2026"] .crow[data-key="${k}"]`),
+];
+
+const G5_RINGS = 2;
+const ringsFor = (selectors: readonly string[]) => (selectors === G5_ROWS ? G5_RINGS : selectors.length);
+
+const CASES: [string, string, readonly string[]][] = [
+	["C5~v/21-2026/di", "the version bar", ['[data-testid="bar-di-21-2026"]']],
 	[
 		"A6~vd/21-2026/di/freeze",
 		"the freeze marker",
-		'.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]',
+		['.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]'],
 	],
-	["E1~h/da/2.3.1", "the hotfix bar", '[data-testid="hotfix-da-2.3.1"]'],
-	["F2~ht/da/2.3.1/21-2026", "the hotfix bar", '[data-testid="hotfix-da-2.3.1"]'],
-	["L3~ct/21-2026/di/DEMO-109", "the parked card row", '[data-testid="cards-di:21-2026"] .crow[data-key="DEMO-109"]'],
-	["G5~pf/21-2026/demo/open", "the card row", '[data-testid="cards-di:21-2026"] .crow[data-key="DEMO-103"]'],
+	["E1~h/da/2.3.1", "the hotfix bar", ['[data-testid="hotfix-da-2.3.1"]']],
+	["F2~ht/da/2.3.1/21-2026", "the hotfix bar", ['[data-testid="hotfix-da-2.3.1"]']],
+	["L3~ct/21-2026/di/DEMO-109", "the parked card row", ['[data-testid="cards-di:21-2026"] .crow[data-key="DEMO-109"]']],
+	["G5~pf/21-2026/demo/open", "every missing card row of the family", G5_ROWS],
 	[
 		"G2~c/DEMO-304",
 		"the sprint card row",
-		'[data-testid="sprint-row-DEMO"] [data-dest="none"] .crow[data-key="DEMO-304"]',
+		['[data-testid="sprint-row-DEMO"] [data-dest="none"] .crow[data-key="DEMO-304"]'],
 	],
 	[
 		"L1~mr/di/330",
 		"the long-lived lane",
-		'.rel-app[data-app="di"] [data-testid="llb-lane"][data-branch="feature/demo-wallet"]',
+		['.rel-app[data-app="di"] [data-testid="llb-lane"][data-branch="feature/demo-wallet"]'],
 	],
 	[
 		"L8~mr/pi/405",
 		"the MR glyph",
-		'[data-testid="sprint-row-DEMO"] [data-dest="off"] .crow[data-key="DEMO-303"] [data-testid="mr-glyph"][data-app="pi"]',
+		[
+			'[data-testid="sprint-row-DEMO"] [data-dest="off"] .crow[data-key="DEMO-303"] [data-testid="mr-glyph"][data-app="pi"]',
+		],
 	],
-	["L9~mr/da/415", "the app label (fallback)", '[data-testid="label-da"]'],
-	["A2~jv/7001", "the app label (fallback)", '[data-testid="label-da"]'],
-	["A3~m/pi/9001", "the app label (fallback)", '[data-testid="label-pi"]'],
-	["F1~tt/21-2026/22-2026", "the later train's chip (fallback)", '.rel-tchip[data-train="22-2026"]'],
+	["L9~mr/da/415", "the app label (fallback)", ['[data-testid="label-da"]']],
+	["A2~jv/7001", "the app label (fallback)", ['[data-testid="label-da"]']],
+	["A3~m/pi/9001", "the app label (fallback)", ['[data-testid="label-pi"]']],
+	["F1~tt/21-2026/22-2026", "the later train's chip (fallback)", ['.rel-tchip[data-train="22-2026"]']],
 ];
 
 test.describe("Show on an alert", () => {
-	for (const [hit, what, selector] of CASES)
-		test(`${hit} pulses ${what} in view`, async ({ page }) => {
-			await open(page, "?sheet=attention", "subjects");
-			await show(page, hit);
-			const target = page.locator(selector);
-			await expect(target).toHaveAttribute("data-pulse", "motion");
-			await expect(page.locator("[data-pulse]")).toHaveCount(1);
+	for (const [hit, what, selectors] of CASES)
+		test(`${hit} keeps the sheet open and rings ${what} beside it`, async ({ page }) => {
+			await openFrozen(page, "?sheet=attention");
 			await settle(page);
-			expect(await inOpenView(target)).toBe("");
-			await expect(target).not.toHaveAttribute("data-pulse", { timeout: 10_000 });
+			await show(page, hit);
+			await expectSpotted(page, selectors, { rings: ringsFor(selectors) });
+			await expect(sheet(page)).toBeVisible();
+			expect(await outerScrolls(page)).toEqual([]);
 		});
 
-	test("slides the sheet aside, keeps its place, and brings it back", async ({ page }) => {
+	test("Needs attention lists exactly the fixture's badge alerts", async ({ page }) => {
 		await open(page, "?sheet=attention", "subjects");
-		await settle(page);
-		await sheet(page)
-			.locator(".sh-b")
-			.evaluate((el) => (el.scrollTop = 200));
-		await show(page, "C5~v/21-2026/di");
-		await expect(sheet(page)).toHaveAttribute("data-aside", "true");
-		await expect(page.locator(".rel-scrim")).toHaveCount(0);
-		await expect
-			.poll(() => sheet(page).evaluate((el) => Math.round(innerWidth - el.getBoundingClientRect().left)))
-			.toBe(36 + 12);
-		await page.getByTestId("bar-di-21-2026").click();
-		await expect(sheet(page)).not.toHaveAttribute("data-aside");
-		await expect(page).toHaveURL(/sheet=version/);
-
-		await open(page, "?sheet=attention", "subjects");
-		await settle(page);
-		const lower = page.locator('.rel-sheet .al[data-hit="L8~mr/pi/405"]');
-		await lower.scrollIntoViewIfNeeded();
-		const at = await sheet(page)
-			.locator(".sh-b")
-			.evaluate((el) => el.scrollTop);
-		expect(at).toBeGreaterThan(200);
-		await lower.getByTestId("hit-show").click();
-		await page.getByTestId("sheet-return").click();
-		await expect(sheet(page)).not.toHaveAttribute("data-aside");
-		await expect(page.locator(".rel-scrim")).toHaveCount(1);
-		expect(
-			await sheet(page)
-				.locator(".sh-b")
-				.evaluate((el) => el.scrollTop),
-		).toBe(at);
+		const shown = await page
+			.locator(".rel-sheet .al[data-hit]")
+			.evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.hit ?? ""));
+		expect(shown.sort()).toEqual([...BADGE].sort());
 	});
 
-	test("a sheet that arrives by the URL is in front, not left aside", async ({ page }) => {
+	for (const hit of BADGE)
+		test(`${hit} from Needs attention rings its subject beside the sheet, twice in a row`, async ({ page }) => {
+			await openFrozen(page, "?sheet=attention");
+			for (const press of [1, 2]) {
+				const since = await animationNow(page);
+				await show(page, hit);
+				await expectRinged(page, since, `press ${press}`);
+				await expect(sheet(page), `press ${press}`).toBeVisible();
+			}
+		});
+
+	test("a second press after the pulse ended rings the subject again", async ({ page }) => {
+		const hit = "C5~v/21-2026/di";
 		await open(page, "?sheet=attention", "subjects");
+		await show(page, hit);
+		await expect.poll(() => ringLife(page), { timeout: 9_000 }).toBeGreaterThan(4_500);
+		await freezeRings(page);
+		const since = await animationNow(page);
+		await show(page, hit);
+		await expectSpotted(page, ['[data-testid="bar-di-21-2026"]'], { since, rings: 1 });
+	});
+
+	test("a second press while the pulse runs starts it over and re-centres a target scrolled away", async ({ page }) => {
+		const hit = "C5~v/21-2026/di";
+		const target = '[data-testid="bar-di-21-2026"]';
+		await openFrozen(page, "?sheet=attention");
+		await show(page, hit);
+		await expectSpotted(page, [target]);
+		const since = await animationNow(page);
+		await show(page, hit);
+		await expectSpotted(page, [target], { since, rings: 1 });
+
+		const away = await page.locator(".rel-sc").evaluate((el) => {
+			el.scrollLeft += 700;
+			el.scrollTop += 300;
+			return { left: el.scrollLeft, top: el.scrollTop };
+		});
+		await show(page, hit);
+		await expectSpotted(page, [target]);
+		await settle(page);
+		const at = await page.locator(target).evaluate((el) => {
+			const sc = document.querySelector(".rel-sc")!;
+			const b = sc.getBoundingClientRect();
+			const top = document.querySelector(".rel-axis")!.getBoundingClientRect().bottom;
+			const sheetLeft = document.querySelector(".rel-sheet")!.getBoundingClientRect().left;
+			const right = Math.min(b.left + sc.clientWidth, sheetLeft);
+			const r = el.getBoundingClientRect();
+			const pinned = (v: number, max: number) => v <= 0 || v >= max - 1;
+			return {
+				x: Math.round((r.left + r.right) / 2 - (b.left + 280 + right) / 2),
+				y: Math.round((r.top + r.bottom) / 2 - (top + b.top + sc.clientHeight) / 2),
+				pinnedX: pinned(sc.scrollLeft, sc.scrollWidth - sc.clientWidth),
+				pinnedY: pinned(sc.scrollTop, sc.scrollHeight - sc.clientHeight),
+				left: sc.scrollLeft,
+				top: sc.scrollTop,
+			};
+		});
+		expect(at.left !== away.left || at.top !== away.top, "scrolled back").toBe(true);
+		expect(Math.abs(at.x) <= 5 || at.pinnedX, `centred across the part the sheet leaves (${at.x})`).toBe(true);
+		expect(Math.abs(at.y) <= 5 || at.pinnedY, `centred down, or as far as the timeline scrolls (${at.y})`).toBe(true);
+	});
+
+	test("a press on another alert takes the old ring away at once and rings the new subject", async ({ page }) => {
+		await openFrozen(page, "?sheet=attention&hideBoards=PILOT");
 		await show(page, "C5~v/21-2026/di");
-		await expect(sheet(page)).toHaveAttribute("data-aside", "true");
-		await page.evaluate(() => (location.hash = "#/releases?sheet=version:21-2026:di"));
-		await expect(page).toHaveURL(/sheet=version/);
-		await expect(sheet(page)).not.toHaveAttribute("data-aside");
-		await expect(page.locator(".rel-scrim")).toHaveCount(1);
+		await expectSpotted(page, ['[data-testid="bar-di-21-2026"]'], { rings: 1 });
+		const since = await animationNow(page);
+		await show(page, "G2~c/PIL-12");
+		await expectSpotted(page, ['[data-testid="sprint-row-PILOT"] .crow[data-key="PIL-12"]'], { since, rings: 1 });
+		const [gone, born] = (await ringLog(page)).slice(-2);
+		expect(gone.sign, "the old ring goes first").toBe("-");
+		expect(born.sign).toBe("+");
+		expect(gone.at, "before the new subject is drawn and still").toBeLessThan(born.at);
+	});
+
+	test("a page family alert rings all of its missing cards at once, one ring per app's list, twice in a row", async ({
+		page,
+	}) => {
+		const hit = "G5~pf/21-2026/demo/open";
+		await openFrozen(page, "?sheet=attention");
+		for (let press = 0; press < 2; press++) {
+			const since = await animationNow(page);
+			await show(page, hit);
+			await expectSpotted(page, G5_ROWS, { since, rings: G5_RINGS });
+		}
 	});
 
 	test("a card on a hidden board turns on Sprint cards, shows the board and opens its folds", async ({ page }) => {
-		await open(page, "?sheet=attention&hideBoards=PILOT", "subjects");
+		await openFrozen(page, "?sheet=attention&hideBoards=PILOT");
 		await expect(layer(page, "Sprint cards")).toHaveAttribute("aria-pressed", "false");
 		await expect(page.getByTestId("sprint-row-PILOT")).toHaveCount(0);
 		await show(page, "G2~c/PIL-12");
 		await expect(layer(page, "Sprint cards")).toHaveAttribute("aria-pressed", "true");
-		const row = page.locator('[data-testid="sprint-row-PILOT"] [data-dest="t:21-2026"] .crow[data-key="PIL-12"]');
-		await expect(row).toHaveAttribute("data-pulse", "motion");
-		await settle(page);
-		expect(await inOpenView(row)).toBe("");
+		await expectSpotted(page, ['[data-testid="sprint-row-PILOT"] [data-dest="t:21-2026"] .crow[data-key="PIL-12"]']);
 		await expect(page).not.toHaveURL(/hideBoards=[^&]*PILOT/);
 	});
 
 	test("a sprint card whose app the filter hides brings that app back", async ({ page }) => {
-		await open(page, "?sheet=attention&apps=di", "subjects");
+		await openFrozen(page, "?sheet=attention&apps=di");
 		await show(page, "G2~c/PIL-12");
-		const row = page.locator('[data-testid="sprint-row-PILOT"] .crow[data-key="PIL-12"]');
-		await expect(row).toHaveAttribute("data-pulse", "motion");
+		await expectSpotted(page, ['[data-testid="sprint-row-PILOT"] .crow[data-key="PIL-12"]']);
 		await expect(page).toHaveURL(/apps=di(%2C|,)pa/);
 	});
 
 	test("a freeze marker on an unfocused train focuses it", async ({ page }) => {
-		await open(page, "?sheet=attention&focus=22-2026", "subjects");
+		await openFrozen(page, "?sheet=attention&focus=22-2026");
 		await show(page, "A6~vd/21-2026/di/freeze");
-		const mk = page.locator('.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]');
-		await expect(mk).toHaveAttribute("data-pulse", "motion");
+		await expectSpotted(page, ['.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]']);
 		await expect(page).toHaveURL(/focus=21-2026/);
-		await settle(page);
-		expect(await inOpenView(mk)).toBe("");
 	});
 
 	test("a row whose subject has no mark says where Show goes; a row with a mark says nothing", async ({ page }) => {
 		await open(page, "?sheet=attention", "subjects");
-		const where = (hit: string) => page.locator(`.rel-sheet .al[data-hit="${hit}"]`).getByTestId("hit-where");
+		const where = (hit: string) => row(page, hit).getByTestId("hit-where");
 		await expect(where("L9~mr/da/415")).toHaveText(
 			"Show lands at its app: the timeline draws no lane for feat/DEMO-201-base",
 		);
@@ -161,9 +216,7 @@ test.describe("Show on an alert", () => {
 		await expect(where("A3~m/pi/9001")).toContainText("at its app");
 		await expect(where("F1~tt/21-2026/22-2026")).toContainText("at the later train");
 		await expect(where("C5~v/21-2026/di")).toHaveCount(0);
-		await expect(
-			page.locator('.rel-sheet .al[data-hit="L9~mr/da/415"]').getByTestId("hit-show"),
-		).toHaveAccessibleDescription(/draws no lane/);
+		await expect(row(page, "L9~mr/da/415").getByTestId("hit-show")).toHaveAccessibleDescription(/draws no lane/);
 	});
 
 	test("the later train's chip scrolls the timeline to that train", async ({ page }) => {
@@ -176,22 +229,17 @@ test.describe("Show on an alert", () => {
 	});
 
 	test("an alert of mine on a card Only me does not draw turns Only me off to show it", async ({ page }) => {
-		await open(page, "?sheet=attention&me=1", "subjects");
+		await openFrozen(page, "?sheet=attention&me=1");
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
 		await show(page, "G2~c/DEMO-304");
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "false");
-		await expect(page.locator('[data-testid="sprint-row-DEMO"] .crow[data-key="DEMO-304"]')).toHaveAttribute(
-			"data-pulse",
-			"motion",
-		);
+		await expectSpotted(page, ['[data-testid="sprint-row-DEMO"] .crow[data-key="DEMO-304"]']);
 	});
 
 	test("an alert of mine keeps Only me on and shows the version without writing the focus", async ({ page }) => {
-		await open(page, "?sheet=attention&me=1", "subjects");
+		await openFrozen(page, "?sheet=attention&me=1");
 		await show(page, "A6~vd/21-2026/di/freeze");
-		await expect(
-			page.locator('.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]'),
-		).toHaveAttribute("data-pulse", "motion");
+		await expectSpotted(page, ['.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]']);
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
 		expect(page.url()).not.toContain("focus=");
 	});
@@ -204,76 +252,146 @@ test.describe("Show on an alert", () => {
 			"A6~vd/21-2026/di/freeze",
 			'.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]',
 		],
-		["card", "?sheet=card:DEMO-109", "L3~ct/21-2026/di/DEMO-109", '.crow[data-key="DEMO-109"]'],
+		["card", "?sheet=card:DEMO-109", "L3~ct/21-2026/di/DEMO-109", '.rel-sc .crow[data-key="DEMO-109"]'],
 	] as const)
-		test(`from the ${name} sheet, Show slides the sheet aside and pulses the subject`, async ({ page }) => {
-			await open(page, query, "subjects");
-			await show(page, hit);
-			await expect(sheet(page)).toHaveAttribute("data-aside", "true");
-			const target = page.locator(`.rel-sc ${selector}`);
-			await expect(target).toHaveAttribute("data-pulse", "motion");
+		test(`from the ${name} sheet, Show keeps the sheet open and rings the subject beside it, twice`, async ({
+			page,
+		}) => {
+			await openFrozen(page, query);
 			await settle(page);
-			expect(await inOpenView(target)).toBe("");
+			for (let press = 0; press < 2; press++) {
+				const since = await animationNow(page);
+				await show(page, hit);
+				await expectSpotted(page, [selector], { since, rings: 1 });
+				await expect(sheet(page)).toBeVisible();
+				await expect(page).toHaveURL(/sheet=/);
+			}
 		});
 
 	test("every alert row, hidden ones too, has a Show button", async ({ page }) => {
 		await open(page, "?sheet=attention", "subjects");
 		await page.getByRole("button", { name: /hidden/ }).click();
 		const rows = page.locator(".rel-sheet .al[data-hit]");
-		const n = await rows.count();
-		expect(n).toBeGreaterThan(15);
+		expect(await rows.count()).toBeGreaterThan(15);
 		await expect(page.locator(".rel-sheet .al[data-hit]:not(:has([data-testid=hit-show]))")).toHaveCount(0);
 	});
 });
 
-test.describe("an alert's subject line in its own sheet", () => {
-	test("A6 lights the freeze stage row it names and keeps the sheet in place", async ({ page }) => {
-		await open(page, "?sheet=version:21-2026:di", "subjects");
+test.describe("sheets float beside the timeline", () => {
+	test("a sheet has no backdrop and stays open through Show, a pan and a click on the timeline", async ({ page }) => {
+		await openFrozen(page, "?sheet=attention");
 		await settle(page);
-		await sheet(page).locator('.al[data-hit="A6~vd/21-2026/di/freeze"]').getByTestId("hit-subject").click();
-		const row = sheet(page).locator('[data-testid="stage-row"][data-stage="freeze"]');
-		await expect(row).toHaveAttribute("data-pulse", "motion");
-		await expect(sheet(page).locator("[data-pulse]")).toHaveCount(1);
-		await expect(sheet(page)).not.toHaveAttribute("data-aside");
-		await expect(page).toHaveURL(/sheet=version(%3A|:)21-2026(%3A|:)di/);
-		await expect(row).toBeInViewport();
+		await expect(sheet(page)).toHaveAttribute("aria-modal", "false");
+		await expect(page.locator(".rel-scrim")).toHaveCount(0);
+		await show(page, "C5~v/21-2026/di");
+		await expectSpotted(page, ['[data-testid="bar-di-21-2026"]']);
+		await settle(page);
+		const sc = page.locator(".rel-sc");
+		const box = (await sc.boundingBox())!;
+		const y = box.y + box.height - 30;
+		const before = await sc.evaluate((el) => el.scrollLeft);
+		await page.mouse.move(box.x + 400, y);
+		await page.mouse.down();
+		await page.mouse.move(box.x + 600, y, { steps: 8 });
+		await page.mouse.up();
+		await expect.poll(() => sc.evaluate((el) => el.scrollLeft)).toBeLessThan(before - 100);
+		await page.mouse.click(box.x + 420, y);
+		await expect(sheet(page)).toBeVisible();
+		await expect(page).toHaveURL(/sheet=attention/);
 	});
 
-	test("A6 from Needs attention opens the version sheet and lights the same row", async ({ page }) => {
+	test("opening a card from the timeline while a sheet is open replaces it, with no back stack", async ({ page }) => {
+		await open(page, "?layers=cards&sheet=version:21-2026:di", "subjects");
+		const group = page.getByTestId("cards-di:21-2026");
+		const reach = async (key: string) => {
+			const crow = group.locator(`.crow[data-key="${key}"]`);
+			await crow.evaluate((el) => {
+				const sc = document.querySelector(".rel-sc")!;
+				sc.scrollLeft += el.getBoundingClientRect().left - sc.getBoundingClientRect().left - 300;
+			});
+			await settle(page);
+			return crow;
+		};
+		await group.locator(".csum").click();
+		await (await reach("DEMO-101")).click();
+		await expect(page).toHaveURL(/sheet=card(%3A|:)DEMO-101/);
+		await (await reach("DEMO-102")).click();
+		await expect(page).toHaveURL(/sheet=card(%3A|:)DEMO-102/);
+		await expect(page.locator(".rel-sheet")).toHaveCount(1);
+		await expect(sheet(page).getByRole("button", { name: "Back", exact: true })).toHaveCount(0);
+	});
+
+	test("Esc and the close button close the sheet", async ({ page }) => {
 		await open(page, "?sheet=attention", "subjects");
+		await page.keyboard.press("Escape");
+		await expect(sheet(page)).toHaveCount(0);
+		await page.getByRole("button", { name: /Needs attention/ }).click();
+		await expect(sheet(page)).toBeVisible();
+		await sheet(page).getByRole("button", { name: "Close" }).click();
+		await expect(sheet(page)).toHaveCount(0);
+	});
+});
+
+test.describe("the page never shifts", () => {
+	test.use({ viewport: { width: 1100, height: 800 } });
+
+	test("in a window too narrow for the top bar, focus and Show scroll only the timeline", async ({ page }) => {
+		await openFrozen(page, "?sheet=attention");
+		await settle(page);
+		await page.getByRole("button", { name: /Needs attention/ }).focus();
+		expect(await outerScrolls(page)).toEqual([]);
+		await show(page, "L1~mr/di/330");
+		await expectSpotted(page, ['.rel-app[data-app="di"] [data-testid="llb-lane"][data-branch="feature/demo-wallet"]']);
+		expect(await outerScrolls(page)).toEqual([]);
+	});
+});
+
+test.describe("an alert's subject line in its own sheet", () => {
+	test("A6 rings the freeze stage row it names, keeps the sheet, and rings it again on a second press", async ({
+		page,
+	}) => {
+		await openFrozen(page, "?sheet=version:21-2026:di");
+		await settle(page);
+		const subject = sheet(page).locator('.al[data-hit="A6~vd/21-2026/di/freeze"]').getByTestId("hit-subject");
+		const part = '.rel-sheet [data-testid="stage-row"][data-stage="freeze"]';
+		await subject.click();
+		await expectSpotted(page, [part], { rings: 1 });
+		await expect(page).toHaveURL(/sheet=version(%3A|:)21-2026(%3A|:)di/);
+		const since = await animationNow(page);
+		await subject.click();
+		await expectSpotted(page, [part], { since, rings: 1 });
+	});
+
+	test("A6 from Needs attention opens the version sheet and rings the same row", async ({ page }) => {
+		await openFrozen(page, "?sheet=attention");
 		await sheet(page).locator('.al[data-hit="A6~vd/21-2026/di/freeze"]').getByTestId("hit-subject").click();
 		await expect(page).toHaveURL(/sheet=version/);
-		await expect(sheet(page).locator('[data-testid="stage-row"][data-stage="freeze"]')).toHaveAttribute(
-			"data-pulse",
-			"motion",
-		);
+		await expectSpotted(page, ['.rel-sheet [data-testid="stage-row"][data-stage="freeze"]']);
 		await sheet(page).getByRole("button", { name: "Back", exact: true }).click();
 		await expect(page).toHaveURL(/sheet=attention/);
 	});
 
-	test("an approval alert lights each approver it names", async ({ page }) => {
-		await open(page, "?sheet=version:21-2026:da", "subjects");
+	test("an approval alert rings the approvers it names, as one run", async ({ page }) => {
+		await openFrozen(page, "?sheet=version:21-2026:da");
 		await settle(page);
 		await sheet(page).locator('.al[data-hit="D3~v/21-2026/da"]').getByTestId("hit-subject").click();
-		const named = sheet(page).locator('[data-part="approvers"] .prow[data-pulse="motion"]');
-		await expect(named).toHaveCount(9);
-		await expect(named.first()).toBeInViewport();
+		await expectSpotted(page, ['.rel-sheet [data-part="approvers"] [data-name]'], { rings: 1 });
+		await expect(page.locator('.rel-sheet [data-part="approvers"] [data-name]')).toHaveCount(9);
 	});
 });
 
 test.describe("Show under reduced motion", () => {
-	test("outlines the target without animating it", async ({ page }) => {
+	test("rings the target without a pulse, holds it for 5 s, then takes it away", async ({ page }) => {
 		await page.emulateMedia({ reducedMotion: "reduce" });
 		await open(page, "?sheet=attention", "subjects");
 		await show(page, "L3~ct/21-2026/di/DEMO-109");
-		const row = page.locator('[data-testid="cards-di:21-2026"] .crow[data-key="DEMO-109"]');
-		await expect(row).toHaveAttribute("data-pulse", "static");
-		const style = await row.evaluate((el) => {
-			const cs = getComputedStyle(el);
-			return { animation: cs.animationName, outline: cs.outlineStyle };
-		});
-		expect(style).toEqual({ animation: "none", outline: "solid" });
-		expect(await inOpenView(row)).toBe("");
-		await expect(row).not.toHaveAttribute("data-pulse", { timeout: 10_000 });
+		const target = '[data-testid="cards-di:21-2026"] .crow[data-key="DEMO-109"]';
+		await expectSpotted(page, [target], { motion: false });
+		await expect.poll(() => ringLife(page), { timeout: 9_000, intervals: [100] }).toBeGreaterThan(0);
+		const life = await ringLife(page);
+		expect(life, "still there at 4 s").toBeGreaterThan(4_000);
+		expect(life, "held the full 5 s").toBeGreaterThanOrEqual(4_950);
+		expect(life, "gone by about 5.5 s").toBeLessThan(5_600);
+		await expect(page.locator(".rel-halo")).toHaveCount(0);
 	});
 });

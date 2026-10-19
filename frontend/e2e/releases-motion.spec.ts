@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
+import { NARROW, halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 
@@ -60,7 +60,7 @@ async function startFrames(page: Page) {
 				]) {
 					if (y < 0 || y > innerHeight || r.height < 12) continue;
 					const hit = document.elementFromPoint(x, y);
-					if (hit && !lab.contains(hit) && !hit.closest(".rel-axis, .rel-sheet, .rel-scrim, .rel-top, .rel-strip"))
+					if (hit && !lab.contains(hit) && !hit.closest(".rel-axis, .rel-sheet, .rel-top, .rel-strip"))
 						w.__covered.push(`${lab.dataset.testid ?? lab.className} by ${hit.className}`);
 				}
 			}
@@ -121,7 +121,7 @@ async function expectSameAsColdLoad(page: Page) {
 
 for (const reduced of [false, true]) {
 	test.describe(reduced ? "releases motion, reduced" : "releases motion", () => {
-		test.use({ viewport: { width: 1512, height: 945 } });
+		test.use({ viewport: NARROW });
 
 		test.beforeEach(async ({ page }) => {
 			await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });

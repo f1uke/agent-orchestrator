@@ -1372,13 +1372,13 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 	[
 		"G5~pf/21-2026/demo/open",
 		"info",
-		"1 card(s) not on the #21 Demo page: DEMO-103",
+		"4 card(s) not on the #21 Demo page: DEMO-103, DEMO-104, DEMO-105, DEMO-106",
 		{
 			kind: "pageFamily",
 			train: "21-2026",
 			family: "demo",
 			bucket: "open",
-			keys: ["DEMO-103"],
+			keys: ["DEMO-103", "DEMO-104", "DEMO-105", "DEMO-106"],
 		},
 	],
 ];

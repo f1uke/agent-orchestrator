@@ -46,10 +46,8 @@ export function ReleasesPage() {
 	const layers = url.layers ?? stored;
 	const storedHidden = useReleasesUi((s) => s.hidden);
 	const hiddenBoards = url.hideBoards ?? storedHidden;
-	const { pushBack, popBack, clearBack, setLayers, setHidden, openFolds, setPending, setAside } = useReleasesUi();
+	const { pushBack, popBack, clearBack, setLayers, setHidden, openFolds, setPending } = useReleasesUi();
 	useEffect(() => saveSearch(releasesSearch(url)), [url]);
-	const sheetKey = url.sheet ? sheetParam(url.sheet) : null;
-	useEffect(() => setAside(false), [sheetKey, setAside]);
 	const view: RevealView = useMemo(
 		() => ({
 			layers,
@@ -77,18 +75,13 @@ export function ReleasesPage() {
 			openSheet: (s, from) => {
 				if (from === "push" && url.sheet) pushBack(url.sheet);
 				else clearBack();
-				setAside(false);
 				setSearch({ sheet: s });
 			},
 			closeSheet: () => {
 				clearBack();
-				setAside(false);
 				setSearch({ sheet: null });
 			},
-			back: () => {
-				setAside(false);
-				setSearch({ sheet: popBack() ?? null });
-			},
+			back: () => setSearch({ sheet: popBack() ?? null }),
 			setLayers: (l) => {
 				setLayers(l);
 				if (url.layers) setSearch({ layers: l });
@@ -117,7 +110,6 @@ export function ReleasesPage() {
 				if (r.focus && r.focus !== view.focus) patch.focus = r.focus;
 				openFolds(r.folds);
 				setPending(r);
-				if (url.sheet) setAside(true);
 				if (Object.keys(patch).length) setSearch(patch);
 			},
 			whereIs: (subject) => (board ? locate(subject, board, view).fallback : null),
@@ -127,7 +119,6 @@ export function ReleasesPage() {
 					if (url.sheet) pushBack(url.sheet);
 					setSearch({ sheet: s });
 				}
-				setAside(false);
 				if (part) setPending(sheetReveal(part));
 			},
 		}),
@@ -150,7 +141,6 @@ export function ReleasesPage() {
 			setHidden,
 			openFolds,
 			setPending,
-			setAside,
 		],
 	);
 
@@ -163,6 +153,7 @@ export function ReleasesPage() {
 	return (
 		<ReleaseMotionRoot>
 			<div className="rel" data-testid="releases-page" data-src={layers.src || undefined}>
+				<div className="rel-halos" aria-hidden="true" />
 				{!response ? (
 					<div className="rel-empty">{fetchError ? `Release trains: ${fetchError}` : "Loading release trains…"}</div>
 				) : !response.board ? (

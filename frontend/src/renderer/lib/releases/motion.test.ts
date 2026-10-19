@@ -1,16 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-	ASIDE_STRIP,
-	DURATION,
-	enterKeyframes,
-	momentumDistance,
-	moveKeys,
-	releaseMotion,
-	SHEET_W,
-	type Presence,
-} from "./motion";
+import { DURATION, enterKeyframes, momentumDistance, moveKeys, releaseMotion, RING_MS, type Presence } from "./motion";
 import { DEFAULT_LAYERS, parseReleasesSearch } from "./url";
 
 const COMPONENTS = path.resolve(__dirname, "../../components/releases");
@@ -106,10 +97,24 @@ describe("releases motion", () => {
 			expect(keysOf(s.appear)).toEqual(["opacity"]);
 			for (const i of [0, 1, 4]) expect(keysOf(s.label(i)), `label(${i}) has no offset`).toEqual(["opacity"]);
 			expect(keysOf(s.sheet)).toEqual(["opacity", "x"]);
-			expect(s.sheet.aside, "aside slides the sheet on x only").toEqual({ opacity: 1, x: SHEET_W - ASIDE_STRIP });
 		}
 		expect(releaseMotion(false).unfold.animate.height).toBe("auto");
 		expect(releaseMotion(false).unfold.exit).toEqual({ height: 0, opacity: 0 });
+	});
+
+	it("breathes Show's ring for RING_MS without fading below a third, then fades it; holds it still when reduced", () => {
+		expect(RING_MS).toBe(5000);
+		const ring = releaseMotion(false).ring;
+		if (ring.kind !== "pulse") throw new Error("motion on must pulse the ring");
+		expect(ring.timing.duration).toBe(RING_MS);
+		const o = ring.keyframes.map((k) => Number(k.opacity));
+		const offsets = ring.keyframes.map((k) => Number(k.offset));
+		expect(offsets).toEqual([...offsets].sort((a, b) => a - b));
+		expect(o.filter((v, i) => v === 1 && o[i - 1] !== 1).length).toBeGreaterThanOrEqual(5);
+		expect(Math.min(...o.slice(1, -1))).toBeGreaterThan(0.3);
+		expect([o[0], o.at(-1)]).toEqual([0, 0]);
+		expect(offsets.at(-2)).toBeGreaterThan(0.9);
+		expect(releaseMotion(true).ring).toEqual({ kind: "hold", ms: RING_MS });
 	});
 
 	it("settles every effect within DESIGN.md's medium duration, the last label included", () => {
