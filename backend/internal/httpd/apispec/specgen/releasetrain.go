@@ -211,6 +211,7 @@ func init() {
 		"SpecgenRtIdentityUnknown":                   "ReleaseTrainIdentityUnknown",
 		"ReleasetrainMineReason":                     "ReleaseTrainMineReason",
 		"ReleasetrainMineWhy":                        "ReleaseTrainMineWhy",
+		"ReleasetrainMinePolicy":                     "ReleaseTrainMinePolicy",
 		"SpecgenRtLLBLandedIn":                       "ReleaseTrainLLBLandedIn",
 		"SpecgenRtLLBPlanned":                        "ReleaseTrainLLBPlanned",
 		"SpecgenRtLLBFromEpic":                       "ReleaseTrainLLBFromEpic",

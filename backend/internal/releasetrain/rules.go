@@ -59,6 +59,8 @@ type RuleInfo struct {
 	Reads []KindName `json:"reads"`
 	// Subjects is every kind of subject the rule's hits are about, so the page can find each on the timeline.
 	Subjects []SubjectKind `json:"subjects"`
+	// Mine is when the rule's hits are mine, so an alert can say why it is.
+	MinePolicy MinePolicy `json:"minePolicy"`
 }
 
 // LookupRule returns the catalogue row of id under settings, or false when no rule has that id.
@@ -76,7 +78,7 @@ func catalogue(settings map[RuleID]bool) []RuleInfo {
 	out := make([]RuleInfo, len(table))
 	for i, r := range table {
 		out[i] = RuleInfo{ID: r.ID, Group: r.Group, Severity: r.Severity, DefaultOn: r.DefaultOn,
-			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID), Reads: r.Reads, Subjects: r.Subjects}
+			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID), Reads: r.Reads, Subjects: r.Subjects, MinePolicy: r.Mine}
 	}
 	return out
 }

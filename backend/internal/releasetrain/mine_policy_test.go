@@ -1,8 +1,10 @@
 package releasetrain
 
 import (
+	"encoding/json"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +28,22 @@ func TestEveryRuleDeclaresTheApprovedMinePolicy(t *testing.T) {
 		if r.Mine != want[r.ID] {
 			t.Errorf("rule %s mine policy = %q, want %q", r.ID, r.Mine, want[r.ID])
 		}
+	}
+}
+
+func TestCatalogueServesEachRulesMinePolicy(t *testing.T) {
+	b := newFixture(t, today).reconcile()
+	for i, r := range ruleTable() {
+		if got := b.Catalogue[i].MinePolicy; got != r.Mine {
+			t.Errorf("rule %s catalogue mine = %q, want %q", r.ID, got, r.Mine)
+		}
+	}
+	raw, err := json.Marshal(b.Catalogue[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"minePolicy":"never"`) {
+		t.Fatalf("catalogue row writes %s, want its mine policy", raw)
 	}
 }
 

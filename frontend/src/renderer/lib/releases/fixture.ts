@@ -5,6 +5,7 @@ import type {
 	Board,
 	BoardResponse,
 	FixKind,
+	MinePolicy,
 	RuleInfo,
 	Severity,
 	Stage,
@@ -259,6 +260,23 @@ const READS: Readonly<Record<string, string[]>> = {
 	G5: [...CARD_READS, "jira.branch_cards"],
 	L3: CARD_READS,
 	L9: ["gitlab.mrs"],
+};
+
+const MINE_POLICY: Readonly<Record<string, MinePolicy>> = {
+	A1: "never",
+	A5: "never",
+	A6: "never",
+	A7: "never",
+	F1: "never",
+	B1: "owner",
+	C1: "owner",
+	C5: "owner",
+	D1: "owner",
+	E1: "owner",
+	D3: "pending_approver",
+	G5: "listed_cards",
+	L3: "listed_cards",
+	L9: "mr",
 };
 
 const SUBJECTS: Readonly<Record<string, SubjectKind[]>> = {
@@ -528,6 +546,7 @@ function baseBoard(today: string): Board {
 		defaultOn: true,
 		reads: READS[id],
 		subjects: SUBJECTS[id],
+		minePolicy: MINE_POLICY[id],
 		...(FIX_KINDS[id] ? { fix: FIX_KINDS[id] } : {}),
 	}));
 	const badge = hits.filter((h) => h.bucket === "badge");
@@ -1263,6 +1282,7 @@ export function fixesBoard(today: string): Board {
 			fix: FIX_KINDS[id],
 			reads: READS[id],
 			subjects: SUBJECTS[id],
+			minePolicy: MINE_POLICY[id],
 		});
 	b.alerts.rules = b.catalogue.map((r) => {
 		const ids = b.alerts.hits.filter((h) => h.rule === r.id && h.bucket === "badge").map((h) => h.id);
