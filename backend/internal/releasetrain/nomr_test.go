@@ -87,7 +87,7 @@ func TestAMarkedCardOnATrainIsInTheNoCodeState(t *testing.T) {
 		codes[c.Key] = c.Code
 	}
 	want := map[string]CodeState{
-		"DEMO-1": CodeNoMR{Note: mark.Note, MarkedBy: mark.MarkedBy, MarkedAt: mark.MarkedAt},
+		"DEMO-1": CodeNoMR(mark),
 		"DEMO-2": CodeNone{},
 		"DEMO-3": CodeOpen{MRs: []int{f.mrs[len(f.mrs)-1].IID}},
 	}
