@@ -46,7 +46,7 @@ export function ReleasesPage() {
 	const layers = url.layers ?? stored;
 	const storedHidden = useReleasesUi((s) => s.hidden);
 	const hiddenBoards = url.hideBoards ?? storedHidden;
-	const { pushBack, popBack, clearBack, setLayers, setHidden, openFolds, setPending } = useReleasesUi();
+	const { pushBack, popBack, clearBack, setLayers, setHidden, openFolds, setPending } = useReleasesUi.getState();
 	useEffect(() => saveSearch(releasesSearch(url)), [url]);
 	const view: RevealView = useMemo(
 		() => ({
