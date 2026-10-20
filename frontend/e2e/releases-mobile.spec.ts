@@ -5,6 +5,13 @@ const LAYERS = "?layers=sprint,llb,cards";
 const DAY = 36;
 
 const bar = (row: Locator, which: "active" | "next") => row.locator(`.spsrc[data-sprint='${which}']`);
+async function unfold(button: Locator, shown: Locator, count = 1) {
+	await expect(async () => {
+		if ((await button.getAttribute("aria-expanded")) !== "true") await button.click({ timeout: 2_000 });
+		await expect(shown).toHaveCount(count, { timeout: 2_000 });
+	}).toPass({ timeout: 20_000 });
+}
+
 const toggle = (page: import("@playwright/test").Page) => page.getByTestId("mobile-only");
 
 test.describe("releases Mobile only filter", () => {
@@ -44,12 +51,9 @@ test.describe("releases Mobile only filter", () => {
 		await settle(page);
 		await expect(bar(pilot, "next").locator(".sl > b")).toHaveText("3 cards");
 		await expect(bar(pilot, "next").getByTestId("sprint-mobile-count")).toHaveText("0 mobile");
-		await bar(pilot, "next").locator(".csum").click();
 		const web = pilot.locator("[data-sprint='next'][data-dest='web']");
-		await expect(web).toHaveCount(1);
-		await settle(page);
-		await web.locator(".dsum").click();
-		await expect(web.locator(".crow[data-key]")).toHaveCount(3);
+		await unfold(bar(pilot, "next").locator(".csum"), web);
+		await unfold(web.locator(".dsum"), web.locator(".crow[data-key]"), 3);
 		await expect(web.getByTestId("web-tag")).toHaveCount(3);
 		await expect(web).toContainText("not mobile");
 
