@@ -72,10 +72,6 @@ func activeSprint(snap Snapshot, board int) (SprintFact, bool) {
 
 func (s SprintFact) dated() bool { return s.Start != nil && s.End != nil }
 
-// nextSprint is the board's next sprint with its dates as the Board shows them:
-// the earliest-starting future sprint with both dates, else the undated one
-// with the lowest id, whose dates are estimated from the active sprint's length
-// and flagged. With no dates on the active sprint there is nothing to estimate from.
 func nextSprint(snap Snapshot, board int) (sprint SprintFact, estimated, ok bool) {
 	active, hasActive := activeSprint(snap, board)
 	var dated, undated *SprintFact

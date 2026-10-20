@@ -30,7 +30,6 @@ export type Reveal = {
 	apps: readonly AppId[];
 	/** Only me must go off: the target is not mine, so Only me does not draw it. */
 	notMine: boolean;
-	/** Mobile only must go off: the target is not a mobile card, so Mobile only does not draw it. */
 	notMobile: boolean;
 	/** Where Show lands when the subject has no mark of its own on the timeline, for the row to say. */
 	fallback: string | null;

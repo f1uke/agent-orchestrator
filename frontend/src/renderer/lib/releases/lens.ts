@@ -93,7 +93,6 @@ export type Lens = {
 	appHits: (app: AppId) => AlertHit[];
 	/** Only me is on and the identity is known; with an unknown identity ?me=1 filters nothing. */
 	me: boolean;
-	/** Mobile only is on: sprint rows show the cards that touch the mobile apps. */
 	mobile: boolean;
 	identity: Identity;
 	/** Whose face marks my rows in a train's card lists, which Only me never filters. */

@@ -24,10 +24,9 @@ const StatusAbandoned = "Abandoned"
 
 // SprintRow is one configured board's active or next sprint and its cards that touch the mobile apps.
 type SprintRow struct {
-	Board  BoardConfig `json:"board"`
-	Sprint SprintFact  `json:"sprint"`
-	Next   bool        `json:"next"`
-	// Estimated says Sprint's dates are not Jira's: the sprint has none yet, so they follow the active sprint's length.
+	Board     BoardConfig  `json:"board"`
+	Sprint    SprintFact   `json:"sprint"`
+	Next      bool         `json:"next"`
 	Estimated bool         `json:"estimated"`
 	Number    int          `json:"number"`
 	Total     int          `json:"total"`
@@ -66,8 +65,7 @@ type SprintCard struct {
 	ActiveWhy      []ActiveWhy     `json:"activeWhy"`
 	Mine           []MineReason    `json:"mine,omitempty"`
 	NoMR           *NoMRMark       `json:"noMr,omitempty"`
-	// Mobile says the card touches the mobile apps. A card that does not is shown in its sprint and read by no rule, tally or Only me.
-	Mobile bool `json:"mobile"`
+	Mobile         bool            `json:"mobile"`
 }
 
 // SprintSubtask is a subtask of a sprint card; Mobile when its summary matches the configured pattern.

@@ -29,7 +29,6 @@ export type ReleasesSearch = {
 	layers: Layers | null;
 	/** Board keys whose sprint row is hidden; null means the viewer's stored set. */
 	hideBoards: ReadonlySet<string> | null;
-	/** Sprint rows keep only the cards that touch the mobile apps. */
 	mobile: boolean;
 };
 

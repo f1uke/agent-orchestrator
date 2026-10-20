@@ -144,7 +144,6 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export type CardView = { me: boolean; mobile: boolean };
 export type CardCount = { text: string; sub: string | null };
 
-/** Counts the cards the lens keeps; a muted "M mobile" appears only when some of them are not mobile. */
 export function cardCount(cards: readonly SprintCard[], view: CardView): CardCount {
 	if (view.me) return { text: `${plural(cards.length, "card")} of mine`, sub: null };
 	if (view.mobile) return { text: plural(cards.length, "mobile card"), sub: null };
