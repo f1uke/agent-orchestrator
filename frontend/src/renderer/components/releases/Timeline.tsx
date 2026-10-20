@@ -102,6 +102,10 @@ export function Timeline({
 		}
 	}, []);
 	useEffect(() => {
+		const frame = requestAnimationFrame(fit);
+		return () => cancelAnimationFrame(frame);
+	});
+	useEffect(() => {
 		const el = sc.current;
 		if (!el) return;
 		let queued = 0;
@@ -113,7 +117,6 @@ export function Timeline({
 				useReleasesUi.getState().setScroll({ left: el.scrollLeft, top: el.scrollTop, focus: focusId });
 			});
 		};
-		queue();
 		el.addEventListener("scroll", queue, { passive: true });
 		window.addEventListener("resize", queue);
 		return () => {
@@ -121,7 +124,7 @@ export function Timeline({
 			window.removeEventListener("resize", queue);
 			cancelAnimationFrame(queued);
 		};
-	});
+	}, [fit, focusId]);
 
 	usePan(sc, mo);
 	useHoverGuide(sc, canvas, tl.days);
