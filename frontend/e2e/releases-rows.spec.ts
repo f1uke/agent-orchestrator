@@ -6,7 +6,6 @@ const LAYERS = "?layers=sprint,llb,cards";
 type Box = { x: number; y: number; width: number; height: number };
 const box = async (l: Locator): Promise<Box> => (await l.boundingBox())!;
 const right = (b: Box) => b.x + b.width;
-const bottom = (b: Box) => b.y + b.height;
 
 const sprintRow = (page: Page) => page.getByTestId("sprint-row-DEMO");
 
@@ -25,16 +24,33 @@ const rowOf = (page: Page, block: string, key: string) =>
 
 const truncated = (l: Locator) => l.evaluate((el) => el.scrollWidth > el.clientWidth);
 
-async function chipsInside(row: Locator, wrapped = false) {
+async function chipsInside(row: Locator) {
 	const cell = await box(row.locator(".t"));
 	const tt = await box(row.locator(".tt"));
 	const chips = row.locator(".tc > .ob");
 	expect(await chips.count(), "the row carries chips").toBeGreaterThan(0);
 	for (const c of await chips.all()) {
 		const b = await box(c);
-		if (wrapped) expect(b.y, "chips wrap under the full title").toBeGreaterThanOrEqual(bottom(tt) - 0.5);
-		else expect(b.x, "chip starts after the visible title").toBeGreaterThanOrEqual(right(tt) - 0.5);
+		expect(b.x, "chip starts after the visible title").toBeGreaterThanOrEqual(right(tt) - 0.5);
+		expect(Math.abs(b.y + b.height / 2 - (tt.y + tt.height / 2)), "chip sits on the title's line").toBeLessThan(2);
 		expect(right(b), "chip ends inside the title cell").toBeLessThanOrEqual(right(cell) + 0.5);
+		expect(await c.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), "chip text not cut").toBe(true);
+	}
+}
+
+async function chipsVisible(row: Locator) {
+	const chips = row.locator(".tc > .ob");
+	expect(await chips.count(), "the row carries warning chips").toBeGreaterThan(0);
+	for (const c of await chips.all()) {
+		const b = await box(c);
+		const hit = await c.evaluate(
+			(el, pts) => pts.every(([x, y]) => el.contains(document.elementFromPoint(x, y))),
+			[
+				[b.x + 2, b.y + b.height / 2],
+				[right(b) - 2, b.y + b.height / 2],
+			],
+		);
+		expect(hit, `chip "${await c.textContent()}" is whole and on top`).toBe(true);
 		expect(await c.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), "chip text not cut").toBe(true);
 	}
 }
@@ -53,11 +69,12 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			await expect(row.locator(".tc")).toContainText(chip);
 			expect(await truncated(row.locator(".tt")), "the title carries the ellipsis").toBe(true);
 			await chipsInside(row);
+			await chipsVisible(row);
 			const mrs = await box(row.locator(".spill"));
 			expect(right(mrs), "Jira status column stays in the row").toBeLessThanOrEqual(right(await box(row)) + 0.5);
 		});
 
-		test(`sprint block ${block}: hover opens the whole title over the rows below, leave puts it back, nothing moves`, async ({
+		test(`sprint block ${block}: hover opens the whole title and its chips on one line over the columns to the right, leave puts it back, nothing moves`, async ({
 			page,
 		}) => {
 			await open(page, LAYERS, "dense-lists");
@@ -69,12 +86,15 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			const restCell = await box(cell);
 			const nextRest = (await next.count()) ? await box(next) : null;
 			await row.hover();
-			await expect.poll(async () => (await box(cell)).height).toBeGreaterThan(restCell.height + 4);
+			await expect.poll(async () => (await box(cell)).width).toBeGreaterThan(restCell.width + 20);
 			await settle(page);
 			const wide = await box(cell);
+			expect(wide.height, "the open title stays on one line, inside the 24px row").toBeLessThanOrEqual(24);
 			expect(await truncated(row.locator(".tt")), "no ellipsis while open").toBe(false);
+			expect((await box(row.locator(".tt"))).height, "the title does not wrap").toBeLessThan(20);
 			expect(await box(row), "the row itself keeps its box").toEqual(rest);
-			await chipsInside(row, true);
+			await chipsInside(row);
+			await chipsVisible(row);
 			for (const col of [".k", ".spill"]) {
 				const c = await box(row.locator(col).first());
 				expect(
@@ -85,9 +105,9 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			if (nextRest) expect(await box(next), "no neighbour moves").toEqual(nextRest);
 			const top = await page.evaluate(
 				([x, y]) => document.elementFromPoint(x, y)?.closest(".crow")?.getAttribute("data-key"),
-				[restCell.x + 20, wide.y + wide.height - 3],
+				[right(wide) - 3, wide.y + wide.height / 2],
 			);
-			expect(top, "the last line of the open title is on top and not clipped").toBe(key);
+			expect(top, "the right end of the open line is on top and not clipped").toBe(key);
 			await page.mouse.move(5, 5);
 			await settle(page);
 			expect(await box(cell)).toEqual(restCell);
@@ -97,19 +117,19 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			await open(page, LAYERS, "dense-lists");
 			await unfoldSprint(page);
 			const row = rowOf(page, block, key);
-			const rest = (await box(row.locator(".t"))).height;
+			const rest = (await box(row.locator(".t"))).width;
 			await row.focus();
 			await expect(row).toBeFocused();
 			await page.keyboard.press("Shift+Tab");
 			await page.keyboard.press("Tab");
 			await expect(row).toBeFocused();
-			await expect.poll(async () => (await box(row.locator(".t"))).height).toBeGreaterThan(rest + 4);
+			await expect.poll(async () => (await box(row.locator(".t"))).width).toBeGreaterThan(rest + 20);
 			await row.blur();
-			await expect.poll(async () => (await box(row.locator(".t"))).height).toBeCloseTo(rest, 0);
+			await expect.poll(async () => (await box(row.locator(".t"))).width).toBeCloseTo(rest, 0);
 		});
 	}
 
-	test("when the chips alone are wider than the cell the title keeps 40px, the chips clip at the cell, and hover shows them all", async ({
+	test("a long title with more warning chips than the cell holds keeps 40px of title, and every chip stays whole at rest and on hover", async ({
 		page,
 	}) => {
 		await open(page, LAYERS, "dense-lists");
@@ -122,20 +142,15 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 		expect(tt.x + tt.width, "the title never overlaps a chip").toBeLessThanOrEqual(
 			(await box(row.locator(".tc"))).x + 0.5,
 		);
-		expect(right(await box(row.locator(".spill"))), "the status column stays in the row").toBeLessThanOrEqual(
-			right(await box(row)) + 0.5,
-		);
+		await chipsVisible(row);
 		await row.hover();
 		await settle(page);
-		for (const c of await row.locator(".tc > .ob").all()) {
-			const b = await box(c);
-			expect(right(b), "every chip is inside the open cell").toBeLessThanOrEqual(
-				right(await box(row.locator(".t"))) + 0.5,
-			);
-		}
+		expect(await truncated(row.locator(".tt")), "no ellipsis while open").toBe(false);
+		expect((await box(row.locator(".t"))).height, "one line").toBeLessThanOrEqual(24);
+		await chipsVisible(row);
 	});
 
-	test("the open title is not clipped by its block and no block moves", async ({ page }) => {
+	test("the open line is not clipped by its block and no block moves", async ({ page }) => {
 		await open(page, LAYERS, "dense-lists");
 		await unfoldSprint(page);
 		const blocks = sprintRow(page).getByTestId("sprint-dest-block");
@@ -145,15 +160,12 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 		await row.hover();
 		await settle(page);
 		expect(await tops(), "no block moves").toEqual(before);
-		const last = await box(row.locator(".t"));
-		const block = await box(sprintRow(page).locator('[data-dest="web"]'));
-		expect(bottom(last), "the open title reaches below its block's own height or fits in it").toBeGreaterThan(0);
+		const line = await box(row.locator(".t"));
 		const at = await page.evaluate(
 			([x, y]) => document.elementFromPoint(x, y)?.closest(".crow")?.getAttribute("data-key"),
-			[last.x + 20, bottom(last) - 3],
+			[right(line) - 3, line.y + line.height / 2],
 		);
-		expect(at, "the last line of the open title is on top").toBe("DEMO-362");
-		void block;
+		expect(at, "the right end of the open line is on top").toBe("DEMO-362");
 	});
 });
 

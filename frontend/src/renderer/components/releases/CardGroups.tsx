@@ -139,14 +139,14 @@ function UnitRow({
 	u,
 	board,
 	train,
-	focused,
+	tagged,
 	face,
 	actions,
 }: {
 	u: CardUnit;
 	board: Board;
 	train: string;
-	focused: boolean;
+	tagged: boolean;
 	face: IdentityKnown | null;
 	actions: PageActions;
 }) {
@@ -167,7 +167,7 @@ function UnitRow({
 			statusCategory={u.statusCategory}
 			statusKind={u.factsFrom}
 			source={
-				focused && (
+				tagged && (
 					<SourceCell>
 						<SourceTag p={membershipOf(u, train)} />
 					</SourceCell>
@@ -187,13 +187,13 @@ function BranchCardRow({
 	c,
 	landed,
 	url,
-	focused,
+	tagged,
 	face,
 	actions,
 }: {
 	c: BranchCard;
 	landed: boolean;
-	focused: boolean;
+	tagged: boolean;
 	url?: string;
 	face: IdentityKnown | null;
 	actions: PageActions;
@@ -216,7 +216,7 @@ function BranchCardRow({
 			statusCategory={c.statusCategory}
 			statusKind="jira.llb_cards"
 			source={
-				focused && (
+				tagged && (
 					<SourceCell>
 						<SourceTag p={BRANCH_CARD_P} />
 					</SourceCell>
@@ -242,7 +242,7 @@ const BRANCH_CARD_P = derivedOf(
 function GroupRows({
 	g,
 	board,
-	focused,
+	tagged,
 	face,
 	actions,
 	isOpen,
@@ -250,7 +250,7 @@ function GroupRows({
 }: {
 	g: CardGroup;
 	board: Board;
-	focused: boolean;
+	tagged: boolean;
 	face: IdentityKnown | null;
 	actions: PageActions;
 	isOpen: (k: string) => boolean;
@@ -260,15 +260,7 @@ function GroupRows({
 	return (
 		<>
 			{g.direct.map((u) => (
-				<UnitRow
-					key={u.key}
-					u={u}
-					board={board}
-					train={g.train.label}
-					focused={focused}
-					face={face}
-					actions={actions}
-				/>
+				<UnitRow key={u.key} u={u} board={board} train={g.train.label} tagged={tagged} face={face} actions={actions} />
 			))}
 			{g.llbs.map(({ group, branch, cards }) => {
 				const fk = branchFoldKey(g, branch);
@@ -303,7 +295,7 @@ function GroupRows({
 									{cards.length} card{cards.length === 1 ? "" : "s"}
 								</span>
 								{tgt && <TargetTag chip={tgt} />}
-								{tgt && focused && <SourceTag p={llbTargetOf(group, (t) => trainLabel(board, t))} />}
+								{tgt && tagged && <SourceTag p={llbTargetOf(group, (t) => trainLabel(board, t))} />}
 							</span>
 							<span className="spill">
 								{landed && st.label !== "accepted" ? `merged ${shortDay(branch.landing?.mergedOn ?? "")}` : st.label}
@@ -316,7 +308,7 @@ function GroupRows({
 									c={c}
 									landed={landed}
 									url={jira(c.key)}
-									focused={focused}
+									tagged={tagged}
 									face={face}
 									actions={actions}
 								/>
@@ -380,6 +372,7 @@ export function CardGroupBox({
 	const isOpen = (k: string) => open.has(k);
 	const t = g.tally;
 	const n = g.units.length;
+	const tagged = focused || g.train.phase !== "past";
 	return (
 		<div
 			className={`rel-cg${focused ? "" : " quiet"}`}
@@ -400,11 +393,11 @@ export function CardGroupBox({
 					{t.parked ? ` · ${t.parked} parked` : ""}
 					{t.elsewhere ? ` · ${t.elsewhere} elsewhere` : ""}
 					{t.no_mr ? ` · ${t.no_mr} no code` : ""}
-					{focused && <SourceTag p={CODE_TALLY_P} />}
+					{tagged && <SourceTag p={CODE_TALLY_P} />}
 				</span>
 				<span className="passive">
 					{g.ready} ready
-					{focused && <SourceTag p={READY_P} />}
+					{tagged && <SourceTag p={READY_P} />}
 				</span>
 				{g.llbs.length > 0 && (
 					<span className="llbn">
@@ -413,7 +406,7 @@ export function CardGroupBox({
 				)}
 			</button>
 			<Unfold open={open.has(g.key)} className="crows">
-				<GroupRows g={g} board={board} focused={focused} face={face} actions={actions} isOpen={isOpen} jira={jira} />
+				<GroupRows g={g} board={board} tagged={tagged} face={face} actions={actions} isOpen={isOpen} jira={jira} />
 			</Unfold>
 		</div>
 	);

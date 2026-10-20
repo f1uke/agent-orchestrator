@@ -317,3 +317,13 @@ export function readOf(title: string, kind: KindName, text?: string, field?: str
 export function derivedOf(title: string, lines: SourceLine[], note?: string, field?: string): Provenance {
 	return { title, how: "derived", lines, note, field };
 }
+
+export type ReleasePage = { page: Board["trains"][number]["pages"][number] } | { reason: string };
+
+export function releasePage(b: Board, train: Board["trains"][number], app: string): ReleasePage {
+	const family = b.apps.find((a) => a.id === app)?.family;
+	const page = train.pages.find((p) => p.family === family);
+	if (page) return { page };
+	if (!b.kinds.find((k) => k.kind === "confluence.pages")?.resources) return { reason: "not connected" };
+	return { reason: `no ${family ?? app} train page for ${train.label} yet` };
+}

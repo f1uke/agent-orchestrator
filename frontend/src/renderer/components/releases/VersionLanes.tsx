@@ -79,19 +79,19 @@ function Line2({ parts, src }: { parts: BarPart[]; src?: (p: BarPart) => Provena
 
 function versionPartOf(v: AppVersion, today: string) {
 	return (p: BarPart): Provenance | null => {
+		const mr = v.releaseMr;
 		if (p.id === "mr")
-			return {
-				title: "Release MR",
-				how: "read",
-				lines: [
-					{
-						kind: "gitlab.mrs",
-						text: v.releaseMr ? `!${v.releaseMr.mr.iid} release → main: state` : "no MR from release/* into main",
-					},
-					{ kind: "gitlab.mr_detail", text: "conflicts, head pipeline" },
-				],
-				field: "releaseMr",
-			};
+			return mr
+				? {
+						title: "Release MR",
+						how: "read",
+						lines: [
+							{ kind: "gitlab.mrs", text: `!${mr.mr.iid} release → main: state` },
+							{ kind: "gitlab.mr_detail", text: "conflicts, head pipeline" },
+						],
+						field: "releaseMr",
+					}
+				: null;
 		if (p.id === "tag")
 			return readOf(
 				"Version tag",
@@ -139,6 +139,7 @@ function TrainBar({
 	const t = it.train;
 	const box = barBox(tl, it.freeze, it.publish);
 	const focused = t.id === lens.focus?.id;
+	const tagged = focused || t.phase !== "past";
 	const hits = lens.attention.filter((h) => h.train === t.id && h.app === it.version.app);
 	const flag = hits[0];
 	const tone = t.phase === "next" ? "todo" : worstTone(it.stages);
@@ -184,7 +185,7 @@ function TrainBar({
 					<span className={`dt${it.offDates ? " off" : ""}`} data-part="dates">
 						{shortDay(it.freeze)} → {shortDay(it.publish)}
 						{it.offDates ? ` · not ${t.label}'s dates` : ""}
-						{focused && (
+						{tagged && (
 							<SourceTag
 								p={readOf(
 									"Bar dates",
@@ -196,7 +197,7 @@ function TrainBar({
 						)}
 					</span>
 				</span>
-				<Line2 parts={barLine(it.version, today)} src={focused ? versionPartOf(it.version, today) : undefined} />
+				<Line2 parts={barLine(it.version, today)} src={tagged ? versionPartOf(it.version, today) : undefined} />
 			</span>
 			{flag && (
 				<span className="fl" data-st={SEVERITY_META[flag.severity].tone} title={SEVERITY_META[flag.severity].label}>
