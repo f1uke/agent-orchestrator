@@ -211,6 +211,7 @@ func branchCards(snap Snapshot) map[string]IssueFact {
 // sprintRows routes the next sprint by the branch flow of the active one, and pulls in no off-board cards for it.
 func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 	mobileSub := regexp.MustCompile(cfg.Mobile.SubtaskPattern)
+	mobileTitle := regexp.MustCompile(cfg.Mobile.cardPattern())
 	mobileProject := map[string]bool{}
 	for _, p := range cfg.Mobile.Projects {
 		mobileProject[p] = true
@@ -254,7 +255,7 @@ func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 			}
 			row := SprintRow{Board: b, Sprint: s, Next: isNext, Number: si.number, Total: len(si.cards), Cards: []SprintCard{}}
 			for _, is := range issues {
-				c, ok := sprintCard(is, si, mrs[is.Key], mobileSub, mobileProject, r, cfg)
+				c, ok := sprintCard(is, si, mrs[is.Key], mobileSub, mobileTitle, mobileProject, r, cfg)
 				if !ok {
 					continue
 				}
@@ -294,7 +295,7 @@ func branchOwner(cfg Config, snap Snapshot) (sprintIssues, bool) {
 	return sprintIssues{}, false
 }
 
-func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub *regexp.Regexp, mobileProject map[string]bool, r routing, cfg Config) (SprintCard, bool) {
+func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub, mobileTitle *regexp.Regexp, mobileProject map[string]bool, r routing, cfg Config) (SprintCard, bool) {
 	c := SprintCard{
 		Key: is.Key, URL: is.URL, Summary: is.Summary, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
 		Subtasks: []SprintSubtask{}, MRs: append([]SprintMR{}, mrs...), OnBoard: si.inSprint[is.Key], ActiveWhy: []ActiveWhy{},
@@ -308,7 +309,7 @@ func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub *regexp
 		}
 	}
 	project, _, _ := strings.Cut(is.Key, "-")
-	if !mobileProject[project] && len(mrs) == 0 && len(mobile) == 0 {
+	if !mobileProject[project] && len(mrs) == 0 && len(mobile) == 0 && !mobileTitle.MatchString(is.Summary) {
 		return SprintCard{}, false
 	}
 	isNew, openSub, mrNow := si.newHere[is.Key], false, false

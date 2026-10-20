@@ -29,6 +29,12 @@ func (f *fixture) sprintCard(s *SprintFact, key, status string, isNew bool) *Iss
 	return is
 }
 
+func (f *fixture) titledCard(s *SprintFact, key, summary, status string, isNew bool) *IssueFact {
+	is := f.sprintCard(s, key, status, isNew)
+	is.Summary = summary
+	return is
+}
+
 func (f *fixture) subtask(s *SprintFact, parent, key, summary, category string) *IssueFact {
 	is := &IssueFact{Key: key, Summary: summary, Status: "Task", StatusCategory: category, Subtask: true, Parent: parent, URL: "https://jira.example.com/browse/" + key}
 	f.sprintIss[s.ID] = append(f.sprintIss[s.ID], is)
@@ -231,5 +237,40 @@ func TestEveryBoardRoutesByTheSprintBranchOwnersNumber(t *testing.T) {
 	}
 	if rowOf(t, b, "OTHER").Number != 8 {
 		t.Fatalf("OTHER's label keeps its own sprint number")
+	}
+}
+
+func TestACardTitledAsMobileIsKeptWithNoSubtaskAndNoMR(t *testing.T) {
+	f := newFixture(t, today)
+	s := f.sprint(43, 7, "2026-10-05", "2026-10-16")
+	f.titledCard(s, "OTHER-1", "App - fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-2", "Web - fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-3", "[iOS] fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-4", "Application form", "To Do", false)
+
+	r := rowOf(t, f.reconcile(), "OTHER")
+
+	if got := cardKeys(r); !reflect.DeepEqual(got, []string{"OTHER-1", "OTHER-3"}) {
+		t.Fatalf("OTHER cards = %v; want the App and the [iOS] titled cards, not Web or Application", got)
+	}
+	if r.Total != 4 {
+		t.Fatalf("total = %d; want all 4 cards of the sprint", r.Total)
+	}
+	for _, c := range r.Cards {
+		if c.Active {
+			t.Errorf("%s is active; a title only decides whether a card is kept", c.Key)
+		}
+	}
+}
+
+func TestACardPatternInTheConfigReplacesTheDefault(t *testing.T) {
+	f := newFixture(t, today)
+	f.cfg.Mobile.CardPattern = `^Wallet\b`
+	s := f.sprint(43, 7, "2026-10-05", "2026-10-16")
+	f.titledCard(s, "OTHER-1", "App - fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-2", "Wallet - fictional thing", "To Do", false)
+
+	if got := cardKeys(rowOf(t, f.reconcile(), "OTHER")); !reflect.DeepEqual(got, []string{"OTHER-2"}) {
+		t.Fatalf("OTHER cards = %v; want only the card the configured pattern names", got)
 	}
 }

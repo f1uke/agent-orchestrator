@@ -61,10 +61,20 @@ type BoardConfig struct {
 	OwnsSprintBranch bool   `json:"ownsSprintBranch"`
 }
 
-// MobileConfig says which Jira projects and subtasks touch the mobile apps.
+// MobileConfig says which Jira projects, cards and subtasks touch the mobile apps.
 type MobileConfig struct {
 	Projects       []string `json:"projects,omitempty"`
 	SubtaskPattern string   `json:"subtaskPattern,omitempty"`
+	CardPattern    string   `json:"cardPattern,omitempty"`
+}
+
+const defaultCardPattern = `(?i)^\s*\[?(App|iOS|ADR|Android|Mobile)\b`
+
+func (m MobileConfig) cardPattern() string {
+	if m.CardPattern == "" {
+		return defaultCardPattern
+	}
+	return m.CardPattern
 }
 
 // FixWritesOff is the only fixWrites value accepted: every fix except L3 is a dry run.
@@ -174,6 +184,9 @@ func (c Config) validateSources() error {
 	}
 	if _, err := regexp.Compile(c.Mobile.SubtaskPattern); err != nil {
 		return configErr("mobile.subtaskPattern", "%v", err)
+	}
+	if _, err := regexp.Compile(c.Mobile.cardPattern()); err != nil {
+		return configErr("mobile.cardPattern", "%v", err)
 	}
 	return nil
 }
