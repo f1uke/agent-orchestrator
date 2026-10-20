@@ -48,7 +48,6 @@ describe("deriveReadiness — verdict", () => {
 		const r = deriveReadiness({ activity: { state: "active" }, status: "working" }, []);
 		expect(r.verdict.word).toBe("Working");
 		expect(r.verdict.hue).toBe("working");
-		expect(r.verdict.pulse).toBe(true);
 		expect(r.contextLabel).toBe("");
 		expect(tones(r).work).toBe("wait");
 		expect(tones(r).pr).toBe("idle");
@@ -111,7 +110,6 @@ describe("deriveReadiness — verdict", () => {
 		]);
 		expect(r.verdict.word).toBe("Ready to Merge");
 		expect(r.verdict.hue).toBe("merge");
-		expect(r.verdict.pulse).toBe(true);
 		expect(r.currentKey).toBeUndefined();
 	});
 
@@ -122,7 +120,6 @@ describe("deriveReadiness — verdict", () => {
 		const r = deriveReadiness({ status: "review_pending", activity: { state: "idle" } }, [pr()]);
 		expect(r.verdict.word).toBe("Waiting on Review");
 		expect(r.verdict.hue).toBe("review");
-		expect(r.verdict.pulse).toBeFalsy();
 		expect(tones(r).review).toBe("wait");
 		expect(stateOf(r, "review")).toBe("awaiting");
 		expect(r.currentKey).toBe("review");
@@ -147,11 +144,10 @@ describe("deriveReadiness — verdict", () => {
 		expect(r.verdict.word).toBe("Working");
 	});
 
-	it("merged PR → Merged (terminal, no pulse)", () => {
+	it("merged PR → Merged (terminal)", () => {
 		const r = deriveReadiness({ status: "merged" }, [pr({ state: "merged" })]);
 		expect(r.verdict.word).toBe("Merged");
 		expect(r.verdict.hue).toBe("merge");
-		expect(r.verdict.pulse).toBeUndefined();
 		expect(tones(r).pr).toBe("pass");
 		expect(tones(r).merge).toBe("pass");
 	});
@@ -289,7 +285,6 @@ describe("a session that stopped before opening a PR", () => {
 		);
 		expect(readiness.verdict.word).toBe("Stopped");
 		expect(readiness.verdict.caption).toContain("agent");
-		expect(readiness.verdict.pulse).toBeFalsy();
 	});
 
 	it("says so when AO was the one that ended it", () => {

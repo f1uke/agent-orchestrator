@@ -1270,7 +1270,7 @@ function SessionCard({
 					style={{ color: col.dotVar }}
 				>
 					<Icon
-						className={cn("h-[15px] w-[15px]", col.key === "working" && "animate-status-pulse")}
+						className="h-[15px] w-[15px]"
 						style={filled ? { fill: "currentColor" } : undefined}
 						aria-hidden="true"
 					/>

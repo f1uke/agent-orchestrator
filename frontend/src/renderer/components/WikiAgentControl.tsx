@@ -72,9 +72,7 @@ export function WikiAgentControl({
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
 				<button type="button" className={`wiki-pill wiki-pill--${state}`}>
-					{/* The breathing dot is the app's own working signal (status-pulse),
-					    so "the agent is busy" reads the same here as on the board. */}
-					<span className={`wiki-pill__dot${state === "thinking" ? " wiki-pill__dot--pulse" : ""}`} />
+					<span className="wiki-pill__dot" />
 					{harness || "agent"}
 					<ChevronDown aria-hidden="true" className="wiki-pill__chevron" />
 				</button>

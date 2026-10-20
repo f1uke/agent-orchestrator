@@ -24,18 +24,18 @@ const noDragStyle = isMac ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperti
 
 // Topbar shows only the raw agent activity state. SCM/context badges stay in
 // the inspector Summary > Activity row.
-const TOPBAR_ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: string; breathe: boolean }> = {
-	active: { label: "Working", tone: "var(--orange)", breathe: true },
-	idle: { label: "Idle", tone: "var(--fg-muted)", breathe: false },
-	waiting_input: { label: "Input Needed", tone: "var(--amber)", breathe: false },
+const TOPBAR_ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: string }> = {
+	active: { label: "Working", tone: "var(--orange)" },
+	idle: { label: "Idle", tone: "var(--fg-muted)" },
+	waiting_input: { label: "Input Needed", tone: "var(--amber)" },
 	// Parked is a finished turn, not a question: it reads like idle, not like the
 	// amber "the agent is asking you something".
-	parked: { label: "Your Turn", tone: "var(--fg-muted)", breathe: false },
+	parked: { label: "Your Turn", tone: "var(--fg-muted)" },
 	// The turn ended but the agent's own background work is still running and
 	// will wake it: still working, not the human's turn.
-	background: { label: "Background Work", tone: "var(--orange)", breathe: true },
-	exited: { label: "Exited", tone: "var(--fg-muted)", breathe: false },
-	unknown: { label: "Unknown", tone: "var(--fg-muted)", breathe: false },
+	background: { label: "Background Work", tone: "var(--orange)" },
+	exited: { label: "Exited", tone: "var(--fg-muted)" },
+	unknown: { label: "Unknown", tone: "var(--fg-muted)" },
 };
 
 // The one app topbar (.dashboard-app-header), rendered by the shell layout
@@ -298,10 +298,10 @@ function SessionRef({ session }: { session: WorkspaceSession }) {
 }
 
 // StatusBadge --pill: tinted bordered pill (inset 25%-tone hairline + 7%-tone
-// fill) with a 6px dot that breathes while the agent is working.
+// fill) with a 6px dot.
 function SessionStatusPill({ session }: { session: WorkspaceSession }) {
 	const activityState = session.activity?.state ?? "unknown";
-	const { label, tone, breathe } = TOPBAR_ACTIVITY_PILL[activityState];
+	const { label, tone } = TOPBAR_ACTIVITY_PILL[activityState];
 	return (
 		<span
 			className="inline-flex shrink-0 items-center gap-[7px] whitespace-nowrap rounded-[7px] px-[11px] py-[5px] text-[11.5px] font-semibold leading-none"
@@ -311,10 +311,7 @@ function SessionStatusPill({ session }: { session: WorkspaceSession }) {
 				boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${tone} 25%, transparent)`,
 			}}
 		>
-			<span
-				className={cn("h-1.5 w-1.5 rounded-full", breathe && "animate-status-pulse")}
-				style={{ background: tone }}
-			/>
+			<span className="h-1.5 w-1.5 rounded-full" style={{ background: tone }} />
 			{label}
 		</span>
 	);

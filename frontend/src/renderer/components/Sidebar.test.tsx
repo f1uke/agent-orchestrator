@@ -633,43 +633,20 @@ describe("Sidebar", () => {
 		});
 	});
 
-	// Breathing status dot (decision 2026-07-11): the lane glyph gently pulses
-	// ONLY while the session is working; every other state is static; and the
-	// pulse is disabled under prefers-reduced-motion.
-	describe("working status dot breathing", () => {
+	// The breathing glyph (2026-07-11) was dropped on 2026-10-20: an endless
+	// opacity animation kept the GPU process at ~7% CPU with the app idle.
+	describe("status glyph motion", () => {
 		function glyphOf(title: string): SVGElement | null {
 			// The open target is a transparent layer over the row, so the glyph lives
 			// beside it in the row's content — it is the row's first svg.
 			return screen.getByLabelText(`Open ${title}`).closest("li")?.querySelector("svg") ?? null;
 		}
 
-		it("breathes the status glyph while the session is working", () => {
-			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
-			expect(glyphOf("fix login")?.getAttribute("class") ?? "").toContain("animate-status-pulse");
-		});
-
-		it("keeps the status glyph static for non-working sessions", () => {
+		it("keeps the status glyph still for every session, working or not", () => {
 			const merge = { ...session, id: "proj-1-2", title: "ship it", status: "mergeable" as const };
-			renderSidebar({ workspaces: [{ ...workspace, sessions: [merge] }] });
-			expect(glyphOf("ship it")?.getAttribute("class") ?? "").not.toContain("animate-status-pulse");
-		});
-
-		it("keeps the working glyph static under prefers-reduced-motion", () => {
-			vi.spyOn(window, "matchMedia").mockImplementation(
-				(query: string) =>
-					({
-						matches: query.includes("prefers-reduced-motion"),
-						media: query,
-						onchange: null,
-						addEventListener: () => undefined,
-						removeEventListener: () => undefined,
-						addListener: () => undefined,
-						removeListener: () => undefined,
-						dispatchEvent: () => false,
-					}) as unknown as MediaQueryList,
-			);
-			renderSidebar({ workspaces: [{ ...workspace, sessions: [session] }] });
-			expect(glyphOf("fix login")?.getAttribute("class") ?? "").not.toContain("animate-status-pulse");
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [session, merge] }] });
+			for (const title of ["fix login", "ship it"])
+				expect(glyphOf(title)?.getAttribute("class") ?? "").not.toMatch(/animate-/);
 		});
 	});
 
@@ -795,32 +772,15 @@ describe("Sidebar", () => {
 			status,
 			...extra,
 		});
-		function mockReducedMotion(reduce: boolean) {
-			vi.spyOn(window, "matchMedia").mockImplementation(
-				(query: string) =>
-					({
-						matches: reduce && query.includes("prefers-reduced-motion"),
-						media: query,
-						onchange: null,
-						addEventListener: () => undefined,
-						removeEventListener: () => undefined,
-						addListener: () => undefined,
-						removeListener: () => undefined,
-						dispatchEvent: () => false,
-					}) as unknown as MediaQueryList,
-			);
-		}
-
-		it("shows a breathing dot while the orchestrator is working", () => {
+		it("shows a still dot while the orchestrator is working", () => {
 			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }] });
 
 			const dot = busyDot();
 			expect(dot).toBeInTheDocument();
 			expect(orchestratorBtn()).toContainElement(dot);
-			// Tinted with the status token that already maps 1:1 to the daemon's
-			// working status, and breathing with the app's one status animation.
+			// Tinted with the status token that already maps 1:1 to the daemon's working status.
 			expect(dot?.className).toContain("bg-working");
-			expect(dot?.className).toContain("animate-status-pulse");
+			expect(dot?.className).not.toMatch(/animate-/);
 		});
 
 		it("leaves the idle button exactly as it is today", () => {
@@ -888,19 +848,7 @@ describe("Sidebar", () => {
 			expect(orchestratorBtn("Project Two").querySelector("[data-testid='orchestrator-busy']")).toBeNull();
 		});
 
-		it("keeps the dot but drops the breathing under prefers-reduced-motion", () => {
-			mockReducedMotion(true);
-			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }] });
-
-			// Presence, not motion, is what separates busy from idle — so the two
-			// states stay distinguishable with the animation switched off.
-			expect(busyDot()).toBeInTheDocument();
-			expect(busyDot()?.className).toContain("bg-working");
-			expect(busyDot()?.className).not.toContain("animate-status-pulse");
-		});
-
 		it("exposes busy on the button's name and adds no live region", () => {
-			mockReducedMotion(false);
 			renderSidebar({ workspaces: [{ ...workspace, sessions: [orch("working")] }] });
 
 			expect(orchestratorBtn()).toHaveAccessibleName("Open Project One orchestrator, working");

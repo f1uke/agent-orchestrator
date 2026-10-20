@@ -51,11 +51,7 @@ export function ReadinessStrip({ readiness }: { readiness: Readiness }) {
 			aria-label={`Merge readiness: ${verdict.word}. ${verdict.caption}`}
 		>
 			<div className="readiness__verdict">
-				<Icon
-					className={cn("readiness__glyph", verdict.pulse && "readiness__glyph--pulse")}
-					style={filled ? { fill: "currentColor" } : undefined}
-					aria-hidden="true"
-				/>
+				<Icon className="readiness__glyph" style={filled ? { fill: "currentColor" } : undefined} aria-hidden="true" />
 				<span className="readiness__headline">{verdict.word}</span>
 				{contextLabel ? <span className="readiness__ctx">{contextLabel}</span> : null}
 			</div>

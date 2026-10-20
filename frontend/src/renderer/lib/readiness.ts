@@ -39,8 +39,6 @@ export type ReadinessVerdict = {
 	word: string;
 	/** One-line "why / what to do next". */
 	caption: string;
-	/** Pulse the dot for act-now states (Working, Ready to Merge). */
-	pulse?: boolean;
 };
 
 export type Readiness = {
@@ -244,7 +242,6 @@ function deriveVerdict(
 			hue: "working",
 			word: "Working",
 			caption: "Agent is still working — no pull request yet.",
-			pulse: session.activity?.state === "active",
 		};
 	}
 
@@ -262,7 +259,7 @@ function deriveVerdict(
 	// whole claim "all gates pass" makes.
 	const ready =
 		pr!.state === "open" && gates.ci.tone === "pass" && gates.review.tone === "pass" && gates.merge.tone === "pass";
-	if (ready) return { hue: "merge", word: "Ready to Merge", caption: "All gates pass — you can merge.", pulse: true };
+	if (ready) return { hue: "merge", word: "Ready to Merge", caption: "All gates pass — you can merge." };
 
 	// In-flight — surface the earliest gate still in motion.
 	if (pr!.state === "draft") return { hue: "todo", word: "Draft", caption: "Mark the draft ready for review." };

@@ -51,7 +51,6 @@ import { spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { renameSession } from "../lib/rename-session";
 import { sessionRefLabel } from "../lib/session-ref";
 import { useEventsConnection } from "../hooks/useEventsConnection";
-import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { useIdleCountdown } from "../hooks/useIdleCountdown";
 import { useResizable } from "../hooks/useResizable";
 import {
@@ -167,9 +166,7 @@ const ORCHESTRATOR_SEG_CLASS = "relative";
 // `--color-working` is the status token that already maps 1:1 to the daemon's
 // working status (orange), so the sidebar agrees with the board's working lane and
 // the topbar pill instead of inventing a hue. Presence — not colour, not motion —
-// is the primary channel: the dot exists only while the orchestrator is working,
-// which is why dropping the animation under prefers-reduced-motion still leaves
-// the two states plainly distinguishable.
+// is the only channel: the dot exists only while the orchestrator is working.
 const ORCHESTRATOR_BUSY_DOT_CLASS =
 	"pointer-events-none absolute top-[5px] right-[6px] size-[5px] rounded-full bg-working";
 
@@ -646,7 +643,6 @@ function ProjectItem({
 	// is paused or about to pause. Hook order is unconditional — an absent
 	// orchestrator passes an empty session, which yields null.
 	const orchestratorCountdown = useIdleCountdown(orchestrator ?? {});
-	const prefersReducedMotion = usePrefersReducedMotion();
 
 	// Active-view glow: mark which of Dashboard / Orchestrator is the view
 	// currently open, read from the REAL route state (useSelection → URL params).
@@ -941,11 +937,7 @@ function ProjectItem({
 							re-wraps the label or shifts the header. Decorative — the state is
 							already on the button's accessible name above. */}
 							{orchestratorBusy && (
-								<span
-									aria-hidden="true"
-									className={cn(ORCHESTRATOR_BUSY_DOT_CLASS, !prefersReducedMotion && "animate-status-pulse")}
-									data-testid="orchestrator-busy"
-								/>
+								<span aria-hidden="true" className={ORCHESTRATOR_BUSY_DOT_CLASS} data-testid="orchestrator-busy" />
 							)}
 						</button>
 					</div>

@@ -84,7 +84,6 @@
 	--radius-lg: 8px;
 	--radius-xl: 12px;
 
-	--animate-status-pulse: status-pulse 1.8s ease-in-out infinite;
 	--animate-overlay-in: overlay-in 150ms ease-out;
 	--animate-modal-in: modal-in 150ms ease-out;
 }
@@ -739,16 +738,6 @@ body {
 	font-size: 12px;
 	font-weight: 600;
 	color: var(--fg-muted);
-}
-
-@keyframes status-pulse {
-	0%,
-	100% {
-		opacity: 1;
-	}
-	50% {
-		opacity: 0.35;
-	}
 }
 
 @keyframes overlay-in {
@@ -4523,10 +4512,6 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--rs-hue);
 }
 
-.readiness__glyph--pulse {
-	animation: status-pulse 1.8s ease-in-out infinite;
-}
-
 .readiness__headline {
 	font-size: 14.5px;
 	font-weight: 680;
@@ -4653,12 +4638,6 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 .readiness-gate[data-tone="idle"] .readiness-gate__label,
 .readiness-gate[data-tone="idle"] .readiness-gate__state {
 	color: var(--fg-passive);
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.readiness__glyph--pulse {
-		animation: none;
-	}
 }
 
 /* Approval-progress meter: a row of pips (approved filled, rest hollow), neutral
@@ -6238,17 +6217,6 @@ ol.note-prose__list {
 .wiki-pill--stopped .wiki-pill__dot {
 	background: var(--fg-passive);
 	opacity: 0.6;
-}
-
-/* The app's own working signal, so "busy" reads the same here as on the board. */
-.wiki-pill__dot--pulse {
-	animation: var(--animate-status-pulse);
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.wiki-pill__dot--pulse {
-		animation: none;
-	}
 }
 
 .wiki-pill__chevron {

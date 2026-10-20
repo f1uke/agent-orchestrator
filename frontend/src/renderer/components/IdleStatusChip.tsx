@@ -87,7 +87,6 @@ export function IdleStatusChip({ session, compact = false }: { session: Workspac
 				"inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 font-mono text-[10px] tabular-nums",
 				LEVEL_TEXT[countdown.level],
 				LEVEL_BORDER[countdown.level],
-				countdown.level === "imminent" && "animate-status-pulse",
 			)}
 			title={title}
 		>

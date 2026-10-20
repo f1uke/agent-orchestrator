@@ -16,7 +16,6 @@ import {
 	toSessionStatus,
 	toStatusReason,
 	workerDisplayStatus,
-	workerStatusPulses,
 	openPRs,
 	mergedPRCount,
 	isMergedAwaitingNext,
@@ -348,17 +347,6 @@ describe("orchestratorHealth", () => {
 				sessions: [newest],
 			}).state,
 		).toBe("restart_needed");
-	});
-});
-
-describe("workerStatusPulses", () => {
-	it("pulses only for working and needs_you", () => {
-		expect(workerStatusPulses("working")).toBe(true);
-		expect(workerStatusPulses("needs_you")).toBe(true);
-		expect(workerStatusPulses("mergeable")).toBe(false);
-		expect(workerStatusPulses("no_signal")).toBe(false);
-		expect(workerStatusPulses("done")).toBe(false);
-		expect(workerStatusPulses("unknown")).toBe(false);
 	});
 });
 
