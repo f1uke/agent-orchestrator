@@ -1344,24 +1344,23 @@
 	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .t {
 		position: relative;
 		z-index: 2;
-		align-self: start;
-		flex-wrap: wrap;
+		width: max-content;
+		min-width: 100%;
+		max-width: 1000px;
 		overflow: visible;
-		padding: 3px 4px;
-		margin: -3px -4px;
+		padding: 0 4px;
+		margin: 0 -4px;
+		height: 22px;
 		border-radius: 4px;
 		background: var(--bg-2);
 		box-shadow: 0 0 0 1px var(--border);
 	}
 	.rel-cg .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tt {
 		overflow: visible;
+	}
+	.rel-cg:not(.dest) .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tt {
 		white-space: normal;
 		overflow-wrap: anywhere;
-	}
-	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tc {
-		flex-wrap: wrap;
-		max-width: 100%;
-		gap: 0 6px;
 	}
 	.rel-cg.dest.next:has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
 		filter: none;
@@ -1453,7 +1452,7 @@
 		display: flex;
 		align-items: center;
 		min-width: 0;
-		overflow: clip;
+		background: inherit;
 	}
 	.rel .crow .tt {
 		flex: 0 1 auto;
@@ -1463,10 +1462,13 @@
 		white-space: nowrap;
 	}
 	.rel .crow .tc {
+		position: relative;
+		z-index: 1;
 		flex: none;
 		display: inline-flex;
 		align-items: center;
 		white-space: nowrap;
+		background: inherit;
 	}
 	.rel .crow .ob {
 		color: var(--amber);
@@ -1656,14 +1658,21 @@
 	.rel-sheet .crow {
 		width: auto;
 	}
-	.rel-sheet .crow:is(:hover, :focus-visible, :has(:focus-visible)) {
-		height: auto;
-		min-height: 24px;
+	.rel-sheet .crow:is(:hover, :focus-visible, :has(:focus-visible)) .t {
+		position: relative;
+		z-index: 2;
+		width: max-content;
+		min-width: 100%;
+		overflow: visible;
+		padding: 0 4px;
+		margin: 0 -4px;
+		height: 22px;
+		border-radius: 4px;
+		background: var(--bg-2);
+		box-shadow: 0 0 0 1px var(--border);
 	}
 	.rel-sheet .crow:is(:hover, :focus-visible, :has(:focus-visible)) .tt {
 		overflow: visible;
-		white-space: normal;
-		overflow-wrap: anywhere;
 	}
 	.rel-sheet .status-line {
 		display: flex;
