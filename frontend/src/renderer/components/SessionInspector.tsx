@@ -614,30 +614,30 @@ function ActivityTimeline({ session }: { session: WorkspaceSession }) {
 	);
 }
 
-const ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: string; breathe: boolean }> = {
-	active: { label: "Working", tone: "var(--orange)", breathe: true },
-	idle: { label: "Idle", tone: "var(--fg-muted)", breathe: false },
-	waiting_input: { label: "Input Needed", tone: "var(--amber)", breathe: false },
+const ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: string }> = {
+	active: { label: "Working", tone: "var(--orange)" },
+	idle: { label: "Idle", tone: "var(--fg-muted)" },
+	waiting_input: { label: "Input Needed", tone: "var(--amber)" },
 	// Parked is a finished turn, not a question: it reads like idle, not like the
 	// amber "the agent is asking you something".
-	parked: { label: "Your Turn", tone: "var(--fg-muted)", breathe: false },
+	parked: { label: "Your Turn", tone: "var(--fg-muted)" },
 	// The turn ended but the agent's own background work is still running and
 	// will wake it: still working, not the human's turn.
-	background: { label: "Background Work", tone: "var(--orange)", breathe: true },
-	exited: { label: "Exited", tone: "var(--fg-muted)", breathe: false },
-	unknown: { label: "Activity Unavailable", tone: "var(--fg-muted)", breathe: false },
+	background: { label: "Background Work", tone: "var(--orange)" },
+	exited: { label: "Exited", tone: "var(--fg-muted)" },
+	unknown: { label: "Activity Unavailable", tone: "var(--fg-muted)" },
 };
 
-const ACTIVITY_WARNING_PILL: Record<"no_signal", { label: string; tone: string; breathe: boolean }> = {
-	no_signal: { label: "No Signal", tone: "var(--fg-muted)", breathe: false },
+const ACTIVITY_WARNING_PILL: Record<"no_signal", { label: string; tone: string }> = {
+	no_signal: { label: "No Signal", tone: "var(--fg-muted)" },
 };
 
 type ScmTimelineState = "ci_failed" | "changes_requested" | "conflict";
 
-const SCM_PILL: Record<ScmTimelineState, { label: string; tone: string; breathe: boolean }> = {
-	ci_failed: { label: "CI Failed", tone: "var(--red)", breathe: false },
-	changes_requested: { label: "Changes Requested", tone: "var(--amber)", breathe: false },
-	conflict: { label: "Conflict", tone: "var(--red)", breathe: false },
+const SCM_PILL: Record<ScmTimelineState, { label: string; tone: string }> = {
+	ci_failed: { label: "CI Failed", tone: "var(--red)" },
+	changes_requested: { label: "Changes Requested", tone: "var(--amber)" },
+	conflict: { label: "Conflict", tone: "var(--red)" },
 };
 
 function InspectorActivityPill({ state }: { state: SessionActivityState }) {
@@ -648,7 +648,7 @@ function InspectorScmPill({ state }: { state: ScmTimelineState }) {
 	return <TimelinePill {...SCM_PILL[state]} />;
 }
 
-function TimelinePill({ label, tone, breathe }: { label: string; tone: string; breathe: boolean }) {
+function TimelinePill({ label, tone }: { label: string; tone: string }) {
 	return (
 		<span
 			className="inline-flex shrink-0 items-center gap-[7px] whitespace-nowrap rounded-[7px] px-[11px] py-[5px] text-[11.5px] font-semibold"
@@ -659,7 +659,7 @@ function TimelinePill({ label, tone, breathe }: { label: string; tone: string; b
 			}}
 		>
 			<span
-				className={cn("h-1.5 w-1.5 rounded-full", breathe && "animate-status-pulse")}
+				className="h-1.5 w-1.5 rounded-full"
 				style={{ background: tone }}
 			/>
 			{label}

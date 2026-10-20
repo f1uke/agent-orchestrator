@@ -757,11 +757,6 @@ export const workerStatusLabel: Record<WorkerDisplayStatus, string> = {
 	unknown: "unknown",
 };
 
-/** Whether a status should breathe (alive/working). */
-export function workerStatusPulses(status: WorkerDisplayStatus): boolean {
-	return status === "working" || status === "needs_you";
-}
-
 /**
  * Kanban attention zone, ordered by human-action urgency — ported from
  * agent-orchestrator's getAttentionLevel (packages/web/src/lib/types.ts),

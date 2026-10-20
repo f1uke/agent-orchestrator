@@ -52,7 +52,7 @@ export function ReadinessStrip({ readiness }: { readiness: Readiness }) {
 		>
 			<div className="readiness__verdict">
 				<Icon
-					className={cn("readiness__glyph", verdict.pulse && "readiness__glyph--pulse")}
+					className="readiness__glyph"
 					style={filled ? { fill: "currentColor" } : undefined}
 					aria-hidden="true"
 				/>
