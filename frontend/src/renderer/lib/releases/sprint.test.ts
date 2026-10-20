@@ -13,6 +13,8 @@ import {
 	mineText,
 	mrPills,
 	versionMineText,
+	sprintFoldKey,
+	sprintRowId,
 	sprintShipsIn,
 } from "./sprint";
 import { board, train, version } from "./testkit";
@@ -69,6 +71,7 @@ const b = board({
 
 const row: SprintRow = {
 	board: { id: 1, key: "DEMO", ownsSprintBranch: true },
+	next: false,
 	number: 20,
 	sprint: { board: 1, id: 20, name: "DEMO 20", url: "", start: "2026-10-06", end: "2026-10-20" },
 	total: 30,
@@ -373,5 +376,35 @@ describe("cards marked No MR needed", () => {
 	it("say marked by you under Only me", () => {
 		expect(mineText([{ why: "no_mr" }])).toBe("marked by you");
 		expect(mineText([{ why: "assignee" }, { why: "no_mr" }])).toBe("assignee · marked by you");
+	});
+});
+
+describe("next sprint", () => {
+	const next: SprintRow = {
+		...fullRow,
+		next: true,
+		number: 21,
+		sprint: { board: 1, id: 21, name: "DEMO 21", url: "", start: "2026-10-20", end: "2026-11-03" },
+	};
+
+	it("reads the same label as an active row, under its own number and dates", () => {
+		const active = boardLabel(fullRow, b, cards);
+		const label = boardLabel(next, b, cards);
+		expect(label).toEqual({ ...active, title: "DEMO 21", dates: "20 Oct → 3 Nov" });
+	});
+
+	it("has its own row id and fold key, so folding one never folds the other", () => {
+		expect(sprintRowId(fullRow)).toBe("DEMO");
+		expect(sprintRowId(next)).toBe("DEMO-next");
+		expect(sprintFoldKey(fullRow)).toBe("sp-DEMO");
+		expect(sprintFoldKey(next)).toBe("sp-DEMO-next");
+	});
+
+	it("is hidden with its board, and a board counts once in N hidden", () => {
+		const lens = { me: false, apps: null, hidden: new Set(["DEMO"]) };
+		expect(lensSprintCards(next, lens)).toEqual([]);
+		expect(lensSprintCards(fullRow, lens)).toEqual([]);
+		expect(hiddenBoardsText([fullRow, next], lens.hidden)).toBe("1 hidden");
+		expect(hiddenBoardsText([fullRow, next], new Set())).toBeNull();
 	});
 });

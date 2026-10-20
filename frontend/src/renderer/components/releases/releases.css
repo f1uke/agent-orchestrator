@@ -521,6 +521,9 @@
 	.rel-spr.active .sl {
 		background: color-mix(in srgb, var(--accent) 7%, var(--bg));
 	}
+	.rel-spr.next {
+		opacity: 0.6;
+	}
 
 	.rel-app {
 		border-bottom: 1px solid var(--border);
@@ -1852,6 +1855,10 @@
 	.rel-sched > .rel-sprow + .rel-sprow,
 	.rel-sched > .rel-row + .rel-sprow {
 		border-top: 1px solid var(--border);
+	}
+	.rel-sprow.next > .rel-lab,
+	.rel-sprow.next > .rel-trk {
+		opacity: 0.55;
 	}
 	.rel-sched > .rel-sprow > .rel-lab.top {
 		height: auto;

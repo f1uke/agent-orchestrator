@@ -26,6 +26,7 @@ function sprintRow(key: string, cards: SprintCard[]): SprintRow {
 		cards,
 		counts: { carriedDone: 0, carriedWithMrs: 0, new: cards.length },
 		dests: [],
+		next: false,
 		number: 20,
 		sprint: { id: 1, board: 1, name: `${key} 20`, url: "", start: "2026-10-06", end: "2026-10-16" },
 		total: cards.length,

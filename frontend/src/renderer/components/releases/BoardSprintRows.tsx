@@ -26,6 +26,7 @@ import {
 	leadKind,
 	mrPills,
 	sprintFoldKey,
+	sprintRowId,
 	type DestBlock,
 	type MrPill,
 } from "../../lib/releases/sprint";
@@ -332,16 +333,18 @@ export function HiddenBoardsMenu({
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="start" aria-label="Sprint rows">
 				<DropdownMenuLabel>Sprint rows</DropdownMenuLabel>
-				{board.sprints.map((r) => (
-					<DropdownMenuCheckboxItem
-						key={r.board.key}
-						checked={!lens.hiddenBoards.has(r.board.key)}
-						onCheckedChange={(on) => show(r.board.key, on === true)}
-						onSelect={(e) => e.preventDefault()}
-					>
-						{r.board.key} {r.number}
-					</DropdownMenuCheckboxItem>
-				))}
+				{board.sprints
+					.filter((r) => !r.next)
+					.map((r) => (
+						<DropdownMenuCheckboxItem
+							key={r.board.key}
+							checked={!lens.hiddenBoards.has(r.board.key)}
+							onCheckedChange={(on) => show(r.board.key, on === true)}
+							onSelect={(e) => e.preventDefault()}
+						>
+							{r.board.key} {r.number}
+						</DropdownMenuCheckboxItem>
+					))}
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onSelect={() => actions.setHiddenBoards(new Set())}>Show all</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -381,14 +384,20 @@ export function BoardSprintRow({
 			track="rows"
 			appear
 			height={h + ROW_BORDER}
-			className="rel-row rel-sprow"
-			data={{ "data-board": row.board.key, "data-testid": `sprint-row-${row.board.key}` }}
+			className={`rel-row rel-sprow${row.next ? " next" : ""}`}
+			data={{
+				"data-board": row.board.key,
+				"data-next": row.next ? "true" : undefined,
+				"data-testid": `sprint-row-${sprintRowId(row)}`,
+			}}
 		>
 			<div className="rel-lab top">
 				<button
 					type="button"
 					className="open"
-					onClick={() => actions.openSheet({ kind: "sprint", board: row.board.key })}
+					onClick={() =>
+						actions.openSheet({ kind: "sprint", board: row.board.key, ...(row.next ? { next: true as const } : {}) })
+					}
 				>
 					<span className="spn">
 						<b>{label.title}</b>
@@ -401,9 +410,14 @@ export function BoardSprintRow({
 										kind: "ao.config",
 										text: `board ${row.board.id} is followed${row.board.ownsSprintBranch ? ", and owns the sprint branch" : ""}`,
 									},
-									{ kind: "jira.board_sprints", text: `active sprint "${row.sprint.name}"` },
+									{
+										kind: "jira.board_sprints",
+										text: `${row.next ? "next" : "active"} sprint "${row.sprint.name}"`,
+									},
 								],
-								note: "One row per followed board with an active sprint. A board with no active sprint has no row.",
+								note: row.next
+									? "The board's next sprint, dimmed because it has not started. A board with no dated next sprint has no such row."
+									: "One row per followed board with an active sprint. A board with no active sprint has no row.",
 								field: "SprintRow.board, sprint",
 							}}
 						/>
@@ -429,8 +443,8 @@ export function BoardSprintRow({
 				<button
 					type="button"
 					className="hide"
-					aria-label={`Hide ${row.board.key} sprint`}
-					title={`Hide ${row.board.key} sprint`}
+					aria-label={`Hide ${row.board.key} ${row.next ? "next " : ""}sprint`}
+					title={`Hide ${row.board.key} ${row.next ? "next sprint with its active one" : "sprint"}`}
 					onClick={() => onHide(row.board.key)}
 				>
 					<EyeOff aria-hidden="true" />

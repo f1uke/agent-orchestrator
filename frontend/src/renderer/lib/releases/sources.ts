@@ -284,7 +284,7 @@ export function sprintCardOf(c: SprintCard, row: SprintRow): Provenance {
 				kind: "jira.sprint_cards",
 				short: `${row.board.key} board`,
 				on: c.onBoard,
-				text: `in the active sprint on the ${row.board.key} board`,
+				text: `in the ${row.next ? "next" : "active"} sprint on the ${row.board.key} board`,
 			},
 			{
 				kind: "gitlab.mrs",

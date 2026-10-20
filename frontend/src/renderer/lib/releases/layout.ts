@@ -34,6 +34,7 @@ export function timeline(b: Board): Timeline {
 		b.today,
 		...b.trains.flatMap((t) => (t.publish ? [t.publish] : [])),
 		...b.hotfixes.flatMap((h) => (h.milestone.due ? [h.milestone.due] : [])),
+		...b.sprints.flatMap((s) => (s.sprint.end ? [s.sprint.end] : [])),
 	);
 	const end = addDays(lastDay, TAIL_DAYS);
 	const days = dayDiff(start, end) + 1;

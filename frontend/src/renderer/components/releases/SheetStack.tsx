@@ -133,7 +133,7 @@ function render(s: SheetEntry, c: Ctx): Sheet | null {
 		case "card":
 			return cardSheet(s.key, c);
 		case "sprint":
-			return sprintSheet(s.board, c);
+			return sprintSheet(s.board, s.next === true, c);
 	}
 }
 

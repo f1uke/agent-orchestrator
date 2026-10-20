@@ -221,7 +221,7 @@ const KINDS: readonly [string, string, number][] = [
 	["gitlab.mrs", "merge requests", 2],
 	["gitlab.tags", "tags", 10],
 	["gitlab.user", "my GitLab account", 1440],
-	["jira.board_sprints", "active sprints", 30],
+	["jira.board_sprints", "active and next sprints", 30],
 	["jira.branch_cards", "sprint branch cards", 5],
 	["jira.cards", "fixVersion cards", 5],
 	["jira.llb_cards", "long-lived branch cards", 10],
@@ -957,7 +957,13 @@ const destId = (d: Dest) =>
 	d.kind === "train" ? `t:${d.train}` : d.kind === "llb" ? `l:${d.group}` : d.kind === "before" ? "early" : d.kind;
 const DEST_RANK: Readonly<Record<Dest["kind"], number>> = { before: 0, train: 1, llb: 2, off: 3, none: 4, nomr: 5 };
 
-function sprintRow(board: Board["sprints"][number]["board"], start: string, end: string, cards: SprintCard[]) {
+function sprintRow(
+	board: Board["sprints"][number]["board"],
+	start: string,
+	end: string,
+	cards: SprintCard[],
+	next = false,
+): Board["sprints"][number] {
 	const dests = new Map<string, { to: Dest; count: number; keys: string[] }>();
 	for (const c of cards.filter((x) => x.active))
 		for (const to of c.routes.length ? c.routes.map((r) => r.to) : [{ kind: c.noMr ? "nomr" : "none" } as Dest]) {
@@ -972,11 +978,13 @@ function sprintRow(board: Board["sprints"][number]["board"], start: string, end:
 	const isNew = active.filter((c) => c.activeWhy[0] === "new this sprint").length;
 	return {
 		board,
-		number: 20,
+		next,
+		number: next ? 21 : 20,
 		sprint: {
 			board: board.id,
-			id: board.id * 100 + 20,
-			name: `${board.key} 20`,
+			id: board.id * 100 + (next ? 21 : 20),
+			name: `${board.key} ${next ? 21 : 20}`,
+			state: next ? "future" : "active",
 			url: `${JIRA}/sprint/${board.id}`,
 			start,
 			end,
@@ -1123,8 +1131,31 @@ function demoSprints(b: Board): Board["sprints"] {
 			{ onBoard: false },
 		),
 	];
+	const upcoming = [
+		sprintCard(
+			"DEMO-351",
+			"Goal tracker home card",
+			3,
+			todo,
+			["new this sprint"],
+			[sprintMr("di", 421, sprintBranch, "sprint_open", 3)],
+			[route("di", "sprint_open", t21, 421)],
+		),
+		sprintCard("DEMO-352", "Rebalance reminder push", 4, todo, ["new this sprint"], [], []),
+		sprintCard("DEMO-353", "Fee table copy review", 5, todo, ["new this sprint"], [], []),
+		sprintCard(
+			"DEMO-354",
+			"Dividend history chart",
+			6,
+			doing,
+			[],
+			[sprintMr("da", 422, "feature/demo-wallet", "llb", 6, addDays(start, -2))],
+			[route("da", "llb", wallet, 422)],
+		),
+	];
 	return [
 		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, start, end, demo),
+		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, end, addDays(end, 14), upcoming, true),
 		sprintRow({ id: 2, key: "PILOT", ownsSprintBranch: false }, start, end, pilot),
 	];
 }
