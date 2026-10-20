@@ -7,6 +7,9 @@ import {
 	FOCUS_LANE,
 	hotfixStages,
 	LABEL_H,
+	LIST_GAP,
+	LIST_MIN,
+	listRoom,
 	llbBlockH,
 	markerSpots,
 	QUIET_LANE,
@@ -232,5 +235,32 @@ describe("sprint box", () => {
 
 	it("is one column wide for a one-day sprint", () => {
 		expect(sprintBox(tl, "2026-10-21", "2026-10-21").width).toBe(DW);
+	});
+});
+
+describe("listRoom", () => {
+	it("has no cap on the last list of a row", () => {
+		expect(listRoom([100, 900], 1)).toBe(Infinity);
+		expect(listRoom([100], 0)).toBe(Infinity);
+	});
+
+	it("stops a list a gap short of the next list's start, whatever the order they were given in", () => {
+		expect(listRoom([100, 900], 0)).toBe(900 - 100 - LIST_GAP);
+		expect(listRoom([900, 100], 1)).toBe(900 - 100 - LIST_GAP);
+	});
+
+	it("measures to the nearest list on the right, not to a farther one", () => {
+		expect(listRoom([100, 1500, 700], 0)).toBe(700 - 100 - LIST_GAP);
+	});
+
+	it("keeps the minimum width when the next release starts closer than that", () => {
+		expect(listRoom([100, 200], 0)).toBe(LIST_MIN);
+		expect(listRoom([100, 100 + LIST_MIN + LIST_GAP - 1], 0)).toBe(LIST_MIN);
+		expect(listRoom([100, 100 + LIST_MIN + LIST_GAP + 1], 0)).toBe(LIST_MIN + 1);
+	});
+
+	it("puts two lists that start together in order, the earlier one capped to the minimum", () => {
+		expect(listRoom([300, 300], 0)).toBe(LIST_MIN);
+		expect(listRoom([300, 300], 1)).toBe(Infinity);
 	});
 });
