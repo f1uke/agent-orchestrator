@@ -75,6 +75,13 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			expect(await truncated(row.locator(".tt")), "no ellipsis while open").toBe(false);
 			expect(await box(row), "the row itself keeps its box").toEqual(rest);
 			await chipsInside(row, true);
+			for (const col of [".k", ".spill"]) {
+				const c = await box(row.locator(col).first());
+				expect(
+					Math.abs(c.y + c.height / 2 - (rest.y + rest.height / 2)),
+					`${col} stays on the row's line`,
+				).toBeLessThan(2);
+			}
 			if (nextRest) expect(await box(next), "no neighbour moves").toEqual(nextRest);
 			const top = await page.evaluate(
 				([x, y]) => document.elementFromPoint(x, y)?.closest(".crow")?.getAttribute("data-key"),

@@ -1335,6 +1335,9 @@
 	.rel-cg.dest .crows:has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
 		overflow: visible !important;
 	}
+	.rel-cg.dest .crow {
+		grid-template-rows: 24px;
+	}
 	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) {
 		z-index: 1;
 	}
