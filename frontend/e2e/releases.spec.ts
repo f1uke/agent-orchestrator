@@ -50,6 +50,23 @@ test.describe("releases page", () => {
 		await expect(page).not.toHaveURL(/sheet=/);
 	});
 
+	test("the version sheet links its family's Confluence train page, and says why when there is none", async ({
+		page,
+	}) => {
+		await open(page);
+		await page.getByTestId("bar-da-22-2026").click({ position: { x: 4, y: 4 } });
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		const row = sheet.locator('[data-part="page"]');
+		await expect(row.getByRole("link", { name: "Demo release train #22" })).toHaveAttribute(
+			"href",
+			"https://wiki.example.com/pages/22-2026",
+		);
+		await page.keyboard.press("Escape");
+		await page.getByTestId("bar-pa-22-2026").click({ position: { x: 4, y: 4 } });
+		await expect(sheet.locator('[data-part="page"]')).toContainText("no pilot train page for #22 yet");
+		await expect(sheet.locator('[data-part="page"]').getByRole("link")).toHaveCount(0);
+	});
+
 	test("a layer toggle changes the page and survives a reload", async ({ page }) => {
 		await open(page);
 		await layer(page, "History").click();

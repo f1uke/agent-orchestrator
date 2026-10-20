@@ -6,6 +6,7 @@ import {
 	mineWhyOf,
 	noMrOf,
 	planSaysText,
+	releasePage,
 	ruleOf,
 	sourceIndex,
 	sprintCardOf,
@@ -14,7 +15,7 @@ import {
 	tagText,
 	type Provenance,
 } from "./sources";
-import { board } from "./testkit";
+import { board, train } from "./testkit";
 import type { Board, CardUnit, LLBGroup, RuleInfo, SprintCard, SprintRow, Stage } from "./types";
 
 const NOW = Date.parse("2026-10-14T03:00:00Z");
@@ -359,5 +360,38 @@ describe("No MR needed provenance", () => {
 		expect(noMrOf("DEMO-1", { markedBy: "cli:demo-7", markedAt: mark.markedAt }).lines[0].text).toBe(
 			"marked by you · cli:demo-7 · 2026-10-14",
 		);
+	});
+});
+
+describe("releasePage", () => {
+	const page = (family: string) => ({
+		id: `p-${family}`,
+		family,
+		number: 21,
+		title: `Demo release train #21 ${family}`,
+		url: `https://wiki.example.com/${family}`,
+		created: "2026-10-01",
+		keys: [],
+		tasks: 0,
+		ticked: 0,
+	});
+	const apps = [
+		{ id: "di", name: "Demo iOS", family: "demo", platform: "ios" as const },
+		{ id: "pi", name: "Pilot iOS", family: "pilot", platform: "ios" as const },
+	];
+	const t = train("21-2026", "2026-10-20", "2026-10-27", "current", [], { pages: [page("demo")] });
+	const read = board({ apps, kinds: [fresh("confluence.pages", "confluence")] });
+
+	it("links the train page of the app's own family", () => {
+		expect(releasePage(read, t, "di")).toEqual({ page: page("demo") });
+	});
+
+	it("never lends another family's page", () => {
+		expect(releasePage(read, t, "pi")).toEqual({ reason: "no pilot train page for #21 yet" });
+	});
+
+	it("says not connected when no Confluence page is read at all", () => {
+		const off = board({ apps, kinds: [{ ...fresh("confluence.pages", "confluence"), resources: 0 }] });
+		expect(releasePage(off, { ...t, pages: [] }, "di")).toEqual({ reason: "not connected" });
 	});
 });

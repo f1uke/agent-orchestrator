@@ -17,7 +17,7 @@ import {
 	type Lens,
 	type Owner,
 } from "../../lib/releases/lens";
-import { derivedOf, readOf, stageOf, type Provenance } from "../../lib/releases/sources";
+import { derivedOf, readOf, releasePage, stageOf, type Provenance } from "../../lib/releases/sources";
 import type { AppVersion, Board, FixState, RuleOutcome, Stage } from "../../lib/releases/types";
 import type { ReleasesSearch, SheetEntry } from "../../lib/releases/url";
 import {
@@ -176,6 +176,12 @@ const TRAIN_PAGE_P = readOf(
 	"Train page",
 	"confluence.pages",
 	"newest page per family, created 0-60 days before freeze",
+	"Train.pages",
+);
+const RELEASE_PAGE_P = readOf(
+	"Confluence",
+	"confluence.pages",
+	"the train page of this app's family: title names the train, created 0-60 days before freeze",
 	"Train.pages",
 );
 const VERSION_MILESTONE_P = readOf(
@@ -346,6 +352,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 			body: <div className="sec empty">This version is no longer on the Board.</div>,
 		};
 	const own = owner(v);
+	const pg = releasePage(c.board, t, app);
 	const mr = v.releaseMr;
 	const ap = approvals(v);
 	const hits = c.lens.attention.filter((h) => h.train === t.id && h.app === app);
@@ -416,6 +423,11 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 					<span data-part="tag">
 						{v.tag ? <Ext url={v.tag.url}>{v.tag.name}</Ext> : "-"}
 						<SourceTag p={readOf("Tag", "gitlab.tags", `tag named ${v.version}`, "Version.tag")} wide />
+					</span>
+					<span>Confluence</span>
+					<span data-part="page">
+						{"page" in pg ? <Ext url={pg.page.url}>{pg.page.title}</Ext> : <span className="passive">{pg.reason}</span>}
+						<SourceTag p={RELEASE_PAGE_P} wide />
 					</span>
 				</div>
 				<AlertList title="Needs attention" hits={hits} c={c} />
