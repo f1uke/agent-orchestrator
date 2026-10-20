@@ -153,9 +153,9 @@ function SprintCardRow({
 			url={card.url}
 			className={`sp${isSplit(card) ? " split" : ""}${card.mine?.length ? " mine" : ""}${card.noMr ? " nomr" : ""}`}
 			action={card.mobile && !card.mrs.length && <NoMrButton board={board} k={card.key} variant="row" />}
-			summary={
+			summary={card.summary}
+			chips={
 				<>
-					{card.summary}
 					{!card.mobile && (
 						<span className="ob passive" data-testid="web-tag">
 							web

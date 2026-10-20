@@ -159,6 +159,17 @@ export function llbBlockH(lanes: number, open: boolean): number {
 
 const GROUP_REACH = 520;
 
+export const LIST_W = 496;
+export const LIST_GAP = 8;
+export const LIST_MIN = 340;
+
+export function listRoom(lefts: readonly number[], i: number): number {
+	const own = lefts[i];
+	let next = Infinity;
+	for (const [j, l] of lefts.entries()) if (j !== i && (l > own || (l === own && j > i))) next = Math.min(next, l);
+	return next === Infinity ? Infinity : Math.max(LIST_MIN, next - own - LIST_GAP);
+}
+
 export function cardGroupTop(L: AppLanes, it: LaneItem, tl: Timeline, llbH: number): number {
 	const gx = tl.x(it.freeze) + 2;
 	const covered = L.items.some(

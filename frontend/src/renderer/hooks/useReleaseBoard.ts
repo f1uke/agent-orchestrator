@@ -4,6 +4,7 @@ import { boardFetcher } from "../lib/releases/boardFetch";
 import {
 	demoBoard,
 	demoResponse,
+	denseListsBoard,
 	failedSourceBoard,
 	fixesBoard,
 	staleKindBoard,
@@ -28,6 +29,7 @@ type PreviewSeam = {
 };
 
 const VARIANTS = {
+	"dense-lists": denseListsBoard,
 	"failed-source": failedSourceBoard,
 	"identity-unknown": unknownIdentityBoard,
 	fixes: fixesBoard,

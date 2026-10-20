@@ -1,5 +1,5 @@
 import { ChevronRight, GitFork } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { branchFoldKey, statusTone, type BranchCard, type CardGroup } from "../../lib/releases/cards";
 import { shortDay } from "../../lib/releases/day";
 import { aimedTrain, branchState, shortBranch, targetChip, trainLabel } from "../../lib/releases/llb";
@@ -70,6 +70,7 @@ export function CardLine({
 	k,
 	url,
 	summary,
+	chips,
 	status,
 	statusCategory,
 	extra,
@@ -90,7 +91,8 @@ export function CardLine({
 	person?: Person;
 	k: string;
 	url?: string;
-	summary?: ReactNode;
+	summary?: string;
+	chips?: ReactNode;
 	status?: string;
 	statusCategory?: string;
 	extra?: ReactNode;
@@ -114,8 +116,13 @@ export function CardLine({
 			<Face person={person} />
 			<JiraKey k={k} url={url} />
 			<span className="t">
-				{summary}
-				{action}
+				<span className="tt" title={summary}>
+					{summary}
+				</span>
+				<span className="tc">
+					{chips}
+					{action}
+				</span>
 			</span>
 			{extra ?? <span />}
 			<SourceValue p={status ? statusOf(status, statusKind) : null}>
@@ -154,12 +161,8 @@ function UnitRow({
 			person={u.assignee}
 			k={u.key}
 			url={u.url}
-			summary={
-				<>
-					{u.summary}
-					{u.code.kind === "merged" && u.code.via && <span className="ob hf">via ⑂ {shortBranch(u.code.via)}</span>}
-				</>
-			}
+			summary={u.summary}
+			chips={u.code.kind === "merged" && u.code.via && <span className="ob hf">via ⑂ {shortBranch(u.code.via)}</span>}
 			status={u.status}
 			statusCategory={u.statusCategory}
 			statusKind={u.factsFrom}
@@ -380,17 +383,11 @@ export function CardGroupBox({
 	return (
 		<div
 			className={`rel-cg${focused ? "" : " quiet"}`}
-			style={{ left, top }}
+			style={{ left, top, ...(Number.isFinite(room) ? { "--room": `${room}px` } : {}) } as CSSProperties}
 			data-testid={`cards-${g.key}`}
 			data-group={g.key}
 		>
-			<button
-				type="button"
-				className="csum"
-				aria-expanded={open.has(g.key)}
-				onClick={() => toggle(g.key)}
-				style={Number.isFinite(room) ? { maxWidth: room } : undefined}
-			>
+			<button type="button" className="csum" aria-expanded={open.has(g.key)} onClick={() => toggle(g.key)}>
 				<Chev open={open.has(g.key)} />
 				<span>{g.train.label}</span>
 				<b>

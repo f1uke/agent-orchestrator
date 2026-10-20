@@ -9,6 +9,7 @@ import {
 	DW,
 	LABEL_W,
 	llbBlockH,
+	listRoom,
 	rowHeight,
 	sprintBox,
 	timeline,
@@ -292,13 +293,16 @@ function AppRow({
 				)}
 				<Moving track="blocks" className="rel-below" style={{ top: llbH, width: tl.width }}>
 					<VersionLanes board={scoped} tl={tl} lanes={L} top={0} lens={lens} actions={actions} />
-					{boxes.map(({ g, left, top }) => (
+					{boxes.map(({ g, left, top }, i) => (
 						<CardGroupBox
 							key={g.key}
 							g={g}
 							board={board}
 							left={left}
-							room={Math.min(Infinity, ...boxes.filter((o) => o.left > left).map((o) => o.left - left - 10))}
+							room={listRoom(
+								boxes.map((o) => o.left),
+								i,
+							)}
 							top={top - llbH}
 							focused={g.train.id === lens.focus?.id}
 							face={lens.face}

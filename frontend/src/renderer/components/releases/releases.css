@@ -1312,6 +1312,52 @@
 		position: absolute;
 		z-index: 2;
 	}
+	.rel-cg:is(:hover, :has(:focus-visible)) {
+		z-index: 5;
+	}
+	.rel-row:has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
+		z-index: 4;
+	}
+	.rel-cg:not(.dest) :is(.crows, .nest):has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
+		overflow: visible !important;
+	}
+	.rel-cg:not(.dest) .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) {
+		position: relative;
+		z-index: 1;
+		width: max-content;
+		min-width: 100%;
+		max-width: 1000px;
+		height: auto;
+		min-height: 24px;
+		box-shadow: 0 0 0 1px var(--border);
+	}
+	.rel-trk > div:has(.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible))),
+	.rel-cg.dest .crows:has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
+		overflow: visible !important;
+	}
+	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) {
+		z-index: 1;
+	}
+	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .t {
+		position: relative;
+		z-index: 2;
+		align-self: start;
+		flex-wrap: wrap;
+		overflow: visible;
+		padding: 3px 4px;
+		margin: -3px -4px;
+		border-radius: 4px;
+		background: var(--bg-2);
+		box-shadow: 0 0 0 1px var(--border);
+	}
+	.rel-cg .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tt {
+		overflow: visible;
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.rel-cg.dest.next:has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
+		filter: none;
+	}
 	.rel-cg .csum {
 		display: flex;
 		align-items: center;
@@ -1323,9 +1369,12 @@
 		color: var(--fg-muted);
 		white-space: nowrap;
 		overflow: clip;
+		max-width: var(--room, none);
 	}
-	.rel-cg .csum:hover {
-		background: var(--hover);
+	.rel-cg .csum:hover,
+	.rel-cg .csum:focus-visible {
+		max-width: none;
+		background: color-mix(in srgb, var(--fg) 5%, var(--bg));
 		color: var(--fg);
 	}
 	.rel-cg .csum b {
@@ -1363,7 +1412,7 @@
 		align-items: center;
 		gap: 6px;
 		height: 24px;
-		width: 496px;
+		width: min(496px, var(--room, 496px));
 		padding: 0 6px;
 		border-radius: 4px;
 		font-size: 12px;
@@ -1371,7 +1420,9 @@
 		cursor: pointer;
 		background: var(--bg);
 	}
-	.rel .crow:hover {
+	.rel .crow:hover,
+	.rel .crow:focus-visible,
+	.rel .crow:has(:focus-visible) {
 		background: var(--bg-2);
 	}
 	.rel .crow .cg {
@@ -1391,8 +1442,22 @@
 		text-decoration: underline;
 	}
 	.rel .crow .t {
+		display: flex;
+		align-items: center;
+		min-width: 0;
+		overflow: clip;
+	}
+	.rel .crow .tt {
+		flex: 0 1 auto;
+		min-width: 40px;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.rel .crow .tc {
+		flex: none;
+		display: inline-flex;
+		align-items: center;
 		white-space: nowrap;
 	}
 	.rel .crow .ob {
@@ -1416,7 +1481,9 @@
 		margin-top: 2px;
 		background: color-mix(in srgb, var(--purple) 6%, var(--bg));
 	}
-	.rel .crow.lbr:hover {
+	.rel .crow.lbr:hover,
+	.rel .crow.lbr:focus-visible,
+	.rel .crow.lbr:has(:focus-visible) {
 		background: color-mix(in srgb, var(--purple) 12%, var(--bg));
 	}
 	.rel .crow.lbr .cg {
@@ -1446,7 +1513,7 @@
 		margin-left: 22px;
 	}
 	.rel .llbgrp .nest .crow {
-		width: 474px;
+		width: min(474px, calc(var(--room, 496px) - 22px));
 	}
 	.rel .tgt {
 		font: 600 10.5px var(--font-mono);
@@ -1580,6 +1647,15 @@
 	}
 	.rel-sheet .crow {
 		width: auto;
+	}
+	.rel-sheet .crow:is(:hover, :focus-visible, :has(:focus-visible)) {
+		height: auto;
+		min-height: 24px;
+	}
+	.rel-sheet .crow:is(:hover, :focus-visible, :has(:focus-visible)) .tt {
+		overflow: visible;
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 	.rel-sheet .status-line {
 		display: flex;

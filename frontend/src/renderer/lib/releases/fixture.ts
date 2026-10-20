@@ -1259,6 +1259,69 @@ function stripMine(v: unknown): void {
 	}
 }
 
+const LONG_TITLE =
+	"App - a very long fictional card title that runs past the column and keeps going until it cannot fit";
+
+function closeTrain(b: Board, base: Train, id: string, gap: number): Train {
+	const freeze = addDays(base.freeze ?? b.today, gap);
+	const publish = addDays(freeze, 7);
+	const t = trainOf(
+		id,
+		"next",
+		freeze,
+		publish,
+		base.versions.map((v) => ({
+			app: v.app,
+			v: v.version.replace(/\.\d+$/, ".6"),
+			start: freeze,
+			due: publish,
+			stages: [st("freeze", freeze, "todo"), st("publish", publish, "todo")],
+		})),
+	);
+	b.trains.push(t);
+	return t;
+}
+
+export function denseListsBoard(today: string): Board {
+	const b = demoBoard(today);
+	const t22 = b.trains.find((t) => t.id === "22-2026");
+	if (!t22) return b;
+	const t23 = closeTrain(b, t22, "23-2026", 11);
+	const di22 = t22.versions.find((v) => v.app === "di");
+	const di23 = t23.versions.find((v) => v.app === "di");
+	if (di22 && di23) {
+		const kinds: [string, string, Unit["code"]["kind"], string, string, number][] = [
+			["DEMO-221", "Show the fee before the order", "merged", "Ready for UAT", "indeterminate", 0],
+			["DEMO-222", "Wallet top-up limits", "merged", "Done", "done", 1],
+			["DEMO-223", LONG_TITLE, "open", "Pull Request", "indeterminate", 2],
+			["DEMO-224", "Portfolio export to CSV", "parked", "In Progress", "indeterminate", 3],
+			["DEMO-225", "Fix the chart tooltip on small phones", "none", "To Do", "new", 4],
+			["DEMO-226", "Dividend history chart", "merged", "Ready for UAT", "indeterminate", 5],
+		];
+		di22.cards = kinds.map(([k, s, kind, status, cat, who]) => unitOf(k, s, di22, kind, status, cat, who));
+		di23.cards = [
+			unitOf("DEMO-231", "Goal tracker home card", di23, "open", "In Progress", "indeterminate", 6),
+			unitOf("DEMO-232", LONG_TITLE, di23, "none", "To Do", "new", 7),
+		];
+	}
+	for (const r of b.sprints) {
+		if (r.board.key !== "DEMO" || r.next) continue;
+		const sprintBranch = "feature/sprint-2026-20";
+		const carried = sprintCard(
+			"DEMO-361",
+			LONG_TITLE,
+			3,
+			["Done", "done"],
+			[],
+			[sprintMr("di", 431, sprintBranch, "prev", 3, addDays(r.sprint.start ?? today, -3))],
+			[{ app: "di", kind: "prev", to: { kind: "train", train: "21-2026" }, mr: 431 }],
+		);
+		const web = sprintCard("DEMO-362", LONG_TITLE, 4, ["To Do", "new"], [], [], [], { mobile: false });
+		r.cards = [...r.cards, carried, web];
+	}
+	return b;
+}
+
 export function unknownIdentityBoard(today: string): Board {
 	const b = demoBoard(today);
 	stripMine(b);
