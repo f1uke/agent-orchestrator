@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
 	svc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/rttest"
 )
@@ -138,5 +139,57 @@ func TestSprintReadsAreGETsOnTheirBudgets(t *testing.T) {
 	_, atl = w.pass()
 	if !slices.Contains(atl, "/rest/agile/1.0/board/42/sprint") {
 		t.Fatalf("pass after 36m fetched %v; want the board's active sprint read again", atl)
+	}
+}
+
+func TestBoardSprintsStoredByTheActiveOnlyDaemonAreRefetchedInTheFirstPassAfterTheUpgrade(t *testing.T) {
+	w := newSprintWorld(t)
+	w.jira.Set("/rest/agile/1.0/board/42/sprint", `{"isLast":true,"values":[`+
+		`{"id":7021,"name":"DEMO 2026-21","state":"active","startDate":"2026-10-06T02:00:00.000Z","endDate":"2026-10-20T10:00:00.000Z"},`+
+		`{"id":7022,"name":"DEMO 2026-22","state":"future","startDate":"2026-10-20T02:00:00.000Z","endDate":"2026-11-03T10:00:00.000Z"}]}`)
+	w.jira.Set(`/rest/api/3/search/jql?jql=sprint = 7022 ORDER BY key`, `{"issues":[]}`)
+	w.jira.Set(`/rest/api/3/search/jql?jql=sprint = 7022 AND sprint not in closedSprints() ORDER BY key`, `{"issues":[]}`)
+	start, end := rt.DayOf(at("2026-10-06T02:00:00Z"), time.UTC), rt.DayOf(at("2026-10-20T10:00:00Z"), time.UTC)
+	old, err := rt.EncodeItem(rt.KindBoardSprints, rt.SprintFact{Board: 42, ID: 7021, Name: "DEMO 2026-21", Start: &start, End: &end}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := rt.SpecFor(rt.KindBoardSprints, rt.BoardScope(42), "")
+	spec.Version = 1
+	ctx := context.Background()
+	if err := w.store.PlanReleaseResources(ctx, []rt.ResourceSpec{spec}, w.now); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.WriteReleaseSnapshot(ctx, spec, []rt.Item{old}, w.now); err != nil {
+		t.Fatal(err)
+	}
+
+	_, atl := w.pass()
+
+	if !slices.Contains(atl, "/rest/agile/1.0/board/42/sprint") {
+		t.Fatalf("first pass after the upgrade fetched %v; want the board's sprints read again, not kept for half their budget", atl)
+	}
+	for passes := 0; passes < 6; passes++ {
+		w.now = w.now.Add(svc.Tick)
+		w.pass()
+	}
+	board := svc.NewBoardService(svc.BoardDeps{Config: svc.NewConfigLoader(w.configPath), Store: w.store, Clock: func() time.Time { return w.now }})
+	body, _, err := board.Board(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp struct {
+		Board struct {
+			Sprints []struct {
+				Next   bool `json:"next"`
+				Number int  `json:"number"`
+			} `json:"sprints"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Board.Sprints) != 2 || resp.Board.Sprints[0].Next || !resp.Board.Sprints[1].Next || resp.Board.Sprints[1].Number != 22 {
+		t.Fatalf("sprints = %+v; want sprint 21 active and sprint 22 next", resp.Board.Sprints)
 	}
 }

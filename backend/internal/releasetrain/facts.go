@@ -125,6 +125,12 @@ func asLookup[T any](k Kind[T]) Kind[T] {
 	return k
 }
 
+func atVersion[T any](k Kind[T], version int) Kind[T] {
+	k.Version = version
+	kinds[k.Name] = k.kindMeta
+	return k
+}
+
 func newKind[T any](name KindName, label string, mode SyncMode, budget time.Duration, cover coverMode) Kind[T] {
 	k := Kind[T]{kindMeta{Name: name, Label: label, Version: 1, Mode: mode, Budget: budget, cover: cover}}
 	k.decode = func(b []byte) (any, error) { return k.Decode(b) }
