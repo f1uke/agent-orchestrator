@@ -311,10 +311,7 @@ function SessionStatusPill({ session }: { session: WorkspaceSession }) {
 				boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${tone} 25%, transparent)`,
 			}}
 		>
-			<span
-				className="h-1.5 w-1.5 rounded-full"
-				style={{ background: tone }}
-			/>
+			<span className="h-1.5 w-1.5 rounded-full" style={{ background: tone }} />
 			{label}
 		</span>
 	);

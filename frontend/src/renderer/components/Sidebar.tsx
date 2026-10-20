@@ -937,11 +937,7 @@ function ProjectItem({
 							re-wraps the label or shifts the header. Decorative — the state is
 							already on the button's accessible name above. */}
 							{orchestratorBusy && (
-								<span
-									aria-hidden="true"
-									className={ORCHESTRATOR_BUSY_DOT_CLASS}
-									data-testid="orchestrator-busy"
-								/>
+								<span aria-hidden="true" className={ORCHESTRATOR_BUSY_DOT_CLASS} data-testid="orchestrator-busy" />
 							)}
 						</button>
 					</div>

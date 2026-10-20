@@ -350,7 +350,6 @@ describe("orchestratorHealth", () => {
 	});
 });
 
-
 describe("toAgentProvider", () => {
 	it("passes through a known provider", () => {
 		expect(toAgentProvider("opencode")).toBe("opencode");

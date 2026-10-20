@@ -645,7 +645,8 @@ describe("Sidebar", () => {
 		it("keeps the status glyph still for every session, working or not", () => {
 			const merge = { ...session, id: "proj-1-2", title: "ship it", status: "mergeable" as const };
 			renderSidebar({ workspaces: [{ ...workspace, sessions: [session, merge] }] });
-			for (const title of ["fix login", "ship it"]) expect(glyphOf(title)?.getAttribute("class") ?? "").not.toMatch(/animate-/);
+			for (const title of ["fix login", "ship it"])
+				expect(glyphOf(title)?.getAttribute("class") ?? "").not.toMatch(/animate-/);
 		});
 	});
 

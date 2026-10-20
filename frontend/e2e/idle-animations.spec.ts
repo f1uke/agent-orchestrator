@@ -13,7 +13,10 @@ test.describe("an idle window runs no endless animation", () => {
 				document
 					.getAnimations()
 					.filter((a) => a.effect?.getComputedTiming().iterations === Infinity)
-					.map((a) => `${(a as CSSAnimation).animationName} on ${(a.effect as KeyframeEffect).target?.outerHTML.slice(0, 80)}`),
+					.map(
+						(a) =>
+							`${(a as CSSAnimation).animationName} on ${(a.effect as KeyframeEffect).target?.outerHTML.slice(0, 80)}`,
+					),
 			);
 			expect(endless).toEqual([]);
 		});
