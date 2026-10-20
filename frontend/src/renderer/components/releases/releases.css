@@ -1875,7 +1875,7 @@
 	.rel-sched > .rel-row + .rel-sprow {
 		border-top: 1px solid var(--border);
 	}
-	.rel-sprow.next > .rel-lab,
+	.rel-sprow.next > .rel-lab > *,
 	.rel-sprow.next > .rel-trk {
 		opacity: 0.55;
 	}

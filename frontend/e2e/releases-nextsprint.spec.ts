@@ -19,7 +19,7 @@ test.describe("releases next sprint", () => {
 
 		const opacity = (row: typeof next) =>
 			row.evaluate((el) => ({
-				lab: getComputedStyle(el.querySelector(".rel-lab") as Element).opacity,
+				lab: getComputedStyle(el.querySelector(".rel-lab > .open") as Element).opacity,
 				trk: getComputedStyle(el.querySelector(".rel-trk") as Element).opacity,
 			}));
 		expect(await opacity(active)).toEqual({ lab: "1", trk: "1" });
@@ -27,6 +27,18 @@ test.describe("releases next sprint", () => {
 		expect(Number(dim.lab)).toBeLessThan(0.7);
 		expect(Number(dim.trk)).toBeLessThan(0.7);
 		await expect(next).toHaveAttribute("data-next", "true");
+	});
+
+	test("its sticky label stays opaque so a panned track never shows through it", async ({ page }) => {
+		await open(page, LAYERS);
+		const next = page.getByTestId("sprint-row-DEMO-next");
+		await next.locator(".spsrc .csum").click();
+		await page.getByTestId("release-timeline").evaluate((el) => (el.scrollLeft += 900));
+		await settle(page);
+		expect(await next.locator(".rel-lab").evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+		expect(await next.locator(".rel-lab").evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(
+			"rgba(0, 0, 0, 0)",
+		);
 	});
 
 	test("it sits on the timeline at its own dates, right where the active sprint ends", async ({ page }) => {

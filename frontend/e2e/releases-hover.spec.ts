@@ -68,7 +68,7 @@ test.describe("releases hover guide line", () => {
 		await expect(line(page)).toBeHidden();
 	});
 
-	test("a card under the line still opens on click, and a stage hover is unaffected", async ({ page }) => {
+	test("a card under the line still opens on click", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		const row = page.getByTestId("sprint-row-DEMO");
 		await row.locator(".spsrc .csum").click();
