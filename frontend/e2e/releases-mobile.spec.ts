@@ -7,7 +7,8 @@ const DAY = 36;
 const bar = (row: Locator, which: "active" | "next") => row.locator(`.spsrc[data-sprint='${which}']`);
 async function unfold(button: Locator, shown: Locator, count = 1) {
 	await expect(async () => {
-		if ((await button.getAttribute("aria-expanded")) !== "true") await button.click({ timeout: 2_000 });
+		if ((await button.getAttribute("aria-expanded")) !== "true")
+			await button.click({ position: { x: 8, y: 8 }, timeout: 2_000 });
 		await expect(shown).toHaveCount(count, { timeout: 2_000 });
 	}).toPass({ timeout: 20_000 });
 }
