@@ -24,14 +24,16 @@ const StatusAbandoned = "Abandoned"
 
 // SprintRow is one configured board's active or next sprint and its cards that touch the mobile apps.
 type SprintRow struct {
-	Board  BoardConfig  `json:"board"`
-	Sprint SprintFact   `json:"sprint"`
-	Next   bool         `json:"next"`
-	Number int          `json:"number"`
-	Total  int          `json:"total"`
-	Cards  []SprintCard `json:"cards"`
-	Counts SprintCounts `json:"counts"`
-	Dests  []SprintDest `json:"dests"`
+	Board  BoardConfig `json:"board"`
+	Sprint SprintFact  `json:"sprint"`
+	Next   bool        `json:"next"`
+	// Estimated says Sprint's dates are not Jira's: the sprint has none yet, so they follow the active sprint's length.
+	Estimated bool         `json:"estimated"`
+	Number    int          `json:"number"`
+	Total     int          `json:"total"`
+	Cards     []SprintCard `json:"cards"`
+	Counts    SprintCounts `json:"counts"`
+	Dests     []SprintDest `json:"dests"`
 }
 
 // SprintCounts is the board label's second line. Abandoned cards are not counted.
@@ -235,7 +237,8 @@ func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 			r.start = *active.Start
 		}
 		sprints := []SprintFact{active}
-		if next, ok := nextSprint(snap, b.ID); ok {
+		next, estimated, hasNext := nextSprint(snap, b.ID)
+		if hasNext {
 			sprints = append(sprints, next)
 		}
 		for _, s := range sprints {
@@ -253,7 +256,7 @@ func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 					}
 				}
 			}
-			row := SprintRow{Board: b, Sprint: s, Next: isNext, Number: si.number, Total: len(si.cards), Cards: []SprintCard{}}
+			row := SprintRow{Board: b, Sprint: s, Next: isNext, Estimated: isNext && estimated, Number: si.number, Total: len(si.cards), Cards: []SprintCard{}}
 			for _, is := range issues {
 				c, ok := sprintCard(is, si, mrs[is.Key], mobileSub, mobileTitle, mobileProject, r, cfg)
 				if !ok {

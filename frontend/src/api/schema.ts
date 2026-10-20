@@ -5538,6 +5538,7 @@ export interface components {
             cards: components["schemas"]["ReleaseTrainSprintCard"][];
             counts: components["schemas"]["ReleaseTrainSprintCounts"];
             dests: components["schemas"]["ReleaseTrainSprintDest"][];
+            estimated: boolean;
             next: boolean;
             number: number;
             sprint: components["schemas"]["ReleaseTrainSprintFact"];

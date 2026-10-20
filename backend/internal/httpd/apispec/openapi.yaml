@@ -15549,6 +15549,8 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainSprintDest'
           type: array
+        estimated:
+          type: boolean
         next:
           type: boolean
         number:
@@ -15561,6 +15563,7 @@ components:
       - board
       - sprint
       - next
+      - estimated
       - number
       - total
       - cards

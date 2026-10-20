@@ -69,34 +69,147 @@ func TestNextSprintGetsItsOwnRowWithTheSameDataAndIsFlagged(t *testing.T) {
 	}
 }
 
-func TestABoardWithoutADatedNextSprintShowsOnlyItsActiveRow(t *testing.T) {
+func TestABoardWithoutAFutureSprintShowsOnlyItsActiveRow(t *testing.T) {
+	f := newFixture(t, today)
+	active := f.sprint(42, 7, "2026-10-06", "2026-10-20")
+	f.sprintCard(active, "DEMO-1", "To Do", true)
+
+	b := f.reconcile()
+
+	if rows := rowsOf(b, "DEMO"); len(rows) != 1 || rows[0].Next {
+		t.Fatalf("DEMO rows = %+v; want the active row alone", rows)
+	}
+	if b.Alerts.Badge.Unknown != 0 {
+		t.Fatalf("unknown cells = %d; a missing next sprint is no coverage gap", b.Alerts.Badge.Unknown)
+	}
+	if got := f.plannedSprintIDs(); !reflect.DeepEqual(got, []int{active.ID}) {
+		t.Fatalf("planned sprints = %v; want only the active one read", got)
+	}
+}
+
+func TestAnUndatedNextSprintFollowsTheActiveOneOnTheActiveLength(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		setup func(f *fixture)
+		name         string
+		start, end   string
+		wantS, wantE string
 	}{
-		{"no future sprint", func(f *fixture) {}},
-		{"future sprint without dates", func(f *fixture) { f.futureSprint(42, 8, "", "") }},
-		{"future sprint without an end", func(f *fixture) { f.futureSprint(42, 8, "2026-10-20", "") }},
-		{"future sprint without a start", func(f *fixture) { f.futureSprint(42, 8, "", "2026-11-03") }},
+		{"no dates", "", "", "2026-10-21", "2026-11-04"},
+		{"a start only", "2026-10-25", "", "2026-10-21", "2026-11-04"},
+		{"an end only", "", "2026-11-30", "2026-10-21", "2026-11-04"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, today)
 			active := f.sprint(42, 7, "2026-10-06", "2026-10-20")
 			f.sprintCard(active, "DEMO-1", "To Do", true)
-			tc.setup(f)
+			next := f.futureSprint(42, 8, tc.start, tc.end)
+			f.sprintCard(next, "DEMO-2", "To Do", true)
 
 			b := f.reconcile()
 
-			if rows := rowsOf(b, "DEMO"); len(rows) != 1 || rows[0].Next {
-				t.Fatalf("DEMO rows = %+v; want the active row alone", rows)
+			rows := rowsOf(b, "DEMO")
+			if len(rows) != 2 || !rows[1].Next || !rows[1].Estimated || rows[0].Estimated {
+				t.Fatalf("DEMO rows = %+v; want the active row, then an estimated next one", rows)
+			}
+			r := rows[1]
+			if r.Sprint.ID != next.ID || r.Number != 8 || r.Sprint.Start.String() != tc.wantS || r.Sprint.End.String() != tc.wantE {
+				t.Fatalf("next row = sprint %d number %d %v to %v; want %s to %s, the active sprint's 15 days from the day after it", r.Sprint.ID, r.Number, r.Sprint.Start, r.Sprint.End, tc.wantS, tc.wantE)
+			}
+			if got := cardKeys(r); !reflect.DeepEqual(got, []string{"DEMO-2"}) {
+				t.Fatalf("next cards = %v; want its card, read although the sprint has no dates", got)
+			}
+			if got := f.plannedSprintIDs(); !reflect.DeepEqual(got, []int{active.ID, next.ID}) {
+				t.Fatalf("planned sprints = %v; want the cards of the undated sprint read too", got)
+			}
+			if next.Start != nil && tc.start == "" || next.End != nil && tc.end == "" {
+				t.Fatalf("the stored fact was given dates: %+v", next)
 			}
 			if b.Alerts.Badge.Unknown != 0 {
-				t.Fatalf("unknown cells = %d; a missing next sprint is no coverage gap", b.Alerts.Badge.Unknown)
-			}
-			if got := f.plannedSprintIDs(); !reflect.DeepEqual(got, []int{active.ID}) {
-				t.Fatalf("planned sprints = %v; want only the active one read", got)
+				t.Fatalf("unknown cells = %d; an estimated sprint is no coverage gap", b.Alerts.Badge.Unknown)
 			}
 		})
+	}
+}
+
+func TestADatedFutureSprintAlwaysWinsOverAnUndatedOne(t *testing.T) {
+	f := newFixture(t, today)
+	active := f.sprint(42, 7, "2026-10-06", "2026-10-20")
+	f.sprintCard(active, "DEMO-1", "To Do", true)
+	f.futureSprint(42, 8, "", "")
+	dated := f.futureSprint(42, 9, "2026-11-03", "2026-11-17")
+
+	rows := rowsOf(f.reconcile(), "DEMO")
+
+	if len(rows) != 2 || rows[1].Sprint.ID != dated.ID || rows[1].Estimated || rows[1].Sprint.Start.String() != "2026-11-03" {
+		t.Fatalf("DEMO rows = %+v; want the dated sprint 9 on its own dates, not an estimate for 8", rows)
+	}
+}
+
+func TestTheLowestIDUndatedSprintIsTheNextWhenNoneIsDated(t *testing.T) {
+	f := newFixture(t, today)
+	f.sprintCard(f.sprint(42, 7, "2026-10-06", "2026-10-20"), "DEMO-1", "To Do", true)
+	later := f.futureSprint(42, 9, "", "")
+	first := f.futureSprint(42, 8, "", "")
+	if first.ID <= later.ID {
+		t.Fatalf("setup: sprint 8 (%d) must have the higher id than 9 (%d)", first.ID, later.ID)
+	}
+
+	rows := rowsOf(f.reconcile(), "DEMO")
+
+	if len(rows) != 2 || rows[1].Sprint.ID != later.ID || !rows[1].Estimated {
+		t.Fatalf("DEMO rows = %+v; want the undated sprint with the lowest id", rows)
+	}
+}
+
+func TestAnUndatedNextSprintShowsNothingWhenTheActiveSprintHasNoDates(t *testing.T) {
+	f := newFixture(t, today)
+	active := f.sprint(42, 7, "2026-10-06", "2026-10-20")
+	active.Start, active.End = nil, nil
+	f.sprintCard(active, "DEMO-1", "To Do", true)
+	f.futureSprint(42, 8, "", "")
+
+	rows := rowsOf(f.reconcile(), "DEMO")
+
+	if len(rows) != 1 || rows[0].Next {
+		t.Fatalf("DEMO rows = %+v; want the active row alone, with nothing to estimate from", rows)
+	}
+	if got := f.plannedSprintIDs(); !reflect.DeepEqual(got, []int{active.ID}) {
+		t.Fatalf("planned sprints = %v; want only the active one read", got)
+	}
+}
+
+func TestRealDatesReplaceTheEstimate(t *testing.T) {
+	f := newFixture(t, today)
+	f.sprintCard(f.sprint(42, 7, "2026-10-06", "2026-10-20"), "DEMO-1", "To Do", true)
+	next := f.futureSprint(42, 8, "", "")
+	if r := rowsOf(f.reconcile(), "DEMO")[1]; !r.Estimated {
+		t.Fatalf("setup: %+v should be estimated", r)
+	}
+	next.Start, next.End = dayPtr(t, "2026-10-27"), dayPtr(t, "2026-11-10")
+
+	r := rowsOf(f.reconcile(), "DEMO")[1]
+
+	if r.Estimated || r.Sprint.Start.String() != "2026-10-27" || r.Sprint.End.String() != "2026-11-10" {
+		t.Fatalf("next row = %+v; want Jira's dates and no estimate", r)
+	}
+}
+
+func TestAnEstimatedNextSprintRaisesNoAlertAndMovesNoNumber(t *testing.T) {
+	f := newFixture(t, today)
+	f.sprintCard(f.sprint(42, 7, "2026-10-06", "2026-10-20"), "DEMO-1", "In Progress", true)
+	f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/sprint-7-2026", MROpened, "2026-10-07", "")
+	next := f.futureSprint(42, 8, "", "")
+	f.sprintCard(next, "DEMO-2", "In Progress", true)
+	f.mr("di", "DEMO-2 a", "feat/DEMO-2", "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")
+
+	b := f.reconcile()
+
+	for _, rule := range []RuleID{"G1", "G2", "G3", "G4", "G5"} {
+		if got := firedIDs(b, rule); got != nil {
+			t.Errorf("%s hits = %v; a card of the estimated sprint raises none", rule, got)
+		}
+	}
+	if n, _, ok := b.branchSprint(); !ok || n != 7 {
+		t.Fatalf("branch sprint = %d %v; want the active sprint 7", n, ok)
 	}
 }
 
