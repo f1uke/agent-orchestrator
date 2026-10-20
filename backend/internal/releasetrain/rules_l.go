@@ -103,13 +103,14 @@ var ruleL9 = rule{
 	Subjects: []SubjectKind{SubjectMR},
 	Mine:     MineMR,
 	Reads:    []KindName{KindMRs.Name},
-	Title:    "MR into a branch that is not a sprint branch, a long-lived branch or develop",
-	Hint:     "No train takes code from that branch, so the change stays there until someone moves it on.",
+	Title:    "Code stranded in a branch that is not a sprint branch, a long-lived branch or develop",
+	Hint:     "An open MR into such a branch, or a merged one whose target branch has not itself landed in a sprint branch, a long-lived branch or develop. No train takes code from that branch until someone moves it on.",
 	Check: func(b *Board) []Hit {
 		llbs := groupsByBranch(b.LLBs)
 		var out []Hit
 		for _, app := range b.Apps {
 			cutover, hasCutover := b.Cutover[app.ID]
+			landed := landedBranches(b.mrs[app.ID], func(branch string) bool { return roleRE.MatchString(branch) || llbs[app.ID][branch] != nil })
 			for _, mr := range b.mrs[app.ID] {
 				switch {
 				case mr.State == MRClosed,
@@ -117,13 +118,18 @@ var ruleL9 = rule{
 					roleRE.MatchString(mr.TargetBranch),
 					llbs[app.ID][mr.TargetBranch] != nil,
 					llbs[app.ID][mr.SourceBranch] != nil,
-					sprintBranchRE.MatchString(mr.SourceBranch):
+					sprintBranchRE.MatchString(mr.SourceBranch),
+					mr.State == MRMerged && landed[mr.TargetBranch]:
 					continue
+				}
+				why := "open into a branch no train takes"
+				if mr.State == MRMerged {
+					why = fmt.Sprintf("merged, but %s has not landed in a sprint branch or develop", mr.TargetBranch)
 				}
 				out = append(out, Hit{
 					Subject: SubjMR{App: app.ID, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: app.ID,
 					Evidence: Evidence{"mr": mr.IID, "source": mr.SourceBranch, "target": mr.TargetBranch, "state": mr.State},
-					Text:     fmt.Sprintf("!%d %s → %s: not a sprint branch, a long-lived branch or develop", mr.IID, mr.SourceBranch, mr.TargetBranch),
+					Text:     fmt.Sprintf("!%d %s → %s: %s", mr.IID, mr.SourceBranch, mr.TargetBranch, why),
 					Links:    []Link{{Label: "Open MR", URL: mr.URL}},
 					cards:    mrKeys(mr),
 				})
@@ -131,6 +137,22 @@ var ruleL9 = rule{
 		}
 		return out
 	},
+}
+
+// landedBranches is the branches whose code reached a flow branch: one with a
+// merged MR into a flow branch, or into another branch that landed. It grows to
+// a fixpoint, so a cycle of merged MRs never lands.
+func landedBranches(mrs []MRFact, flow func(branch string) bool) map[string]bool {
+	landed := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for _, mr := range mrs {
+			if mr.State == MRMerged && !landed[mr.SourceBranch] && (flow(mr.TargetBranch) || landed[mr.TargetBranch]) {
+				landed[mr.SourceBranch], changed = true, true
+			}
+		}
+	}
+	return landed
 }
 
 func mrsByApp(cfg Config, snap Snapshot) map[AppID][]MRFact {

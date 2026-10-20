@@ -846,9 +846,7 @@ test.describe("releases page", () => {
 	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="L9~mr/da/415"]');
-		await expect(hit).toContainText(
-			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
-		);
+		await expect(hit).toContainText("!415 feat/DEMO-203 → feat/DEMO-201-base: open into a branch no train takes");
 		await expect(hit.getByLabel("Demo Android")).toBeVisible();
 		await expect(hit.getByRole("link", { name: "Open MR" })).toHaveAttribute(
 			"href",
@@ -856,7 +854,7 @@ test.describe("releases page", () => {
 		);
 		await open(page, "?sheet=rules");
 		await expect(page.locator('.rule[data-rule="L9"]')).toContainText(
-			"MR into a branch that is not a sprint branch, a long-lived branch or develop",
+			"Code stranded in a branch that is not a sprint branch, a long-lived branch or develop",
 		);
 	});
 

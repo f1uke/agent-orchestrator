@@ -209,7 +209,7 @@ const RULES: [string, Severity, string][] = [
 	["D3", "risk", "Not every approver approved before publish"],
 	["E1", "hygiene", "Published but the Jira release is not marked released"],
 	["F1", "info", "Two trains overlap"],
-	["L9", "risk", "MR into a branch that is not a sprint branch, a long-lived branch or develop"],
+	["L9", "risk", "Code stranded in a branch that is not a sprint branch, a long-lived branch or develop"],
 ];
 
 const KINDS: readonly [string, string, number][] = [
@@ -510,7 +510,7 @@ function baseBoard(today: string): Board {
 			"L9~mr/da/415",
 			"L9",
 			"risk",
-			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
+			"!415 feat/DEMO-203 → feat/DEMO-201-base: open into a branch no train takes",
 			{ kind: "mr", app: "da", iid: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base" },
 			{
 				app: "da",
