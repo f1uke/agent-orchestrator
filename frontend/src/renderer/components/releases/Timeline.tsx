@@ -10,6 +10,7 @@ import {
 	LABEL_W,
 	llbBlockH,
 	rowHeight,
+	sprintBox,
 	timeline,
 	type AppLanes,
 	type Timeline as TL,
@@ -160,10 +161,7 @@ export function Timeline({
 											key={s.sprint.id}
 											className={`rel-spr ${s.next ? "next" : "active"}`}
 											data-testid={s.next ? "sprint-band-next" : "sprint-band"}
-											style={{
-												left: tl.x(s.sprint.start ?? ""),
-												width: tl.x(s.sprint.end ?? "") - tl.x(s.sprint.start ?? ""),
-											}}
+											style={sprintBox(tl, s.sprint.start ?? "", s.sprint.end ?? "")}
 										>
 											<span className="sl" data-sticky>
 												<span>

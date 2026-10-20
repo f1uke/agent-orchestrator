@@ -11,6 +11,7 @@ import {
 	markerSpots,
 	QUIET_LANE,
 	rowHeight,
+	sprintBox,
 	timeline,
 } from "./layout";
 import { board, hotfix, stage, train, version } from "./testkit";
@@ -214,5 +215,20 @@ describe("hotfixStages", () => {
 			["tag", ["gitlab.tags", "gitlab.milestones"]],
 			["publish", ["gitlab.tags", "gitlab.milestones"]],
 		]);
+	});
+});
+
+describe("sprint box", () => {
+	const tl = timeline(board({ today: "2026-10-14", trains: [t20, t21, t22] }));
+
+	it("covers the end day's whole column, so a Monday to Friday sprint reaches the end of Friday", () => {
+		const box = sprintBox(tl, "2026-10-19", "2026-10-23");
+		expect(box.left).toBe(tl.x("2026-10-19"));
+		expect(box.left + box.width).toBe(tl.x("2026-10-24"));
+		expect(box.width).toBe(5 * DW);
+	});
+
+	it("is one column wide for a one-day sprint", () => {
+		expect(sprintBox(tl, "2026-10-21", "2026-10-21").width).toBe(DW);
 	});
 });

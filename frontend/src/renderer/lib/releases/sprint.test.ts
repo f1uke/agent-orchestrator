@@ -412,12 +412,17 @@ describe("next sprint", () => {
 
 	describe("bars on one lane", () => {
 		const tl = timeline(board({ today: "2026-10-14", trains: [t21] }));
-		const tight: SprintRow = { ...next, sprint: { ...next.sprint, start: "2026-10-20", end: "2026-11-03" } };
+		const tight: SprintRow = { ...next, sprint: { ...next.sprint, start: "2026-10-21", end: "2026-11-03" } };
 
 		it("puts the next bar a sprint to the right of the active one, with no overlap", () => {
 			const [a, n] = barSpans([fullRow, tight], tl);
-			expect(n.x0 - a.x0).toBe(14 * DW);
+			expect(n.x0 - a.x0).toBe(15 * DW);
 			expect(n.x0).toBeGreaterThanOrEqual(a.x0 + a.width);
+		});
+
+		it("ends a bar at the end of its last day's column, less the 2px inset each side", () => {
+			const [a] = barSpans([fullRow], tl);
+			expect(a.x0 + a.width).toBe(tl.x("2026-10-21") - 2);
 		});
 
 		it("pushes a bar whose dates overlap the earlier one to start after it, keeping its width", () => {

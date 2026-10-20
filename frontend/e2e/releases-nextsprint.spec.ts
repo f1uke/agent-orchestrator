@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { NARROW, WIDE, labelOverlaps, layer, open, settle } from "./releases-kit";
 
 const LAYERS = "?layers=sprint,llb,cards";
@@ -7,6 +7,52 @@ const DAY = 36;
 const bar = (row: Locator, which: "active" | "next") => row.locator(`.spsrc[data-sprint='${which}']`);
 const blocks = (row: Locator, which: "active" | "next") =>
 	row.locator(`[data-testid=sprint-dest-block][data-sprint='${which}']`);
+
+test.describe("releases sprint bars cover their last day", () => {
+	test.use({ viewport: NARROW });
+
+	const dayAt = (page: Page, x: number, side: "left" | "right") =>
+		page.evaluate(
+			([px, edge]) => {
+				for (const c of document.querySelectorAll<HTMLElement>(".rel-day")) {
+					const r = c.getBoundingClientRect();
+					if (Math.abs((edge === "left" ? r.left : r.right) - px) <= 0.5)
+						return c.querySelector("span")?.textContent ?? null;
+				}
+				return null;
+			},
+			[x, side] as const,
+		);
+	const days = async (label: Locator) => {
+		const m = (await label.innerText()).match(/(\d+) \w+\s*→\s*(\d+) \w+/);
+		return { first: m![1], last: m![2] };
+	};
+
+	test("the Sprint band and the row's bar end at the end of the end day's column", async ({ page }) => {
+		await open(page, LAYERS);
+		const demo = page.getByTestId("sprint-row-DEMO");
+		const { first, last } = await days(demo.locator(".rel-lab .spn small"));
+		const band = (await page.getByTestId("sprint-band").boundingBox())!;
+		expect(await dayAt(page, band.x, "left"), "the band starts on its first day").toBe(first);
+		expect(await dayAt(page, band.x + band.width, "right"), "the band ends with its last day").toBe(last);
+
+		const a = (await bar(demo, "active").boundingBox())!;
+		expect(await dayAt(page, a.x - 2, "left"), "the bar starts on its first day, less its inset").toBe(first);
+		expect(await dayAt(page, a.x + a.width + 2, "right"), "the bar ends with its last day, less its inset").toBe(last);
+	});
+
+	test("the next bar starts the day after the active sprint's last day", async ({ page }) => {
+		await open(page, LAYERS);
+		const demo = page.getByTestId("sprint-row-DEMO");
+		const active = await days(demo.locator(".rel-lab .spn small"));
+		const nextLabel = await days(bar(demo, "next").locator(".passive"));
+		const n = (await page.getByTestId("sprint-band-next").boundingBox())!;
+		expect(await dayAt(page, n.x, "left")).toBe(nextLabel.first);
+		const a = (await page.getByTestId("sprint-band").boundingBox())!;
+		expect(n.x, "no gap and no overlap between the two bands").toBeCloseTo(a.x + a.width, 0);
+		expect(Number(nextLabel.first)).not.toBe(Number(active.last));
+	});
+});
 
 test.describe("releases next sprint on its board's row", () => {
 	test.use({ viewport: NARROW });
@@ -42,7 +88,7 @@ test.describe("releases next sprint on its board's row", () => {
 		const a = (await bar(demo, "active").boundingBox())!;
 		const n = (await bar(demo, "next").boundingBox())!;
 		expect(n.y, "same lane").toBeCloseTo(a.y, 0);
-		expect(n.x - a.x, "starts a sprint later").toBeCloseTo(14 * DAY, 0);
+		expect(n.x - a.x, "starts the day after the active sprint ends").toBeCloseTo(15 * DAY, 0);
 		expect(n.x).toBeGreaterThanOrEqual(a.x + a.width);
 		const bands = async (id: string) => (await page.getByTestId(id).boundingBox())!;
 		const band = await bands("sprint-band-next");

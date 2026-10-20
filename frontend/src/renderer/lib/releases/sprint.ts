@@ -1,7 +1,7 @@
 import { appMark } from "./appMark";
 import { statusTone } from "./cards";
 import { shortDay } from "./day";
-import { DW, type Timeline } from "./layout";
+import { DW, sprintBox, type Timeline } from "./layout";
 import { aimedTrain, epicNote, shortBranch, trainLabel, urgency } from "./llb";
 import type {
 	AppId,
@@ -303,8 +303,9 @@ export function barSpans(rows: readonly SprintRow[], tl: Timeline): BarSpan[] {
 	let edge = Number.NEGATIVE_INFINITY;
 	return rows.map((r) => {
 		const start = r.sprint.start ?? tl.start;
-		const own = tl.x(start) + 2;
-		const right = own + Math.max(MIN_BAR, tl.x(r.sprint.end ?? start) - tl.x(start) - 4);
+		const box = sprintBox(tl, start, r.sprint.end ?? start);
+		const own = box.left + 2;
+		const right = own + Math.max(MIN_BAR, box.width - 4);
 		const x0 = Math.max(own, edge);
 		edge = Math.max(right, x0 + MIN_BAR) + 4;
 		return { x0, width: Math.max(MIN_BAR, right - x0) };
