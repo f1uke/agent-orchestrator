@@ -209,7 +209,7 @@ for (const reduced of [false, true]) {
 			await act(
 				page,
 				() => demo.locator(".spsrc[data-sprint='active'] .csum").click(),
-				() => expect(blocks).toHaveCount(6),
+				() => expect(blocks).toHaveCount(7),
 				"DIV.sprint-row-DEMO",
 			);
 			const t21 = demo.locator('[data-dest="t:21-2026"]');

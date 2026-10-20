@@ -147,13 +147,25 @@ export function Timeline({
 			<MoveRoot keys={moveKeys(url, layers, folds, lens.hiddenBoards)}>
 				<div className="rel-canvas" ref={canvas} style={{ width: LABEL_W + tl.width }}>
 					<Background tl={tl} />
-					<Axis tl={tl} layers={layers} mobile={lens.mobile} actions={actions} />
+					<Axis tl={tl} layers={layers} actions={actions} />
 					<div className="rel-sched">
 						<div className="rel-row">
 							<div className="rel-lab">
 								<span className="rel-eyebrow">Sprint</span>
 								{layers.sprint && (
 									<HiddenBoardsMenu board={board} lens={lens} actions={actions} trigger={hiddenTrigger} />
+								)}
+								{layers.sprint && (
+									<button
+										type="button"
+										className="rel-lyr rel-mob"
+										aria-pressed={lens.mobile}
+										data-testid="mobile-only"
+										onClick={() => actions.setSearch({ mobile: !lens.mobile })}
+									>
+										<span className="sw" />
+										Mobile only
+									</button>
 								)}
 							</div>
 							<div className="rel-trk" style={{ width: tl.width, height: 30 }}>
@@ -340,7 +352,7 @@ function Background({ tl }: { tl: TL }) {
 	);
 }
 
-function Axis({ tl, layers, mobile, actions }: { tl: TL; layers: Layers; mobile: boolean; actions: PageActions }) {
+function Axis({ tl, layers, actions }: { tl: TL; layers: Layers; actions: PageActions }) {
 	const days = Array.from({ length: tl.days }, (_, i) => addDays(tl.start, i));
 	const months = days.filter((d, i) => i === 0 || dayOfMonth(d) === 1);
 	return (
@@ -359,16 +371,6 @@ function Axis({ tl, layers, mobile, actions }: { tl: TL; layers: Layers; mobile:
 							{LAYER_NAMES[k]}
 						</button>
 					))}
-					<button
-						type="button"
-						className="rel-lyr rel-mob"
-						aria-pressed={mobile}
-						data-testid="mobile-only"
-						onClick={() => actions.setSearch({ mobile: !mobile })}
-					>
-						<span className="sw" />
-						Mobile only
-					</button>
 				</div>
 			</div>
 			<div className="rel-trk" style={{ width: tl.width }}>

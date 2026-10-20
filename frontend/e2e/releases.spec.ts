@@ -691,7 +691,7 @@ test.describe("releases page", () => {
 		const demo = page.getByTestId("sprint-row-DEMO");
 		await demo.locator(".spsrc[data-sprint='active'] .csum").click();
 		const blocks = demo.getByTestId("sprint-dest-block");
-		await expect(blocks).toHaveCount(6);
+		await expect(blocks).toHaveCount(7);
 		await expect(blocks.locator(".dsum .to")).toHaveText([
 			"→ before #20",
 			"→ #21",
@@ -699,6 +699,7 @@ test.describe("releases page", () => {
 			"! off the sprint flow",
 			"· not routed yet",
 			"↺ carried over",
+			"· not mobile",
 		]);
 		const t21 = demo.locator('[data-dest="t:21-2026"]');
 		await expect(t21.locator(".dsum")).toContainText("2.4.0");
@@ -736,9 +737,9 @@ test.describe("releases page", () => {
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		await expect(sheet.getByRole("button", { name: "Train #21" })).toBeVisible();
 		await expect(sheet.getByTestId("sprint-sheet-cards")).toContainText(
-			"4 new this sprint, 2 carried over with MRs or open mobile work, 2 carried over with mobile done.",
+			"9 cards, 8 mobile. 4 new this sprint, 2 carried over with MRs or open mobile work, 2 carried over with mobile done, 1 not mobile. 9 on the board in all.",
 		);
-		await expect(sheet.getByTestId("sprint-dest")).toHaveCount(6);
+		await expect(sheet.getByTestId("sprint-dest")).toHaveCount(7);
 		await sheet.locator('.crow[data-key="DEMO-301"]').click();
 		await expect(sheet.getByTestId("card-summary")).toHaveText("Filter the fund list by risk level");
 		const routes = sheet.getByTestId("card-route");

@@ -260,10 +260,7 @@ func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 			}
 			row := SprintRow{Board: b, Sprint: s, Next: isNext, Estimated: isNext && estimated, Number: si.number, Total: len(si.cards), Cards: []SprintCard{}}
 			for _, is := range issues {
-				c, ok := sprintCard(is, si, mrs[is.Key], mobileSub, mobileTitle, mobileProject, r, cfg)
-				if !ok {
-					continue
-				}
+				c := sprintCard(is, si, mrs[is.Key], mobileSub, mobileTitle, mobileProject, r, cfg)
 				if c.OnBoard && !isNext {
 					onBoard[c.Key]++
 				}
@@ -300,7 +297,7 @@ func branchOwner(cfg Config, snap Snapshot) (sprintIssues, bool) {
 	return sprintIssues{}, false
 }
 
-func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub, mobileTitle *regexp.Regexp, mobileProject map[string]bool, r routing, cfg Config) (SprintCard, bool) {
+func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub, mobileTitle *regexp.Regexp, mobileProject map[string]bool, r routing, cfg Config) SprintCard {
 	c := SprintCard{
 		Key: is.Key, URL: is.URL, Summary: is.Summary, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
 		Subtasks: []SprintSubtask{}, MRs: append([]SprintMR{}, mrs...), OnBoard: si.inSprint[is.Key], ActiveWhy: []ActiveWhy{},
@@ -317,7 +314,7 @@ func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub, mobile
 	c.Mobile = mobileProject[project] || len(mrs) > 0 || len(mobile) > 0 || mobileTitle.MatchString(is.Summary)
 	if !c.Mobile {
 		c.Routes = []Route{}
-		return c, true
+		return c
 	}
 	isNew, openSub, mrNow := si.newHere[is.Key], false, false
 	for _, st := range mobile {
@@ -352,7 +349,7 @@ func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub, mobile
 			}
 		}
 	}
-	return c, true
+	return c
 }
 
 func rowTallies(cards []SprintCard) (SprintCounts, []SprintDest) {
