@@ -41,11 +41,13 @@ test.describe("releases Mobile only filter", () => {
 	test("a next sprint of web cards shows them with the filter off and no mobile cards with it on", async ({ page }) => {
 		await open(page, LAYERS);
 		const pilot = page.getByTestId("sprint-row-PILOT");
+		await settle(page);
 		await expect(bar(pilot, "next").locator(".sl > b")).toHaveText("3 cards");
 		await expect(bar(pilot, "next").getByTestId("sprint-mobile-count")).toHaveText("0 mobile");
 		await bar(pilot, "next").locator(".csum").click();
 		const web = pilot.locator("[data-sprint='next'][data-dest='web']");
 		await expect(web).toHaveCount(1);
+		await settle(page);
 		await web.locator(".dsum").click();
 		await expect(web.locator(".crow[data-key]")).toHaveCount(3);
 		await expect(web.getByTestId("web-tag")).toHaveCount(3);
