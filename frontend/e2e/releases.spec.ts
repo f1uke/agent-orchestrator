@@ -525,7 +525,7 @@ test.describe("releases page", () => {
 		for (const name of [/^Sprint/, /^Long-lived/, /^Alert rules$/])
 			await expect(nav.getByRole("button", { name })).toHaveCount(0);
 		await layer(page, "Sprint cards").click();
-		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.locator("[data-board]")).toHaveCount(3);
 		await page.getByRole("button", { name: /Needs attention/ }).click();
 		await page.getByRole("dialog", { name: "Release details" }).getByRole("tab", { name: "Rules" }).click();
 		await expect(page.locator('.rule[data-rule="L9"]')).toBeVisible();
@@ -575,7 +575,7 @@ test.describe("releases page", () => {
 	test("the Sprint cards layer adds one row per board with its three-line label", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		const demo = page.getByTestId("sprint-row-DEMO");
-		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.locator("[data-board]")).toHaveCount(3);
 		await expect(demo.locator(".rel-lab .spn")).toContainText(/DEMO 20\s*\d+ \w+ → \d+ \w+/);
 		await expect(demo.getByTestId("sprint-scope")).toHaveText("4 new · 2 carried with MRs · 2 carried, done");
 		await expect(demo.getByTestId("sprint-dests")).toHaveText(/<#20 1\s*#21 3\s*⑂ 1\s*off 1\s*no MR 1/);
@@ -635,7 +635,7 @@ test.describe("releases page", () => {
 		await expect(page.getByTestId("sprint-row-PILOT")).toBeVisible();
 		await expect(page.getByTestId("hidden-boards")).toHaveText("1 hidden");
 		await menu.getByRole("menuitem", { name: "Show all" }).click();
-		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.locator("[data-board]")).toHaveCount(3);
 		await expect(page.getByTestId("hidden-boards")).toHaveCount(0);
 	});
 
