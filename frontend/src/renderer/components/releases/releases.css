@@ -1876,9 +1876,11 @@
 		border-top: 1px solid var(--border);
 	}
 	.rel-cg.spsrc.next,
-	.rel-cg.dest.next,
 	.rel-sprow .rel-wires.next {
 		opacity: 0.55;
+	}
+	.rel-cg.dest.next {
+		filter: opacity(0.55);
 	}
 	.rel-sched > .rel-sprow > .rel-lab.top {
 		height: auto;
