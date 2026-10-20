@@ -147,7 +147,7 @@ func TestACardOfTheNextSprintRaisesNoAlertAndAFailingReadIsNoCoverageGap(t *test
 	f.sprintCard(next, "DEMO-3", "In Progress", true)
 	f.mr("da", "DEMO-3 a", "feat/DEMO-3", "feature/DEMO-9-base", MROpened, "2026-10-07", "")
 	in := f.inputs()
-	st, _ := in.Snap.Status(KindSprintCards.Name,SprintScope(next.ID))
+	st, _ := in.Snap.Status(KindSprintCards.Name, SprintScope(next.ID))
 	st.ErrorClass, st.Failures = ErrUnavailable, 3
 	Put(&in.Snap, KindSprintCards, st, Items(in.Snap, KindSprintCards, SprintScope(next.ID)))
 
