@@ -159,6 +159,7 @@ describe("releases motion", () => {
 		const filters = [
 			moveKeys({ ...url, apps: new Set(["di"]) }, DEFAULT_LAYERS, folds, none),
 			moveKeys({ ...url, me: true }, DEFAULT_LAYERS, folds, none),
+			moveKeys({ ...url, mobile: true }, DEFAULT_LAYERS, folds, none),
 			moveKeys({ ...url, hotfixes: !url.hotfixes }, DEFAULT_LAYERS, folds, none),
 			moveKeys(url, { ...DEFAULT_LAYERS, sprint: true }, folds, none),
 			moveKeys(url, DEFAULT_LAYERS, folds, new Set(["PILOT"])),

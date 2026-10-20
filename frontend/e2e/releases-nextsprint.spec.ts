@@ -57,16 +57,16 @@ test.describe("releases sprint bars cover their last day", () => {
 test.describe("releases next sprint on its board's row", () => {
 	test.use({ viewport: NARROW });
 
-	test("a board is one row with two bars, the next one dimmed, and PILOT has just its own", async ({ page }) => {
+	test("a board is one row with two bars, the next one dimmed, and PILOT's next one is estimated", async ({ page }) => {
 		await open(page, LAYERS);
 		const demo = page.getByTestId("sprint-row-DEMO");
 		await expect(page.locator("[data-board]")).toHaveCount(2);
 		await expect(page.getByTestId("sprint-row-DEMO-next")).toHaveCount(0);
 		await expect(demo.getByTestId("sprint-bar")).toHaveCount(2);
-		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-bar")).toHaveCount(1);
+		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-bar")).toHaveCount(2);
 		await expect(bar(demo, "next")).toContainText("DEMO 21");
 		await expect(bar(demo, "next")).toContainText(/\d+ \w+ → \d+ \w+/);
-		await expect(bar(demo, "next")).toContainText("3 cards");
+		await expect(bar(demo, "next").locator(".sl > b")).toHaveText("4 cards");
 
 		const opacity = (l: Locator) => l.evaluate((el) => Number(getComputedStyle(el).opacity));
 		expect(await opacity(bar(demo, "active"))).toBe(1);
@@ -156,7 +156,7 @@ test.describe("releases next sprint on its board's row", () => {
 		await demo.hover();
 		await demo.getByRole("button", { name: "Hide DEMO sprint" }).click();
 		await expect(demo).toHaveCount(0);
-		await expect(page.getByTestId("sprint-bar")).toHaveCount(1);
+		await expect(page.getByTestId("sprint-bar")).toHaveCount(2);
 		await expect(page.getByTestId("sprint-row-PILOT")).toBeVisible();
 		await expect(page.getByTestId("hidden-boards")).toHaveText("1 hidden");
 		await page.getByTestId("hidden-boards").click();
@@ -191,7 +191,7 @@ test.describe("releases next sprint on its board's row", () => {
 		await expect(page).toHaveURL(/sheet=sprint%3ADEMO%3Anext|sheet=sprint:DEMO:next/);
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		await expect(sheet).toContainText("next");
-		await expect(sheet.getByTestId("sprint-sheet-cards")).toContainText("13 on the board");
+		await expect(sheet.getByTestId("sprint-sheet-cards")).toContainText("4 on the board");
 	});
 
 	test("a card of the next sprint opens its sheet from a card link", async ({ page }) => {

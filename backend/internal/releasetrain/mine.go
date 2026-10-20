@@ -104,8 +104,9 @@ func mine(b *Board, m *me, mrs mrIndex, snap Snapshot, cfg Config) {
 	}
 	for i := range b.Sprints {
 		for j := range b.Sprints[i].Cards {
-			c := &b.Sprints[i].Cards[j]
-			c.Mine = m.sprintCard(c)
+			if c := &b.Sprints[i].Cards[j]; c.Mobile {
+				c.Mine = m.sprintCard(c)
+			}
 		}
 	}
 	for i := range b.LLBs {

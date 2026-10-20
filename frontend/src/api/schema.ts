@@ -5487,6 +5487,7 @@ export interface components {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             key: string;
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
+            mobile: boolean;
             mrs: components["schemas"]["ReleaseTrainSprintMR"][];
             noMr?: components["schemas"]["ReleaseTrainNoMRMark"];
             onBoard: boolean;
@@ -5538,6 +5539,7 @@ export interface components {
             cards: components["schemas"]["ReleaseTrainSprintCard"][];
             counts: components["schemas"]["ReleaseTrainSprintCounts"];
             dests: components["schemas"]["ReleaseTrainSprintDest"][];
+            estimated: boolean;
             next: boolean;
             number: number;
             sprint: components["schemas"]["ReleaseTrainSprintFact"];

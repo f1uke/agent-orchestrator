@@ -70,27 +70,42 @@ func activeSprint(snap Snapshot, board int) (SprintFact, bool) {
 	return best, found
 }
 
-func nextSprint(snap Snapshot, board int) (SprintFact, bool) {
-	var best SprintFact
-	found := false
-	for _, s := range Items(snap, KindBoardSprints, BoardScope(board)) {
-		if s.State != SprintFuture || s.Start == nil {
-			continue
-		}
-		if !found || s.Start.Before(*best.Start) || *s.Start == *best.Start && s.ID < best.ID {
-			best, found = s, true
+func (s SprintFact) dated() bool { return s.Start != nil && s.End != nil }
+
+func nextSprint(snap Snapshot, board int) (sprint SprintFact, estimated, ok bool) {
+	active, hasActive := activeSprint(snap, board)
+	var dated, undated *SprintFact
+	items := Items(snap, KindBoardSprints, BoardScope(board))
+	for i := range items {
+		s := &items[i]
+		switch {
+		case s.State != SprintFuture:
+		case s.dated():
+			if dated == nil || s.Start.Before(*dated.Start) || *s.Start == *dated.Start && s.ID < dated.ID {
+				dated = s
+			}
+		case undated == nil || s.ID < undated.ID:
+			undated = s
 		}
 	}
-	if found && best.End == nil {
-		return SprintFact{}, false
+	switch {
+	case dated != nil:
+		return *dated, false, true
+	case undated != nil && hasActive && active.dated():
+		est := *undated
+		length := active.End.Sub(*active.Start)
+		start := active.End.Add(1)
+		end := start.Add(length)
+		est.Start, est.End = &start, &end
+		return est, true, true
 	}
-	return best, found
+	return SprintFact{}, false, false
 }
 
 func readSprints(cfg Config, snap Snapshot) []SprintFact {
 	out := activeSprints(cfg, snap)
 	for _, b := range cfg.Boards {
-		if s, ok := nextSprint(snap, b.ID); ok {
+		if s, _, ok := nextSprint(snap, b.ID); ok {
 			out = append(out, s)
 		}
 	}

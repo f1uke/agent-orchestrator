@@ -155,6 +155,18 @@ export function Timeline({
 								{layers.sprint && (
 									<HiddenBoardsMenu board={board} lens={lens} actions={actions} trigger={hiddenTrigger} />
 								)}
+								{layers.sprint && (
+									<button
+										type="button"
+										className="rel-lyr rel-mob"
+										aria-pressed={lens.mobile}
+										data-testid="mobile-only"
+										onClick={() => actions.setSearch({ mobile: !lens.mobile })}
+									>
+										<span className="sw" />
+										Mobile only
+									</button>
+								)}
 							</div>
 							<div className="rel-trk" style={{ width: tl.width, height: 30 }}>
 								{board.sprints
@@ -162,7 +174,7 @@ export function Timeline({
 									.map((s) => (
 										<div
 											key={s.sprint.id}
-											className={`rel-spr ${s.next ? "next" : "active"}`}
+											className={`rel-spr ${s.next ? "next" : "active"}${s.estimated ? " estimated" : ""}`}
 											data-testid={s.next ? "sprint-band-next" : "sprint-band"}
 											style={sprintBox(tl, s.sprint.start ?? "", s.sprint.end ?? "")}
 										>

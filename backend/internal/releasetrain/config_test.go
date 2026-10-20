@@ -3,6 +3,7 @@ package releasetrain
 import (
 	"encoding/json"
 	"errors"
+	"regexp"
 	"testing"
 )
 
@@ -41,6 +42,7 @@ func TestConfigValidateRejects(t *testing.T) {
 		{"confluence space without page title", func(c *Config) { c.Confluence = &ConfluenceConfig{Space: "DOCS"} }, "confluence"},
 		{"duplicate board", func(c *Config) { c.Boards = append(c.Boards, c.Boards[0]) }, "boards"},
 		{"board without key", func(c *Config) { c.Boards[0].Key = "" }, "boards"},
+		{"bad card pattern", func(c *Config) { c.Mobile.CardPattern = "(" }, "mobile.cardPattern"},
 		{"bad subtask pattern", func(c *Config) { c.Mobile.SubtaskPattern = "(" }, "mobile.subtaskPattern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,5 +82,20 @@ func TestConfigWithoutOptionalBlocksValidates(t *testing.T) {
 	c.Jira.TechRequestProject, c.Jira.ForceUpdateSummary = "", ""
 	if _, err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestTheCardPatternDefaultsToTheMobilePrefixes(t *testing.T) {
+	re := regexp.MustCompile(MobileConfig{}.cardPattern())
+	for title, want := range map[string]bool{
+		"App - fictional thing": true, "iOS - fictional thing": true, "ADR - fictional thing": true, "  android fix": true,
+		"[iOS] fictional thing": true, "Mobile: thing": true, "Web - fictional thing": false, "Application form": false, "Fix the App": false,
+	} {
+		if re.MatchString(title) != want {
+			t.Errorf("default card pattern on %q = %v, want %v", title, !want, want)
+		}
+	}
+	if got := (MobileConfig{CardPattern: "^X"}).cardPattern(); got != "^X" {
+		t.Errorf("cardPattern = %q; want the configured one", got)
 	}
 }

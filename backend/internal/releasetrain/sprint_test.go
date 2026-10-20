@@ -3,6 +3,7 @@ package releasetrain
 import (
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,12 @@ func (f *fixture) sprintCard(s *SprintFact, key, status string, isNew bool) *Iss
 	if isNew {
 		f.thisSprint[s.ID] = append(f.thisSprint[s.ID], key)
 	}
+	return is
+}
+
+func (f *fixture) titledCard(s *SprintFact, key, summary, status string, isNew bool) *IssueFact {
+	is := f.sprintCard(s, key, status, isNew)
+	is.Summary = summary
 	return is
 }
 
@@ -61,12 +68,22 @@ func rowOf(t *testing.T, b Board, key string) SprintRow {
 func cardKeys(r SprintRow) []string {
 	out := []string{}
 	for _, c := range r.Cards {
+		if c.Mobile {
+			out = append(out, c.Key)
+		}
+	}
+	return out
+}
+
+func allCardKeys(r SprintRow) []string {
+	out := []string{}
+	for _, c := range r.Cards {
 		out = append(out, c.Key)
 	}
 	return out
 }
 
-func TestSprintRowKeepsCardsThatTouchMobile(t *testing.T) {
+func TestSprintRowShowsEveryCardAndMarksTheOnesThatTouchMobile(t *testing.T) {
 	f := newFixture(t, today)
 	s := f.sprint(43, 7, "2026-10-05", "2026-10-16")
 	f.sprintCard(s, "OTHER-1", "In Progress", true)
@@ -82,7 +99,10 @@ func TestSprintRowKeepsCardsThatTouchMobile(t *testing.T) {
 	b := f.reconcile()
 
 	if got := cardKeys(rowOf(t, b, "OTHER")); !reflect.DeepEqual(got, []string{"OTHER-2", "OTHER-4"}) {
-		t.Fatalf("OTHER cards = %v; want the one with an iOS subtask and the one with an MR", got)
+		t.Fatalf("OTHER mobile cards = %v; want the one with an iOS subtask and the one with an MR", got)
+	}
+	if got := allCardKeys(rowOf(t, b, "OTHER")); !reflect.DeepEqual(got, []string{"OTHER-1", "OTHER-2", "OTHER-4", "OTHER-5"}) {
+		t.Fatalf("OTHER cards = %v; want every top-level card of the sprint", got)
 	}
 	if got := cardKeys(rowOf(t, b, "DEMO")); !reflect.DeepEqual(got, []string{"DEMO-1"}) {
 		t.Fatalf("DEMO cards = %v; want DEMO-1, in a mobile project", got)
@@ -231,5 +251,83 @@ func TestEveryBoardRoutesByTheSprintBranchOwnersNumber(t *testing.T) {
 	}
 	if rowOf(t, b, "OTHER").Number != 8 {
 		t.Fatalf("OTHER's label keeps its own sprint number")
+	}
+}
+
+func TestACardTitledAsMobileIsMobileWithNoSubtaskAndNoMR(t *testing.T) {
+	f := newFixture(t, today)
+	s := f.sprint(43, 7, "2026-10-05", "2026-10-16")
+	f.titledCard(s, "OTHER-1", "App - fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-2", "Web - fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-3", "[iOS] fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-4", "Application form", "To Do", false)
+
+	r := rowOf(t, f.reconcile(), "OTHER")
+
+	if got := cardKeys(r); !reflect.DeepEqual(got, []string{"OTHER-1", "OTHER-3"}) {
+		t.Fatalf("OTHER mobile cards = %v; want the App and the [iOS] titled cards, not Web or Application", got)
+	}
+	if got := allCardKeys(r); len(got) != 4 {
+		t.Fatalf("OTHER cards = %v; want all four, a title only marks a card mobile", got)
+	}
+	if r.Total != 4 {
+		t.Fatalf("total = %d; want all 4 cards of the sprint", r.Total)
+	}
+	for _, c := range r.Cards {
+		if c.Active {
+			t.Errorf("%s is active; a title only decides whether a card is mobile", c.Key)
+		}
+	}
+}
+
+func TestACardPatternInTheConfigReplacesTheDefault(t *testing.T) {
+	f := newFixture(t, today)
+	f.cfg.Mobile.CardPattern = `^Wallet\b`
+	s := f.sprint(43, 7, "2026-10-05", "2026-10-16")
+	f.titledCard(s, "OTHER-1", "App - fictional thing", "To Do", false)
+	f.titledCard(s, "OTHER-2", "Wallet - fictional thing", "To Do", false)
+
+	if got := cardKeys(rowOf(t, f.reconcile(), "OTHER")); !reflect.DeepEqual(got, []string{"OTHER-2"}) {
+		t.Fatalf("OTHER mobile cards = %v; want only the card the configured pattern names", got)
+	}
+}
+
+func TestAWebCardIsShownInItsRowAndRaisesNothingNorCounts(t *testing.T) {
+	f := newFixture(t, today)
+	s := f.sprint(43, 7, "2026-10-05", "2026-10-16")
+	f.titledCard(s, "OTHER-1", "Web - fictional thing", "Done", true)
+	f.titledCard(s, "OTHER-2", "App - fictional thing", "In Progress", true)
+	f.sprintCard(f.sprint(42, 7, "2026-10-06", "2026-10-20"), "DEMO-1", "To Do", true)
+	f.me()
+	f.sprintIss[s.ID][0].Assignee = dee
+	f.sprintIss[s.ID][1].Assignee = dee
+	b := f.reconcile()
+
+	r := rowOf(t, b, "OTHER")
+	var web *SprintCard
+	for i := range r.Cards {
+		if r.Cards[i].Key == "OTHER-1" {
+			web = &r.Cards[i]
+		}
+	}
+	if web == nil || web.Mobile || len(web.Routes) != 0 || web.Active || len(web.Mine) != 0 {
+		t.Fatalf("OTHER-1 = %+v; want it in the row, not mobile, with no route, not active", web)
+	}
+	if c := b.sprintCard("OTHER-2"); c == nil || len(c.Mine) != 1 {
+		t.Fatalf("OTHER-2 = %+v; want the mobile card mine as its assignee", c)
+	}
+	if r.Total != 2 || len(r.Cards) != 2 {
+		t.Fatalf("total %d, cards %d; want both cards shown", r.Total, len(r.Cards))
+	}
+	if r.Counts != (SprintCounts{New: 1}) || len(r.Dests) != 1 || r.Dests[0].Keys[0] != "OTHER-2" {
+		t.Fatalf("counts %+v dests %+v; want the web card in neither", r.Counts, r.Dests)
+	}
+	if got := firedIDs(b, "G2"); !reflect.DeepEqual(got, []string{"G2~c/OTHER-2"}) {
+		t.Errorf("G2 hits = %v; want the mobile App card with no MR, and not the web one", got)
+	}
+	for _, h := range b.Alerts.Hits {
+		if strings.Contains(string(h.ID), "OTHER-1") {
+			t.Errorf("hit %s names the web card", h.ID)
+		}
 	}
 }

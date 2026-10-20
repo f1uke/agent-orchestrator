@@ -152,6 +152,7 @@ export function moveKeys(
 	const rows = [
 		url.apps ? [...url.apps].sort().join(",") : "*",
 		url.me ? "me" : "",
+		url.mobile ? "mobile" : "",
 		url.hotfixes ? "hf" : "",
 		LAYER_ORDER.filter((k) => layers[k]).join(","),
 		boardKeysParam(hidden),

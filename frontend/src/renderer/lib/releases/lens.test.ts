@@ -291,6 +291,7 @@ describe("Only me", () => {
 		mrs: [],
 		routes: [],
 		onBoard: true,
+		mobile: true,
 		active: true,
 		activeWhy: ["new this sprint" as const],
 		...(m ? { mine } : {}),
@@ -322,6 +323,7 @@ describe("Only me", () => {
 			{
 				board: { id: 1, key: "DEMO", ownsSprintBranch: true },
 				next: false,
+				estimated: false,
 				number: 20,
 				sprint: { board: 1, id: 20, name: "DEMO 20", url: "" },
 				total: 2,
@@ -400,7 +402,13 @@ describe("Only me", () => {
 			...b,
 			sprints: [
 				b.sprints[0],
-				{ ...b.sprints[0], next: true, number: 21, sprint: { board: 1, id: 21, name: "DEMO 21", url: "" } },
+				{
+					...b.sprints[0],
+					next: true,
+					estimated: false,
+					number: 21,
+					sprint: { board: 1, id: 21, name: "DEMO 21", url: "" },
+				},
 			],
 		};
 		const shown = makeLens(withNext, parseReleasesSearch({}), new Set());

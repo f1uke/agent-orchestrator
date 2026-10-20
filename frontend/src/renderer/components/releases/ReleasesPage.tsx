@@ -55,8 +55,9 @@ export function ReleasesPage() {
 			apps: url.apps,
 			focus: board ? (focusTrain(board, url.focus)?.id ?? null) : null,
 			me: url.me,
+			mobile: url.mobile,
 		}),
-		[layers, hiddenBoards, url.apps, url.focus, url.me, board],
+		[layers, hiddenBoards, url.apps, url.focus, url.me, url.mobile, board],
 	);
 
 	const setSearch = useCallback(
@@ -95,6 +96,7 @@ export function ReleasesPage() {
 				const r = locate(subject, board, view);
 				const patch: Partial<ReleasesSearch> = {};
 				if (r.notMine && url.me) patch.me = false;
+				if (r.notMobile && url.mobile) patch.mobile = false;
 				const nextLayers = { ...layers, ...Object.fromEntries(r.layers.map((k) => [k, true])) };
 				if (r.layers.some((k) => !layers[k])) {
 					setLayers(nextLayers);
@@ -130,6 +132,7 @@ export function ReleasesPage() {
 			url.apps,
 			url.hotfixes,
 			url.me,
+			url.mobile,
 			view,
 			board,
 			layers,

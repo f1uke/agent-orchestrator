@@ -29,6 +29,7 @@ export type ReleasesSearch = {
 	layers: Layers | null;
 	/** Board keys whose sprint row is hidden; null means the viewer's stored set. */
 	hideBoards: ReadonlySet<string> | null;
+	mobile: boolean;
 };
 
 export type ReleasesSearchRaw = Partial<Record<keyof ReleasesSearch, string>>;
@@ -143,6 +144,7 @@ export function parseReleasesSearch(raw: Record<string, unknown>): ReleasesSearc
 		sheet: parseSheet(str(raw.sheet)),
 		layers: parseLayers(str(raw.layers)),
 		hideBoards: hideBoards === null ? null : parseBoardKeys(hideBoards),
+		mobile: flag(raw.mobile) ?? false,
 	};
 }
 
@@ -155,5 +157,6 @@ export function releasesSearch(s: ReleasesSearch): ReleasesSearchRaw {
 	if (s.sheet) out.sheet = sheetParam(s.sheet);
 	if (s.layers) out.layers = LAYER_ORDER.filter((k) => s.layers?.[k]).join(",");
 	if (s.hideBoards) out.hideBoards = boardKeysParam(s.hideBoards);
+	if (s.mobile) out.mobile = "1";
 	return out;
 }
