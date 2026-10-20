@@ -22,10 +22,12 @@ func (ActiveWhy) Enum() []any { return []any{ActiveNew, ActiveMR, ActiveSubtaskO
 // StatusAbandoned is the Jira status of a card nobody will finish; sprint counts and G2 skip it.
 const StatusAbandoned = "Abandoned"
 
-// SprintRow is one configured board's active sprint and its cards that touch the mobile apps.
+// SprintRow is one configured board's active or next sprint and its cards that touch the mobile apps.
+// Next marks the sprint that has not started: it shows the same data and raises no alert.
 type SprintRow struct {
 	Board  BoardConfig  `json:"board"`
 	Sprint SprintFact   `json:"sprint"`
+	Next   bool         `json:"next"`
 	Number int          `json:"number"`
 	Total  int          `json:"total"`
 	Cards  []SprintCard `json:"cards"`
@@ -207,8 +209,10 @@ func branchCards(snap Snapshot) map[string]IssueFact {
 	return out
 }
 
-// sprintRows builds one row per configured board with an active sprint; a card
-// that is on one board's sprint shows only there.
+// sprintRows builds a row per configured board with an active sprint, and one
+// for its next sprint when that has dates. A card that is on one board's active
+// sprint shows only there. The next sprint is routed as the active one is, by
+// the branch flow of the sprint now running, and pulls in no off-board cards.
 func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 	mobileSub := regexp.MustCompile(cfg.Mobile.SubtaskPattern)
 	mobileProject := map[string]bool{}
@@ -220,45 +224,56 @@ func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 	var rows []SprintRow
 	onBoard := map[string]int{}
 	for _, b := range cfg.Boards {
-		s, ok := activeSprint(snap, b.ID)
+		active, ok := activeSprint(snap, b.ID)
 		if !ok {
 			continue
 		}
-		si := readSprint(snap, s)
-		mrs := sprintMRs(cfg, snap, si.parentOf)
+		now := readSprint(snap, active)
 		r := base
-		r.sprint, r.year = si.number, si.year
+		r.sprint, r.year = now.number, now.year
 		if owned {
 			r.sprint, r.year = owner.number, owner.year
 		}
-		if s.Start != nil {
-			r.start = *s.Start
+		if active.Start != nil {
+			r.start = *active.Start
 		}
-		issues := append([]IssueFact{}, si.cards...)
-		if b.OwnsSprintBranch {
-			for _, k := range si.offBoardKeys(mrs) {
-				if is, ok := extra[k]; ok && !is.Subtask {
-					issues = append(issues, is)
+		sprints := []SprintFact{active}
+		if next, ok := nextSprint(snap, b.ID); ok {
+			sprints = append(sprints, next)
+		}
+		for _, s := range sprints {
+			isNext := s.ID != active.ID
+			si := now
+			if isNext {
+				si = readSprint(snap, s)
+			}
+			mrs := sprintMRs(cfg, snap, si.parentOf)
+			issues := append([]IssueFact{}, si.cards...)
+			if b.OwnsSprintBranch && !isNext {
+				for _, k := range si.offBoardKeys(mrs) {
+					if is, ok := extra[k]; ok && !is.Subtask {
+						issues = append(issues, is)
+					}
 				}
 			}
-		}
-		row := SprintRow{Board: b, Sprint: s, Number: si.number, Total: len(si.cards), Cards: []SprintCard{}}
-		for _, is := range issues {
-			c, ok := sprintCard(is, si, mrs[is.Key], mobileSub, mobileProject, r, cfg)
-			if !ok {
-				continue
+			row := SprintRow{Board: b, Sprint: s, Next: isNext, Number: si.number, Total: len(si.cards), Cards: []SprintCard{}}
+			for _, is := range issues {
+				c, ok := sprintCard(is, si, mrs[is.Key], mobileSub, mobileProject, r, cfg)
+				if !ok {
+					continue
+				}
+				if c.OnBoard && !isNext {
+					onBoard[c.Key]++
+				}
+				row.Cards = append(row.Cards, c)
 			}
-			if c.OnBoard {
-				onBoard[c.Key]++
-			}
-			row.Cards = append(row.Cards, c)
+			rows = append(rows, row)
 		}
-		rows = append(rows, row)
 	}
 	for i := range rows {
 		kept := rows[i].Cards[:0]
 		for _, c := range rows[i].Cards {
-			if c.OnBoard || onBoard[c.Key] == 0 {
+			if rows[i].Next || c.OnBoard || onBoard[c.Key] == 0 {
 				kept = append(kept, c)
 			}
 		}

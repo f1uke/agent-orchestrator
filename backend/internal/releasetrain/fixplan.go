@@ -405,7 +405,7 @@ func (b *Board) sprintMR(s SubjMR) *retargetMR {
 // board's active sprint, as sprint routing reads it.
 func (b *Board) branchSprint() (int, int, bool) {
 	for _, row := range b.Sprints {
-		if row.Board.OwnsSprintBranch {
+		if row.Board.OwnsSprintBranch && !row.Next {
 			return sprintNumber(row.Sprint)
 		}
 	}
