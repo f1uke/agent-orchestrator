@@ -1,6 +1,6 @@
 import { animate } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { addDays, dayOfMonth, monthYear, weekday, weekdayShort } from "../../lib/releases/day";
+import { addDays, dayDiff, dayOfMonth, monthYear, weekday, weekdayShort } from "../../lib/releases/day";
 import { cardGroups, groupRowCount, jiraUrl } from "../../lib/releases/cards";
 import {
 	appLanes,
@@ -30,6 +30,7 @@ import type { PageActions } from "./ReleasesPage";
 import { readOf } from "../../lib/releases/sources";
 import { SourceTag } from "./Sources";
 import { StickyAppLabel } from "./StickyAppLabel";
+import { useHoverGuide } from "./useHoverGuide";
 import { useSpotlight } from "./useSpotlight";
 import { VersionLanes } from "./VersionLanes";
 
@@ -122,6 +123,7 @@ export function Timeline({
 	});
 
 	usePan(sc, mo);
+	useHoverGuide(sc, canvas, tl.days);
 	useSpotlight();
 
 	const hiddenTrigger = useRef<HTMLButtonElement>(null);
@@ -330,6 +332,7 @@ function Background({ tl }: { tl: TL }) {
 				background: `repeating-linear-gradient(90deg, transparent 0 ${off}px, color-mix(in srgb, var(--fg) 2.2%, transparent) ${off}px ${off + 2 * DW}px, transparent ${off + 2 * DW}px ${7 * DW}px)`,
 			}}
 		>
+			<div className="hovercol" hidden />
 			<div className="todaycol" style={{ left: tl.x(tl.today), width: DW }} />
 			<div className="today" style={{ left: tl.x(tl.today) + DW / 2 }} />
 		</div>
@@ -372,6 +375,7 @@ function Axis({ tl, layers, actions }: { tl: TL; layers: Layers; actions: PageAc
 					return (
 						<div
 							key={d}
+							data-col={dayDiff(tl.start, d)}
 							className={`rel-day${we ? " we" : ""}${d === tl.today ? " td" : ""}`}
 							style={{ left: tl.x(d), width: DW }}
 						>
