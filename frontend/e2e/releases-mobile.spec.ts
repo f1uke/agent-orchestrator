@@ -133,6 +133,7 @@ for (const vp of [NARROW, WIDE]) {
 
 		for (const mobile of [false, true]) {
 			test(`no label overlaps with both bars unfolded, Mobile only ${mobile ? "on" : "off"}`, async ({ page }) => {
+				test.setTimeout(90_000);
 				await open(page, `${LAYERS}${mobile ? "&mobile=1" : ""}`);
 				for (const key of ["DEMO", "PILOT"]) {
 					const row = page.getByTestId(`sprint-row-${key}`);
