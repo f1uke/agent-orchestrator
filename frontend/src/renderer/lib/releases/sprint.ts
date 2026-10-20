@@ -287,7 +287,6 @@ export function sprintFoldKey(row: SprintRow): string {
 
 export type BoardSprints = { key: string; rows: SprintRow[] };
 
-/** One entry per board, in the order boards first appear, with the active sprint ahead of the next one. */
 export function sprintsByBoard(rows: readonly SprintRow[]): BoardSprints[] {
 	const boards = new Map<string, SprintRow[]>();
 	for (const r of rows) boards.set(r.board.key, [...(boards.get(r.board.key) ?? []), r]);
@@ -298,7 +297,6 @@ export const MIN_BAR = 4 * DW;
 
 export type BarSpan = { x0: number; width: number };
 
-/** Sprints never overlap, so the later bar normally starts after the earlier one ends; overlapping data starts it after the earlier bar instead. */
 export function barSpans(rows: readonly SprintRow[], tl: Timeline): BarSpan[] {
 	let edge = Number.NEGATIVE_INFINITY;
 	return rows.map((r) => {
@@ -314,7 +312,6 @@ export function barSpans(rows: readonly SprintRow[], tl: Timeline): BarSpan[] {
 
 export type Extent = { right: number; bottom: number };
 
-/** An unfolded bar's blocks run wider than a sprint, so a later bar's blocks drop below any earlier block they would sit on. */
 export function stackTop(earlier: readonly Extent[], x0: number, base: number): number {
 	return earlier.filter((e) => e.right > x0).reduce((y, e) => Math.max(y, e.bottom), base);
 }

@@ -173,7 +173,6 @@ func (r reader) sprints(ctx context.Context, board int) (svc.Batch, error) {
 	return svc.SnapshotOf(rt.KindBoardSprints, facts)
 }
 
-// sprintEndDay is the last day a sprint runs: an end instant at exactly local midnight closes the day before.
 func sprintEndDay(end time.Time, loc *time.Location) rt.Day {
 	local := end.In(loc)
 	if local.Hour() == 0 && local.Minute() == 0 && local.Second() == 0 && local.Nanosecond() == 0 {
