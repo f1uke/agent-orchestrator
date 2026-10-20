@@ -220,7 +220,7 @@ for (const vp of [NARROW, WIDE]) {
 	test.describe(`releases next sprint at ${vp.width}x${vp.height}`, () => {
 		test.use({ viewport: vp });
 
-		test("both bars fit the viewport and no labels overlap with both unfolded", async ({ page }) => {
+		test("both bars sit inside the track and no labels overlap with both unfolded", async ({ page }) => {
 			await open(page, LAYERS);
 			const demo = page.getByTestId("sprint-row-DEMO");
 			await bar(demo, "active").locator(".csum").click();
@@ -228,8 +228,12 @@ for (const vp of [NARROW, WIDE]) {
 			await settle(page);
 			for (const d of await demo.locator(".rel-cg.dest .dsum").all()) await d.click();
 			await settle(page);
-			const box = (await demo.boundingBox())!;
-			expect(box.x + box.width).toBeLessThanOrEqual(vp.width + 1);
+			const track = (await demo.locator(".rel-trk").boundingBox())!;
+			for (const which of ["active", "next"] as const) {
+				const b = (await bar(demo, which).boundingBox())!;
+				expect(b.x, `${which} bar starts inside the track`).toBeGreaterThanOrEqual(track.x);
+				expect(b.x + b.width, `${which} bar ends inside the track`).toBeLessThanOrEqual(track.x + track.width);
+			}
 			const { n, overlaps } = await labelOverlaps(page);
 			expect(n).toBeGreaterThan(10);
 			expect(overlaps).toEqual([]);
