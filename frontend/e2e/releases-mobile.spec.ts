@@ -84,14 +84,35 @@ test.describe("releases Mobile only filter", () => {
 		await expect(page.getByTestId("source-card")).toContainText("titled App, iOS or ADR");
 	});
 
-	test("it reads right in the light theme too", async ({ page }) => {
-		await open(page, `${LAYERS}&mobile=1`);
-		await page.evaluate(() => document.documentElement.classList.add("light"));
-		await settle(page);
-		const sw = toggle(page).locator(".sw");
-		await expect(sw).toBeVisible();
-		expect(await sw.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
-	});
+	for (const theme of ["dark", "light"] as const) {
+		test(`the toggle reads in the ${theme} theme, on and off`, async ({ page }) => {
+			await page.addInitScript((t) => localStorage.setItem("ao.theme", t), theme);
+			await open(page, LAYERS);
+			await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+			const readings = async () =>
+				toggle(page).evaluate((el) => {
+					const sw = el.querySelector(".sw")!;
+					const cs = getComputedStyle(el);
+					const knob = getComputedStyle(sw, "::after").backgroundColor;
+					return {
+						text: cs.color,
+						track: getComputedStyle(sw).backgroundColor,
+						knob,
+						bg: getComputedStyle(el.closest(".rel-lab")!).backgroundColor,
+					};
+				});
+			const off = await readings();
+			await toggle(page).click();
+			const on = await readings();
+			for (const r of [off, on]) {
+				expect(r.text, "label colour differs from its background").not.toBe(r.bg);
+				expect(r.knob, "knob is painted").not.toBe("rgba(0, 0, 0, 0)");
+				expect(r.track, "track is painted").not.toBe("rgba(0, 0, 0, 0)");
+			}
+			expect(on.knob, "the knob changes colour when on").not.toBe(off.knob);
+			await expect(toggle(page)).toHaveAttribute("aria-pressed", "true");
+		});
+	}
 });
 
 test.describe("releases estimated next sprint", () => {
