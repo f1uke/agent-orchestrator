@@ -9,7 +9,9 @@ const card = (scope: { getByTestId: Locator["getByTestId"] }) => scope.getByTest
 test.describe("releases sources layer", () => {
 	test.use({ viewport: NARROW });
 
-	test("off by default with no tags; on, every app label has tags and quiet bars have none", async ({ page }) => {
+	test("off by default with no tags; on, every app label has tags and a past train's bars have none", async ({
+		page,
+	}) => {
 		await open(page);
 		await expect(layer(page, "Sources")).toHaveAttribute("aria-pressed", "false");
 		await expect(tags(page.getByTestId("releases-page"))).toHaveCount(0);
@@ -17,12 +19,28 @@ test.describe("releases sources layer", () => {
 		await expect(page).not.toHaveURL(/layers=/);
 		for (const app of APPS) expect(await tags(page.getByTestId(`label-${app}`)).count(), app).toBeGreaterThan(2);
 		await expect(tags(page.getByTestId("bar-di-21-2026")).first()).toBeVisible();
-		await expect(tags(page.getByTestId("bar-di-22-2026"))).toHaveCount(0);
-		await expect(tags(page.locator(".rel-cg.quiet"))).toHaveCount(0);
+		await expect(tags(page.getByTestId("bar-di-20-2026"))).toHaveCount(0);
+		await expect(tags(page.getByTestId("cards-di:20-2026"))).toHaveCount(0);
 		await page.reload();
 		await expect(layer(page, "Sources")).toHaveAttribute("aria-pressed", "true");
 		await layer(page, "Sources").click();
 		await expect(tags(page.getByTestId("releases-page"))).toHaveCount(0);
+	});
+
+	test("an upcoming release shows the same source tags as the focused one, and none on a field with no source", async ({
+		page,
+	}) => {
+		await open(page, "?layers=llb,cards,src");
+		const bar = page.getByTestId("bar-di-22-2026");
+		await expect(tags(bar.locator('[data-part="dates"]'))).toHaveText("GitLab");
+		await expect(bar.locator('[data-part="mr"]')).toContainText("no release MR");
+		await expect(tags(bar.locator('[data-part="mr"]'))).toHaveCount(0);
+		const group = page.getByTestId("cards-di:22-2026");
+		await expect(tags(group.locator(".csum"))).toHaveText(["GitLab", "Jira"]);
+		await group.locator(".csum").click({ position: { x: 8, y: 8 } });
+		const rows = group.locator(".crow[data-key]");
+		expect(await rows.count()).toBeGreaterThan(0);
+		for (const r of await rows.all()) await expect(tags(r)).toHaveText(/fixVersion|page|sprint MR|branch/);
 	});
 
 	test("a link with src in layers turns the layer on", async ({ page }) => {
@@ -44,7 +62,6 @@ test.describe("releases sources layer", () => {
 		await expect(row("DEMO-103")).toHaveText("fixVersion + sprint MR");
 		await expect(row("DEMO-104")).toHaveText("page");
 		await expect(row("DEMO-106")).toHaveText("fixVersion + page + sprint MR");
-		await expect(tags(page.getByTestId("cards-di:22-2026"))).toHaveCount(0);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sources-cards.png` });
 	});
 
@@ -111,8 +128,12 @@ test.describe("releases sources layer", () => {
 		await open(page, "?layers=sprint,llb,cards,src");
 		for (const key of ["DEMO", "PILOT"]) {
 			const row = page.getByTestId(`sprint-row-${key}`);
-			await row.locator(".spsrc[data-sprint='active'] .csum").click();
-			for (const d of await row.locator(".dsum").all()) await d.click();
+			await row.locator(".spsrc[data-sprint='active'] .csum").click({ position: { x: 8, y: 8 } });
+			await settle(page);
+			for (const d of await row.locator(".dsum").all()) {
+				await d.click();
+				await settle(page);
+			}
 		}
 		const off = page.getByTestId("sprint-row-PILOT").locator('.crow[data-key="PIL-12"]');
 		await expect(off).toContainText("not on the board");
