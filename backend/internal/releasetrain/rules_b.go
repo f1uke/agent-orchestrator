@@ -9,6 +9,7 @@ import (
 var ruleB1 = rule{
 	ID: "B1", Group: "B", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineOwner,
 	Reads:    []KindName{KindMilestones.Name, KindMRs.Name},
 	Title:    "Freeze day passed and no release MR is open",
 	Check: func(b *Board) []Hit {
@@ -28,6 +29,7 @@ var devStatuses = map[string]bool{"Ready to Dev": true, "In Progress": true, "Pu
 var ruleB3 = rule{
 	ID: "B3", Group: "B", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineListedCards,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name},
 	Title:    "Cards still in development after freeze",
 	Check: func(b *Board) []Hit {
@@ -47,9 +49,11 @@ var ruleB3 = rule{
 			if len(keys) == 0 {
 				return nil
 			}
-			return versionHit(t, v,
+			h := versionHit(t, v,
 				fmt.Sprintf("%d card(s) still %s: %s", len(keys), strings.Join(sortedKeys(statuses), " / "), joinNames(keys)),
 				Evidence{"cards": keys}, jiraLink(v.Jira))
+			h.cards = keys
+			return h
 		})
 	},
 }

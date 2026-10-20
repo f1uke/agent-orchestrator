@@ -12,6 +12,7 @@ var trunkRE = regexp.MustCompile(`^(develop|main|master)$`)
 var ruleL1 = rule{
 	ID: "L1", Group: "G", Severity: SevBlock, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectMR},
+	Mine:     MineMR,
 	Reads:    []KindName{KindMRs.Name},
 	Title:    "Long-lived branch has an open MR into develop or main after cutover",
 	Hint:     "Catches the wrong landing before it merges; it should go into the sprint branch.",
@@ -32,6 +33,7 @@ var ruleL1 = rule{
 						Evidence: Evidence{"group": g.ID, "branch": br.Branch, "mr": mr.IID, "target": mr.TargetBranch, "cutover": cutover},
 						Text:     fmt.Sprintf("!%d %s → %s is open; land it in the sprint branch instead", mr.IID, br.Branch, mr.TargetBranch),
 						Links:    []Link{{Label: "Open MR", URL: mr.URL}},
+						cards:    br.cardKeys(),
 					})
 				}
 			}
@@ -56,6 +58,7 @@ func accepted(p *LlbPlan, app AppID, iid int) bool {
 var ruleL3 = rule{
 	ID: "L3", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectCardOnTrain},
+	Mine:     MineListedCards,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name, KindMRs.Name, KindPages.Name, KindPageCards.Name, KindLLBCards.Name},
 	Title:    "Card is on a train page but parked in a long-lived branch that does not target it",
 	Hint:     "Its code will not ride this train unless the branch lands in the sprint branch before the cut.",
@@ -83,6 +86,7 @@ var ruleL3 = rule{
 						Evidence: Evidence{"card": c.Key, "train": t.ID, "group": g.ID, "branch": parked.Branch, "target": targetText(g.Target)},
 						Text:     fmt.Sprintf("%s is on train %s, but its code sits in %s (%s)", c.Key, t.ID, parked.Branch, targetText(g.Target)),
 						Links:    []Link{{Label: "Open card", URL: c.URL}},
+						cards:    []string{c.Key},
 					})
 				}
 			}
@@ -97,6 +101,7 @@ var ruleL3 = rule{
 var ruleL9 = rule{
 	ID: "L9", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectMR},
+	Mine:     MineMR,
 	Reads:    []KindName{KindMRs.Name},
 	Title:    "MR into a branch that is not a sprint branch, a long-lived branch or develop",
 	Hint:     "No train takes code from that branch, so the change stays there until someone moves it on.",
@@ -120,6 +125,7 @@ var ruleL9 = rule{
 					Evidence: Evidence{"mr": mr.IID, "source": mr.SourceBranch, "target": mr.TargetBranch, "state": mr.State},
 					Text:     fmt.Sprintf("!%d %s → %s: not a sprint branch, a long-lived branch or develop", mr.IID, mr.SourceBranch, mr.TargetBranch),
 					Links:    []Link{{Label: "Open MR", URL: mr.URL}},
+					cards:    mrKeys(mr),
 				})
 			}
 		}

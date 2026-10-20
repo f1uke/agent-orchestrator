@@ -21,6 +21,7 @@ type rule struct {
 	Hint      string
 	Reads     []KindName
 	Subjects  []SubjectKind
+	Mine      MinePolicy
 	Scope     ruleScope
 	Check     func(b *Board) []Hit
 }
@@ -57,7 +58,8 @@ type RuleInfo struct {
 	// Reads is every fact kind the rule reads, so an alert can name its sources.
 	Reads []KindName `json:"reads"`
 	// Subjects is every kind of subject the rule's hits are about, so the page can find each on the timeline.
-	Subjects []SubjectKind `json:"subjects"`
+	Subjects   []SubjectKind `json:"subjects"`
+	MinePolicy MinePolicy    `json:"minePolicy"`
 }
 
 // LookupRule returns the catalogue row of id under settings, or false when no rule has that id.
@@ -75,7 +77,7 @@ func catalogue(settings map[RuleID]bool) []RuleInfo {
 	out := make([]RuleInfo, len(table))
 	for i, r := range table {
 		out[i] = RuleInfo{ID: r.ID, Group: r.Group, Severity: r.Severity, DefaultOn: r.DefaultOn,
-			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID), Reads: r.Reads, Subjects: r.Subjects}
+			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID), Reads: r.Reads, Subjects: r.Subjects, MinePolicy: r.Mine}
 	}
 	return out
 }
@@ -136,6 +138,7 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 	a := Alerts{StaleHides: []StaleHide{}}
 	matched := map[HitID]bool{}
 	unsure := map[RuleID]bool{}
+	myCards := b.myCards()
 	for _, r := range ruleTable() {
 		on := r.effectiveOn(in.Human.RuleSettings)
 		hits := r.Check(b)
@@ -148,7 +151,7 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 			if hits[i].Severity == 0 {
 				hits[i].Severity = r.Severity
 			}
-			hits[i].Mine = mineOfSubject(b, hits[i].Subject)
+			hits[i].Mine = r.mineOf(b, myCards, hits[i])
 			matched[hits[i].ID] = true
 		}
 		for _, cell := range cells(b, in.Config, r, hits) {

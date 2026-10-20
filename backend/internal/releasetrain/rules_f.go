@@ -8,6 +8,7 @@ import (
 var ruleF1 = rule{
 	ID: "F1", Group: "F", Severity: SevInfo, DefaultOn: false, Scope: scopeGlobal,
 	Subjects: []SubjectKind{SubjectTrainPair},
+	Mine:     MineNever,
 	Reads:    []KindName{KindMilestones.Name},
 	Title:    "Two trains overlap",
 	Check: func(b *Board) []Hit {
@@ -39,6 +40,7 @@ var ruleF1 = rule{
 var ruleF2 = rule{
 	ID: "F2", Group: "F", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectHotfixTrain},
+	Mine:     MineOwner,
 	Reads:    []KindName{KindMilestones.Name},
 	Title:    "A hotfix overlaps a train window",
 	Check: func(b *Board) []Hit {

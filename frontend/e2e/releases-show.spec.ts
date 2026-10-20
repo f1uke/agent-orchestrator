@@ -228,18 +228,18 @@ test.describe("Show on an alert", () => {
 		await expect.poll(() => page.locator(".rel-sc").evaluate((el) => el.scrollLeft)).toBeGreaterThan(before + 100);
 	});
 
-	test("an alert of mine on a card Only me does not draw turns Only me off to show it", async ({ page }) => {
+	test("an alert of mine on a hotfix keeps Only me on and shows the hotfix bar", async ({ page }) => {
 		await openFrozen(page, "?sheet=attention&me=1");
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
-		await show(page, "G2~c/DEMO-304");
-		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "false");
-		await expectSpotted(page, ['[data-testid="sprint-row-DEMO"] .crow[data-key="DEMO-304"]']);
+		await show(page, "F2~ht/da/2.3.1/21-2026");
+		await expectSpotted(page, ['[data-testid="hotfix-da-2.3.1"]']);
+		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
 	});
 
 	test("an alert of mine keeps Only me on and shows the version without writing the focus", async ({ page }) => {
 		await openFrozen(page, "?sheet=attention&me=1");
-		await show(page, "A6~vd/21-2026/di/freeze");
-		await expectSpotted(page, ['.rel-app[data-app="di"] .rel-mk[data-key="21-2026"][data-stage="freeze"]']);
+		await show(page, "C5~v/21-2026/di");
+		await expectSpotted(page, ['[data-testid="bar-di-21-2026"]']);
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
 		expect(page.url()).not.toContain("focus=");
 	});

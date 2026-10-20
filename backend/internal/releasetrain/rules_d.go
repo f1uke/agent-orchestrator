@@ -8,6 +8,7 @@ import (
 var ruleD1 = rule{
 	ID: "D1", Group: "D", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp, Reads: readsJoin,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineOwner,
 	Title:    "No approvers set on the Jira release",
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
@@ -24,6 +25,7 @@ var ruleD1 = rule{
 var ruleD2 = rule{
 	ID: "D2", Group: "D", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineOwner,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindRelatedWork.Name},
 	Title:    "Scan page or release note not attached",
 	Check: func(b *Board) []Hit {
@@ -55,6 +57,7 @@ var ruleD2 = rule{
 var ruleD3 = rule{
 	ID: "D3", Group: "D", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MinePendingApprover,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindTags.Name},
 	Title:    "Not every approver approved before publish",
 	Hint:     "The team has no fixed rule yet for which approvals are required, so this checks all of them.",

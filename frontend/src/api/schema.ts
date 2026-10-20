@@ -5286,6 +5286,8 @@ export interface components {
             title: string;
             url: string;
         };
+        /** @enum {string} */
+        ReleaseTrainMinePolicy: "never" | "owner" | "pending_approver" | "listed_cards" | "mr";
         ReleaseTrainMineReason: {
             ref?: string;
             why: components["schemas"]["ReleaseTrainMineWhy"];
@@ -5443,6 +5445,7 @@ export interface components {
             group: string;
             hint?: string;
             id: string;
+            minePolicy: components["schemas"]["ReleaseTrainMinePolicy"];
             on: boolean;
             reads: string[];
             severity: components["schemas"]["ReleaseTrainSeverity"];

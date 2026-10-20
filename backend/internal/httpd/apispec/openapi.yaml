@@ -14900,6 +14900,14 @@ components:
       - state
       - url
       type: object
+    ReleaseTrainMinePolicy:
+      enum:
+      - never
+      - owner
+      - pending_approver
+      - listed_cards
+      - mr
+      type: string
     ReleaseTrainMineReason:
       properties:
         ref:
@@ -15275,6 +15283,8 @@ components:
           type: string
         id:
           type: string
+        minePolicy:
+          $ref: '#/components/schemas/ReleaseTrainMinePolicy'
         "on":
           type: boolean
         reads:
@@ -15298,6 +15308,7 @@ components:
       - title
       - reads
       - subjects
+      - minePolicy
       type: object
     ReleaseTrainRuleOutcome:
       properties:

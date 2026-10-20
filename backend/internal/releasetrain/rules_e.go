@@ -7,6 +7,7 @@ var doneStatuses = map[string]bool{"Done": true, "Deployed": true, "UAT Approved
 var ruleE1 = rule{
 	ID: "E1", Group: "E", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion, SubjectHotfix},
+	Mine:     MineOwner,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindTags.Name},
 	Title:    "Published but the Jira release is not marked released",
 	Check: func(b *Board) []Hit {
@@ -38,6 +39,7 @@ var ruleE1 = rule{
 var ruleE2 = rule{
 	ID: "E2", Group: "E", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineListedCards,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name},
 	Title:    "Cards not Done after publish",
 	Hint:     "Team decision: every card should be moved to Done after publish, including Ready for UAT and Ready to Deliver.",
@@ -47,17 +49,20 @@ var ruleE2 = rule{
 			if due == nil || !due.Before(b.Today) {
 				return nil
 			}
-			var left []string
+			var left, keys []string
 			for _, is := range v.Issues {
 				if !doneStatuses[is.Status] {
 					left = append(left, is.Key+" "+is.Status)
+					keys = append(keys, is.Key)
 				}
 			}
 			if len(left) == 0 {
 				return nil
 			}
-			return versionHit(t, v, fmt.Sprintf("%d card(s) not Done: %s", len(left), joinNames(left)),
+			h := versionHit(t, v, fmt.Sprintf("%d card(s) not Done: %s", len(left), joinNames(left)),
 				Evidence{"cards": left}, jiraLink(v.Jira))
+			h.cards = keys
+			return h
 		})
 	},
 }
@@ -65,6 +70,7 @@ var ruleE2 = rule{
 var ruleE4 = rule{
 	ID: "E4", Group: "E", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineOwner,
 	Reads:    []KindName{KindMilestones.Name, KindTechReq.Name},
 	Title:    "Force-update ticket open after its due date",
 	Check: func(b *Board) []Hit {
@@ -82,6 +88,7 @@ var ruleE4 = rule{
 var ruleE5 = rule{
 	ID: "E5", Group: "E", Severity: SevInfo, DefaultOn: false, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectVersion},
+	Mine:     MineOwner,
 	Reads:    []KindName{KindMilestones.Name, KindTechReq.Name},
 	Title:    "Force-update ticket has no due date",
 	Check: func(b *Board) []Hit {

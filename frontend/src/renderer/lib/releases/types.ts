@@ -31,6 +31,7 @@ export type CardUnit = S["ReleaseTrainCardUnit"];
 export type CodeState = S["ReleaseTrainCodeState"];
 export type Person = S["ReleaseTrainPerson"];
 export type MineReason = S["ReleaseTrainMineReason"];
+export type MinePolicy = S["ReleaseTrainMinePolicy"];
 export type Identity = S["ReleaseTrainIdentity"];
 export type IdentityKnown = S["ReleaseTrainIdentityKnown"];
 export type SprintRow = S["ReleaseTrainSprintRow"];

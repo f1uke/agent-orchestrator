@@ -95,6 +95,7 @@ type Hit struct {
 	Links    []Link       `json:"links"`
 	AsOf     time.Time    `json:"asOf"`
 	Mine     []MineReason `json:"mine,omitempty"`
+	cards    []string
 }
 
 // Fingerprint hashes the evidence, so a hide can tell when the facts behind a hit changed.
