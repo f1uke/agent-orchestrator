@@ -10,6 +10,7 @@ import {
 	LABEL_W,
 	llbBlockH,
 	rowHeight,
+	sprintBox,
 	timeline,
 	type AppLanes,
 	type Timeline as TL,
@@ -21,7 +22,7 @@ import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
-import { sprintRowId } from "../../lib/releases/sprint";
+import { sprintsByBoard } from "../../lib/releases/sprint";
 import { BoardSprintRow, HiddenBoardsMenu } from "./BoardSprintRows";
 import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
@@ -160,10 +161,7 @@ export function Timeline({
 											key={s.sprint.id}
 											className={`rel-spr ${s.next ? "next" : "active"}`}
 											data-testid={s.next ? "sprint-band-next" : "sprint-band"}
-											style={{
-												left: tl.x(s.sprint.start ?? ""),
-												width: tl.x(s.sprint.end ?? "") - tl.x(s.sprint.start ?? ""),
-											}}
+											style={sprintBox(tl, s.sprint.start ?? "", s.sprint.end ?? "")}
 										>
 											<span className="sl" data-sticky>
 												<span>
@@ -184,10 +182,10 @@ export function Timeline({
 							</div>
 						</div>
 						{layers.sprint &&
-							lens.sprintRows.map((row) => (
+							sprintsByBoard(lens.sprintRows).map((g) => (
 								<BoardSprintRow
-									key={sprintRowId(row)}
-									row={row}
+									key={g.key}
+									rows={g.rows}
 									board={board}
 									tl={tl}
 									lens={lens}

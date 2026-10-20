@@ -36,7 +36,7 @@ type SprintMemberFact struct {
 // Sprint fact kinds. jira.sprint_cards holds a sprint's cards and their subtasks;
 // jira.branch_cards holds the cards with an MR into a sprint branch the Board follows.
 var (
-	KindBoardSprints = newKind[SprintFact]("jira.board_sprints", "active and next sprints", Snapshotted, 30*time.Minute, perBoard)
+	KindBoardSprints = atVersion(newKind[SprintFact]("jira.board_sprints", "active and next sprints", Snapshotted, 30*time.Minute, perBoard), 2)
 	KindSprintCards  = newKind[IssueFact]("jira.sprint_cards", "sprint cards", Snapshotted, 5*time.Minute, perSprint)
 	KindThisSprint   = newKind[SprintMemberFact]("jira.this_sprint", "This Sprint set", Snapshotted, 10*time.Minute, perSprint)
 	KindBranchCards  = newKind[IssueFact]("jira.branch_cards", "sprint branch cards", Snapshotted, 5*time.Minute, global)

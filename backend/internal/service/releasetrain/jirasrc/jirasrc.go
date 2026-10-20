@@ -165,12 +165,20 @@ func (r reader) sprints(ctx context.Context, board int) (svc.Batch, error) {
 			f.Start = &d
 		}
 		if s.EndDate != nil {
-			d := rt.DayOf(*s.EndDate, r.view.Loc)
+			d := sprintEndDay(*s.EndDate, r.view.Loc)
 			f.End = &d
 		}
 		facts = append(facts, f)
 	}
 	return svc.SnapshotOf(rt.KindBoardSprints, facts)
+}
+
+func sprintEndDay(end time.Time, loc *time.Location) rt.Day {
+	local := end.In(loc)
+	if local.Hour() == 0 && local.Minute() == 0 && local.Second() == 0 && local.Nanosecond() == 0 {
+		return rt.DayOf(local.AddDate(0, 0, -1), loc)
+	}
+	return rt.DayOf(local, loc)
 }
 
 func (r reader) sprintMembers(ctx context.Context, jql string) (svc.Batch, error) {

@@ -1,7 +1,7 @@
 import { branchFoldKey, cardGroups } from "./cards";
 import { timeline } from "./layout";
 import { llbGroupsFor } from "./llb";
-import { destKey, lensSprintCards, sprintFoldKey, sprintRowId } from "./sprint";
+import { destKey, lensSprintCards, sprintFoldKey } from "./sprint";
 import type { AppId, Board, Subject, SubjectKind, TrainKey } from "./types";
 import type { Layer, Layers } from "./url";
 
@@ -124,7 +124,7 @@ function sprintCard(b: Board, key: string, view: RevealView, app?: AppId): Revea
 		const route = (app && card.routes.find((r) => r.app === app)) || card.routes[0];
 		const block = !card.active ? "carried" : route ? destKey(route.to) : "none";
 		const fk = sprintFoldKey(row);
-		const rowSel = `[data-testid=${css(`sprint-row-${sprintRowId(row)}`)}] [data-dest=${css(block)}] .crow[data-key=${css(key)}]`;
+		const rowSel = `[data-testid=${css(`sprint-row-${row.board.key}`)}] [data-sprint=${css(row.next ? "next" : "active")}][data-dest=${css(block)}] .crow[data-key=${css(key)}]`;
 		return plan(
 			app ? "mr-glyph" : "sprint-card",
 			[app ? `${rowSel} [data-testid=mr-glyph][data-app=${css(app)}]` : rowSel],

@@ -45,6 +45,10 @@ export function barBox(tl: Timeline, freeze: Day, publish: Day): { left: number;
 	return { left: tl.x(freeze) + DW / 2 - 9, width: tl.x(publish) - tl.x(freeze) + 18 };
 }
 
+export function sprintBox(tl: Timeline, start: Day, end: Day): { left: number; width: number } {
+	return { left: tl.x(start), width: tl.x(end) - tl.x(start) + DW };
+}
+
 type ItemBase = {
 	key: string;
 	freeze: Day;

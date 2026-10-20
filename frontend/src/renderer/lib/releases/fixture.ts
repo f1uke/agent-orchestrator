@@ -1155,7 +1155,7 @@ function demoSprints(b: Board): Board["sprints"] {
 	];
 	return [
 		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, start, end, demo),
-		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, end, addDays(end, 14), upcoming, true),
+		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, addDays(end, 1), addDays(end, 14), upcoming, true),
 		sprintRow({ id: 2, key: "PILOT", ownsSprintBranch: false }, start, end, pilot),
 	];
 }

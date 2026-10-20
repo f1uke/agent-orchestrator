@@ -8,7 +8,7 @@ const block = (page: Page, key: string) => demo(page).locator(`[data-dest="${key
 const row = (page: Page, key: string, card: string) => block(page, key).locator(`.crow[data-key="${card}"]`);
 
 async function unfoldSprint(page: Page, ...dests: string[]) {
-	await demo(page).locator(".spsrc .csum").click();
+	await demo(page).locator(".spsrc[data-sprint='active'] .csum").click();
 	await settle(page);
 	for (const d of dests) {
 		await block(page, d).locator(".dsum").click();
@@ -139,7 +139,7 @@ test.describe("No MR needed", () => {
 		await page.keyboard.press("Escape");
 		await page.goto("/#/releases?layers=sprint,llb,cards,src&me=1");
 		await expect(demo(page).getByTestId("sprint-dests")).toContainText("no code 1");
-		await demo(page).locator(".spsrc .csum").click();
+		await demo(page).locator(".spsrc[data-sprint='active'] .csum").click();
 		await settle(page);
 		await block(page, "nomr").locator(".dsum").click();
 		await settle(page);

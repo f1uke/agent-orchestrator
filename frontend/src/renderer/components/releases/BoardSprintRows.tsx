@@ -21,13 +21,16 @@ import {
 	destHead,
 	destKey,
 	destTally,
+	barSpans,
 	hiddenBoardsText,
 	isSplit,
 	leadKind,
 	mrPills,
 	sprintFoldKey,
-	sprintRowId,
+	stackTop,
+	type BoardLabel,
 	type DestBlock,
+	type Extent,
 	type MrPill,
 } from "../../lib/releases/sprint";
 import { derivedOf, planSaysText, sprintCardOf } from "../../lib/releases/sources";
@@ -251,8 +254,16 @@ function freezeOf(b: Board, to: Dest | null): string | undefined {
 	return to?.kind === "train" ? b.trains.find((t) => t.id === to.train)?.freeze : undefined;
 }
 
-function place(b: Board, blocks: DestBlock[], tl: Timeline, x0: number, fk: string, isOpen: (k: string) => boolean) {
-	let y = SRC_TOP + SUM_H + 10;
+function place(
+	b: Board,
+	blocks: DestBlock[],
+	tl: Timeline,
+	x0: number,
+	fk: string,
+	isOpen: (k: string) => boolean,
+	top0: number,
+) {
+	let y = top0;
 	const placed: Placed[] = blocks.map((bk) => {
 		const freeze = freezeOf(b, bk.to);
 		const open = isOpen(`${fk}:${bk.key}`);
@@ -269,11 +280,29 @@ function place(b: Board, blocks: DestBlock[], tl: Timeline, x0: number, fk: stri
 	return { placed, bottom: y };
 }
 
-function Wires({ board, placed, x0, tl }: { board: Board; placed: Placed[]; x0: number; tl: Timeline }) {
+function Wires({
+	board,
+	placed,
+	x0,
+	tl,
+	className = "",
+}: {
+	board: Board;
+	placed: Placed[];
+	x0: number;
+	tl: Timeline;
+	className?: string;
+}) {
 	const sx = x0 + 13;
 	let lastY = SRC_TOP + SUM_H;
 	return (
-		<svg className="rel-wires" width={tl.width} height="100%" aria-hidden="true" data-testid="sprint-wires">
+		<svg
+			className={`rel-wires${className}`}
+			width={tl.width}
+			height="100%"
+			aria-hidden="true"
+			data-testid="sprint-wires"
+		>
 			{placed.map((bk) => {
 				if (!bk.to || bk.to.kind === "none") return null;
 				const ey = bk.top + 11;
@@ -352,15 +381,196 @@ export function HiddenBoardsMenu({
 	);
 }
 
+type Bar = {
+	row: SprintRow;
+	cards: SprintCard[];
+	fk: string;
+	x0: number;
+	width: number;
+	unfolded: boolean;
+	label: BoardLabel;
+	placed: Placed[];
+	bottom: number;
+};
+
+function layBars(rows: readonly SprintRow[], board: Board, tl: Timeline, lens: Lens, open: ReadonlySet<string>): Bar[] {
+	const spans = barSpans(rows, tl);
+	const taken: Extent[] = [];
+	return rows.map((row, i) => {
+		const cards = lens.sprintCards(row);
+		const fk = sprintFoldKey(row);
+		const { x0, width } = spans[i];
+		const unfolded = open.has(fk);
+		const top0 = stackTop(taken, x0 + INDENT, SRC_TOP + SUM_H + 10);
+		const L = unfolded
+			? place(board, destBlocks(row, cards), tl, x0, fk, (k) => open.has(k), top0)
+			: { placed: [], bottom: 0 };
+		if (unfolded) taken.push({ right: Math.max(x0, ...L.placed.map((b) => b.x + BLOCK_W)), bottom: L.bottom });
+		return { row, cards, fk, x0, width, unfolded, label: boardLabel(row, board, cards), ...L };
+	});
+}
+
+const sprintSource = (row: SprintRow) => ({
+	title: `${row.board.key} board`,
+	how: "read" as const,
+	lines: [
+		{
+			kind: "jira.board_sprints",
+			text: `${row.next ? "next" : "active"} sprint "${row.sprint.name}"`,
+		},
+	],
+	note: row.next
+		? "The board's next sprint, dimmed because it has not started, on the same row as the active one. A board with no dated next sprint has none."
+		: "One row per followed board with an active sprint. A board with no active sprint has no row.",
+	field: "SprintRow.board, sprint",
+});
+
+function SprintBar({
+	bar,
+	lens,
+	toggle,
+	actions,
+}: {
+	bar: Bar;
+	lens: Lens;
+	toggle: (k: string) => void;
+	actions: PageActions;
+}) {
+	const { row, label, fk, x0, width, unfolded, cards } = bar;
+	const active = cards.filter((c) => c.active);
+	const next = row.next;
+	const n = `${active.length} card${active.length === 1 ? "" : "s"}${lens.me ? " of mine" : ""}`;
+	const openSheet = () => actions.openSheet({ kind: "sprint", board: row.board.key, next: true });
+	return (
+		<div
+			className={`rel-cg spsrc${next ? " next" : ""}`}
+			data-testid="sprint-bar"
+			data-sprint={next ? "next" : "active"}
+			style={{ left: x0, top: SRC_TOP, width }}
+		>
+			<button
+				type="button"
+				className="csum"
+				aria-expanded={unfolded}
+				title={`${label.title} · ${label.dates} · ${n}`}
+				onClick={() => toggle(fk)}
+			>
+				<span className="sl" data-sticky>
+					<Chev open={unfolded} />
+					<span>{label.title}</span>
+					{next && <span className="passive">{label.dates}</span>}
+					<b>{n}</b>
+					<span className="routes">
+						{label.routes.map((r) => (
+							<span key={r.text} className="c" data-st={r.tone}>
+								{r.text}
+							</span>
+						))}
+					</span>
+					{next && (
+						<>
+							<span
+								role="button"
+								tabIndex={0}
+								className="lbn"
+								onClick={(e) => {
+									e.stopPropagation();
+									openSheet();
+								}}
+								onKeyDown={(e) => {
+									if (e.key !== "Enter" && e.key !== " ") return;
+									e.stopPropagation();
+									openSheet();
+								}}
+							>
+								sprint ›
+							</span>
+							<SourceTag p={sprintSource(row)} />
+						</>
+					)}
+				</span>
+			</button>
+		</div>
+	);
+}
+
+function SprintBlocks({
+	bar,
+	board,
+	tl,
+	lens,
+	toggle,
+	actions,
+}: {
+	bar: Bar;
+	board: Board;
+	tl: Timeline;
+	lens: Lens;
+	toggle: (k: string) => void;
+	actions: PageActions;
+}) {
+	const { row, fk, x0, unfolded, placed, bottom } = bar;
+	const dim = row.next ? " next" : "";
+	return (
+		<Unfold open={unfolded} clipAt={{ top: DESTS_TOP, height: bottom - DESTS_TOP }}>
+			{placed.length > 0 && <Wires board={board} placed={placed} x0={x0} tl={tl} className={dim} />}
+			{placed.map((bk) => (
+				<Moving
+					track="blocks"
+					key={bk.key}
+					className={`rel-cg dest${dim}`}
+					data={{
+						"data-st": bk.tone,
+						"data-dest": bk.key,
+						"data-sprint": row.next ? "next" : "active",
+						"data-testid": "sprint-dest-block",
+					}}
+					style={{ left: bk.x, top: bk.top, width: BLOCK_W }}
+				>
+					<DestSummary
+						board={board}
+						block={bk}
+						open={bk.open}
+						onToggle={() => toggle(`${fk}:${bk.key}`)}
+						actions={actions}
+					/>
+					<Unfold open={bk.open} className="crows">
+						<div className="crow sp sph" aria-hidden="true">
+							<span />
+							<span />
+							<span>Card</span>
+							<span />
+							<span>MRs</span>
+							<span>Jira</span>
+						</div>
+						{bk.cards.map((c) => (
+							<SprintCardRow
+								key={c.key}
+								card={c}
+								board={board}
+								apps={lens.apps}
+								here={bk.to ? bk.key : null}
+								carried={!bk.to}
+								row={row}
+								actions={actions}
+							/>
+						))}
+					</Unfold>
+				</Moving>
+			))}
+		</Unfold>
+	);
+}
+
 export function BoardSprintRow({
-	row,
+	rows,
 	board,
 	tl,
 	lens,
 	actions,
 	onHide,
 }: {
-	row: SprintRow;
+	rows: SprintRow[];
 	board: Board;
 	tl: Timeline;
 	lens: Lens;
@@ -369,56 +579,35 @@ export function BoardSprintRow({
 }) {
 	const open = useReleasesUi((s) => s.open);
 	const toggle = useReleasesUi((s) => s.toggleFold);
-	const fk = sprintFoldKey(row);
-	const cards = lens.sprintCards(row);
-	const active = cards.filter((c) => c.active);
-	const label = boardLabel(row, board, cards);
-	const start = row.sprint.start ?? tl.start;
-	const x0 = tl.x(start) + 2;
-	const width = Math.max(4 * DW, tl.x(row.sprint.end ?? start) - tl.x(start) - 4);
-	const unfolded = open.has(fk);
-	const L = unfolded ? place(board, destBlocks(row, cards), tl, x0, fk, (k) => open.has(k)) : { placed: [], bottom: 0 };
-	const h = Math.max(L.bottom + 4, SRC_TOP + SUM_H + 8, MIN_H);
+	const bars = layBars(rows, board, tl, lens, open);
+	const { row, label } = bars[0];
+	const h = Math.max(Math.max(...bars.map((b) => b.bottom)) + 4, SRC_TOP + SUM_H + 8, MIN_H);
 	return (
 		<Moving
 			track="rows"
 			appear
 			height={h + ROW_BORDER}
-			className={`rel-row rel-sprow${row.next ? " next" : ""}`}
-			data={{
-				"data-board": row.board.key,
-				"data-next": row.next ? "true" : undefined,
-				"data-testid": `sprint-row-${sprintRowId(row)}`,
-			}}
+			className="rel-row rel-sprow"
+			data={{ "data-board": row.board.key, "data-testid": `sprint-row-${row.board.key}` }}
 		>
 			<div className="rel-lab top">
 				<button
 					type="button"
 					className="open"
-					onClick={() =>
-						actions.openSheet({ kind: "sprint", board: row.board.key, ...(row.next ? { next: true as const } : {}) })
-					}
+					onClick={() => actions.openSheet({ kind: "sprint", board: row.board.key })}
 				>
 					<span className="spn">
 						<b>{label.title}</b>
 						<SourceTag
 							p={{
-								title: `${row.board.key} board`,
-								how: "read",
+								...sprintSource(row),
 								lines: [
 									{
 										kind: "ao.config",
 										text: `board ${row.board.id} is followed${row.board.ownsSprintBranch ? ", and owns the sprint branch" : ""}`,
 									},
-									{
-										kind: "jira.board_sprints",
-										text: `${row.next ? "next" : "active"} sprint "${row.sprint.name}"`,
-									},
+									...sprintSource(row).lines,
 								],
-								note: row.next
-									? "The board's next sprint, dimmed because it has not started. A board with no dated next sprint has no such row."
-									: "One row per followed board with an active sprint. A board with no active sprint has no row.",
-								field: "SprintRow.board, sprint",
 							}}
 						/>
 						<small>{label.dates}</small>
@@ -443,75 +632,20 @@ export function BoardSprintRow({
 				<button
 					type="button"
 					className="hide"
-					aria-label={`Hide ${row.board.key} ${row.next ? "next " : ""}sprint`}
-					title={`Hide ${row.board.key} ${row.next ? "next sprint with its active one" : "sprint"}`}
+					aria-label={`Hide ${row.board.key} sprint`}
+					title={`Hide ${row.board.key} sprint${bars.length > 1 ? " with the next one" : ""}`}
 					onClick={() => onHide(row.board.key)}
 				>
 					<EyeOff aria-hidden="true" />
 				</button>
 			</div>
 			<div className="rel-trk" style={{ width: tl.width }}>
-				<div className="rel-cg spsrc" style={{ left: x0, top: SRC_TOP, width }}>
-					<button type="button" className="csum" aria-expanded={open.has(fk)} onClick={() => toggle(fk)}>
-						<span className="sl" data-sticky>
-							<Chev open={open.has(fk)} />
-							<span>{label.title}</span>
-							<b>
-								{active.length} card{active.length === 1 ? "" : "s"}
-								{lens.me ? " of mine" : ""}
-							</b>
-							<span className="routes">
-								{label.routes.map((r) => (
-									<span key={r.text} className="c" data-st={r.tone}>
-										{r.text}
-									</span>
-								))}
-							</span>
-						</span>
-					</button>
-				</div>
-				<Unfold open={unfolded} clipAt={{ top: DESTS_TOP, height: L.bottom - DESTS_TOP }}>
-					{L.placed.length > 0 && <Wires board={board} placed={L.placed} x0={x0} tl={tl} />}
-					{L.placed.map((bk) => (
-						<Moving
-							track="blocks"
-							key={bk.key}
-							className="rel-cg dest"
-							data={{ "data-st": bk.tone, "data-dest": bk.key, "data-testid": "sprint-dest-block" }}
-							style={{ left: bk.x, top: bk.top, width: BLOCK_W }}
-						>
-							<DestSummary
-								board={board}
-								block={bk}
-								open={bk.open}
-								onToggle={() => toggle(`${fk}:${bk.key}`)}
-								actions={actions}
-							/>
-							<Unfold open={bk.open} className="crows">
-								<div className="crow sp sph" aria-hidden="true">
-									<span />
-									<span />
-									<span>Card</span>
-									<span />
-									<span>MRs</span>
-									<span>Jira</span>
-								</div>
-								{bk.cards.map((c) => (
-									<SprintCardRow
-										key={c.key}
-										card={c}
-										board={board}
-										apps={lens.apps}
-										here={bk.to ? bk.key : null}
-										carried={!bk.to}
-										row={row}
-										actions={actions}
-									/>
-								))}
-							</Unfold>
-						</Moving>
-					))}
-				</Unfold>
+				{bars.map((bar) => (
+					<SprintBar key={bar.fk} bar={bar} lens={lens} toggle={toggle} actions={actions} />
+				))}
+				{bars.map((bar) => (
+					<SprintBlocks key={bar.fk} bar={bar} board={board} tl={tl} lens={lens} toggle={toggle} actions={actions} />
+				))}
 			</div>
 		</Moving>
 	);

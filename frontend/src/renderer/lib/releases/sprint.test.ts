@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	barSpans,
 	boardLabel,
 	carriedTo,
 	destBlocks,
@@ -14,9 +15,11 @@ import {
 	mrPills,
 	versionMineText,
 	sprintFoldKey,
-	sprintRowId,
 	sprintShipsIn,
+	sprintsByBoard,
+	stackTop,
 } from "./sprint";
+import { timeline, DW } from "./layout";
 import { board, train, version } from "./testkit";
 import type { Route, SprintCard, SprintMR, SprintRow } from "./types";
 
@@ -393,11 +396,47 @@ describe("next sprint", () => {
 		expect(label).toEqual({ ...active, title: "DEMO 21", dates: "20 Oct → 3 Nov" });
 	});
 
-	it("has its own row id and fold key, so folding one never folds the other", () => {
-		expect(sprintRowId(fullRow)).toBe("DEMO");
-		expect(sprintRowId(next)).toBe("DEMO-next");
+	it("has its own fold key, so folding one never folds the other", () => {
 		expect(sprintFoldKey(fullRow)).toBe("sp-DEMO");
 		expect(sprintFoldKey(next)).toBe("sp-DEMO-next");
+	});
+
+	it("groups a board's two rows into one, the active sprint first, in the order boards appear", () => {
+		const other: SprintRow = { ...fullRow, board: { id: 2, key: "PILOT", ownsSprintBranch: false } };
+		const groups = sprintsByBoard([next, other, fullRow]);
+		expect(groups.map((g) => [g.key, g.rows.map((r) => r.next)])).toEqual([
+			["DEMO", [false, true]],
+			["PILOT", [false]],
+		]);
+	});
+
+	describe("bars on one lane", () => {
+		const tl = timeline(board({ today: "2026-10-14", trains: [t21] }));
+		const tight: SprintRow = { ...next, sprint: { ...next.sprint, start: "2026-10-21", end: "2026-11-03" } };
+
+		it("puts the next bar a sprint to the right of the active one, with no overlap", () => {
+			const [a, n] = barSpans([fullRow, tight], tl);
+			expect(n.x0 - a.x0).toBe(15 * DW);
+			expect(n.x0).toBeGreaterThanOrEqual(a.x0 + a.width);
+		});
+
+		it("ends a bar at the end of its last day's column, less the 2px inset each side", () => {
+			const [a] = barSpans([fullRow], tl);
+			expect(a.x0 + a.width).toBe(tl.x("2026-10-21") - 2);
+		});
+
+		it("pushes a bar whose dates overlap the earlier one to start after it, keeping its width", () => {
+			const early: SprintRow = { ...next, sprint: { ...next.sprint, start: "2026-10-15", end: "2026-11-03" } };
+			const [a, n] = barSpans([fullRow, early], tl);
+			expect(n.x0).toBeGreaterThanOrEqual(a.x0 + a.width);
+			expect(n.width).toBeGreaterThanOrEqual(4 * DW);
+		});
+
+		it("drops a later bar's unfolded blocks below an earlier block they would sit on, and not below one it clears", () => {
+			expect(stackTop([{ right: 800, bottom: 300 }], 600, 50)).toBe(300);
+			expect(stackTop([{ right: 500, bottom: 300 }], 600, 50)).toBe(50);
+			expect(stackTop([], 600, 50)).toBe(50);
+		});
 	});
 
 	it("is hidden with its board, and a board counts once in N hidden", () => {
