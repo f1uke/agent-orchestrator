@@ -30,6 +30,8 @@ export type Reveal = {
 	apps: readonly AppId[];
 	/** Only me must go off: the target is not mine, so Only me does not draw it. */
 	notMine: boolean;
+	/** Mobile only must go off: the target is not a mobile card, so Mobile only does not draw it. */
+	notMobile: boolean;
 	/** Where Show lands when the subject has no mark of its own on the timeline, for the row to say. */
 	fallback: string | null;
 };
@@ -40,6 +42,7 @@ export type RevealView = {
 	apps: ReadonlySet<AppId> | null;
 	focus: TrainKey | null;
 	me: boolean;
+	mobile: boolean;
 };
 
 const css = (v: string) => JSON.stringify(v);
@@ -55,6 +58,7 @@ function plan(target: Target, selectors: readonly string[], over: Partial<Reveal
 		hotfixes: false,
 		apps: [],
 		notMine: false,
+		notMobile: false,
 		fallback: null,
 		...over,
 	};
@@ -119,10 +123,12 @@ function sprintCard(b: Board, key: string, view: RevealView, app?: AppId): Revea
 	for (const row of b.sprints) {
 		const card = row.cards.find((c) => c.key === key);
 		if (!card) continue;
-		const kept = lensSprintCards(row, { me: false, apps: view.apps, hidden: new Set() }).some((c) => c.key === key);
+		const kept = lensSprintCards(row, { me: false, apps: view.apps, hidden: new Set(), mobile: false }).some(
+			(c) => c.key === key,
+		);
 		const apps = kept ? [] : [app ?? card.mrs[0]?.app].filter((a): a is AppId => !!a);
 		const route = (app && card.routes.find((r) => r.app === app)) || card.routes[0];
-		const block = !card.active ? "carried" : route ? destKey(route.to) : "none";
+		const block = !card.mobile ? "web" : !card.active ? "carried" : route ? destKey(route.to) : "none";
 		const fk = sprintFoldKey(row);
 		const rowSel = `[data-testid=${css(`sprint-row-${row.board.key}`)}] [data-sprint=${css(row.next ? "next" : "active")}][data-dest=${css(block)}] .crow[data-key=${css(key)}]`;
 		return plan(
@@ -133,6 +139,7 @@ function sprintCard(b: Board, key: string, view: RevealView, app?: AppId): Revea
 				unhide: view.hiddenBoards.has(row.board.key) ? [row.board.key] : [],
 				apps,
 				notMine: view.me && !card.mine?.length,
+				notMobile: view.mobile && !card.mobile,
 				folds: [fk, `${fk}:${block}`],
 			},
 		);

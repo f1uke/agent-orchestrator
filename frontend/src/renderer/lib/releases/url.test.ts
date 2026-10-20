@@ -9,6 +9,7 @@ const empty: ReleasesSearch = {
 	sheet: null,
 	layers: null,
 	hideBoards: null,
+	mobile: false,
 };
 
 describe("releases search params", () => {
@@ -26,6 +27,7 @@ describe("releases search params", () => {
 			sheet: { kind: "version", train: "21-2026", app: "di" },
 			layers: { sprint: true, llb: false, cards: true, past: false, src: false },
 			hideBoards: new Set(["PILOT", "DEMO"]),
+			mobile: true,
 		};
 		const raw = releasesSearch(s);
 		expect(raw).toEqual({
@@ -36,8 +38,16 @@ describe("releases search params", () => {
 			sheet: "version:21-2026:di",
 			layers: "sprint,cards",
 			hideBoards: "DEMO,PILOT",
+			mobile: "1",
 		});
 		expect(parseReleasesSearch(raw)).toEqual(s);
+	});
+
+	it("keeps Mobile only off unless asked, and writes nothing for off", () => {
+		expect(parseReleasesSearch({}).mobile).toBe(false);
+		expect(parseReleasesSearch({ mobile: "1" }).mobile).toBe(true);
+		expect(parseReleasesSearch({ mobile: 1 }).mobile).toBe(true);
+		expect(releasesSearch({ ...empty, mobile: false }).mobile).toBeUndefined();
 	});
 
 	it("accepts the values the router's JSON search parser produces", () => {

@@ -3,12 +3,14 @@ import {
 	barSpans,
 	boardLabel,
 	carriedTo,
+	cardCount,
 	destBlocks,
 	destHead,
 	destKey,
 	destLabel,
 	destTally,
 	destTone,
+	emptyCountText,
 	hiddenBoardsText,
 	lensSprintCards,
 	mineText,
@@ -37,6 +39,7 @@ const mr = (app: string, iid: number, dest: SprintMR["dest"]): SprintMR => ({
 });
 
 const card = (key: string, mrs: SprintMR[] = [], over: Partial<SprintCard> = {}): SprintCard => ({
+	mobile: true,
 	key,
 	url: `https://jira.example.com/browse/${key}`,
 	summary: key,
@@ -75,6 +78,7 @@ const b = board({
 const row: SprintRow = {
 	board: { id: 1, key: "DEMO", ownsSprintBranch: true },
 	next: false,
+	estimated: false,
 	number: 20,
 	sprint: { board: 1, id: 20, name: "DEMO 20", url: "", start: "2026-10-06", end: "2026-10-20" },
 	total: 30,
@@ -218,7 +222,7 @@ describe("destination blocks", () => {
 
 describe("hidden boards", () => {
 	const pilot: SprintRow = { ...fullRow, board: { id: 2, key: "PILOT", ownsSprintBranch: false } };
-	const lens = { me: false, apps: null, hidden: new Set(["PILOT", "GONE"]) };
+	const lens = { me: false, apps: null, hidden: new Set(["PILOT", "GONE"]), mobile: false };
 
 	it("drops every card of a hidden board and keeps the other boards whole", () => {
 		expect(lensSprintCards(pilot, lens)).toEqual([]);
@@ -440,10 +444,105 @@ describe("next sprint", () => {
 	});
 
 	it("is hidden with its board, and a board counts once in N hidden", () => {
-		const lens = { me: false, apps: null, hidden: new Set(["DEMO"]) };
+		const lens = { me: false, apps: null, hidden: new Set(["DEMO"]), mobile: false };
 		expect(lensSprintCards(next, lens)).toEqual([]);
 		expect(lensSprintCards(fullRow, lens)).toEqual([]);
 		expect(hiddenBoardsText([fullRow, next], lens.hidden)).toBe("1 hidden");
 		expect(hiddenBoardsText([fullRow, next], new Set())).toBeNull();
+	});
+});
+
+describe("card count text", () => {
+	const mobile = (n: number) => Array.from({ length: n }, (_, i) => card(`DEMO-${i + 1}`));
+	const web = (n: number) =>
+		Array.from({ length: n }, (_, i) => card(`DEMO-${i + 90}`, [], { mobile: false, active: false, activeWhy: [] }));
+	const count = (cardsOn: SprintCard[], opts: { me?: boolean; mobile?: boolean } = {}) =>
+		cardCount(cardsOn, { me: opts.me ?? false, mobile: opts.mobile ?? false });
+
+	it("says N cards and a muted M mobile when some cards are not mobile", () => {
+		expect(count([...mobile(4), ...web(3)])).toEqual({ text: "7 cards", sub: "4 mobile" });
+	});
+
+	it("says only N cards when every card is mobile", () => {
+		expect(count(mobile(3))).toEqual({ text: "3 cards", sub: null });
+		expect(count(mobile(1))).toEqual({ text: "1 card", sub: null });
+	});
+
+	it("says M mobile cards with the filter on, and 0 mobile cards for a web-only sprint", () => {
+		expect(count(mobile(4), { mobile: true })).toEqual({ text: "4 mobile cards", sub: null });
+		expect(count(mobile(1), { mobile: true })).toEqual({ text: "1 mobile card", sub: null });
+		expect(count([], { mobile: true })).toEqual({ text: "0 mobile cards", sub: null });
+	});
+
+	it("counts an all-web sprint as N cards, 0 mobile, with the filter off", () => {
+		expect(count(web(3))).toEqual({ text: "3 cards", sub: "0 mobile" });
+	});
+
+	it("keeps of mine under Only me, with no mobile wording", () => {
+		expect(count(mobile(2), { me: true })).toEqual({ text: "2 cards of mine", sub: null });
+		expect(count(mobile(1), { me: true, mobile: true })).toEqual({ text: "1 card of mine", sub: null });
+		expect(count([], { me: true })).toEqual({ text: "0 cards of mine", sub: null });
+	});
+
+	it("names the left label by what is missing", () => {
+		expect(emptyCountText([], { me: false, mobile: false })).toBe("no cards");
+		expect(emptyCountText([], { me: false, mobile: true })).toBe("no mobile cards");
+		expect(emptyCountText(web(2), { me: false, mobile: false })).toBe("no mobile cards");
+		expect(emptyCountText([], { me: true, mobile: false })).toBe("nothing of mine");
+	});
+});
+
+describe("the not mobile block", () => {
+	const m = card("DEMO-1", [], { routes: [route("di", "sprint", t21Dest)] });
+	const done = card("DEMO-2", [], { active: false, activeWhy: [] });
+	const w = card("DEMO-3", [], { mobile: false, active: false, activeWhy: [] });
+	const r: SprintRow = { ...fullRow, dests: [{ to: t21Dest, count: 1, keys: ["DEMO-1"] }] };
+
+	it("puts a web card in its own last block, never in carried over", () => {
+		expect(destBlocks(r, [m, done, w]).map((x) => [x.key, x.cards.map((c) => c.key)])).toEqual([
+			["t:21-2026", ["DEMO-1"]],
+			["carried", ["DEMO-2"]],
+			["web", ["DEMO-3"]],
+		]);
+	});
+
+	it("heads it as not mobile, and keeps the carried head for the others", () => {
+		const blocks = destBlocks(r, [m, done, w]);
+		expect(destHead(b, blocks[2].to, blocks[2].cards, blocks[2].key).to).toBe("· not mobile");
+		expect(destHead(b, blocks[1].to, blocks[1].cards, blocks[1].key).to).toBe("↺ carried over");
+	});
+
+	it("leaves a web card out of the label's counts and destinations", () => {
+		const label = boardLabel(r, b, [m, done, w]);
+		expect(label.scope).toBe("1 new · 1 carried, done");
+		expect(label.dests).toEqual([{ text: "#21 1", tone: "accent" }]);
+	});
+
+	it("keeps only the mobile cards under the Mobile only lens", () => {
+		const lens = { me: false, apps: null, hidden: new Set<string>(), mobile: true };
+		const only = lensSprintCards({ ...r, cards: [m, done, w] }, lens);
+		expect(only.map((c) => c.key)).toEqual(["DEMO-1", "DEMO-2"]);
+		expect(lensSprintCards({ ...r, cards: [m, done, w] }, { ...lens, mobile: false })).toHaveLength(3);
+	});
+});
+
+describe("an estimated next sprint", () => {
+	const undated: SprintRow = {
+		...fullRow,
+		next: true,
+		estimated: true,
+		number: 21,
+		sprint: { board: 1, id: 21, name: "DEMO 21", url: "", start: "2026-10-21", end: "2026-11-04" },
+	};
+
+	it("reads no dates yet in place of the dates, and a dated one keeps them", () => {
+		expect(boardLabel(undated, b, cards).dates).toBe("no dates yet");
+		expect(boardLabel({ ...undated, estimated: false }, b, cards).dates).toBe("21 Oct → 4 Nov");
+	});
+
+	it("still lays its bar out on the estimated dates", () => {
+		const tl = timeline(board({ today: "2026-10-14", trains: [t21] }));
+		const [a, n] = barSpans([fullRow, undated], tl);
+		expect(n.x0 - a.x0).toBe(15 * DW);
 	});
 });

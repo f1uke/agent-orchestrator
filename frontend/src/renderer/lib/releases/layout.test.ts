@@ -54,6 +54,7 @@ describe("timeline", () => {
 		const sprint = {
 			board: { id: 1, key: "DEMO", ownsSprintBranch: true },
 			next: false,
+			estimated: false,
 			number: 9,
 			sprint: { board: 1, id: 9, name: "Demo 9", url: "", start: "2026-08-03", end: "2026-10-20" },
 			cards: [],
@@ -68,6 +69,7 @@ describe("timeline", () => {
 		const next = {
 			board: { id: 1, key: "DEMO", ownsSprintBranch: true },
 			next: true,
+			estimated: false,
 			number: 21,
 			sprint: { board: 1, id: 21, name: "Demo 21", url: "", start: "2026-10-20", end: "2026-12-01" },
 			cards: [],

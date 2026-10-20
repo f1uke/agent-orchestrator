@@ -11,6 +11,7 @@ const view = (over: Partial<RevealView> = {}): RevealView => ({
 	apps: null,
 	focus: "21-2026",
 	me: false,
+	mobile: false,
 	...over,
 });
 
@@ -68,6 +69,18 @@ describe("locate", () => {
 		const r = locate(hit("G2~c/PIL-12").subject, b, view({ hiddenBoards: new Set(["PILOT"]) }));
 		expect(r.unhide).toEqual(["PILOT"]);
 		expect(r.folds).toEqual(["sp-PILOT", "sp-PILOT:t:21-2026"]);
+	});
+
+	it("turns Mobile only off for a card that is not mobile, and aims at its own block", () => {
+		const web = structuredClone(b);
+		const c = web.sprints.flatMap((x) => x.cards).find((x) => x.key === "PIL-12");
+		if (!c) throw new Error("fixture lost PIL-12");
+		Object.assign(c, { mobile: false, active: false, activeWhy: [], routes: [], mrs: [] });
+		const on = locate(hit("G2~c/PIL-12").subject, web, view({ mobile: true }));
+		expect(on.notMobile).toBe(true);
+		expect(on.selectors[0]).toContain('[data-dest="web"]');
+		expect(locate(hit("G2~c/PIL-12").subject, web, view({ mobile: false })).notMobile).toBe(false);
+		expect(locate(hit("G2~c/DEMO-304").subject, b, view({ mobile: true })).notMobile).toBe(false);
 	});
 
 	it("shows the card's app when the app filter hides it", () => {

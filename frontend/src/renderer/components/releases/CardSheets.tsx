@@ -4,6 +4,8 @@ import { shortDay } from "../../lib/releases/day";
 import { shortBranch } from "../../lib/releases/llb";
 import type { Lens } from "../../lib/releases/lens";
 import {
+	cardCount,
+	MOBILE_RULE,
 	DEST_META,
 	destBlocks,
 	destHead,
@@ -285,7 +287,7 @@ export function sprintSheet(boardKey: string, next: boolean, c: Ctx): Sheet {
 	if (!row)
 		return {
 			title: boardKey,
-			body: <div className="sec empty">This board has no {next ? "dated next" : "active"} sprint on the Board.</div>,
+			body: <div className="sec empty">This board has no {next ? "next" : "active"} sprint on the Board.</div>,
 		};
 	if (c.lens.hiddenBoards.has(boardKey)) {
 		const show = new Set([...c.lens.hiddenBoards].filter((k) => k !== boardKey));
@@ -303,8 +305,10 @@ export function sprintSheet(boardKey: string, next: boolean, c: Ctx): Sheet {
 	}
 	const ships = row.board.ownsSprintBranch ? sprintShipsIn(c.board, row) : undefined;
 	const cards = c.lens.sprintCards(row);
-	const active = cards.filter((x) => x.active);
+	const active = cards.filter((x) => x.mobile && x.active);
 	const isNew = active.filter((x) => x.activeWhy.includes("new this sprint")).length;
+	const count = cardCount(cards, c.lens);
+	const webCount = cards.filter((x) => !x.mobile).length;
 	const filtered = c.lens.me || c.lens.apps.length < c.board.apps.length;
 	const shown = filtered ? ` ${cards.length} shown with the current filter.` : "";
 	return {
@@ -337,8 +341,20 @@ export function sprintSheet(boardKey: string, next: boolean, c: Ctx): Sheet {
 					<span>Dates</span>
 					<span>
 						{row.sprint.start ? shortDay(row.sprint.start) : "-"} → {row.sprint.end ? shortDay(row.sprint.end) : "-"}
+						{row.estimated && (
+							<span className="passive" data-testid="sprint-sheet-estimated">
+								{" "}
+								no dates yet, estimated from the active sprint&apos;s length
+							</span>
+						)}
 						<SourceTag
-							p={readOf("Dates", "jira.board_sprints", `${row.next ? "next" : "active"} sprint start and end`)}
+							p={readOf(
+								"Dates",
+								"jira.board_sprints",
+								row.estimated
+									? "next sprint has no dates in Jira; the day after the active sprint ends, for as many days as it runs"
+									: `${row.next ? "next" : "active"} sprint start and end`,
+							)}
 							wide
 						/>
 					</span>
@@ -362,14 +378,20 @@ export function sprintSheet(boardKey: string, next: boolean, c: Ctx): Sheet {
 					)}
 					<span>Cards</span>
 					<span data-testid="sprint-sheet-cards">
-						{isNew} new this sprint, {active.length - isNew} carried over with MRs or open mobile work,{" "}
-						{cards.length - active.length} carried over with mobile done. {row.total} on the board in all.{shown}
+						{count.text}
+						{count.sub ? `, ${count.sub}` : ""}. {isNew} new this sprint, {active.length - isNew} carried over with MRs
+						or open mobile work, {cards.length - webCount - active.length} carried over with mobile done
+						{webCount ? `, ${webCount} not mobile` : ""}. {row.total} on the board in all.{shown}
 						<SourceTag
-							p={derivedOf("Cards", [
-								{ kind: "jira.this_sprint", text: 'new = "This Sprint" set' },
-								{ kind: "gitlab.mrs", text: "carried with MRs this sprint" },
-								{ kind: "jira.sprint_cards", text: "the rest of the sprint" },
-							])}
+							p={derivedOf(
+								"Cards",
+								[
+									{ kind: "jira.this_sprint", text: 'new = "This Sprint" set' },
+									{ kind: "gitlab.mrs", text: "carried with MRs this sprint" },
+									{ kind: "jira.sprint_cards", text: "the rest of the sprint" },
+								],
+								MOBILE_RULE,
+							)}
 							wide
 						/>
 					</span>
@@ -382,7 +404,7 @@ export function sprintSheet(boardKey: string, next: boolean, c: Ctx): Sheet {
 				</div>
 				<Sec title="Where each card ships" source={ROUTES_P}>
 					{destBlocks(row, cards).map((bk) => {
-						const h = destHead(c.board, bk.to, bk.cards);
+						const h = destHead(c.board, bk.to, bk.cards, bk.key);
 						return (
 							<div key={bk.key} className="dgrp" data-st={h.tone} data-testid="sprint-dest">
 								<div className="dgh">

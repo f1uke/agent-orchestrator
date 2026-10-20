@@ -93,6 +93,8 @@ export type Lens = {
 	appHits: (app: AppId) => AlertHit[];
 	/** Only me is on and the identity is known; with an unknown identity ?me=1 filters nothing. */
 	me: boolean;
+	/** Mobile only is on: sprint rows show the cards that touch the mobile apps. */
+	mobile: boolean;
 	identity: Identity;
 	/** Whose face marks my rows in a train's card lists, which Only me never filters. */
 	face: IdentityKnown | null;
@@ -122,13 +124,14 @@ export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySe
 		hidden: bucket("hidden"),
 		appHits: (app) => attention.filter((h) => h.app === app && h.train === focus?.id),
 		me,
+		mobile: url.mobile,
 		identity: b.identity,
 		face: me && b.identity.kind === "known" ? b.identity : null,
 		keepVersion: keep,
 		keepHotfix: keep,
 		hiddenBoards,
 		sprintRows: b.sprints.filter((r) => !hiddenBoards.has(r.board.key)),
-		sprintCards: (row) => lensSprintCards(row, { me, apps: url.apps, hidden: hiddenBoards }),
+		sprintCards: (row) => lensSprintCards(row, { me, apps: url.apps, hidden: hiddenBoards, mobile: url.mobile }),
 		llbs: b.llbs.filter(keep),
 	};
 }

@@ -15,6 +15,7 @@ import type { Lens } from "../../lib/releases/lens";
 import { trainLabel } from "../../lib/releases/llb";
 import {
 	boardLabel,
+	cardCount,
 	carriedTo,
 	DEST_META,
 	destBlocks,
@@ -22,9 +23,11 @@ import {
 	destKey,
 	destTally,
 	barSpans,
+	emptyCountText,
 	hiddenBoardsText,
 	isSplit,
 	leadKind,
+	MOBILE_RULE,
 	mrPills,
 	sprintFoldKey,
 	stackTop,
@@ -139,7 +142,7 @@ function SprintCardRow({
 	const lead = !routes.length && card.noMr ? CODE_META.no_mr : DEST_META[leadKind(routes)];
 	const mismatch = routes.find((r) => r.mismatch);
 	const via = routes.find((r) => r.viaLlb)?.viaLlb;
-	const went = carried ? carriedTo(board, card) : null;
+	const went = carried && card.mobile ? carriedTo(board, card) : null;
 	return (
 		<CardLine
 			glyph={lead.glyph}
@@ -149,17 +152,22 @@ function SprintCardRow({
 			k={card.key}
 			url={card.url}
 			className={`sp${isSplit(card) ? " split" : ""}${card.mine?.length ? " mine" : ""}${card.noMr ? " nomr" : ""}`}
-			action={!card.mrs.length && <NoMrButton board={board} k={card.key} variant="row" />}
+			action={card.mobile && !card.mrs.length && <NoMrButton board={board} k={card.key} variant="row" />}
 			summary={
 				<>
 					{card.summary}
+					{!card.mobile && (
+						<span className="ob passive" data-testid="web-tag">
+							web
+						</span>
+					)}
 					{!card.onBoard && (
 						<span className="ob">
 							not on the board
 							<SourceTag p={sprintCardOf(card, row)} />
 						</span>
 					)}
-					{!carried && card.active && !card.activeWhy.includes("new this sprint") && (
+					{card.mobile && !carried && card.active && !card.activeWhy.includes("new this sprint") && (
 						<span className="ob passive">carried over</span>
 					)}
 					{went && (
@@ -197,7 +205,7 @@ function DestSummary({
 	onToggle: () => void;
 	actions: PageActions;
 }) {
-	const h = destHead(board, block.to, block.cards);
+	const h = destHead(board, block.to, block.cards, block.key);
 	const tally = destTally(block.to, block.cards);
 	const n = block.cards.length;
 	const group = block.to?.kind === "llb" ? block.to.group : null;
@@ -274,7 +282,7 @@ function place(
 			x: freeze ? Math.max(tl.x(freeze) + 2, x0 + INDENT) : x0 + INDENT,
 			top,
 			open,
-			tone: destHead(b, bk.to, bk.cards).tone,
+			tone: destHead(b, bk.to, bk.cards, bk.key).tone,
 		};
 	});
 	return { placed, bottom: y };
@@ -419,9 +427,13 @@ const sprintSource = (row: SprintRow) => ({
 			text: `${row.next ? "next" : "active"} sprint "${row.sprint.name}"`,
 		},
 	],
-	note: row.next
-		? "The board's next sprint, dimmed because it has not started, on the same row as the active one. A board with no dated next sprint has none."
-		: "One row per followed board with an active sprint. A board with no active sprint has no row.",
+	note: `${
+		row.next
+			? row.estimated
+				? "The board's next sprint, dimmed because it has not started. Jira has no dates for it yet, so they are estimated from the active sprint's length, starting the day after it ends."
+				: "The board's next sprint, dimmed because it has not started, on the same row as the active one. A board with no next sprint has none."
+			: "One row per followed board with an active sprint. A board with no active sprint has no row."
+	} ${MOBILE_RULE}`,
 	field: "SprintRow.board, sprint",
 });
 
@@ -437,29 +449,36 @@ function SprintBar({
 	actions: PageActions;
 }) {
 	const { row, label, fk, x0, width, unfolded, cards } = bar;
-	const active = cards.filter((c) => c.active);
 	const next = row.next;
-	const n = `${active.length} card${active.length === 1 ? "" : "s"}${lens.me ? " of mine" : ""}`;
+	const count = cardCount(cards, lens);
+	const n = count.sub ? `${count.text} · ${count.sub}` : count.text;
+	const tip = row.estimated ? `${label.dates} · estimated from the active sprint's length` : label.dates;
 	const openSheet = () => actions.openSheet({ kind: "sprint", board: row.board.key, next: true });
 	return (
 		<div
-			className={`rel-cg spsrc${next ? " next" : ""}`}
+			className={`rel-cg spsrc${next ? " next" : ""}${row.estimated ? " estimated" : ""}`}
 			data-testid="sprint-bar"
 			data-sprint={next ? "next" : "active"}
+			data-estimated={row.estimated || undefined}
 			style={{ left: x0, top: SRC_TOP, width }}
 		>
 			<button
 				type="button"
 				className="csum"
 				aria-expanded={unfolded}
-				title={`${label.title} · ${label.dates} · ${n}`}
+				title={`${label.title} · ${tip} · ${n}`}
 				onClick={() => toggle(fk)}
 			>
 				<span className="sl" data-sticky>
 					<Chev open={unfolded} />
 					<span>{label.title}</span>
 					{next && <span className="passive">{label.dates}</span>}
-					<b>{n}</b>
+					<b>{count.text}</b>
+					{count.sub && (
+						<span className="passive" data-testid="sprint-mobile-count">
+							{count.sub}
+						</span>
+					)}
 					<span className="routes">
 						{label.routes.map((r) => (
 							<span key={r.text} className="c" data-st={r.tone}>
@@ -580,7 +599,7 @@ export function BoardSprintRow({
 	const open = useReleasesUi((s) => s.open);
 	const toggle = useReleasesUi((s) => s.toggleFold);
 	const bars = layBars(rows, board, tl, lens, open);
-	const { row, label } = bars[0];
+	const { row, label, cards: shown } = bars[0];
 	const h = Math.max(Math.max(...bars.map((b) => b.bottom)) + 4, SRC_TOP + SUM_H + 8, MIN_H);
 	return (
 		<Moving
@@ -624,7 +643,7 @@ export function BoardSprintRow({
 								</span>
 							))
 						) : (
-							<span className="passive">{lens.me ? "nothing of mine" : "no cards"}</span>
+							<span className="passive">{emptyCountText(shown, lens)}</span>
 						)}
 						<SourceTag p={DESTS_P} />
 					</span>

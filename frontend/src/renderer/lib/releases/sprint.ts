@@ -139,6 +139,28 @@ function routeChip(b: Board, d: Dest, n: number): string {
 	}
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+export type CardView = { me: boolean; mobile: boolean };
+export type CardCount = { text: string; sub: string | null };
+
+/** Counts the cards the lens keeps; a muted "M mobile" appears only when some of them are not mobile. */
+export function cardCount(cards: readonly SprintCard[], view: CardView): CardCount {
+	if (view.me) return { text: `${plural(cards.length, "card")} of mine`, sub: null };
+	if (view.mobile) return { text: plural(cards.length, "mobile card"), sub: null };
+	const mobile = cards.filter((c) => c.mobile).length;
+	return { text: plural(cards.length, "card"), sub: mobile < cards.length ? `${mobile} mobile` : null };
+}
+
+export function emptyCountText(cards: readonly SprintCard[], view: CardView): string {
+	if (view.me) return "nothing of mine";
+	if (cards.length === 0 && !view.mobile) return "no cards";
+	return cards.some((c) => c.mobile) ? "no cards" : "no mobile cards";
+}
+
+export const MOBILE_RULE =
+	"A card counts as mobile when it is titled App, iOS or ADR, has a mobile subtask or an MR, or is in a mobile project. Any other card shows as web: no rule, count or route reads it. A sprint that has not started has no subtasks or MRs yet.";
+
 export type Chip = { text: string; tone: Tone };
 export type BoardLabel = { title: string; dates: string; scope: string; dests: Chip[]; routes: Chip[] };
 
@@ -147,14 +169,15 @@ type KeptDest = { to: Dest; cards: SprintCard[] };
 const byKey = (a: SprintCard, b: SprintCard) => a.key.localeCompare(b.key, undefined, { numeric: true });
 
 function keptDests(row: SprintRow, cards: readonly SprintCard[]): KeptDest[] {
-	const active = new Map(cards.filter((c) => c.active).map((c) => [c.key, c]));
+	const active = new Map(cards.filter((c) => c.mobile && c.active).map((c) => [c.key, c]));
 	return row.dests
 		.map((d) => ({ to: d.to, cards: d.keys.flatMap((k) => active.get(k) ?? []).sort(byKey) }))
 		.filter((d) => d.cards.length > 0);
 }
 
 /** Every count comes from the cards the lens keeps, so Only me and the app filter change the label too. */
-export function boardLabel(row: SprintRow, b: Board, cards: readonly SprintCard[]): BoardLabel {
+export function boardLabel(row: SprintRow, b: Board, all: readonly SprintCard[]): BoardLabel {
+	const cards = all.filter((c) => c.mobile);
 	const active = cards.filter((c) => c.active);
 	const isNew = active.filter((c) => c.activeWhy.includes("new this sprint")).length;
 	const carried = cards.length - active.length;
@@ -166,7 +189,9 @@ export function boardLabel(row: SprintRow, b: Board, cards: readonly SprintCard[
 	const dests = keptDests(row, cards);
 	return {
 		title: `${row.board.key} ${row.number}`,
-		dates: `${row.sprint.start ? shortDay(row.sprint.start) : "?"} → ${row.sprint.end ? shortDay(row.sprint.end) : "?"}`,
+		dates: row.estimated
+			? "no dates yet"
+			: `${row.sprint.start ? shortDay(row.sprint.start) : "?"} → ${row.sprint.end ? shortDay(row.sprint.end) : "?"}`,
 		scope: scope.join(" · "),
 		dests: dests.map((d) => ({ text: destChip(b, d.to, d.cards.length), tone: destTone(b, d.to) })),
 		routes: [
@@ -178,11 +203,15 @@ export function boardLabel(row: SprintRow, b: Board, cards: readonly SprintCard[
 
 export type DestBlock = { key: string; to: Dest | null; cards: SprintCard[] };
 
+export const WEB_BLOCK = "web";
+
 export function destBlocks(row: SprintRow, cards: readonly SprintCard[]): DestBlock[] {
-	const carried = cards.filter((c) => !c.active).sort(byKey);
+	const carried = cards.filter((c) => c.mobile && !c.active).sort(byKey);
+	const web = cards.filter((c) => !c.mobile).sort(byKey);
 	return [
 		...keptDests(row, cards).map((d) => ({ key: destKey(d.to), to: d.to, cards: d.cards })),
 		...(carried.length ? [{ key: "carried", to: null, cards: carried }] : []),
+		...(web.length ? [{ key: WEB_BLOCK, to: null, cards: web }] : []),
 	];
 }
 
@@ -225,7 +254,13 @@ export type DestHead = {
 const READY_NOTE = (cards: readonly SprintCard[]) =>
 	`${cards.filter((c) => statusTone(c.status, c.statusCategory) === "done").length} ready or deployed in Jira`;
 
-export function destHead(b: Board, to: Dest | null, cards: readonly SprintCard[]): DestHead {
+export function destHead(b: Board, to: Dest | null, cards: readonly SprintCard[], key?: string): DestHead {
+	if (!to && key === WEB_BLOCK)
+		return {
+			to: "· not mobile",
+			tone: "passive",
+			tail: "no mobile subtask, MR, title or project, so no rule reads them",
+		};
 	if (!to)
 		return {
 			to: "↺ carried over",
@@ -316,13 +351,19 @@ export function stackTop(earlier: readonly Extent[], x0: number, base: number): 
 	return earlier.filter((e) => e.right > x0).reduce((y, e) => Math.max(y, e.bottom), base);
 }
 
-export type SprintLens = { me: boolean; apps: ReadonlySet<AppId> | null; hidden: ReadonlySet<string> };
+export type SprintLens = {
+	me: boolean;
+	apps: ReadonlySet<AppId> | null;
+	hidden: ReadonlySet<string>;
+	mobile: boolean;
+};
 
 export function lensSprintCards(row: SprintRow, lens: SprintLens): SprintCard[] {
 	if (lens.hidden.has(row.board.key)) return [];
 	return row.cards.filter(
 		(c) =>
 			c.status !== "Abandoned" &&
+			(!lens.mobile || c.mobile) &&
 			(!lens.me || (c.mine?.length ?? 0) > 0) &&
 			(!lens.apps || !c.mrs.length || c.mrs.some((m) => lens.apps?.has(m.app))),
 	);

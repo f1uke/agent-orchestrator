@@ -939,6 +939,7 @@ function sprintCard(
 	return {
 		key,
 		summary,
+		mobile: true,
 		url: `${JIRA}/browse/${key}`,
 		status: status[0],
 		statusCategory: status[1],
@@ -963,6 +964,7 @@ function sprintRow(
 	end: string,
 	cards: SprintCard[],
 	next = false,
+	over: { estimated?: boolean } = {},
 ): Board["sprints"][number] {
 	const dests = new Map<string, { to: Dest; count: number; keys: string[] }>();
 	for (const c of cards.filter((x) => x.active))
@@ -979,6 +981,7 @@ function sprintRow(
 	return {
 		board,
 		next,
+		estimated: over.estimated ?? false,
 		number: next ? 21 : 20,
 		sprint: {
 			board: board.id,
@@ -992,7 +995,7 @@ function sprintRow(
 		cards,
 		dests: [...dests.values()].sort((a, b) => DEST_RANK[a.to.kind] - DEST_RANK[b.to.kind]),
 		counts: { new: isNew, carriedWithMrs: active.length - isNew, carriedDone: cards.length - active.length },
-		total: cards.length + 9,
+		total: cards.filter((c) => c.onBoard).length,
 	};
 }
 
@@ -1108,6 +1111,7 @@ function demoSprints(b: Board): Board["sprints"] {
 			[route("da", "llb", wallet, 409)],
 			{ mine: [{ why: "subtask", ref: "DEMO-318" }] },
 		),
+		sprintCard("DEMO-309", "Web - Fee calculator widget", 2, todo, [], [], [], { mobile: false }),
 	];
 	const pilot = [
 		sprintCard(
@@ -1130,6 +1134,13 @@ function demoSprints(b: Board): Board["sprints"] {
 			[route("pa", "sprint_open", t21, 412)],
 			{ onBoard: false },
 		),
+	];
+	const web = (key: string, summary: string, who: number): SprintCard =>
+		sprintCard(key, summary, who, todo, [], [], [], { mobile: false });
+	const webOnly = [
+		web("PIL-31", "Web - Pricing page banner", 3),
+		web("PIL-32", "Web - Help centre search", 4),
+		web("PIL-33", "Web - Cookie notice copy", 5),
 	];
 	const upcoming = [
 		sprintCard(
@@ -1157,6 +1168,9 @@ function demoSprints(b: Board): Board["sprints"] {
 		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, start, end, demo),
 		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, addDays(end, 1), addDays(end, 14), upcoming, true),
 		sprintRow({ id: 2, key: "PILOT", ownsSprintBranch: false }, start, end, pilot),
+		sprintRow({ id: 2, key: "PILOT", ownsSprintBranch: false }, addDays(end, 1), addDays(end, 15), webOnly, true, {
+			estimated: true,
+		}),
 	];
 }
 
