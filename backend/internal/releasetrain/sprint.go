@@ -66,6 +66,8 @@ type SprintCard struct {
 	ActiveWhy      []ActiveWhy     `json:"activeWhy"`
 	Mine           []MineReason    `json:"mine,omitempty"`
 	NoMR           *NoMRMark       `json:"noMr,omitempty"`
+	// Mobile says the card touches the mobile apps. A card that does not is shown in its sprint and read by no rule, tally or Only me.
+	Mobile bool `json:"mobile"`
 }
 
 // SprintSubtask is a subtask of a sprint card; Mobile when its summary matches the configured pattern.
@@ -312,8 +314,10 @@ func sprintCard(is IssueFact, si sprintIssues, mrs []SprintMR, mobileSub, mobile
 		}
 	}
 	project, _, _ := strings.Cut(is.Key, "-")
-	if !mobileProject[project] && len(mrs) == 0 && len(mobile) == 0 && !mobileTitle.MatchString(is.Summary) {
-		return SprintCard{}, false
+	c.Mobile = mobileProject[project] || len(mrs) > 0 || len(mobile) > 0 || mobileTitle.MatchString(is.Summary)
+	if !c.Mobile {
+		c.Routes = []Route{}
+		return c, true
 	}
 	isNew, openSub, mrNow := si.newHere[is.Key], false, false
 	for _, st := range mobile {
@@ -369,7 +373,7 @@ func rowTallies(cards []SprintCard) (SprintCounts, []SprintDest) {
 	}
 	for _, c := range cards {
 		switch {
-		case c.abandoned():
+		case c.abandoned() || !c.Mobile:
 			continue
 		case !c.Active:
 			counts.CarriedDone++

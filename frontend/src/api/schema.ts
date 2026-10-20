@@ -5487,6 +5487,7 @@ export interface components {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             key: string;
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
+            mobile: boolean;
             mrs: components["schemas"]["ReleaseTrainSprintMR"][];
             noMr?: components["schemas"]["ReleaseTrainNoMRMark"];
             onBoard: boolean;

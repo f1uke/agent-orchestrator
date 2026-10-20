@@ -15400,6 +15400,8 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainMineReason'
           type: array
+        mobile:
+          type: boolean
         mrs:
           items:
             $ref: '#/components/schemas/ReleaseTrainSprintMR'
@@ -15436,6 +15438,7 @@ components:
       - onBoard
       - active
       - activeWhy
+      - mobile
       type: object
     ReleaseTrainSprintCounts:
       properties:
