@@ -280,8 +280,12 @@ export function sprintShipsIn(b: Board, row: SprintRow): Train | undefined {
 	return found.find((t) => !start || !t.freeze || t.freeze >= start) ?? found[0];
 }
 
+export function sprintRowId(row: SprintRow): string {
+	return row.next ? `${row.board.key}-next` : row.board.key;
+}
+
 export function sprintFoldKey(row: SprintRow): string {
-	return `sp-${row.board.key}`;
+	return `sp-${sprintRowId(row)}`;
 }
 
 export type SprintLens = { me: boolean; apps: ReadonlySet<AppId> | null; hidden: ReadonlySet<string> };
@@ -297,7 +301,7 @@ export function lensSprintCards(row: SprintRow, lens: SprintLens): SprintCard[] 
 }
 
 export function hiddenBoardsText(rows: readonly SprintRow[], hidden: ReadonlySet<string>): string | null {
-	const n = rows.filter((r) => hidden.has(r.board.key)).length;
+	const n = new Set(rows.filter((r) => hidden.has(r.board.key)).map((r) => r.board.key)).size;
 	return n ? `${n} hidden` : null;
 }
 

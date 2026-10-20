@@ -306,7 +306,7 @@ func TestL9EvidenceAndText(t *testing.T) {
 		t.Fatalf("L9 hits = %v", hits)
 	}
 	h := hits[0]
-	want := "!" + strconv.Itoa(mr.IID) + " feat/DEMO-2 → feat/DEMO-1-base: not a sprint branch, a long-lived branch or develop"
+	want := "!" + strconv.Itoa(mr.IID) + " feat/DEMO-2 → feat/DEMO-1-base: open into a branch no train takes"
 	if h.Text != want || h.Severity != SevRisk || h.App != "di" || h.Train != nil || h.AgesOn != nil || len(h.Links) != 1 || h.Links[0].URL != mr.URL {
 		t.Fatalf("L9 hit = %+v, want text %q, risk, app di, no train, never ages, the MR link", h, want)
 	}

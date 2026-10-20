@@ -6,7 +6,7 @@ export type SheetEntry =
 	| { kind: "hotfix"; app: AppId; version: string }
 	| { kind: "mismatch"; hit: HitId }
 	| { kind: "card"; key: string }
-	| { kind: "sprint"; board: string }
+	| { kind: "sprint"; board: string; next?: true }
 	| { kind: "llb"; id: string }
 	| { kind: "fix"; hit: HitId; choice?: string }
 	| { kind: "fixes"; fix?: string }
@@ -71,8 +71,11 @@ function parseSheet(raw: string | null): SheetEntry | null {
 			return rest ? { kind, train: rest } : null;
 		case "card":
 			return rest ? { kind, key: rest } : null;
-		case "sprint":
-			return rest ? { kind, board: rest } : null;
+		case "sprint": {
+			const [board, next, extra] = rest.split(":");
+			if (!board || extra !== undefined || (next !== undefined && next !== "next")) return null;
+			return next ? { kind, board, next: true } : { kind, board };
+		}
 		case "llb":
 			return rest ? { kind, id: rest } : null;
 		case "mismatch":
@@ -103,7 +106,7 @@ export function sheetParam(s: SheetEntry): string {
 		case "card":
 			return `card:${s.key}`;
 		case "sprint":
-			return `sprint:${s.board}`;
+			return s.next ? `sprint:${s.board}:next` : `sprint:${s.board}`;
 		case "llb":
 			return `llb:${s.id}`;
 		case "fix":

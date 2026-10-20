@@ -5513,6 +5513,7 @@ export interface components {
             id: number;
             name: string;
             start?: components["schemas"]["ReleaseTrainDay"];
+            state?: components["schemas"]["ReleaseTrainSprintState"];
             url: string;
         };
         ReleaseTrainSprintMR: {
@@ -5537,10 +5538,13 @@ export interface components {
             cards: components["schemas"]["ReleaseTrainSprintCard"][];
             counts: components["schemas"]["ReleaseTrainSprintCounts"];
             dests: components["schemas"]["ReleaseTrainSprintDest"][];
+            next: boolean;
             number: number;
             sprint: components["schemas"]["ReleaseTrainSprintFact"];
             total: number;
         };
+        /** @enum {string} */
+        ReleaseTrainSprintState: "active" | "future";
         ReleaseTrainSprintSubtask: {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             key: string;

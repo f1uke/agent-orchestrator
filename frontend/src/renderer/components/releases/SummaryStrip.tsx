@@ -46,7 +46,7 @@ export function SummaryStrip({
 }) {
 	const t = lens.focus;
 	const sprint = t
-		? board.sprints.find((s) => s.board.ownsSprintBranch && String(s.number + 1) === t.label.slice(1))
+		? board.sprints.find((s) => s.board.ownsSprintBranch && !s.next && String(s.number + 1) === t.label.slice(1))
 		: undefined;
 	const people = t
 		? trainApprovers(

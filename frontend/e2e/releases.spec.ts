@@ -525,7 +525,7 @@ test.describe("releases page", () => {
 		for (const name of [/^Sprint/, /^Long-lived/, /^Alert rules$/])
 			await expect(nav.getByRole("button", { name })).toHaveCount(0);
 		await layer(page, "Sprint cards").click();
-		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.locator("[data-board]")).toHaveCount(3);
 		await page.getByRole("button", { name: /Needs attention/ }).click();
 		await page.getByRole("dialog", { name: "Release details" }).getByRole("tab", { name: "Rules" }).click();
 		await expect(page.locator('.rule[data-rule="L9"]')).toBeVisible();
@@ -575,7 +575,7 @@ test.describe("releases page", () => {
 	test("the Sprint cards layer adds one row per board with its three-line label", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		const demo = page.getByTestId("sprint-row-DEMO");
-		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.locator("[data-board]")).toHaveCount(3);
 		await expect(demo.locator(".rel-lab .spn")).toContainText(/DEMO 20\s*\d+ \w+ → \d+ \w+/);
 		await expect(demo.getByTestId("sprint-scope")).toHaveText("4 new · 2 carried with MRs · 2 carried, done");
 		await expect(demo.getByTestId("sprint-dests")).toHaveText(/<#20 1\s*#21 3\s*⑂ 1\s*off 1\s*no MR 1/);
@@ -635,7 +635,7 @@ test.describe("releases page", () => {
 		await expect(page.getByTestId("sprint-row-PILOT")).toBeVisible();
 		await expect(page.getByTestId("hidden-boards")).toHaveText("1 hidden");
 		await menu.getByRole("menuitem", { name: "Show all" }).click();
-		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.locator("[data-board]")).toHaveCount(3);
 		await expect(page.getByTestId("hidden-boards")).toHaveCount(0);
 	});
 
@@ -846,9 +846,7 @@ test.describe("releases page", () => {
 	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="L9~mr/da/415"]');
-		await expect(hit).toContainText(
-			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
-		);
+		await expect(hit).toContainText("!415 feat/DEMO-203 → feat/DEMO-201-base: open into a branch no train takes");
 		await expect(hit.getByLabel("Demo Android")).toBeVisible();
 		await expect(hit.getByRole("link", { name: "Open MR" })).toHaveAttribute(
 			"href",
@@ -856,7 +854,7 @@ test.describe("releases page", () => {
 		);
 		await open(page, "?sheet=rules");
 		await expect(page.locator('.rule[data-rule="L9"]')).toContainText(
-			"MR into a branch that is not a sprint branch, a long-lived branch or develop",
+			"Code stranded in a branch that is not a sprint branch, a long-lived branch or develop",
 		);
 	});
 

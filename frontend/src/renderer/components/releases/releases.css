@@ -368,6 +368,19 @@
 		background: var(--accent);
 		opacity: 0.55;
 	}
+	.rel-bg .hovercol {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 0;
+		width: 1px;
+		background: var(--fg-muted);
+		opacity: 0.4;
+		pointer-events: none;
+	}
+	.rel-bg .hovercol[hidden] {
+		display: none;
+	}
 	.rel-bg .todaycol {
 		position: absolute;
 		top: 0;
@@ -440,6 +453,12 @@
 	.rel-day.we,
 	.rel-day.we small {
 		color: var(--fg-off);
+	}
+	.rel-day.hv span {
+		background: color-mix(in srgb, var(--fg-muted) 28%, transparent);
+		border-radius: 4px;
+		padding: 0 4px;
+		color: var(--fg);
 	}
 	.rel-day.td {
 		color: var(--fg);
@@ -520,6 +539,9 @@
 	}
 	.rel-spr.active .sl {
 		background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+	}
+	.rel-spr.next {
+		opacity: 0.6;
 	}
 
 	.rel-app {
@@ -1852,6 +1874,10 @@
 	.rel-sched > .rel-sprow + .rel-sprow,
 	.rel-sched > .rel-row + .rel-sprow {
 		border-top: 1px solid var(--border);
+	}
+	.rel-sprow.next > .rel-lab > *,
+	.rel-sprow.next > .rel-trk {
+		opacity: 0.55;
 	}
 	.rel-sched > .rel-sprow > .rel-lab.top {
 		height: auto;

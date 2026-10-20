@@ -52,6 +52,7 @@ describe("timeline", () => {
 	it("reaches back to an active sprint that began before the eight weeks", () => {
 		const sprint = {
 			board: { id: 1, key: "DEMO", ownsSprintBranch: true },
+			next: false,
 			number: 9,
 			sprint: { board: 1, id: 9, name: "Demo 9", url: "", start: "2026-08-03", end: "2026-10-20" },
 			cards: [],
@@ -60,6 +61,21 @@ describe("timeline", () => {
 			total: 0,
 		};
 		expect(timeline(board({ today: "2026-10-14", trains: [t21], sprints: [sprint] })).start).toBe("2026-08-03");
+	});
+
+	it("reaches past the end of a next sprint that outlasts every train", () => {
+		const next = {
+			board: { id: 1, key: "DEMO", ownsSprintBranch: true },
+			next: true,
+			number: 21,
+			sprint: { board: 1, id: 21, name: "Demo 21", url: "", start: "2026-10-20", end: "2026-12-01" },
+			cards: [],
+			dests: [],
+			counts: { new: 0, carriedDone: 0, carriedWithMrs: 0 },
+			total: 0,
+		};
+		const tl = timeline(board({ today: "2026-10-14", trains: [t21], sprints: [next] }));
+		expect(tl.x("2026-12-01") + DW).toBeLessThanOrEqual(tl.width);
 	});
 });
 

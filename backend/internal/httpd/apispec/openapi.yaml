@@ -15477,6 +15477,8 @@ components:
           type: string
         start:
           $ref: '#/components/schemas/ReleaseTrainDay'
+        state:
+          $ref: '#/components/schemas/ReleaseTrainSprintState'
         url:
           type: string
       required:
@@ -15547,6 +15549,8 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainSprintDest'
           type: array
+        next:
+          type: boolean
         number:
           type: integer
         sprint:
@@ -15556,12 +15560,18 @@ components:
       required:
       - board
       - sprint
+      - next
       - number
       - total
       - cards
       - counts
       - dests
       type: object
+    ReleaseTrainSprintState:
+      enum:
+      - active
+      - future
+      type: string
     ReleaseTrainSprintSubtask:
       properties:
         assignee:

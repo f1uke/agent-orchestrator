@@ -148,7 +148,7 @@ type reader struct {
 }
 
 func (r reader) sprints(ctx context.Context, board int) (svc.Batch, error) {
-	rows, err := r.c.BoardSprints(ctx, board, []string{"active"}, 0)
+	rows, err := r.c.BoardSprints(ctx, board, []string{string(rt.SprintActive), string(rt.SprintFuture)}, 0)
 	if err != nil {
 		return svc.Batch{}, err
 	}
@@ -159,7 +159,7 @@ func (r reader) sprints(ctx context.Context, board int) (svc.Batch, error) {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	facts := make([]rt.SprintFact, 0, len(rows))
 	for _, s := range rows {
-		f := rt.SprintFact{Board: board, ID: s.ID, Name: s.Name, URL: base + "/issues/?jql=sprint%20%3D%20" + strconv.Itoa(s.ID)}
+		f := rt.SprintFact{Board: board, ID: s.ID, Name: s.Name, State: rt.SprintState(s.State), URL: base + "/issues/?jql=sprint%20%3D%20" + strconv.Itoa(s.ID)}
 		if s.StartDate != nil {
 			d := rt.DayOf(*s.StartDate, r.view.Loc)
 			f.Start = &d

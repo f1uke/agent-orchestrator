@@ -246,6 +246,7 @@ func init() {
 		"ReleasetrainTargetKind":                     "ReleaseTrainTargetKind",
 		"ReleasetrainSprintRow":                      "ReleaseTrainSprintRow",
 		"ReleasetrainSprintFact":                     "ReleaseTrainSprintFact",
+		"ReleasetrainSprintState":                    "ReleaseTrainSprintState",
 		"ReleasetrainSprintCounts":                   "ReleaseTrainSprintCounts",
 		"ReleasetrainSprintDest":                     "ReleaseTrainSprintDest",
 		"ReleasetrainSprintCard":                     "ReleaseTrainSprintCard",

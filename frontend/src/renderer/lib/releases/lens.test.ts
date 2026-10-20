@@ -321,6 +321,7 @@ describe("Only me", () => {
 		sprints: [
 			{
 				board: { id: 1, key: "DEMO", ownsSprintBranch: true },
+				next: false,
 				number: 20,
 				sprint: { board: 1, id: 20, name: "DEMO 20", url: "" },
 				total: 2,
@@ -392,6 +393,21 @@ describe("Only me", () => {
 		expect(hid.attention).toEqual(all.attention);
 		expect(hid.badge).toEqual(all.badge);
 		expect(all.sprintRows.map((r) => r.board.key)).toEqual(["DEMO"]);
+	});
+
+	it("hides a board's next-sprint row together with its active one", () => {
+		const withNext = {
+			...b,
+			sprints: [
+				b.sprints[0],
+				{ ...b.sprints[0], next: true, number: 21, sprint: { board: 1, id: 21, name: "DEMO 21", url: "" } },
+			],
+		};
+		const shown = makeLens(withNext, parseReleasesSearch({}), new Set());
+		expect(shown.sprintRows.map((r) => r.next)).toEqual([false, true]);
+		const hid = makeLens(withNext, parseReleasesSearch({}), new Set(["DEMO"]));
+		expect(hid.sprintRows).toEqual([]);
+		expect(hid.sprintCards(withNext.sprints[1])).toEqual([]);
 	});
 
 	it("ignores ?me=1 when the identity is unknown, so nothing filters to empty", () => {

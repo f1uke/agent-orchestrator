@@ -17,6 +17,9 @@ func forEachSprintCard(b *Board, fn func(row *SprintRow, c *SprintCard) []Hit) [
 	var out []Hit
 	for i := range b.Sprints {
 		row := &b.Sprints[i]
+		if row.Next {
+			continue
+		}
 		for j := range row.Cards {
 			out = append(out, fn(row, &row.Cards[j])...)
 		}

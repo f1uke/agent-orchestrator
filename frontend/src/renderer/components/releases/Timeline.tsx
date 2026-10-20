@@ -1,6 +1,6 @@
 import { animate } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { addDays, dayOfMonth, monthYear, weekday, weekdayShort } from "../../lib/releases/day";
+import { addDays, dayDiff, dayOfMonth, monthYear, weekday, weekdayShort } from "../../lib/releases/day";
 import { cardGroups, groupRowCount, jiraUrl } from "../../lib/releases/cards";
 import {
 	appLanes,
@@ -21,6 +21,7 @@ import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
+import { sprintRowId } from "../../lib/releases/sprint";
 import { BoardSprintRow, HiddenBoardsMenu } from "./BoardSprintRows";
 import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
@@ -29,6 +30,7 @@ import type { PageActions } from "./ReleasesPage";
 import { readOf } from "../../lib/releases/sources";
 import { SourceTag } from "./Sources";
 import { StickyAppLabel } from "./StickyAppLabel";
+import { useHoverGuide } from "./useHoverGuide";
 import { useSpotlight } from "./useSpotlight";
 import { VersionLanes } from "./VersionLanes";
 
@@ -121,6 +123,7 @@ export function Timeline({
 	});
 
 	usePan(sc, mo);
+	useHoverGuide(sc, canvas, tl.days);
 	useSpotlight();
 
 	const hiddenTrigger = useRef<HTMLButtonElement>(null);
@@ -155,14 +158,17 @@ export function Timeline({
 									.map((s) => (
 										<div
 											key={s.sprint.id}
-											className="rel-spr active"
+											className={`rel-spr ${s.next ? "next" : "active"}`}
+											data-testid={s.next ? "sprint-band-next" : "sprint-band"}
 											style={{
 												left: tl.x(s.sprint.start ?? ""),
 												width: tl.x(s.sprint.end ?? "") - tl.x(s.sprint.start ?? ""),
 											}}
 										>
 											<span className="sl" data-sticky>
-												<span>Sprint {s.number} · active</span>
+												<span>
+													Sprint {s.number} · {s.next ? "next" : "active"}
+												</span>
 												<span className="passive">ships in #{s.number + 1}</span>
 												<SourceTag
 													p={readOf(
@@ -180,7 +186,7 @@ export function Timeline({
 						{layers.sprint &&
 							lens.sprintRows.map((row) => (
 								<BoardSprintRow
-									key={row.board.key}
+									key={sprintRowId(row)}
 									row={row}
 									board={board}
 									tl={tl}
@@ -326,6 +332,7 @@ function Background({ tl }: { tl: TL }) {
 				background: `repeating-linear-gradient(90deg, transparent 0 ${off}px, color-mix(in srgb, var(--fg) 2.2%, transparent) ${off}px ${off + 2 * DW}px, transparent ${off + 2 * DW}px ${7 * DW}px)`,
 			}}
 		>
+			<div className="hovercol" hidden />
 			<div className="todaycol" style={{ left: tl.x(tl.today), width: DW }} />
 			<div className="today" style={{ left: tl.x(tl.today) + DW / 2 }} />
 		</div>
@@ -368,6 +375,7 @@ function Axis({ tl, layers, actions }: { tl: TL; layers: Layers; actions: PageAc
 					return (
 						<div
 							key={d}
+							data-col={dayDiff(tl.start, d)}
 							className={`rel-day${we ? " we" : ""}${d === tl.today ? " td" : ""}`}
 							style={{ left: tl.x(d), width: DW }}
 						>

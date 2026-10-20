@@ -5,14 +5,27 @@ import (
 	"time"
 )
 
-// SprintFact is one active sprint of a configured agile board.
+// SprintState is a sprint's state in Jira; the Board reads the active and future ones.
+type SprintState string
+
+// Sprint states.
+const (
+	SprintActive SprintState = "active"
+	SprintFuture SprintState = "future"
+)
+
+// Enum lists the sprint states for the API schema.
+func (SprintState) Enum() []any { return []any{SprintActive, SprintFuture} }
+
+// SprintFact is one sprint of a configured agile board; a stored fact with no State is active.
 type SprintFact struct {
-	Board int    `json:"board"`
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Start *Day   `json:"start,omitempty"`
-	End   *Day   `json:"end,omitempty"`
-	URL   string `json:"url"`
+	Board int         `json:"board"`
+	ID    int         `json:"id"`
+	Name  string      `json:"name"`
+	State SprintState `json:"state,omitempty"`
+	Start *Day        `json:"start,omitempty"`
+	End   *Day        `json:"end,omitempty"`
+	URL   string      `json:"url"`
 }
 
 // SprintMemberFact is one issue Jira's "This Sprint" filter lists: in the sprint and in no closed one.
@@ -23,7 +36,7 @@ type SprintMemberFact struct {
 // Sprint fact kinds. jira.sprint_cards holds a sprint's cards and their subtasks;
 // jira.branch_cards holds the cards with an MR into a sprint branch the Board follows.
 var (
-	KindBoardSprints = newKind[SprintFact]("jira.board_sprints", "active sprints", Snapshotted, 30*time.Minute, perBoard)
+	KindBoardSprints = newKind[SprintFact]("jira.board_sprints", "active and next sprints", Snapshotted, 30*time.Minute, perBoard)
 	KindSprintCards  = newKind[IssueFact]("jira.sprint_cards", "sprint cards", Snapshotted, 5*time.Minute, perSprint)
 	KindThisSprint   = newKind[SprintMemberFact]("jira.this_sprint", "This Sprint set", Snapshotted, 10*time.Minute, perSprint)
 	KindBranchCards  = newKind[IssueFact]("jira.branch_cards", "sprint branch cards", Snapshotted, 5*time.Minute, global)
@@ -38,7 +51,7 @@ func (f SprintFact) ItemKey() string { return strconv.Itoa(f.ID) }
 // ItemKey keys a SprintMemberFact within its resource.
 func (f SprintMemberFact) ItemKey() string { return f.Key }
 
-// BoardScope is the scope of one board's active sprints.
+// BoardScope is the scope of one board's active and future sprints.
 func BoardScope(id int) Scope { return Scope("board:" + strconv.Itoa(id)) }
 
 // SprintScope is the scope of one sprint's issue reads.
@@ -50,11 +63,38 @@ func activeSprint(snap Snapshot, board int) (SprintFact, bool) {
 	var best SprintFact
 	found := false
 	for _, s := range Items(snap, KindBoardSprints, BoardScope(board)) {
-		if !found || s.ID < best.ID {
+		if s.State != SprintFuture && (!found || s.ID < best.ID) {
 			best, found = s, true
 		}
 	}
 	return best, found
+}
+
+func nextSprint(snap Snapshot, board int) (SprintFact, bool) {
+	var best SprintFact
+	found := false
+	for _, s := range Items(snap, KindBoardSprints, BoardScope(board)) {
+		if s.State != SprintFuture || s.Start == nil {
+			continue
+		}
+		if !found || s.Start.Before(*best.Start) || *s.Start == *best.Start && s.ID < best.ID {
+			best, found = s, true
+		}
+	}
+	if found && best.End == nil {
+		return SprintFact{}, false
+	}
+	return best, found
+}
+
+func readSprints(cfg Config, snap Snapshot) []SprintFact {
+	out := activeSprints(cfg, snap)
+	for _, b := range cfg.Boards {
+		if s, ok := nextSprint(snap, b.ID); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func activeSprints(cfg Config, snap Snapshot) []SprintFact {

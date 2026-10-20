@@ -82,7 +82,7 @@ const ROUTES_P = derivedOf(
 );
 
 export function findSprintCard(b: Board, key: string): { row: SprintRow; card: SprintCard } | null {
-	for (const row of b.sprints) {
+	for (const row of [...b.sprints.filter((r) => !r.next), ...b.sprints.filter((r) => r.next)]) {
 		const card = row.cards.find((c) => c.key === key);
 		if (card) return { row, card };
 	}
@@ -144,7 +144,12 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 									<button
 										type="button"
 										className="lnk"
-										onClick={() => c.actions.openSheet({ kind: "sprint", board: sp.row.board.key }, "push")}
+										onClick={() =>
+											c.actions.openSheet(
+												{ kind: "sprint", board: sp.row.board.key, ...(sp.row.next ? { next: true as const } : {}) },
+												"push",
+											)
+										}
 									>
 										{sp.row.sprint.name}
 									</button>
@@ -275,10 +280,13 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 	};
 }
 
-export function sprintSheet(boardKey: string, c: Ctx): Sheet {
-	const row = c.board.sprints.find((s) => s.board.key === boardKey);
+export function sprintSheet(boardKey: string, next: boolean, c: Ctx): Sheet {
+	const row = c.board.sprints.find((s) => s.board.key === boardKey && s.next === next);
 	if (!row)
-		return { title: boardKey, body: <div className="sec empty">This board has no active sprint on the Board.</div> };
+		return {
+			title: boardKey,
+			body: <div className="sec empty">This board has no {next ? "dated next" : "active"} sprint on the Board.</div>,
+		};
 	if (c.lens.hiddenBoards.has(boardKey)) {
 		const show = new Set([...c.lens.hiddenBoards].filter((k) => k !== boardKey));
 		return {
@@ -303,8 +311,8 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 		title: (
 			<>
 				{row.sprint.name}
-				<span className="badge" data-st="accent">
-					active
+				<span className="badge" data-st={row.next ? "todo" : "accent"}>
+					{row.next ? "next" : "active"}
 				</span>
 			</>
 		),
@@ -329,7 +337,10 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 					<span>Dates</span>
 					<span>
 						{row.sprint.start ? shortDay(row.sprint.start) : "-"} → {row.sprint.end ? shortDay(row.sprint.end) : "-"}
-						<SourceTag p={readOf("Dates", "jira.board_sprints", "active sprint start and end")} wide />
+						<SourceTag
+							p={readOf("Dates", "jira.board_sprints", `${row.next ? "next" : "active"} sprint start and end`)}
+							wide
+						/>
 					</span>
 					{row.board.ownsSprintBranch && (
 						<>
