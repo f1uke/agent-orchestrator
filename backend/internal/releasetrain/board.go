@@ -103,8 +103,7 @@ type Train struct {
 }
 
 // SourceFreshness is one system's resources at a glance: the oldest complete
-// read of the live data the page is built from (identity lookups such as
-// jira.users do not age it), and every resource that is stale, never complete, or failing.
+// read of live data (identity lookups do not age it), and every resource that is stale, never complete, or failing.
 type SourceFreshness struct {
 	System    string           `json:"system"`
 	Resources int              `json:"resources"`

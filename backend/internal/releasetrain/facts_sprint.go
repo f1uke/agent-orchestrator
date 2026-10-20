@@ -5,19 +5,19 @@ import (
 	"time"
 )
 
-// SprintState is where a sprint stands in Jira; the Board follows each board's active sprint and its next future one.
+// SprintState is a sprint's state in Jira; the Board reads the active and future ones.
 type SprintState string
 
-// Sprint states the Board reads.
+// Sprint states.
 const (
 	SprintActive SprintState = "active"
 	SprintFuture SprintState = "future"
 )
 
-// Enum lists the states for the API schema.
+// Enum lists the sprint states for the API schema.
 func (SprintState) Enum() []any { return []any{SprintActive, SprintFuture} }
 
-// SprintFact is one active or future sprint of a configured agile board; a stored fact with no State is active.
+// SprintFact is one sprint of a configured agile board; a stored fact with no State is active.
 type SprintFact struct {
 	Board int         `json:"board"`
 	ID    int         `json:"id"`
@@ -70,8 +70,6 @@ func activeSprint(snap Snapshot, board int) (SprintFact, bool) {
 	return best, found
 }
 
-// nextSprint is the board's future sprint that starts first, when it has both
-// dates; a board with none, or whose next one is undated, has no next sprint.
 func nextSprint(snap Snapshot, board int) (SprintFact, bool) {
 	var best SprintFact
 	found := false
@@ -89,7 +87,6 @@ func nextSprint(snap Snapshot, board int) (SprintFact, bool) {
 	return best, found
 }
 
-// readSprints is every sprint whose cards the Board reads: each board's active sprint and its next one.
 func readSprints(cfg Config, snap Snapshot) []SprintFact {
 	out := activeSprints(cfg, snap)
 	for _, b := range cfg.Boards {

@@ -38,13 +38,12 @@ type PlanView struct {
 	MyAccountID string
 	// WatchedCardKeys are the cards whose subtasks may be mine.
 	WatchedCardKeys []string
-	// Sprints are the active and next sprints jira.board_sprints read, two per board at most.
-	Sprints []PlannedSprint
+	Sprints         []PlannedSprint
 	// BranchCardKeys are the cards with an MR into a sprint branch the Board follows.
 	BranchCardKeys []string
 }
 
-// PlannedSprint is one active or next sprint whose cards are read.
+// PlannedSprint is one sprint whose cards are read.
 type PlannedSprint struct {
 	Board int
 	ID    int

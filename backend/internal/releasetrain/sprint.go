@@ -23,7 +23,6 @@ func (ActiveWhy) Enum() []any { return []any{ActiveNew, ActiveMR, ActiveSubtaskO
 const StatusAbandoned = "Abandoned"
 
 // SprintRow is one configured board's active or next sprint and its cards that touch the mobile apps.
-// Next marks the sprint that has not started: it shows the same data and raises no alert.
 type SprintRow struct {
 	Board  BoardConfig  `json:"board"`
 	Sprint SprintFact   `json:"sprint"`
@@ -209,10 +208,7 @@ func branchCards(snap Snapshot) map[string]IssueFact {
 	return out
 }
 
-// sprintRows builds a row per configured board with an active sprint, and one
-// for its next sprint when that has dates. A card that is on one board's active
-// sprint shows only there. The next sprint is routed as the active one is, by
-// the branch flow of the sprint now running, and pulls in no off-board cards.
+// sprintRows routes the next sprint by the branch flow of the active one, and pulls in no off-board cards for it.
 func sprintRows(cfg Config, snap Snapshot, base routing) []SprintRow {
 	mobileSub := regexp.MustCompile(cfg.Mobile.SubtaskPattern)
 	mobileProject := map[string]bool{}

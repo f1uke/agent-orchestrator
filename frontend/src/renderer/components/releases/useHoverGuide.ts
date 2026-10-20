@@ -2,7 +2,6 @@ import { useEffect, type RefObject } from "react";
 import { DW } from "../../lib/releases/layout";
 import { hoverColumn } from "../../lib/releases/hover";
 
-/** Moves one line and one header chip by hand from a frame callback, so a pointer move never re-renders the lanes. */
 export function useHoverGuide(
 	sc: RefObject<HTMLDivElement | null>,
 	canvas: RefObject<HTMLDivElement | null>,

@@ -280,7 +280,6 @@ export function sprintShipsIn(b: Board, row: SprintRow): Train | undefined {
 	return found.find((t) => !start || !t.freeze || t.freeze >= start) ?? found[0];
 }
 
-/** A board's active and next rows share its key, so the next one carries a suffix wherever a row needs its own id. */
 export function sprintRowId(row: SprintRow): string {
 	return row.next ? `${row.board.key}-next` : row.board.key;
 }

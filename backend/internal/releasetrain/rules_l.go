@@ -139,9 +139,7 @@ var ruleL9 = rule{
 	},
 }
 
-// landedBranches is the branches whose code reached a flow branch: one with a
-// merged MR into a flow branch, or into another branch that landed. It grows to
-// a fixpoint, so a cycle of merged MRs never lands.
+// landedBranches grows to a fixpoint, so a cycle of merged MRs never lands.
 func landedBranches(mrs []MRFact, flow func(branch string) bool) map[string]bool {
 	landed := map[string]bool{}
 	for changed := true; changed; {
