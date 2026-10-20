@@ -37,6 +37,7 @@ type kindMeta struct {
 	Mode    SyncMode
 	Budget  time.Duration
 	cover   coverMode
+	lookup  bool
 	decode  func([]byte) (any, error)
 }
 
@@ -116,6 +117,14 @@ func (k Kind[T]) Encode(v T) ([]byte, error) {
 		return nil, fmt.Errorf("encode %s: %w", k.Name, err)
 	}
 	return b, nil
+}
+
+// asLookup marks a kind as a slow identity lookup: its reads show in a source's issues
+// but never set the source's age, which is the age of the data the page is built from.
+func asLookup[T any](k Kind[T]) Kind[T] {
+	k.lookup = true
+	kinds[k.Name] = k.kindMeta
+	return k
 }
 
 func newKind[T any](name KindName, label string, mode SyncMode, budget time.Duration, cover coverMode) Kind[T] {

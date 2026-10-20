@@ -103,7 +103,8 @@ type Train struct {
 }
 
 // SourceFreshness is one system's resources at a glance: the oldest complete
-// read of live data, and every resource that is stale, never complete, or failing.
+// read of the live data the page is built from (identity lookups such as
+// jira.users do not age it), and every resource that is stale, never complete, or failing.
 type SourceFreshness struct {
 	System    string           `json:"system"`
 	Resources int              `json:"resources"`
@@ -275,7 +276,7 @@ func systemsOf(kindList []KindFreshness) []SourceFreshness {
 		}
 		s.Resources += k.Resources
 		s.Issues = append(s.Issues, k.Issues...)
-		if k.AsOf != nil {
+		if k.AsOf != nil && !kinds[k.Kind].lookup {
 			s.AsOf = older(s.AsOf, *k.AsOf)
 		}
 	}

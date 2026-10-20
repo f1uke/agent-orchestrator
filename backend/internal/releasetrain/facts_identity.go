@@ -23,9 +23,9 @@ type GitLabUserFact struct {
 
 // Identity and people kinds.
 var (
-	KindJiraUsers  = newKind[JiraUserFact]("jira.users", "people", Snapshotted, 24*time.Hour, global)
-	KindJiraMyself = newKind[JiraMyselfFact]("jira.myself", "my Jira account", Snapshotted, 24*time.Hour, global)
-	KindGitLabUser = newKind[GitLabUserFact]("gitlab.user", "my GitLab account", Snapshotted, 24*time.Hour, global)
+	KindJiraUsers  = asLookup(newKind[JiraUserFact]("jira.users", "people", Snapshotted, 24*time.Hour, global))
+	KindJiraMyself = asLookup(newKind[JiraMyselfFact]("jira.myself", "my Jira account", Snapshotted, 24*time.Hour, global))
+	KindGitLabUser = asLookup(newKind[GitLabUserFact]("gitlab.user", "my GitLab account", Snapshotted, 24*time.Hour, global))
 )
 
 // UserScope is the scope of one Jira user's profile.
