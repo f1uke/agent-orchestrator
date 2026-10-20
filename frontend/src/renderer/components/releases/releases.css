@@ -1358,6 +1358,11 @@
 		white-space: normal;
 		overflow-wrap: anywhere;
 	}
+	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tc {
+		flex-wrap: wrap;
+		max-width: 100%;
+		gap: 0 6px;
+	}
 	.rel-cg.dest.next:has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
 		filter: none;
 	}

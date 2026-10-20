@@ -1296,9 +1296,12 @@ export function denseListsBoard(today: string): Board {
 			["DEMO-223", LONG_TITLE, "open", "Pull Request", "indeterminate", 2],
 			["DEMO-224", "Portfolio export to CSV", "parked", "In Progress", "indeterminate", 3],
 			["DEMO-225", "Fix the chart tooltip on small phones", "none", "To Do", "new", 4],
-			["DEMO-226", "Dividend history chart", "merged", "Ready for UAT", "indeterminate", 5],
+			["DEMO-226", "Dividend history chart", "open", "Pull Request", "indeterminate", 5],
 		];
-		di22.cards = kinds.map(([k, s, kind, status, cat, who]) => unitOf(k, s, di22, kind, status, cat, who));
+		di22.cards = kinds.map(([k, s, kind, status, cat, who]) => {
+			const u = unitOf(k, s, di22, kind, status, cat, who);
+			return k === "DEMO-223" ? { ...u, code: { kind: "merged", mrs: [223], via: "feature/demo-other" } } : u;
+		});
 		di23.cards = [
 			unitOf("DEMO-231", "Goal tracker home card", di23, "open", "In Progress", "indeterminate", 6),
 			unitOf("DEMO-232", LONG_TITLE, di23, "none", "To Do", "new", 7),
@@ -1316,8 +1319,29 @@ export function denseListsBoard(today: string): Board {
 			[sprintMr("di", 431, sprintBranch, "prev", 3, addDays(r.sprint.start ?? today, -3))],
 			[{ app: "di", kind: "prev", to: { kind: "train", train: "21-2026" }, mr: 431 }],
 		);
+		const crowded = sprintCard(
+			"DEMO-363",
+			LONG_TITLE,
+			5,
+			["Done", "done"],
+			[],
+			[sprintMr("di", 432, sprintBranch, "prev", 5, addDays(r.sprint.start ?? today, -3))],
+			[
+				{
+					app: "di",
+					kind: "prev",
+					to: { kind: "train", train: "21-2026" },
+					mr: 432,
+					viaLlb: "feature/demo-wallet",
+					mismatch: true,
+					plan: "22-2026",
+					planFrom: ["fixVersion"],
+				},
+			],
+			{ onBoard: false },
+		);
 		const web = sprintCard("DEMO-362", LONG_TITLE, 4, ["To Do", "new"], [], [], [], { mobile: false });
-		r.cards = [...r.cards, carried, web];
+		r.cards = [...r.cards, carried, crowded, web];
 	}
 	return b;
 }
