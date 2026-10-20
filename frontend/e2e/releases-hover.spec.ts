@@ -71,7 +71,7 @@ test.describe("releases hover guide line", () => {
 	test("a card under the line still opens on click", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		const row = page.getByTestId("sprint-row-DEMO");
-		await row.locator(".spsrc .csum").click();
+		await row.locator(".spsrc[data-sprint='active'] .csum").click();
 		await row.locator(".dsum").first().click();
 		await settle(page);
 		const crow = row.locator(".crow[data-key]").first();

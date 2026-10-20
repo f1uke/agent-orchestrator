@@ -1,6 +1,7 @@
 import { appMark } from "./appMark";
 import { statusTone } from "./cards";
 import { shortDay } from "./day";
+import { DW, type Timeline } from "./layout";
 import { aimedTrain, epicNote, shortBranch, trainLabel, urgency } from "./llb";
 import type {
 	AppId,
@@ -280,12 +281,41 @@ export function sprintShipsIn(b: Board, row: SprintRow): Train | undefined {
 	return found.find((t) => !start || !t.freeze || t.freeze >= start) ?? found[0];
 }
 
-export function sprintRowId(row: SprintRow): string {
-	return row.next ? `${row.board.key}-next` : row.board.key;
+export function sprintFoldKey(row: SprintRow): string {
+	return row.next ? `sp-${row.board.key}-next` : `sp-${row.board.key}`;
 }
 
-export function sprintFoldKey(row: SprintRow): string {
-	return `sp-${sprintRowId(row)}`;
+export type BoardSprints = { key: string; rows: SprintRow[] };
+
+/** One entry per board, in the order boards first appear, with the active sprint ahead of the next one. */
+export function sprintsByBoard(rows: readonly SprintRow[]): BoardSprints[] {
+	const boards = new Map<string, SprintRow[]>();
+	for (const r of rows) boards.set(r.board.key, [...(boards.get(r.board.key) ?? []), r]);
+	return [...boards].map(([key, rs]) => ({ key, rows: rs.sort((a, b) => Number(a.next) - Number(b.next)) }));
+}
+
+export const MIN_BAR = 4 * DW;
+
+export type BarSpan = { x0: number; width: number };
+
+/** Sprints never overlap, so the later bar normally starts after the earlier one ends; overlapping data starts it after the earlier bar instead. */
+export function barSpans(rows: readonly SprintRow[], tl: Timeline): BarSpan[] {
+	let edge = Number.NEGATIVE_INFINITY;
+	return rows.map((r) => {
+		const start = r.sprint.start ?? tl.start;
+		const own = tl.x(start) + 2;
+		const right = own + Math.max(MIN_BAR, tl.x(r.sprint.end ?? start) - tl.x(start) - 4);
+		const x0 = Math.max(own, edge);
+		edge = Math.max(right, x0 + MIN_BAR) + 4;
+		return { x0, width: Math.max(MIN_BAR, right - x0) };
+	});
+}
+
+export type Extent = { right: number; bottom: number };
+
+/** An unfolded bar's blocks run wider than a sprint, so a later bar's blocks drop below any earlier block they would sit on. */
+export function stackTop(earlier: readonly Extent[], x0: number, base: number): number {
+	return earlier.filter((e) => e.right > x0).reduce((y, e) => Math.max(y, e.bottom), base);
 }
 
 export type SprintLens = { me: boolean; apps: ReadonlySet<AppId> | null; hidden: ReadonlySet<string> };

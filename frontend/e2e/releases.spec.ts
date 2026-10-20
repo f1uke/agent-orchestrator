@@ -159,7 +159,7 @@ test.describe("releases page", () => {
 			);
 		await open(page, "?layers=sprint,llb,cards");
 		const demo = page.getByTestId("sprint-row-DEMO");
-		await demo.locator(".spsrc .csum").click();
+		await demo.locator(".spsrc[data-sprint='active'] .csum").click();
 		await settle(page);
 		for (const key of ["t:21-2026", "l:demo-wallet", "carried"]) {
 			await demo.locator(`[data-dest="${key}"] .dsum`).click();
@@ -170,7 +170,7 @@ test.describe("releases page", () => {
 		await settle(page);
 		expect(await stripes()).toEqual([]);
 		await open(page, "?layers=sprint,llb,cards&me=1");
-		await demo.locator(".spsrc .csum").click();
+		await demo.locator(".spsrc[data-sprint='active'] .csum").click();
 		await expect(page.locator(".crow.mine").first()).toBeVisible();
 		expect(await stripes()).toEqual([]);
 		await open(page, "?sheet=attention");
@@ -207,7 +207,7 @@ test.describe("releases page", () => {
 		}) => {
 			await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
 			await open(page, "?layers=sprint,llb,cards");
-			await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+			await page.getByTestId("sprint-row-DEMO").locator(".spsrc[data-sprint='active'] .csum").click();
 			await page.setViewportSize({ width: NARROW.width, height: 700 });
 			await settle(page);
 			const sc = page.getByTestId("release-timeline");
@@ -250,7 +250,7 @@ test.describe("releases page", () => {
 
 	test("a drag pans the timeline both ways at once, and a still click on a bar still opens it", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
-		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc[data-sprint='active'] .csum").click();
 		await page.setViewportSize({ width: NARROW.width, height: 700 });
 		await settle(page);
 		const sc = page.getByTestId("release-timeline");
@@ -284,7 +284,7 @@ test.describe("releases page", () => {
 		page,
 	}) => {
 		await open(page, "?layers=sprint,llb,cards&apps=di,da,pi&focus=21-2026&hotfixes=0");
-		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc[data-sprint='active'] .csum").click();
 		await page.getByTestId("cards-di:21-2026").locator(".csum").click();
 		await settle(page);
 		await page.getByRole("button", { name: /Needs attention/ }).click();
@@ -525,7 +525,7 @@ test.describe("releases page", () => {
 		for (const name of [/^Sprint/, /^Long-lived/, /^Alert rules$/])
 			await expect(nav.getByRole("button", { name })).toHaveCount(0);
 		await layer(page, "Sprint cards").click();
-		await expect(page.locator("[data-board]")).toHaveCount(3);
+		await expect(page.locator("[data-board]")).toHaveCount(2);
 		await page.getByRole("button", { name: /Needs attention/ }).click();
 		await page.getByRole("dialog", { name: "Release details" }).getByRole("tab", { name: "Rules" }).click();
 		await expect(page.locator('.rule[data-rule="L9"]')).toBeVisible();
@@ -575,7 +575,7 @@ test.describe("releases page", () => {
 	test("the Sprint cards layer adds one row per board with its three-line label", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		const demo = page.getByTestId("sprint-row-DEMO");
-		await expect(page.locator("[data-board]")).toHaveCount(3);
+		await expect(page.locator("[data-board]")).toHaveCount(2);
 		await expect(demo.locator(".rel-lab .spn")).toContainText(/DEMO 20\s*\d+ \w+ → \d+ \w+/);
 		await expect(demo.getByTestId("sprint-scope")).toHaveText("4 new · 2 carried with MRs · 2 carried, done");
 		await expect(demo.getByTestId("sprint-dests")).toHaveText(/<#20 1\s*#21 3\s*⑂ 1\s*off 1\s*no MR 1/);
@@ -635,7 +635,7 @@ test.describe("releases page", () => {
 		await expect(page.getByTestId("sprint-row-PILOT")).toBeVisible();
 		await expect(page.getByTestId("hidden-boards")).toHaveText("1 hidden");
 		await menu.getByRole("menuitem", { name: "Show all" }).click();
-		await expect(page.locator("[data-board]")).toHaveCount(3);
+		await expect(page.locator("[data-board]")).toHaveCount(2);
 		await expect(page.getByTestId("hidden-boards")).toHaveCount(0);
 	});
 
@@ -689,7 +689,7 @@ test.describe("releases page", () => {
 	}) => {
 		await open(page, "?layers=sprint,llb,cards");
 		const demo = page.getByTestId("sprint-row-DEMO");
-		await demo.locator(".spsrc .csum").click();
+		await demo.locator(".spsrc[data-sprint='active'] .csum").click();
 		const blocks = demo.getByTestId("sprint-dest-block");
 		await expect(blocks).toHaveCount(6);
 		await expect(blocks.locator(".dsum .to")).toHaveText([
@@ -726,7 +726,7 @@ test.describe("releases page", () => {
 		await expect(split.and(page.locator('[data-app="di"]'))).toHaveClass(/away/);
 		await expect(t21.locator('.crow[data-key="DEMO-305"]')).toContainText("fixVersion says #22");
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-unfolded.png` });
-		await demo.locator(".spsrc .csum").click();
+		await demo.locator(".spsrc[data-sprint='active'] .csum").click();
 		await expect(demo.getByTestId("sprint-dest-block")).toHaveCount(0);
 	});
 
@@ -1167,7 +1167,7 @@ for (const { width, height } of VIEWPORTS) {
 	test(`at ${width}x${height} no labels overlap with a board hidden and a row label hovered`, async ({ page }) => {
 		await page.setViewportSize({ width, height });
 		await open(page, "?layers=sprint,llb,cards&hideBoards=PILOT");
-		await page.getByTestId("sprint-row-DEMO").locator(".spsrc .csum").click();
+		await page.getByTestId("sprint-row-DEMO").locator(".spsrc[data-sprint='active'] .csum").click();
 		await page.getByTestId("sprint-row-DEMO").locator(".rel-lab").hover();
 		await expect(page.getByRole("button", { name: "Hide DEMO sprint" })).toHaveCSS("opacity", "1");
 		await settle(page);

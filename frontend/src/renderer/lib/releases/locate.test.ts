@@ -59,7 +59,9 @@ describe("locate", () => {
 		expect(r.layers).toEqual(["sprint"]);
 		expect(r.folds).toEqual(["sp-DEMO", "sp-DEMO:none"]);
 		expect(r.unhide).toEqual([]);
-		expect(r.selectors).toEqual(['[data-testid="sprint-row-DEMO"] [data-dest="none"] .crow[data-key="DEMO-304"]']);
+		expect(r.selectors).toEqual([
+			'[data-testid="sprint-row-DEMO"] [data-sprint="active"][data-dest="none"] .crow[data-key="DEMO-304"]',
+		]);
 	});
 
 	it("unhides the board of a card on a hidden row", () => {

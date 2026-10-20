@@ -208,7 +208,7 @@ for (const reduced of [false, true]) {
 			const blocks = demo.getByTestId("sprint-dest-block");
 			await act(
 				page,
-				() => demo.locator(".spsrc .csum").click(),
+				() => demo.locator(".spsrc[data-sprint='active'] .csum").click(),
 				() => expect(blocks).toHaveCount(6),
 				"DIV.sprint-row-DEMO",
 			);
@@ -237,7 +237,7 @@ for (const reduced of [false, true]) {
 		test("the app filter, Only me and a layer move the rows that stay into their new place", async ({ page }) => {
 			await open(page);
 			await layer(page, "Sprint cards").click();
-			await expect(page.locator("[data-board]")).toHaveCount(3);
+			await expect(page.locator("[data-board]")).toHaveCount(2);
 			const apps = page.getByRole("group", { name: "Apps" });
 			const order = () => page.locator(".rel-app").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.app));
 			await act(

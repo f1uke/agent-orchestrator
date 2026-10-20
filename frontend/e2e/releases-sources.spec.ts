@@ -111,7 +111,7 @@ test.describe("releases sources layer", () => {
 		await open(page, "?layers=sprint,llb,cards,src");
 		for (const key of ["DEMO", "PILOT"]) {
 			const row = page.getByTestId(`sprint-row-${key}`);
-			await row.locator(".spsrc .csum").click();
+			await row.locator(".spsrc[data-sprint='active'] .csum").click();
 			for (const d of await row.locator(".dsum").all()) await d.click();
 		}
 		const off = page.getByTestId("sprint-row-PILOT").locator('.crow[data-key="PIL-12"]');

@@ -1875,8 +1875,9 @@
 	.rel-sched > .rel-row + .rel-sprow {
 		border-top: 1px solid var(--border);
 	}
-	.rel-sprow.next > .rel-lab > *,
-	.rel-sprow.next > .rel-trk {
+	.rel-cg.spsrc.next,
+	.rel-cg.dest.next,
+	.rel-sprow .rel-wires.next {
 		opacity: 0.55;
 	}
 	.rel-sched > .rel-sprow > .rel-lab.top {
@@ -1984,6 +1985,13 @@
 		gap: 8px;
 		padding: 0 10px 0 4px;
 		min-width: 0;
+	}
+	.rel-cg.spsrc .lbn {
+		color: var(--accent);
+		font-size: 11px;
+	}
+	.rel-cg.spsrc .lbn:hover {
+		text-decoration: underline;
 	}
 	.rel-cg .routes {
 		display: inline-flex;
