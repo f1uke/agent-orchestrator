@@ -247,7 +247,11 @@ func missingSetup(calls []toolCall, steps func(string) []string) string {
 			best, bestMissing = pb, missing
 		}
 	}
-	return fmt.Sprintf(`your todolist does not hold every step of playbooks/%s.md verbatim; missing steps start with "%s".`, best, strings.Join(bestMissing, `", "`))
+	quoted := make([]string, len(bestMissing))
+	for i, s := range bestMissing {
+		quoted[i] = fmt.Sprintf("%q", s)
+	}
+	return fmt.Sprintf("your todolist does not hold every step of playbooks/%s.md verbatim; missing steps start with %s.", best, strings.Join(quoted, ", "))
 }
 
 func normalizeWords(s string) string {
@@ -256,8 +260,9 @@ func normalizeWords(s string) string {
 
 // stepPrefixes are the first four normalized words of each numbered step.
 func stepPrefixes(playbook string) []string {
-	var out []string
-	for _, m := range stepLineRE.FindAllStringSubmatch(playbook, -1) {
+	matches := stepLineRE.FindAllStringSubmatch(playbook, -1)
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
 		words := strings.Fields(normalizeWords(m[1]))
 		if len(words) > 4 {
 			words = words[:4]
