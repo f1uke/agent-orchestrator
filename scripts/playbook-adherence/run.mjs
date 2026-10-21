@@ -149,7 +149,9 @@ async function runOne(opts, sysFile, arm, taskName, rep) {
 		// The build's own hook, as AO runs it for a gated dev. The daemon address
 		// points nowhere, so its activity reports fail quietly and never reach a
 		// real daemon.
-		settings.hooks = { Stop: [{ hooks: [{ type: "command", command: `${aoBinary(opts.out)} hooks claude-code stop` }] }] };
+		settings.hooks = {
+			Stop: [{ hooks: [{ type: "command", command: `${aoBinary(opts.out)} hooks claude-code stop` }] }],
+		};
 		Object.assign(extra, {
 			AO_SESSION_ID: "pa-1",
 			AO_SESSION_KIND: "worker",
