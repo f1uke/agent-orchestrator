@@ -1,0 +1,12 @@
+{
+	"name": "tally",
+	"version": "0.4.2",
+	"description": "Turn timesheet entries into invoices and reports",
+	"type": "module",
+	"bin": {
+		"tally": "bin/tally.js"
+	},
+	"scripts": {
+		"test": "node --test"
+	}
+}
