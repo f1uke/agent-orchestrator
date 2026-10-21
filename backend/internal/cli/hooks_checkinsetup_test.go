@@ -69,3 +69,51 @@ func TestHooks_StopIsNeverRefusedWithoutTheFlag(t *testing.T) {
 		t.Fatalf("state = %q, want idle", got)
 	}
 }
+
+func prOpenPayload(t *testing.T) string {
+	b, _ := json.Marshal(map[string]any{
+		"transcript_path": bareCheckInTranscript(t), "cwd": t.TempDir(),
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "gh pr create --base main --fill"},
+	})
+	return string(b)
+}
+
+func TestHooks_PreToolUseRefusesAGatedPROpenBeforePreShip(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	t.Setenv("AO_SESSION_KIND", "worker")
+	t.Setenv(envPROpenGate, "1")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, _, err := executeCLI(t, Deps{In: strings.NewReader(prOpenPayload(t)), ProcessAlive: func(int) bool { return true }}, "hooks", "claude-code", "pre-tool-use")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var denial preToolUseDenial
+	if json.Unmarshal([]byte(out), &denial) != nil || denial.HookSpecificOutput.PermissionDecision != "deny" || !strings.Contains(denial.HookSpecificOutput.PermissionDecisionReason, "deslop has not run") {
+		t.Fatalf("stdout = %q, want a PreToolUse denial naming what is missing", out)
+	}
+	if capture.body != "" {
+		t.Fatalf("a refused call must not report activity, posted %s", capture.body)
+	}
+}
+
+func TestHooks_PROpenIsNeverRefusedWithoutTheFlag(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-7")
+	t.Setenv("AO_SESSION_KIND", "worker")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, _, err := executeCLI(t, Deps{In: strings.NewReader(prOpenPayload(t)), ProcessAlive: func(int) bool { return true }}, "hooks", "claude-code", "pre-tool-use")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want nothing", out)
+	}
+	if got := capturedState(t, capture); got != "active" {
+		t.Fatalf("state = %q, want active", got)
+	}
+}

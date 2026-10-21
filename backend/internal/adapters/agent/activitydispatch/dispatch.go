@@ -212,6 +212,24 @@ func RefuseCheckInWithoutSetup(agent, event string, payload []byte) (bool, strin
 	return refuse(event, payload)
 }
 
+// PROpenRefusers maps the agent token to the check that refuses a dev's PR or
+// MR open until poteto-mode's pre-ship steps are done. Only harnesses whose
+// PreToolUse hook can deny a shell call, and whose transcript shows those
+// steps, appear; every other harness is never refused.
+var PROpenRefusers = map[string]func(event string, payload []byte) (bool, string){
+	"claude-code": claudecode.PROpenRefusal,
+}
+
+// RefusePROpenWithoutPreShip looks up the refuser for an agent token and
+// applies it. refuse=false when the token has none or the open may go ahead.
+func RefusePROpenWithoutPreShip(agent, event string, payload []byte) (bool, string) {
+	refuse, found := PROpenRefusers[agent]
+	if !found {
+		return false, ""
+	}
+	return refuse(event, payload)
+}
+
 // ChildHookParsers read a harness's hook payloads for the child-worktree
 // lifecycle. Only harnesses that hand an isolated subagent's worktree to a hook
 // appear; every other harness keeps its children in the worker's worktree.
