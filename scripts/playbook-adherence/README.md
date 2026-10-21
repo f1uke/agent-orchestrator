@@ -13,7 +13,7 @@ launches a worker. A finished run is skipped on a rerun, so an interrupted
 run resumes. Each run costs about $0.50 to $1.30.
 
 The arms and tasks are in `arms.mjs`; the grading rules are at the top of
-`grade.mjs` and pinned by `transcript.test.mjs` (`node --test scripts/playbook-adherence`).
+`grade.mjs` and pinned by `transcript.test.mjs` (`node --test scripts/playbook-adherence/transcript.test.mjs`).
 
 Workers write their plans into `~/.ao/knowledge/mer/`, the fictional project
 the prompt names. Delete that directory after a run.
