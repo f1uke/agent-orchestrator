@@ -82,6 +82,16 @@ func withCheckInSetup(ctx context.Context, env map[string]string, agent ports.Ag
 	return env
 }
 
+// withPROpenGate sets EnvPROpenGate for every session that preloads
+// devPreloadSkill, independent of the check-in gate.
+func withPROpenGate(ctx context.Context, env map[string]string, agent ports.Agent, kind domain.SessionKind, size domain.TaskSize, role domain.CrewRole) map[string]string {
+	delete(env, EnvPROpenGate)
+	if _, ok := preloadedSkill(ctx, agent, kind, size, role); ok {
+		env[EnvPROpenGate] = "1"
+	}
+	return env
+}
+
 // deliverInitialPrompt decides how the initial prompt reaches the agent. When
 // the agent reads its first prompt from stdin (ports.PromptDeliveryStdin) and
 // the runtime can connect a file there, the prompt goes into the session's

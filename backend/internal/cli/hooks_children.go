@@ -18,6 +18,9 @@ const envChildWorktrees = "AO_CHILD_WORKTREES"
 // envCheckInSetup mirrors session_manager.EnvCheckInSetup.
 const envCheckInSetup = "AO_CHECKIN_SETUP"
 
+// envPROpenGate mirrors session_manager.EnvPROpenGate.
+const envPROpenGate = "AO_PR_OPEN_GATE"
+
 // createChildAPIRequest mirrors the daemon's CreateChildInput.
 type createChildAPIRequest struct {
 	Name string `json:"name"`
