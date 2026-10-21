@@ -84,8 +84,10 @@ func TestLaunches_CarryTheCheckInSetupFlag(t *testing.T) {
 			if _, err := m.Restore(ctx, "mer-1"); err != nil {
 				t.Fatal(err)
 			}
-			if rt.lastCfg.Env[EnvCheckInSetup] != "1" {
-				t.Fatalf("restored env %v lacks %s", rt.lastCfg.Env, EnvCheckInSetup)
+			for _, flag := range []string{EnvCheckInSetup, EnvPROpenGate} {
+				if rt.lastCfg.Env[flag] != "1" {
+					t.Fatalf("restored env %v lacks %s", rt.lastCfg.Env, flag)
+				}
 			}
 		})
 	}
@@ -95,8 +97,54 @@ func TestLaunches_CarryTheCheckInSetupFlag(t *testing.T) {
 		if _, err := m.Restore(ctx, "mer-1"); err != nil {
 			t.Fatal(err)
 		}
-		if _, set := rt.lastCfg.Env[EnvCheckInSetup]; set {
-			t.Fatalf("a qa must not be checked: %v", rt.lastCfg.Env)
+		for _, flag := range []string{EnvCheckInSetup, EnvPROpenGate} {
+			if _, set := rt.lastCfg.Env[flag]; set {
+				t.Fatalf("a qa must not be checked: %v", rt.lastCfg.Env)
+			}
 		}
 	})
+}
+
+func TestWithPROpenGate_GatingMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		agent ports.Agent
+		kind  domain.SessionKind
+		size  domain.TaskSize
+		role  domain.CrewRole
+		want  bool
+	}{
+		{"standard solo dev", poteto(), domain.KindWorker, domain.TaskSizeStandard, "", true},
+		{"deep crew dev", poteto(), domain.KindWorker, domain.TaskSizeDeep, domain.CrewRoleDev, true},
+		{"unset size is standard", poteto(), domain.KindWorker, "", "", true},
+		{"mechanical", poteto(), domain.KindWorker, domain.TaskSizeMechanical, "", false},
+		{"qa", poteto(), domain.KindWorker, domain.TaskSizeStandard, domain.CrewRoleQA, false},
+		{"orchestrator", poteto(), domain.KindOrchestrator, domain.TaskSizeStandard, "", false},
+		{"skill not installed", &skillAgent{}, domain.KindWorker, domain.TaskSizeStandard, "", false},
+		{"agent that cannot load a skill (not Claude Code)", &recordingAgent{}, domain.KindWorker, domain.TaskSizeStandard, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := withPROpenGate(ctx, map[string]string{EnvPROpenGate: "1"}, tc.agent, tc.kind, tc.size, tc.role)
+			if got := env[EnvPROpenGate] == "1"; got != tc.want {
+				t.Fatalf("%s set = %v, want %v (env %v)", EnvPROpenGate, got, tc.want, env)
+			}
+			if _, set := env[EnvPROpenGate]; set && !tc.want {
+				t.Fatalf("%s must be absent, not empty, when off", EnvPROpenGate)
+			}
+		})
+	}
+}
+
+func TestSpawn_CarriesThePROpenGateWithoutTheCheckInGate(t *testing.T) {
+	m, _ := preloadManager(t, poteto())
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "build the thing"}); err != nil {
+		t.Fatal(err)
+	}
+	env := m.runtime.(*fakeRuntime).lastCfg.Env
+	if env[EnvPROpenGate] != "1" {
+		t.Fatalf("spawned env %v lacks %s", env, EnvPROpenGate)
+	}
+	if _, set := env[EnvCheckInSetup]; set {
+		t.Fatalf("ungated project got %s", EnvCheckInSetup)
+	}
 }

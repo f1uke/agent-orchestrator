@@ -128,9 +128,12 @@ const (
 	// EnvCheckInSetup is "1" in a worker whose check-in the Stop hook refuses
 	// until it shows its process set-up (see withCheckInSetup).
 	EnvCheckInSetup = "AO_CHECKIN_SETUP"
-	EnvProjectID    = "AO_PROJECT_ID"
-	EnvWorkspace    = "AO_WORKSPACE"
-	EnvIssueID      = "AO_ISSUE_ID"
+	// EnvPROpenGate is "1" in a worker whose PR or MR open the PreToolUse hook
+	// refuses until poteto-mode's pre-ship steps are done (see withPROpenGate).
+	EnvPROpenGate = "AO_PR_OPEN_GATE"
+	EnvProjectID  = "AO_PROJECT_ID"
+	EnvWorkspace  = "AO_WORKSPACE"
+	EnvIssueID    = "AO_ISSUE_ID"
 	// EnvDataDir tells a spawned agent's AO hook commands where the store lives.
 	EnvDataDir = "AO_DATA_DIR"
 	// EnvRunFile tells a spawned agent's AO hook commands which daemon to
@@ -809,7 +812,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:         runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            withCheckInSetup(ctx, withLaunchEnv(m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, cfg.Kind, scriptsOwnerID), needsSimulator(cfg.Kind, project.Config)), agent), agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole, project.Config.WithDefaults()),
+		Env:            withPROpenGate(ctx, withCheckInSetup(ctx, withLaunchEnv(m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, cfg.Kind, scriptsOwnerID), needsSimulator(cfg.Kind, project.Config)), agent), agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole, project.Config.WithDefaults()), agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole),
 		ExitStatusFile: m.exitStatusFile(),
 		StdinFile:      stdinFile,
 	})
@@ -2087,7 +2090,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:         runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            withCheckInSetup(ctx, withLaunchEnv(m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, rec.Kind, scriptsOwner(rec)), needsSimulator(rec.Kind, project.Config)), agent), agent, rec.Kind, rec.TaskSize, rec.CrewRole, project.Config.WithDefaults()),
+		Env:            withPROpenGate(ctx, withCheckInSetup(ctx, withLaunchEnv(m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, rec.Kind, scriptsOwner(rec)), needsSimulator(rec.Kind, project.Config)), agent), agent, rec.Kind, rec.TaskSize, rec.CrewRole, project.Config.WithDefaults()), agent, rec.Kind, rec.TaskSize, rec.CrewRole),
 		ExitStatusFile: m.exitStatusFile(),
 		StdinFile:      stdinFile,
 	})
