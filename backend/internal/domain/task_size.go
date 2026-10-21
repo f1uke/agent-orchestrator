@@ -2,13 +2,14 @@ package domain
 
 // TaskSize is the orchestrator's estimate of how much process ceremony a worker
 // task warrants. It is captured once at spawn (`ao spawn --task-size`), persisted
-// on the session, and consumed only by the worker system prompt: a `mechanical`
-// task is explicitly authorized to skip the heavyweight process skills (the ones
-// that gather requirements, write a plan, or impose a test-first loop) and go
-// straight to edit + verify, cutting the turn-count blow-up a small change would
-// otherwise incur. `standard` (the
-// default) and `deep` keep the full default ceremony; `deep` is a distinct,
-// persisted tag today but does not change the prompt.
+// on the session, and consumed by the worker system prompt and the initial
+// prompt: a `mechanical` task is explicitly authorized to skip the heavyweight
+// process skills (the ones that gather requirements, write a plan, or impose a
+// test-first loop) and go straight to edit + verify, cutting the turn-count
+// blow-up a small change would otherwise incur. `standard` (the default) and
+// `deep` keep the full default ceremony, and a Claude Code dev on either opens
+// its first turn with the pstack:poteto-mode skill when it is installed
+// (session_manager withPreloadedSkill); `deep` is otherwise the same as standard.
 type TaskSize string
 
 // Task size values. The zero value is the empty string, which WithDefault
