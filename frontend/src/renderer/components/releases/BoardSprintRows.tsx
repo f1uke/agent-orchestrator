@@ -137,24 +137,35 @@ function Pills({
 type FitChip = { text: string; node: ReactElement; tag?: boolean };
 
 const CHIP_GAP = 6;
-const CHIP_ROOM = 669 - 12 - (16 + 20 + 96 + 126 + 110) - 5 * CHIP_GAP - 40;
+const TITLE_CELL = 669 - 12 - (16 + 20 + 96 + 126 + 110) - 5 * CHIP_GAP;
+const TITLE_MIN = 40;
 const TAG_W = 56;
+const ACTION_W = 22;
 
-let chipCtx: CanvasRenderingContext2D | null = null;
+const ctxs = new Map<string, CanvasRenderingContext2D | null>();
 
-function chipWidth(text: string): number {
-	if (!chipCtx) {
-		chipCtx = document.createElement("canvas").getContext("2d");
-		if (!chipCtx) return text.length * 6 + CHIP_GAP;
-		chipCtx.font = `10.5px ${getComputedStyle(document.documentElement).getPropertyValue("--font-sans")}`;
+function textWidth(text: string, size: number): number {
+	let ctx = ctxs.get(`${size}`);
+	if (ctx === undefined) {
+		ctx = document.createElement("canvas").getContext("2d");
+		if (ctx) ctx.font = `${size}px ${getComputedStyle(document.documentElement).getPropertyValue("--font-sans")}`;
+		ctxs.set(`${size}`, ctx);
 	}
-	return Math.ceil(chipCtx.measureText(text).width) + CHIP_GAP;
+	return ctx ? Math.ceil(ctx.measureText(text).width) : text.length * size * 0.55;
 }
 
-function FitChips({ chips }: { chips: FitChip[] }) {
-	const sources = !!useSources();
+const chipWidth = (text: string) => textWidth(text, 10.5) + CHIP_GAP;
+
+function fitRow(chips: FitChip[], summary: string, action: boolean, sources: boolean) {
 	const widths = chips.map((c) => chipWidth(c.text) + (sources && c.tag ? TAG_W : 0));
-	const shown = chipFit(widths, CHIP_ROOM, chipWidth(`+${chips.length}`));
+	const room = TITLE_CELL - (action ? ACTION_W : 0);
+	const shown = chipFit(widths, room - TITLE_MIN, chipWidth(`+${chips.length}`));
+	const used =
+		widths.slice(0, shown).reduce((a, w) => a + w, 0) + (shown < chips.length ? chipWidth(`+${chips.length}`) : 0);
+	return { shown, long: shown < chips.length || textWidth(summary, 12) > room - used };
+}
+
+function FitChips({ chips, shown }: { chips: FitChip[]; shown: number }) {
 	const over = chips.slice(shown);
 	return (
 		<>
@@ -246,6 +257,8 @@ function SprintCardRow({
 			),
 		},
 	].filter((c): c is FitChip => !!c);
+	const action = card.mobile && !card.mrs.length;
+	const fit = fitRow(chips, card.summary ?? "", action, !!useSources());
 	return (
 		<CardLine
 			glyph={lead.glyph}
@@ -254,18 +267,20 @@ function SprintCardRow({
 			person={card.assignee}
 			k={card.key}
 			url={card.url}
-			className={`sp${isSplit(card) ? " split" : ""}${card.mine?.length ? " mine" : ""}${card.noMr ? " nomr" : ""}`}
-			action={card.mobile && !card.mrs.length && <NoMrButton board={board} k={card.key} variant="row" />}
+			className={`sp${isSplit(card) ? " split" : ""}${card.mine?.length ? " mine" : ""}${card.noMr ? " nomr" : ""}${fit.long ? " long" : ""}`}
+			action={action && <NoMrButton board={board} k={card.key} variant="row" />}
 			summary={card.summary}
-			chips={<FitChips chips={chips} />}
+			chips={<FitChips chips={chips} shown={fit.shown} />}
 			extra={<Pills pills={pills} card={card} here={away} />}
 			tail={
-				<>
-					<Pills pills={pills} card={card} here={away} copy />
-					<span className="spill" data-st={statusTone(card.status, card.statusCategory)}>
-						{card.status ?? "-"}
-					</span>
-				</>
+				fit.long && (
+					<>
+						<Pills pills={pills} card={card} here={away} copy />
+						<span className="spill" data-st={statusTone(card.status, card.statusCategory)}>
+							{card.status ?? "-"}
+						</span>
+					</>
+				)
 			}
 			status={card.status}
 			statusCategory={card.statusCategory}
