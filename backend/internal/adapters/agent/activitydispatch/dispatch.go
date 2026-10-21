@@ -194,6 +194,24 @@ func DenyNestedWorktree(agent, event string, payload []byte, childWorktrees bool
 	return deny(event, payload, childWorktrees)
 }
 
+// CheckInSetupRefusers maps the agent token to the check that refuses the Stop
+// ending a gated dev's check-in before it shows its process set-up. Only
+// harnesses whose Stop hook can keep the turn going, and whose transcript
+// shows the set-up, appear; every other harness is never refused.
+var CheckInSetupRefusers = map[string]func(event string, payload []byte) (bool, string){
+	"claude-code": claudecode.CheckInSetupRefusal,
+}
+
+// RefuseCheckInWithoutSetup looks up the refuser for an agent token and
+// applies it. refuse=false when the token has none or the check-in may end.
+func RefuseCheckInWithoutSetup(agent, event string, payload []byte) (bool, string) {
+	refuse, found := CheckInSetupRefusers[agent]
+	if !found {
+		return false, ""
+	}
+	return refuse(event, payload)
+}
+
 // ChildHookParsers read a harness's hook payloads for the child-worktree
 // lifecycle. Only harnesses that hand an isolated subagent's worktree to a hook
 // appear; every other harness keeps its children in the worker's worktree.

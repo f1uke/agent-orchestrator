@@ -53,12 +53,17 @@ export const ARMS = {
 	C: { gate: "setup-first", named: "correct", nudge: true, stopHook: false },
 	"C-wrong": { gate: "setup-first", named: "wrong", nudge: true, stopHook: false },
 	D: { gate: "setup-first", named: null, nudge: false, stopHook: true },
+	// What AO ships: the prompt buildSystemPrompt composes today, and the real
+	// `ao hooks claude-code stop` of the build under test as the Stop hook.
+	"base-new": { gate: "composed", named: null, nudge: false, stopHook: "ao" },
 };
 
 export function systemPromptFor(arm, composed) {
-	if (!composed.includes(GATE_TURN_ONE))
+	if (ARMS[arm].gate === "composed") return composed;
+	const original = composed.replace(GATE_TURN_ONE_SETUP_FIRST, GATE_TURN_ONE);
+	if (!original.includes(GATE_TURN_ONE))
 		throw new Error("composed prompt has no turn-one gate paragraph: did CheckInGate change?");
-	return ARMS[arm].gate === "setup-first" ? composed.replace(GATE_TURN_ONE, GATE_TURN_ONE_SETUP_FIRST) : composed;
+	return ARMS[arm].gate === "setup-first" ? original.replace(GATE_TURN_ONE, GATE_TURN_ONE_SETUP_FIRST) : original;
 }
 
 export function initialPromptFor(arm, task) {

@@ -913,11 +913,13 @@ func TestCheckInGate_MechanicalNeverPauses(t *testing.T) {
 // TestCheckInGate_NamesNoSkillOrPlugin holds the convention #278 established:
 // these prompts describe BEHAVIOUR, never a skill or a plugin by name. Which
 // skill the human reaches for during the check-in is the human's business, and a
-// prompt that names one rots the moment the human switches plugin sets.
+// prompt that names one rots the moment the human switches plugin sets. Turn
+// one may say "a skill you loaded" generically: that describes what the worker
+// does with whatever process it loaded, and names none.
 func TestCheckInGate_NamesNoSkillOrPlugin(t *testing.T) {
 	got := strings.ToLower(CheckInGate("standard"))
 	for _, banned := range []string{
-		"skill", "plugin", "/loop", "mattpocock", "requirement-gathering", "spec-writing", "ticket-breakdown",
+		"pstack", "poteto", "superpowers", "plugin", "/loop", "mattpocock", "requirement-gathering", "spec-writing", "ticket-breakdown",
 	} {
 		if strings.Contains(got, banned) {
 			t.Fatalf("the check-in gate must name no skill or plugin, found %q:\n%s", banned, CheckInGate("standard"))
@@ -1156,5 +1158,24 @@ func TestCrewProtocol_DevGetsTheSharingRulesWhenItsQAArrives(t *testing.T) {
 	}
 	if !strings.Contains(CrewJoinedNotice("qa", true), "qa now owns the Testiny drafts") {
 		t.Error("on a Testiny project the notice does not hand the Testiny work to qa")
+	}
+}
+
+// TestCheckInGate_TurnOneStartsWithTheProcessSetUp: workers on the old text
+// went straight to the code and never opened a playbook (0/15 in
+// scripts/playbook-adherence); opening turn one with the set-up moved the
+// playbook read to 14/15. A worker that reads the todolist as a forbidden edit
+// skips it, so the gate says it is not one, and a todo.md stays out of the repo.
+func TestCheckInGate_TurnOneStartsWithTheProcessSetUp(t *testing.T) {
+	got := CheckInGate("standard")
+	setUp := strings.Index(got, "copying its steps into your todolist")
+	readCode := strings.Index(got, "Then read the code")
+	if setUp < 0 || readCode < 0 || setUp > readCode {
+		t.Fatalf("turn one must set up the playbook and todolist before it reads the code:\n%s", got)
+	}
+	for _, want := range []string{"before you read any code", "is not an edit this gate forbids", "`todo.md` outside the repository"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("CheckInGate missing %q:\n%s", want, got)
+		}
 	}
 }

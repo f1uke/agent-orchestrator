@@ -135,6 +135,16 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 			_ = json.NewEncoder(c.deps.Out).Encode(newPreToolUseDenial(reason))
 			return nil
 		}
+		// A dev whose check-in must show its process set-up (AO_CHECKIN_SETUP,
+		// set per session by the session manager) is kept in its first turn
+		// until it does. Nothing is reported: the turn goes on, and the Stop
+		// that really ends it reports idle.
+		if os.Getenv(envCheckInSetup) == "1" && c.firedBySessionAgent(agent) {
+			if refuse, reason := activitydispatch.RefuseCheckInWithoutSetup(agent, event, payload); refuse {
+				_ = json.NewEncoder(c.deps.Out).Encode(stopBlock{Decision: "block", Reason: reason})
+				return nil
+			}
+		}
 		if hook, ok := activitydispatch.ParseChildHook(agent, event, payload); ok {
 			if hook.Kind == ports.ChildHookCreate {
 				return c.createChildWorktree(ctx, sessionID, hook)
