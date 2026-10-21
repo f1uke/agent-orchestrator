@@ -55,6 +55,9 @@ async function chipsVisible(row: Locator) {
 	}
 }
 
+const visibleCount = (l: Locator) =>
+	l.evaluateAll((els) => els.filter((e) => e.checkVisibility({ visibilityProperty: true })).length);
+
 async function onTop(l: Locator) {
 	const b = await box(l);
 	return l.evaluate(
@@ -263,6 +266,39 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 		await settle(page);
 		expect(await Promise.all(parts.map(box)), "no column moves").toEqual(before);
 		expect(await box(row!)).toEqual(rest);
+	});
+
+	test("every row that fits at rest never opens, shows its status once and no MR copy; every row that does not fit opens", async ({
+		page,
+	}) => {
+		await open(page, LAYERS, "dense-lists");
+		await unfoldSprint(page);
+		const rows = await sprintRow(page).locator(".crow:not(.sph)").all();
+		let fits = 0;
+		let opens = 0;
+		for (const row of rows) {
+			const key = await row.getAttribute("data-key");
+			const hidden = (await truncated(row.locator(".tt"))) || (await row.getByTestId("more-chips").count()) > 0;
+			const rest = await box(row.locator(".t"));
+			await row.locator(".tt").hover();
+			await settle(page);
+			const shown = await visibleCount(row.locator(".spill"));
+			expect(shown, `${key} shows its status once`).toBe(1);
+			if (hidden) {
+				opens++;
+				expect((await box(row.locator(".t"))).width, `${key} opens`).toBeGreaterThan(rest.width + 20);
+				await partsOnTop(row, true);
+				expect(await visibleCount(row.locator(".mrs")), `${key} shows its MR pills once`).toBe(1);
+			} else {
+				fits++;
+				expect(await box(row.locator(".t")), `${key} stays at rest`).toEqual(rest);
+				await expect(row.locator(".tail"), `${key} carries no copy`).toHaveCount(0);
+			}
+			await page.mouse.move(5, 5);
+			await settle(page);
+		}
+		expect(fits, "rows that fit").toBeGreaterThan(2);
+		expect(opens, "rows that do not fit").toBeGreaterThan(2);
 	});
 
 	test("the open line is not clipped by its block and no block moves", async ({ page }) => {
