@@ -55,6 +55,21 @@ async function chipsVisible(row: Locator) {
 	}
 }
 
+async function onTop(l: Locator) {
+	const b = await box(l);
+	return l.evaluate(
+		(el, [x, y]) => el.contains(document.elementFromPoint(x, y)),
+		[b.x + b.width / 2, b.y + b.height / 2],
+	);
+}
+
+async function partsOnTop(row: Locator) {
+	for (const sel of [".tt", ".k", ".spill", "[data-testid='mr-glyph']"]) {
+		const parts = row.locator(sel);
+		for (const p of await parts.all()) expect(await onTop(p), `${sel} is visible and hit-testable`).toBe(true);
+	}
+}
+
 test.describe("releases card rows keep their chips and open on hover", () => {
 	test.use({ viewport: NARROW });
 
@@ -74,7 +89,7 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			expect(right(mrs), "Jira status column stays in the row").toBeLessThanOrEqual(right(await box(row)) + 0.5);
 		});
 
-		test(`sprint block ${block}: hover opens the whole title and its chips on one line over the columns to the right, leave puts it back, nothing moves`, async ({
+		test(`sprint block ${block}: hover opens the whole row on one line past the block edge, leave puts it back, nothing else moves`, async ({
 			page,
 		}) => {
 			await open(page, LAYERS, "dense-lists");
@@ -92,7 +107,12 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			expect(wide.height, "the open title stays on one line, inside the 24px row").toBeLessThanOrEqual(24);
 			expect(await truncated(row.locator(".tt")), "no ellipsis while open").toBe(false);
 			expect((await box(row.locator(".tt"))).height, "the title does not wrap").toBeLessThan(20);
-			expect(await box(row), "the row itself keeps its box").toEqual(rest);
+			const hovered = await box(row);
+			expect([hovered.x, hovered.y, hovered.height], "the row keeps its place and height").toEqual([
+				rest.x,
+				rest.y,
+				rest.height,
+			]);
 			await chipsInside(row);
 			await chipsVisible(row);
 			for (const col of [".k", ".spill"]) {
@@ -103,11 +123,7 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 				).toBeLessThan(2);
 			}
 			if (nextRest) expect(await box(next), "no neighbour moves").toEqual(nextRest);
-			const top = await page.evaluate(
-				([x, y]) => document.elementFromPoint(x, y)?.closest(".crow")?.getAttribute("data-key"),
-				[right(wide) - 3, wide.y + wide.height / 2],
-			);
-			expect(top, "the right end of the open line is on top and not clipped").toBe(key);
+			await partsOnTop(row);
 			await page.mouse.move(5, 5);
 			await settle(page);
 			expect(await box(cell)).toEqual(restCell);
@@ -148,6 +164,53 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 		expect(await truncated(row.locator(".tt")), "no ellipsis while open").toBe(false);
 		expect((await box(row.locator(".t"))).height, "one line").toBeLessThanOrEqual(24);
 		await chipsVisible(row);
+		await partsOnTop(row);
+	});
+
+	test("a hovered long-title row shows its title, every chip, its MR buttons and Jira status, and its MR button clicks through", async ({
+		page,
+		context,
+	}) => {
+		await context.route("**/merge_requests/**", (r) => r.fulfill({ body: "mr" }));
+		await open(page, LAYERS, "dense-lists");
+		await unfoldSprint(page);
+		const row = rowOf(page, "carried", "DEMO-361");
+		const mr = row.getByTestId("mr-glyph");
+		await expect(mr).toHaveCount(1);
+		await expect(row.locator(".spill")).toHaveText("Done");
+		await chipsVisible(row);
+		await partsOnTop(row);
+		const rest = await box(row);
+		await row.locator(".tt").hover();
+		await settle(page);
+		expect(await truncated(row.locator(".tt")), "the whole title shows").toBe(false);
+		const line = await box(row);
+		expect(line.height, "one line").toBeLessThanOrEqual(24);
+		expect(right(line), "the open row runs past the block edge").toBeGreaterThan(right(rest) + 20);
+		const tt = await box(row.locator(".tt"));
+		expect((await box(mr)).x, "the MR buttons follow the whole title").toBeGreaterThan(right(tt));
+		await chipsVisible(row);
+		await partsOnTop(row);
+		const popup = page.waitForEvent("popup");
+		await mr.click();
+		expect((await popup).url()).toContain("/merge_requests/431");
+		await expect(page.locator(".rel-sheet"), "the MR click does not open the card sheet").toHaveCount(0);
+	});
+
+	test("hovering a short-title row moves none of its columns", async ({ page }) => {
+		await open(page, LAYERS, "dense-lists");
+		await unfoldSprint(page);
+		const rows = sprintRow(page).locator(".crow:not(.sph)");
+		let row: Locator | null = null;
+		for (const r of await rows.all()) if (!(await truncated(r.locator(".tt")))) row = r;
+		expect(row, "a row whose title fits").not.toBeNull();
+		const parts = [".k", ".tt", ".mrs", ".spill"].map((s) => row!.locator(s));
+		const before = await Promise.all(parts.map(box));
+		const rest = await box(row!);
+		await row!.hover();
+		await settle(page);
+		expect(await Promise.all(parts.map(box)), "no column moves").toEqual(before);
+		expect(await box(row!)).toEqual(rest);
 	});
 
 	test("the open line is not clipped by its block and no block moves", async ({ page }) => {
@@ -307,6 +370,20 @@ test.describe("hover row in the other theme", () => {
 		await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
 		await unfoldLists(page);
 		const row = listOf(page, "22").locator('.crow[data-key="DEMO-223"]');
+		await row.hover();
+		await settle(page);
+		const bg = await row.evaluate((el) => getComputedStyle(el).backgroundColor);
+		const [r, g, b] = (bg.match(/[\d.]+/g) ?? []).map(Number);
+		expect(Math.min(r, g, b), "a light surface").toBeGreaterThan(200);
+		expect(bg).not.toMatch(/, 0\)/);
+	});
+
+	test("an opened sprint row is opaque in the light theme too", async ({ page }) => {
+		await page.addInitScript(() => localStorage.setItem("theme", "light"));
+		await open(page, LAYERS, "dense-lists");
+		await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+		await unfoldSprint(page);
+		const row = rowOf(page, "carried", "DEMO-361");
 		await row.hover();
 		await settle(page);
 		const bg = await row.evaluate((el) => getComputedStyle(el).backgroundColor);
