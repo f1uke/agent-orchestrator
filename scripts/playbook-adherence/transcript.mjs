@@ -65,10 +65,11 @@ const normalize = (text) =>
 		.replace(/\s+/g, " ")
 		.trim();
 
-// A step counts as copied when its first six words appear in the todolist.
+// A step counts as copied when its first four words appear in the todolist:
+// six cross into the next sentence when a step opens with a short one.
 export function playbookSteps(name) {
 	const text = readFileSync(join(pstackPlaybooksDir(), `${name}.md`), "utf8");
-	return [...text.matchAll(/^\d+\.\s+(.+)$/gm)].map((m) => normalize(m[1]).split(" ").slice(0, 6).join(" "));
+	return [...text.matchAll(/^\d+\.\s+(.+)$/gm)].map((m) => normalize(m[1]).split(" ").slice(0, 4).join(" "));
 }
 
 const commandOf = (call) => (call.name === "Bash" ? String(call.input.command ?? "") : "");
@@ -81,13 +82,19 @@ export function playbookRead(call) {
 }
 
 // The text a call adds to a todolist, or null when it is not a todolist write.
+// A shell write that extracts the steps from a playbook file adds that file.
 export function todoText(call) {
 	if (call.name === "TaskCreate") return `${call.input.subject ?? ""}\n${call.input.description ?? ""}`;
 	if (call.name === "TodoWrite") return (call.input.todos ?? []).map((t) => t.content ?? "").join("\n");
 	if ((call.name === "Write" || call.name === "Edit") && /todo\.md$/i.test(pathOf(call)))
 		return `${call.input.content ?? ""}${call.input.new_string ?? ""}`;
-	if (call.name === "Bash" && /todo\.md/i.test(commandOf(call)) && /<<|>|tee/.test(commandOf(call)))
-		return commandOf(call);
+	if (call.name === "Bash" && /todo\.md/i.test(commandOf(call)) && /<<|>|tee/.test(commandOf(call))) {
+		const copied = commandOf(call).match(/poteto-mode\/playbooks\/([a-z-]+)\.md/);
+		const generated = copied && /\b(awk|sed|grep|cat)\b/.test(commandOf(call));
+		return generated
+			? `${commandOf(call)}\n${readFileSync(join(pstackPlaybooksDir(), `${copied[1]}.md`), "utf8")}`
+			: commandOf(call);
+	}
 	return null;
 }
 
@@ -113,7 +120,7 @@ export function analyzeTurn(
 	correctPlaybook,
 	{ steps = playbookSteps(correctPlaybook), playbookAlreadyRead = false } = {},
 ) {
-	steps = steps.map((s) => normalize(s).split(" ").slice(0, 6).join(" "));
+	steps = steps.map((s) => normalize(s).split(" ").slice(0, 4).join(" "));
 	let todo = "";
 	const out = {
 		toolCalls: calls.length,

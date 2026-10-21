@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeTurn, anySetup } from "./transcript.mjs";
+import { analyzeTurn, anySetup, pstackPlaybooksDir } from "./transcript.mjs";
 
 const PB = "/home/u/.claude/plugins/cache/pstack-claude/pstack/9.9.9/skills/poteto-mode/playbooks";
 const steps = (n) => Array.from({ length: n }, (_, i) => `step ${i + 1} words one two three four`);
@@ -80,3 +80,20 @@ test("writing plans to the knowledge store and reporting with ao is not code exp
 	);
 	assert.equal(a.firstExplorationAt, null);
 });
+
+const installed = (() => {
+	try {
+		return Boolean(pstackPlaybooksDir());
+	} catch {
+		return false;
+	}
+})();
+
+test(
+	"a todo.md generated from the real playbook file with awk counts as copying it",
+	{ skip: !installed && "pstack not installed" },
+	() => {
+		const call = bash(`awk '/^1\\. /,/^6\\. /' ${pstackPlaybooksDir()}/bug-fix.md > /tmp/x/todo.md`);
+		assert.equal(analyzeTurn([read("bug-fix"), call], "bug-fix").setupBeforeExploration, true);
+	},
+);
