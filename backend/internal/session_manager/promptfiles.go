@@ -34,26 +34,52 @@ func (m *Manager) writeSystemPromptFile(id domain.SessionID, systemPrompt string
 const devPreloadSkill = "pstack:poteto-mode"
 
 // withPreloadedSkill returns the initial prompt a session is launched with: the
-// brief itself, opened by devPreloadSkill's command for a dev on a standard or
-// deep task whose agent can load the installed skill from a leading command
-// (ports.SkillInvoker). A qa, a mechanical task, an orchestrator, a promptless
-// spawn and every other agent get the brief unchanged. The prefix is never
-// persisted: a restore that resumes the conversation sends no prompt, so the
-// skill already in its context is not loaded twice, and a fresh relaunch adds
-// it again here.
+// brief itself, opened by devPreloadSkill's command when preloadedSkill finds
+// one. The prefix is never persisted: a restore that resumes the conversation
+// sends no prompt, so the skill already in its context is not loaded twice, and
+// a fresh relaunch adds it again here.
 func withPreloadedSkill(ctx context.Context, agent ports.Agent, kind domain.SessionKind, size domain.TaskSize, role domain.CrewRole, prompt string) string {
-	if prompt == "" || kind != domain.KindWorker || role == domain.CrewRoleQA || size.WithDefault() == domain.TaskSizeMechanical {
+	if prompt == "" {
 		return prompt
 	}
-	invoker, ok := agent.(ports.SkillInvoker)
-	if !ok {
-		return prompt
-	}
-	command, ok := invoker.SkillCommand(ctx, devPreloadSkill)
+	command, ok := preloadedSkill(ctx, agent, kind, size, role)
 	if !ok {
 		return prompt
 	}
 	return command + "\n\n" + prompt
+}
+
+// preloadedSkill is the command that loads devPreloadSkill, for a dev on a
+// standard or deep task whose agent can load the installed skill from a leading
+// command (ports.SkillInvoker). A qa, a mechanical task, an orchestrator and
+// every other agent get none.
+func preloadedSkill(ctx context.Context, agent ports.Agent, kind domain.SessionKind, size domain.TaskSize, role domain.CrewRole) (string, bool) {
+	if kind != domain.KindWorker || role == domain.CrewRoleQA || size.WithDefault() == domain.TaskSizeMechanical {
+		return "", false
+	}
+	invoker, ok := agent.(ports.SkillInvoker)
+	if !ok {
+		return "", false
+	}
+	return invoker.SkillCommand(ctx, devPreloadSkill)
+}
+
+// withCheckInSetup sets EnvCheckInSetup for a session whose check-in must show
+// the preloaded skill's set-up: one that preloads it, on a project with the
+// check-in gate on. The gate's prompt asks for the set-up and the Stop hook
+// refuses a check-in without it, because prompt text alone never produced the
+// todolist (scripts/playbook-adherence). Restore sets it the same way; the
+// hook checks only a session's first turn, so a resumed session past its
+// check-in is never refused.
+func withCheckInSetup(ctx context.Context, env map[string]string, agent ports.Agent, kind domain.SessionKind, size domain.TaskSize, role domain.CrewRole, cfg domain.ProjectConfig) map[string]string {
+	delete(env, EnvCheckInSetup)
+	if !cfg.PauseBeforeImplementing {
+		return env
+	}
+	if _, ok := preloadedSkill(ctx, agent, kind, size, role); ok {
+		env[EnvCheckInSetup] = "1"
+	}
+	return env
 }
 
 // deliverInitialPrompt decides how the initial prompt reaches the agent. When

@@ -15,6 +15,9 @@ import (
 // subagents' worktrees to AO. Mirrors session_manager.EnvChildWorktrees.
 const envChildWorktrees = "AO_CHILD_WORKTREES"
 
+// envCheckInSetup mirrors session_manager.EnvCheckInSetup.
+const envCheckInSetup = "AO_CHECKIN_SETUP"
+
 // createChildAPIRequest mirrors the daemon's CreateChildInput.
 type createChildAPIRequest struct {
 	Name string `json:"name"`
@@ -53,7 +56,7 @@ type hookContext struct {
 	} `json:"hookSpecificOutput"`
 }
 
-// stopBlock is the native SubagentStop response that keeps the subagent going.
+// stopBlock is the native Stop / SubagentStop response that keeps the agent going.
 type stopBlock struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason"`

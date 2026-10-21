@@ -12,7 +12,10 @@ per run, and starts `claude -p` with that prompt appended, the same way AO
 launches a worker. A finished run is skipped on a rerun, so an interrupted
 run resumes. Each run costs about $0.50 to $1.30.
 
-The arms and tasks are in `arms.mjs`; the grading rules are at the top of
+The arms and tasks are in `arms.mjs`. `base-new` is what AO ships: the prompt
+as composed today and the Stop hook of an `ao` built from this checkout
+(`ao hooks claude-code stop` with `AO_CHECKIN_SETUP=1`), pointed at no daemon.
+The other arms swap the gate paragraph back to the text they were measured on. the grading rules are at the top of
 `grade.mjs` and pinned by `transcript.test.mjs` (`node --test scripts/playbook-adherence/transcript.test.mjs`).
 
 Workers write their plans into `~/.ao/knowledge/mer/`, the fictional project

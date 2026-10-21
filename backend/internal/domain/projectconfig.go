@@ -201,11 +201,12 @@ type ProjectConfig struct {
 	// DisableAutoCrew is not `--task-size mechanical`: this one is about WHO
 	// decides the shape of the work, that one is about how many agents work it.
 	//
-	// It is read in sessionmanager.buildSystemPrompt, which is the only consumer:
-	// the gate is entirely a prompt, so there is no runtime seam to hold and
-	// nothing to reconcile if it is flipped mid-task. A worker already running
-	// keeps the prompt it was spawned with; the next spawn (or a restore, which
-	// recomputes the prompt) picks the new value up.
+	// It is read in sessionmanager.buildSystemPrompt, which renders the gate, and
+	// in withCheckInSetup, which turns on the Stop-hook check that refuses a
+	// Claude Code dev's check-in until it shows its process set-up. Neither
+	// reconciles a mid-task flip: a worker already running keeps the prompt and
+	// environment it was launched with; the next spawn (or a restore, which
+	// recomputes both) picks the new value up.
 	PauseBeforeImplementing bool `json:"pauseBeforeImplementing,omitempty"`
 
 	// LearnFromSessions lets AO read this project's Claude Code transcripts and

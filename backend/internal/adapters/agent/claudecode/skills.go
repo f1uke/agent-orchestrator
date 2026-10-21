@@ -32,8 +32,16 @@ func skillInstalled(configDir, skill string) bool {
 	if !isPlugin {
 		return fileExists(filepath.Join(configDir, "skills", skill, "SKILL.md"))
 	}
+	_, ok := pluginSkillDir(configDir, plugin+":"+name)
+	return ok
+}
+
+// pluginSkillDir is the directory of an installed, enabled plugin skill
+// ("plugin:skill"), the one holding its SKILL.md.
+func pluginSkillDir(configDir, skill string) (string, bool) {
+	plugin, name, _ := strings.Cut(skill, ":")
 	if plugin == "" || name == "" {
-		return false
+		return "", false
 	}
 	var manifest struct {
 		Plugins map[string][]struct {
@@ -41,7 +49,7 @@ func skillInstalled(configDir, skill string) bool {
 		} `json:"plugins"`
 	}
 	if !decodeJSONFile(filepath.Join(configDir, "plugins", "installed_plugins.json"), &manifest) {
-		return false
+		return "", false
 	}
 	var settings struct {
 		EnabledPlugins map[string]bool `json:"enabledPlugins"`
@@ -55,12 +63,13 @@ func skillInstalled(configDir, skill string) bool {
 			continue
 		}
 		for _, i := range installs {
-			if i.InstallPath != "" && fileExists(filepath.Join(i.InstallPath, "skills", name, "SKILL.md")) {
-				return true
+			dir := filepath.Join(i.InstallPath, "skills", name)
+			if i.InstallPath != "" && fileExists(filepath.Join(dir, "SKILL.md")) {
+				return dir, true
 			}
 		}
 	}
-	return false
+	return "", false
 }
 
 // claudeConfigDir is Claude Code's config directory: CLAUDE_CONFIG_DIR, else
