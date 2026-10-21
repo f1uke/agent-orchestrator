@@ -74,6 +74,7 @@ export function CardLine({
 	status,
 	statusCategory,
 	extra,
+	tail,
 	source,
 	glyphSource,
 	statusKind = "jira.cards",
@@ -82,6 +83,7 @@ export function CardLine({
 	className = "",
 }: {
 	action?: ReactNode;
+	tail?: ReactNode;
 	source?: ReactNode;
 	glyphSource?: Provenance;
 	statusKind?: string;
@@ -123,6 +125,7 @@ export function CardLine({
 					{chips}
 					{action}
 				</span>
+				{tail && <span className="tail">{tail}</span>}
 			</span>
 			{extra ?? <span />}
 			<SourceValue p={status ? statusOf(status, statusKind) : null}>

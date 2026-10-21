@@ -4,6 +4,7 @@ import {
 	boardLabel,
 	carriedTo,
 	cardCount,
+	chipFit,
 	destBlocks,
 	destHead,
 	destKey,
@@ -544,5 +545,20 @@ describe("an estimated next sprint", () => {
 		const tl = timeline(board({ today: "2026-10-14", trains: [t21] }));
 		const [a, n] = barSpans([fullRow, undated], tl);
 		expect(n.x0 - a.x0).toBe(15 * DW);
+	});
+});
+
+describe("chipFit", () => {
+	it("shows every chip when they all fit", () => {
+		expect(chipFit([60, 50], 120, 24)).toBe(2);
+	});
+	it("keeps as many leading chips as fit beside the +N chip", () => {
+		expect(chipFit([60, 50, 70, 90], 160, 24)).toBe(2);
+	});
+	it("always shows the first chip", () => {
+		expect(chipFit([200, 50], 100, 24)).toBe(1);
+	});
+	it("shows nothing when there are no chips", () => {
+		expect(chipFit([], 100, 24)).toBe(0);
 	});
 });
