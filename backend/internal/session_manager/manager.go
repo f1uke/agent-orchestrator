@@ -768,7 +768,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
-	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, prompt)
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, withPreloadedSkill(ctx, agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole, prompt))
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
@@ -2074,7 +2074,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
-	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, settingsFile, agentConfig, rec.Kind)
+	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec, ws.Path, systemPrompt, systemPromptFile, settingsFile, agentConfig)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
@@ -4219,7 +4219,8 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 // relaunch fresh with the system prompt only rather than erroring. A fresh
 // relaunch replays the prompt the way a spawn delivers it, so stdinFile is the
 // file the runtime feeds the agent, or empty.
-func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile, settingsFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) (argv []string, stdinFile string, err error) {
+func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, rec domain.SessionRecord, workspacePath, systemPrompt, systemPromptFile, settingsFile string, agentConfig ports.AgentConfig) (argv []string, stdinFile string, err error) {
+	id, meta, kind := rec.ID, rec.Metadata, rec.Kind
 	ref := ports.SessionRef{
 		ID:            string(id),
 		WorkspacePath: workspacePath,
@@ -4238,7 +4239,7 @@ func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, id domain.
 	if meta.Prompt == "" && kind != domain.KindOrchestrator {
 		return nil, "", ErrNotResumable
 	}
-	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, meta.Prompt)
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, withPreloadedSkill(ctx, agent, kind, rec.TaskSize, rec.CrewRole, meta.Prompt))
 	if err != nil {
 		return nil, "", err
 	}

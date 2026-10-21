@@ -472,14 +472,11 @@ func claudeConversationExists(workspacePath, sessionID string) bool {
 // per-project conversation transcripts (<projectsDir>/<projectDirName>/<id>.jsonl).
 // It honors CLAUDE_CONFIG_DIR the way Claude Code does, defaulting to ~/.claude.
 func claudeProjectsDir() (string, error) {
-	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		return filepath.Join(dir, "projects"), nil
-	}
-	home, err := os.UserHomeDir()
+	dir, err := claudeConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("claude-code: resolve home directory: %w", err)
 	}
-	return filepath.Join(home, ".claude", "projects"), nil
+	return filepath.Join(dir, "projects"), nil
 }
 
 // claudeProjectDirName maps a working directory onto the directory name Claude

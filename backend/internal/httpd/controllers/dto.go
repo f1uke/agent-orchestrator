@@ -374,7 +374,9 @@ type SpawnSessionRequest struct {
 	// TaskSize is the ceremony level for the worker (`ao spawn --task-size`):
 	// mechanical / standard / deep. Absent/empty means standard (full ceremony). A
 	// mechanical task is authorized in the worker prompt to skip the process
-	// skills. Persisted on the session; not surfaced on the read model.
+	// skills; a claude-code dev on standard or deep opens its first turn with
+	// the pstack:poteto-mode skill when it is installed. Persisted on the
+	// session; not surfaced on the read model.
 	TaskSize domain.TaskSize `json:"taskSize,omitempty" enum:"mechanical,standard,deep"`
 	// ClaudeProfile names the Claude profile a claude-code session launches with
 	// (`ao spawn --claude-profile`), matched case-insensitively. Absent/empty

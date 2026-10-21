@@ -88,6 +88,16 @@ type OneShotNamer interface {
 	OneShotArgv(ctx context.Context, prompt string) (argv []string, ok bool, err error)
 }
 
+// SkillInvoker is the optional capability of an agent that loads a skill when
+// a turn opens with that skill's command, with no model judgement involved. It
+// answers for the agent as installed right now: ok is false when the skill is
+// not installed, so the caller never sends a command the agent cannot expand.
+type SkillInvoker interface {
+	// SkillCommand returns the line that loads the named skill (for Claude Code
+	// "pstack:poteto-mode" -> "/pstack:poteto-mode").
+	SkillCommand(ctx context.Context, skill string) (command string, ok bool)
+}
+
 // AgentBinaryResolver is the optional capability adapters expose when their
 // binary can be checked without constructing a real session launch command.
 type AgentBinaryResolver interface {

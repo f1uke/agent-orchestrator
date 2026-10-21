@@ -28,6 +28,34 @@ func (m *Manager) writeSystemPromptFile(id domain.SessionID, systemPrompt string
 	return path, nil
 }
 
+// devPreloadSkill is the skill a dev on a standard or deep task loads before
+// anything else. The SessionStart hook only advises it, and models judged the
+// advice away, so AO opens the first turn with the skill's command instead.
+const devPreloadSkill = "pstack:poteto-mode"
+
+// withPreloadedSkill returns the initial prompt a session is launched with: the
+// brief itself, opened by devPreloadSkill's command for a dev on a standard or
+// deep task whose agent can load the installed skill from a leading command
+// (ports.SkillInvoker). A qa, a mechanical task, an orchestrator, a promptless
+// spawn and every other agent get the brief unchanged. The prefix is never
+// persisted: a restore that resumes the conversation sends no prompt, so the
+// skill already in its context is not loaded twice, and a fresh relaunch adds
+// it again here.
+func withPreloadedSkill(ctx context.Context, agent ports.Agent, kind domain.SessionKind, size domain.TaskSize, role domain.CrewRole, prompt string) string {
+	if prompt == "" || kind != domain.KindWorker || role == domain.CrewRoleQA || size.WithDefault() == domain.TaskSizeMechanical {
+		return prompt
+	}
+	invoker, ok := agent.(ports.SkillInvoker)
+	if !ok {
+		return prompt
+	}
+	command, ok := invoker.SkillCommand(ctx, devPreloadSkill)
+	if !ok {
+		return prompt
+	}
+	return command + "\n\n" + prompt
+}
+
 // deliverInitialPrompt decides how the initial prompt reaches the agent. When
 // the agent reads its first prompt from stdin (ports.PromptDeliveryStdin) and
 // the runtime can connect a file there, the prompt goes into the session's
