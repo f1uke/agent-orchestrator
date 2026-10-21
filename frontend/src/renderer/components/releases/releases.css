@@ -1339,20 +1339,11 @@
 		grid-template-rows: 24px;
 	}
 	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) {
-		z-index: 1;
-	}
-	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .t {
 		position: relative;
-		z-index: 2;
+		z-index: 1;
 		width: max-content;
-		min-width: 100%;
-		max-width: 1000px;
-		overflow: visible;
-		padding: 0 4px;
-		margin: 0 -4px;
-		height: 22px;
-		border-radius: 4px;
-		background: var(--bg-2);
+		min-width: 669px;
+		grid-template-columns: 16px 20px 96px minmax(max-content, 1fr) 126px 110px;
 		box-shadow: 0 0 0 1px var(--border);
 	}
 	.rel-cg .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tt {
