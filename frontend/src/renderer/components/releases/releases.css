@@ -1331,25 +1331,54 @@
 		min-height: 24px;
 		box-shadow: 0 0 0 1px var(--border);
 	}
-	.rel-trk > div:has(.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible))),
-	.rel-cg.dest .crows:has(.crow:is(:hover, :focus-visible, :has(:focus-visible))) {
+	.rel-trk
+		> div:has(
+			.rel-cg.dest .crow:not(.sph) .t:hover,
+			.rel-cg.dest .crow:not(.sph):focus-visible,
+			.rel-cg.dest .crow:not(.sph) :focus-visible
+		),
+	.rel-cg.dest .crows:has(.crow:not(.sph) .t:hover, .crow:not(.sph):focus-visible, .crow:not(.sph) :focus-visible) {
 		overflow: visible !important;
 	}
 	.rel-cg.dest .crow {
 		grid-template-rows: 24px;
 	}
-	.rel-cg.dest .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) {
-		position: relative;
+	.rel-cg.dest .crow:not(.sph):is(:has(.t:hover), :focus-visible, :has(:focus-visible)) {
 		z-index: 1;
+	}
+	.rel-cg.dest .crow:not(.sph):is(:has(.t:hover), :focus-visible, :has(:focus-visible)) .t {
+		position: relative;
+		z-index: 2;
 		width: max-content;
-		min-width: 669px;
-		grid-template-columns: 16px 20px 96px minmax(max-content, 1fr) 126px 110px;
+		min-width: 100%;
+		overflow: visible;
+		padding: 0 4px;
+		margin: 0 -4px;
+		height: 22px;
+		border-radius: 4px;
+		background: var(--bg-2);
 		box-shadow: 0 0 0 1px var(--border);
 	}
-	.rel-cg .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tt {
+	.rel-cg.dest .crow:not(.sph):is(:has(.t:hover), :focus-visible, :has(:focus-visible)) .tt {
 		overflow: visible;
 	}
+	.rel .crow .t > .tail {
+		display: none;
+	}
+	.rel-cg.dest .crow:not(.sph):is(:has(.t:hover), :focus-visible, :has(:focus-visible)) .t > .tail {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		margin-left: 10px;
+	}
+	.rel-cg.dest .crow:not(.sph):is(:has(.t:hover), :focus-visible, :has(:focus-visible)) .tc > .over {
+		display: contents;
+	}
+	.rel-cg.dest .crow:not(.sph):is(:has(.t:hover), :focus-visible, :has(:focus-visible)) .tc > .more {
+		display: none;
+	}
 	.rel-cg:not(.dest) .crow:is(:hover, :focus-visible, :has(:focus-visible)):not(.sph) .tt {
+		overflow: visible;
 		white-space: normal;
 		overflow-wrap: anywhere;
 	}
@@ -1469,6 +1498,10 @@
 	.rel .crow .ob.hf {
 		color: var(--purple);
 	}
+	.rel .crow .tc > .over {
+		display: none;
+	}
+
 	.rel .spill {
 		font-size: 10.5px;
 		padding: 1px 6px;

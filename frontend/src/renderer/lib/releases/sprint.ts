@@ -435,3 +435,11 @@ export function versionMineText(v: AppVersion, me: Identity): string {
 		.map((m) => (m.why === "approver" ? (approved ? "approved" : "approver, pending") : mineText([m])))
 		.join(" · ");
 }
+
+export function chipFit(widths: readonly number[], room: number, more: number): number {
+	if (widths.reduce((a, w) => a + w, 0) <= room) return widths.length;
+	let used = more;
+	let k = 0;
+	while (k < widths.length && used + widths[k] <= room) used += widths[k++];
+	return Math.max(1, k);
+}

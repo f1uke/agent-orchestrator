@@ -63,8 +63,11 @@ async function onTop(l: Locator) {
 	);
 }
 
-async function partsOnTop(row: Locator) {
-	for (const sel of [".tt", ".k", ".spill", "[data-testid='mr-glyph']"]) {
+const REST_PARTS = [".tt", ".k", "> .spill", "[data-testid='mr-glyph']"];
+const OPEN_PARTS = [".tt", ".k", ".tail .spill", ".tail .mrd"];
+
+async function partsOnTop(row: Locator, open = false) {
+	for (const sel of open ? OPEN_PARTS : REST_PARTS) {
 		const parts = row.locator(sel);
 		for (const p of await parts.all()) expect(await onTop(p), `${sel} is visible and hit-testable`).toBe(true);
 	}
@@ -85,7 +88,7 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			expect(await truncated(row.locator(".tt")), "the title carries the ellipsis").toBe(true);
 			await chipsInside(row);
 			await chipsVisible(row);
-			const mrs = await box(row.locator(".spill"));
+			const mrs = await box(row.locator("> .spill"));
 			expect(right(mrs), "Jira status column stays in the row").toBeLessThanOrEqual(right(await box(row)) + 0.5);
 		});
 
@@ -115,7 +118,7 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 			]);
 			await chipsInside(row);
 			await chipsVisible(row);
-			for (const col of [".k", ".spill"]) {
+			for (const col of [".k", ".tail .spill"]) {
 				const c = await box(row.locator(col).first());
 				expect(
 					Math.abs(c.y + c.height / 2 - (rest.y + rest.height / 2)),
@@ -123,7 +126,7 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 				).toBeLessThan(2);
 			}
 			if (nextRest) expect(await box(next), "no neighbour moves").toEqual(nextRest);
-			await partsOnTop(row);
+			await partsOnTop(row, true);
 			await page.mouse.move(5, 5);
 			await settle(page);
 			expect(await box(cell)).toEqual(restCell);
@@ -145,26 +148,69 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 		});
 	}
 
-	test("a long title with more warning chips than the cell holds keeps 40px of title, and every chip stays whole at rest and on hover", async ({
+	test("a long title with more warning chips than the cell holds folds the rest into +N, keeps its MR pill clickable at rest, and shows every chip on hover", async ({
 		page,
 	}) => {
 		await open(page, LAYERS, "dense-lists");
 		await unfoldSprint(page);
 		const row = rowOf(page, "carried", "DEMO-363");
-		await expect(row.locator(".tc > .ob")).toHaveCount(4);
+		const shown = row.locator(".tc > .ob:not(.more)");
+		const more = row.getByTestId("more-chips");
+		await expect(shown.first()).toHaveText(/not on the board/);
+		const n = await shown.count();
+		expect(n, "at least the first chip shows").toBeGreaterThanOrEqual(1);
+		expect(n, "some chips fold away").toBeLessThan(4);
+		await expect(more).toHaveText(`+${4 - n}`);
 		const tt = await box(row.locator(".tt"));
 		expect(tt.width, "the title keeps the minimum").toBeGreaterThanOrEqual(40);
-		expect(tt.width, "and no more").toBeLessThan(60);
-		expect(tt.x + tt.width, "the title never overlaps a chip").toBeLessThanOrEqual(
-			(await box(row.locator(".tc"))).x + 0.5,
+		expect(right(await box(row.locator(".tc"))), "the chips end before the MRs column").toBeLessThanOrEqual(
+			(await box(row.locator("> .mrs"))).x + 0.5,
 		);
 		await chipsVisible(row);
+		await partsOnTop(row);
 		await row.hover();
 		await settle(page);
+		await expect(more).toBeHidden();
+		await expect(row.locator(".tc .ob:not(.more)")).toHaveCount(4);
 		expect(await truncated(row.locator(".tt")), "no ellipsis while open").toBe(false);
 		expect((await box(row.locator(".t"))).height, "one line").toBeLessThanOrEqual(24);
-		await chipsVisible(row);
-		await partsOnTop(row);
+		for (const c of await row.locator(".tc .ob:not(.more)").all())
+			expect(await onTop(c), `chip "${await c.textContent()}" shows on hover`).toBe(true);
+		await partsOnTop(row, true);
+		await page.mouse.move(5, 5);
+		await settle(page);
+		await expect(more).toBeVisible();
+	});
+
+	for (const key of ["DEMO-361", "DEMO-363"])
+		test(`${key}: moving the pointer onto the MR button at rest and clicking it opens the MR, not the card`, async ({
+			page,
+			context,
+		}) => {
+			await context.route("**/merge_requests/**", (r) => r.fulfill({ body: "mr" }));
+			await open(page, LAYERS, "dense-lists");
+			await unfoldSprint(page);
+			const row = rowOf(page, "carried", key);
+			const b = await box(row.getByTestId("mr-glyph"));
+			await page.mouse.move(b.x - 300, b.y - 120);
+			await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 });
+			await settle(page);
+			const popup = page.waitForEvent("popup", { timeout: 3_000 });
+			await page.mouse.down();
+			await page.mouse.up();
+			expect((await popup).url()).toContain("/merge_requests/");
+			await expect(page.locator(".rel-sheet")).toHaveCount(0);
+		});
+
+	test("hovering a row's key or avatar does not open the line", async ({ page }) => {
+		await open(page, LAYERS, "dense-lists");
+		await unfoldSprint(page);
+		const row = rowOf(page, "carried", "DEMO-361");
+		const rest = await box(row.locator(".t"));
+		await row.locator(".k").hover();
+		await settle(page);
+		expect(await box(row.locator(".t"))).toEqual(rest);
+		expect(await truncated(row.locator(".tt"))).toBe(true);
 	});
 
 	test("a hovered long-title row shows its title, every chip, its MR buttons and Jira status, and its MR button clicks through", async ({
@@ -177,22 +223,28 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 		const row = rowOf(page, "carried", "DEMO-361");
 		const mr = row.getByTestId("mr-glyph");
 		await expect(mr).toHaveCount(1);
-		await expect(row.locator(".spill")).toHaveText("Done");
+		await expect(row.locator("> .spill")).toHaveText("Done");
 		await chipsVisible(row);
 		await partsOnTop(row);
 		const rest = await box(row);
 		await row.locator(".tt").hover();
 		await settle(page);
 		expect(await truncated(row.locator(".tt")), "the whole title shows").toBe(false);
-		const line = await box(row);
+		const line = await box(row.locator(".t"));
 		expect(line.height, "one line").toBeLessThanOrEqual(24);
-		expect(right(line), "the open row runs past the block edge").toBeGreaterThan(right(rest) + 20);
+		expect(right(line), "the open line runs past the block edge").toBeGreaterThan(right(rest) + 20);
 		const tt = await box(row.locator(".tt"));
-		expect((await box(mr)).x, "the MR buttons follow the whole title").toBeGreaterThan(right(tt));
+		const copy = row.locator(".tail .mrd");
+		expect((await box(copy)).x, "the MR buttons follow the whole title").toBeGreaterThan(right(tt));
+		expect(await copy.getAttribute("href")).toBe(await mr.getAttribute("href"));
+		await expect(row.locator(".tail .spill")).toHaveText("Done");
 		await chipsVisible(row);
-		await partsOnTop(row);
+		await partsOnTop(row, true);
+		const b = await box(copy);
+		await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 });
 		const popup = page.waitForEvent("popup");
-		await mr.click();
+		await page.mouse.down();
+		await page.mouse.up();
 		expect((await popup).url()).toContain("/merge_requests/431");
 		await expect(page.locator(".rel-sheet"), "the MR click does not open the card sheet").toHaveCount(0);
 	});
@@ -204,7 +256,7 @@ test.describe("releases card rows keep their chips and open on hover", () => {
 		let row: Locator | null = null;
 		for (const r of await rows.all()) if (!(await truncated(r.locator(".tt")))) row = r;
 		expect(row, "a row whose title fits").not.toBeNull();
-		const parts = [".k", ".tt", ".mrs", ".spill"].map((s) => row!.locator(s));
+		const parts = [".k", ".tt", "> .mrs", "> .spill"].map((s) => row!.locator(s));
 		const before = await Promise.all(parts.map(box));
 		const rest = await box(row!);
 		await row!.hover();

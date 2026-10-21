@@ -1,5 +1,5 @@
 import { EyeOff, Snowflake } from "lucide-react";
-import type { RefObject } from "react";
+import { Fragment, type ReactElement, type RefObject } from "react";
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -23,6 +23,7 @@ import {
 	destKey,
 	destTally,
 	barSpans,
+	chipFit,
 	emptyCountText,
 	hiddenBoardsText,
 	isSplit,
@@ -36,6 +37,7 @@ import {
 	type Extent,
 	type MrPill,
 } from "../../lib/releases/sprint";
+import { statusTone } from "../../lib/releases/cards";
 import { derivedOf, planSaysText, sprintCardOf } from "../../lib/releases/sources";
 import type { Board, BoardApp, Dest, SprintCard, SprintRow } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
@@ -45,7 +47,7 @@ import { NoMrButton } from "./NoMr";
 import { CardLine, Chev } from "./CardGroups";
 import { Moving, Unfold, Wire, WireText } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
-import { SourceTag } from "./Sources";
+import { SourceTag, useSources } from "./Sources";
 
 const SRC_TOP = 6;
 const SUM_H = 26;
@@ -79,7 +81,17 @@ const DESTS_P = derivedOf(
 	"SprintCard.routes",
 );
 
-function Pills({ pills, card, here }: { pills: MrPill[]; card: SprintCard; here: string | null }) {
+function Pills({
+	pills,
+	card,
+	here,
+	copy = false,
+}: {
+	pills: MrPill[];
+	card: SprintCard;
+	here: string | null;
+	copy?: boolean;
+}) {
 	return (
 		<span className="mrs">
 			{pills.map((p) =>
@@ -100,7 +112,8 @@ function Pills({ pills, card, here }: { pills: MrPill[]; card: SprintCard; here:
 									data-st={a.tone}
 									data-kind={a.kind}
 									data-app={a.app}
-									data-testid="mr-glyph"
+									data-testid={copy ? undefined : "mr-glyph"}
+									tabIndex={copy ? -1 : undefined}
 									href={a.url}
 									target="_blank"
 									rel="noreferrer"
@@ -118,6 +131,48 @@ function Pills({ pills, card, here }: { pills: MrPill[]; card: SprintCard; here:
 				),
 			)}
 		</span>
+	);
+}
+
+type FitChip = { text: string; node: ReactElement; tag?: boolean };
+
+const CHIP_GAP = 6;
+const CHIP_ROOM = 669 - 12 - (16 + 20 + 96 + 126 + 110) - 5 * CHIP_GAP - 40;
+const TAG_W = 56;
+
+let chipCtx: CanvasRenderingContext2D | null = null;
+
+function chipWidth(text: string): number {
+	if (!chipCtx) {
+		chipCtx = document.createElement("canvas").getContext("2d");
+		if (!chipCtx) return text.length * 6 + CHIP_GAP;
+		chipCtx.font = `10.5px ${getComputedStyle(document.documentElement).getPropertyValue("--font-sans")}`;
+	}
+	return Math.ceil(chipCtx.measureText(text).width) + CHIP_GAP;
+}
+
+function FitChips({ chips }: { chips: FitChip[] }) {
+	const sources = !!useSources();
+	const widths = chips.map((c) => chipWidth(c.text) + (sources && c.tag ? TAG_W : 0));
+	const shown = chipFit(widths, CHIP_ROOM, chipWidth(`+${chips.length}`));
+	const over = chips.slice(shown);
+	return (
+		<>
+			{chips.map((c, i) =>
+				i < shown ? (
+					<Fragment key={c.text}>{c.node}</Fragment>
+				) : (
+					<span key={c.text} className="over">
+						{c.node}
+					</span>
+				),
+			)}
+			{over.length > 0 && (
+				<span className="ob passive more" data-testid="more-chips" title={over.map((c) => c.text).join("\n")}>
+					+{over.length}
+				</span>
+			)}
+		</>
 	);
 }
 
@@ -143,6 +198,54 @@ function SprintCardRow({
 	const mismatch = routes.find((r) => r.mismatch);
 	const via = routes.find((r) => r.viaLlb)?.viaLlb;
 	const went = carried && card.mobile ? carriedTo(board, card) : null;
+	const pills = mrPills(card, apps);
+	const away = carried ? null : here;
+	const branch = via?.replace(/^feature\//, "");
+	const says = mismatch?.plan && `${planSaysText(mismatch.planFrom)} says ${trainLabel(board, mismatch.plan)}`;
+	const chips: FitChip[] = [
+		!card.mobile && {
+			text: "web",
+			node: (
+				<span className="ob passive" data-testid="web-tag">
+					web
+				</span>
+			),
+		},
+		!card.onBoard && {
+			text: "not on the board",
+			tag: true,
+			node: (
+				<span className="ob">
+					not on the board
+					<SourceTag p={sprintCardOf(card, row)} />
+				</span>
+			),
+		},
+		card.mobile &&
+			!carried &&
+			card.active &&
+			!card.activeWhy.includes("new this sprint") && {
+				text: "carried over",
+				node: <span className="ob passive">carried over</span>,
+			},
+		went && {
+			text: went.text,
+			node: (
+				<span className="ob c" data-st={went.tone}>
+					{went.text}
+				</span>
+			),
+		},
+		branch && { text: `via ⑂ ${branch}`, node: <span className="ob hf">via ⑂ {branch}</span> },
+		says && {
+			text: says,
+			node: (
+				<span className="ob c" data-st="failed">
+					{says}
+				</span>
+			),
+		},
+	].filter((c): c is FitChip => !!c);
 	return (
 		<CardLine
 			glyph={lead.glyph}
@@ -154,36 +257,16 @@ function SprintCardRow({
 			className={`sp${isSplit(card) ? " split" : ""}${card.mine?.length ? " mine" : ""}${card.noMr ? " nomr" : ""}`}
 			action={card.mobile && !card.mrs.length && <NoMrButton board={board} k={card.key} variant="row" />}
 			summary={card.summary}
-			chips={
+			chips={<FitChips chips={chips} />}
+			extra={<Pills pills={pills} card={card} here={away} />}
+			tail={
 				<>
-					{!card.mobile && (
-						<span className="ob passive" data-testid="web-tag">
-							web
-						</span>
-					)}
-					{!card.onBoard && (
-						<span className="ob">
-							not on the board
-							<SourceTag p={sprintCardOf(card, row)} />
-						</span>
-					)}
-					{card.mobile && !carried && card.active && !card.activeWhy.includes("new this sprint") && (
-						<span className="ob passive">carried over</span>
-					)}
-					{went && (
-						<span className="ob c" data-st={went.tone}>
-							{went.text}
-						</span>
-					)}
-					{via && <span className="ob hf">via ⑂ {via.replace(/^feature\//, "")}</span>}
-					{mismatch?.plan && (
-						<span className="ob c" data-st="failed">
-							{planSaysText(mismatch.planFrom)} says {trainLabel(board, mismatch.plan)}
-						</span>
-					)}
+					<Pills pills={pills} card={card} here={away} copy />
+					<span className="spill" data-st={statusTone(card.status, card.statusCategory)}>
+						{card.status ?? "-"}
+					</span>
 				</>
 			}
-			extra={<Pills pills={mrPills(card, apps)} card={card} here={carried ? null : here} />}
 			status={card.status}
 			statusCategory={card.statusCategory}
 			statusKind={card.onBoard ? "jira.sprint_cards" : "jira.branch_cards"}
