@@ -17,7 +17,7 @@ import {
 } from "../../lib/releases/sprint";
 import type { Board, CardUnit, MineReason, SprintCard, SprintRow, Train } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
-import { cardHits } from "../../lib/releases/fix";
+import { cardHits } from "../../lib/releases/hitScope";
 import { appMarkOf } from "../../lib/releases/appMark";
 import { AlertList } from "./Alerts";
 import { AppMark } from "./AppMark";

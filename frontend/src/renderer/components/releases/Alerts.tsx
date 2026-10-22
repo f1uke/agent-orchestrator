@@ -7,6 +7,7 @@ import { alertText, mineWhy, minePolicyOf, onlyMeSubject } from "../../lib/relea
 import type { AlertHit, Board } from "../../lib/releases/types";
 import type { SheetEntry } from "../../lib/releases/url";
 import { appMarkOf } from "../../lib/releases/appMark";
+import { splitKeys } from "../../lib/releases/hitScope";
 import { sheetPart } from "../../lib/releases/sheetPart";
 import { subjectLabel, subjectSheet } from "../../lib/releases/subject";
 import { SEVERITY_META } from "../../lib/releases/vocab";
@@ -114,6 +115,30 @@ function SubjectLine({ h, c, open }: { h: AlertHit; c: AlertCtx; open: SheetEntr
 	);
 }
 
+function HitText({ h, c }: { h: AlertHit; c: AlertCtx }) {
+	const keys = h.subject.kind === "pageFamily" ? h.subject.keys : [];
+	return (
+		<div className="tx">
+			{splitKeys(alertText(h, c.lens.me), keys).map((p, i) =>
+				"key" in p ? (
+					<button
+						key={i}
+						type="button"
+						className="key"
+						data-testid="hit-key"
+						title="Open this card"
+						onClick={() => c.actions.openSheet({ kind: "card", key: p.key }, "push")}
+					>
+						{p.key}
+					</button>
+				) : (
+					p.text
+				),
+			)}
+		</div>
+	);
+}
+
 function MineLine({ h, c }: { h: AlertHit; c: AlertCtx }) {
 	const why = c.lens.me ? mineWhy(h) : "";
 	const policy = minePolicyOf(c.board.catalogue, h.rule);
@@ -169,7 +194,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 					)}
 				</div>
 				<SubjectLine h={h} c={c} open={hidden ? null : target} />
-				<div className="tx">{alertText(h, c.lens.me)}</div>
+				<HitText h={h} c={c} />
 				<MineLine h={h} c={c} />
 				<div className="acts">
 					<button

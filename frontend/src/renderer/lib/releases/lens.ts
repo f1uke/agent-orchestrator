@@ -111,8 +111,9 @@ export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySe
 	const me = url.me && b.identity.kind === "known";
 	const keep = <T extends { mine?: readonly MineReason[] }>(x: T) => !me || isMine(x);
 	const focus = focusTrain(b, url.focus);
+	const ruleOff = new Set(b.catalogue.filter((r) => !r.on).map((r) => r.id));
 	const bucket = (k: AlertHit["bucket"]) =>
-		b.alerts.hits.filter((h) => h.bucket === k && on(h.app) && keep(h)).sort(bySeverity);
+		b.alerts.hits.filter((h) => h.bucket === k && !ruleOff.has(h.rule) && on(h.app) && keep(h)).sort(bySeverity);
 	const attention = bucket("badge");
 	return {
 		focus,
