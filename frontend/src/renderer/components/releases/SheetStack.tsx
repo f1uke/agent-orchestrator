@@ -31,6 +31,7 @@ import {
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Switch } from "../ui/switch";
 import { appMarkOf } from "../../lib/releases/appMark";
+import { versionHits } from "../../lib/releases/hitScope";
 import { AlertList, AlertRow, Ext, HitLinks, HitWho, Sec } from "./Alerts";
 import { AppMark } from "./AppMark";
 import { Avatar } from "./Avatar";
@@ -355,7 +356,7 @@ function versionSheet(trainId: string, app: string, c: Ctx): Sheet {
 	const pg = releasePage(c.board, t, app);
 	const mr = v.releaseMr;
 	const ap = approvals(v);
-	const hits = c.lens.attention.filter((h) => h.train === t.id && h.app === app);
+	const hits = versionHits(c.lens.attention, c.board, t.id, app);
 	return {
 		title: (
 			<>

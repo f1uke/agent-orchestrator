@@ -17,7 +17,7 @@ import {
 } from "./lens";
 import { cardGroups } from "./cards";
 import { board, hotfix as hotfixOf, stage, train, version } from "./testkit";
-import type { AlertHit, Badge, RuleOutcome } from "./types";
+import type { AlertHit, Badge, RuleInfo, RuleOutcome } from "./types";
 import { parseReleasesSearch } from "./url";
 
 const hit = (id: string, over: Partial<AlertHit> = {}): AlertHit => ({
@@ -104,6 +104,11 @@ describe("lens", () => {
 		expect(lens.attention.map((h) => h.id)).toEqual(["B1~v/21-2026/di", "B1~v/21-2026/da", "F1~t/21-2026"]);
 		expect(lens.history.map((h) => h.id)).toEqual(["C1~v/20-2026/di"]);
 		expect(lens.hidden.map((h) => h.id)).toEqual(["C2~v/21-2026/di"]);
+	});
+
+	it("drops a rule's hits the moment it is turned off, before the Board refetches", () => {
+		const off = { ...b, catalogue: [{ id: "B1", on: false } as RuleInfo] };
+		expect(makeLens(off, parseReleasesSearch({}), new Set()).attention.map((h) => h.id)).toEqual(["F1~t/21-2026"]);
 	});
 });
 

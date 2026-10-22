@@ -1143,6 +1143,21 @@ test.describe("release fixes", () => {
 		await expect(alertRow(page, "C1~v/21-2026/di").getByRole("button", { name: "Fix ›" })).toBeVisible();
 		await expect(alertRow(page, "C5~v/21-2026/di").getByRole("button", { name: "Fix ›" })).toHaveCount(0);
 	});
+
+	test("a release lists its train page's missing cards, each opens a card that lists the same alert until it is hidden", async ({
+		page,
+	}) => {
+		const g5 = "G5~pf/21-2026/demo/merged";
+		await open(page, "?sheet=version:21-2026:da", "fixes");
+		await alertRow(page, g5).getByTestId("hit-key").filter({ hasText: "DEMO-106" }).click();
+		await expect(sheet(page)).toContainText("DEMO-106");
+		await expect(alertRow(page, g5)).toBeVisible();
+		await alertRow(page, g5)
+			.getByRole("button", { name: `Hide ${g5}` })
+			.click();
+		await expect(alertRow(page, g5)).toHaveCount(0);
+		await expect(sheet(page).getByText("Needs attention")).toHaveCount(0);
+	});
 });
 
 for (const { width, height } of VIEWPORTS) {
