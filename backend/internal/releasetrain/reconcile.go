@@ -32,6 +32,7 @@ func Reconcile(in Inputs, env Env) Board {
 			v.Stages = stages(t, v, b.Today, rs)
 		}
 	}
+	b.Forecast = forecast(&b, in.Config, in.Snap)
 	b.Sprints = sprintRows(in.Config, in.Snap, routing{
 		cutover: b.Cutover, llbs: llbs, groups: groupsByBranch(b.LLBs),
 		trains: b.Trains, plans: planTrains(b.Trains, b.Today), noMR: in.Human.NoMR,

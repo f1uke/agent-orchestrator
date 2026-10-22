@@ -47,6 +47,9 @@ func (t *TrainID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// regular is a numbered train in the yearly sequence, not an extra one like "#20-1".
+func (t TrainID) regular() bool { return t.Extra == 0 }
+
 func (t TrainID) less(o TrainID) bool {
 	if t.Year != o.Year {
 		return t.Year < o.Year
