@@ -1,5 +1,5 @@
 import { addDays, dayDiff, maxDay, minDay, weekday } from "./day";
-import type { AppId, AppVersion, Board, Day, Hotfix, Stage, Train, TrainKey } from "./types";
+import type { AppId, AppVersion, Board, Day, Forecast, ForecastVersion, Hotfix, Stage, Train, TrainKey } from "./types";
 
 export const DW = 36;
 export const LABEL_W = 280;
@@ -12,7 +12,7 @@ const LLB_LANE_H = 24;
 const LANES_PAD = 8;
 const ROW_PAD = 10;
 const LOOKBACK_DAYS = 56;
-const TAIL_DAYS = 12;
+const TAIL_DAYS = 21;
 
 export type Timeline = {
 	start: Day;
@@ -33,6 +33,7 @@ export function timeline(b: Board): Timeline {
 	const lastDay = maxDay(
 		b.today,
 		...b.trains.flatMap((t) => (t.publish ? [t.publish] : [])),
+		...(b.forecast ? [b.forecast.publish] : []),
 		...b.hotfixes.flatMap((h) => (h.milestone.due ? [h.milestone.due] : [])),
 		...b.sprints.flatMap((s) => (s.sprint.end ? [s.sprint.end] : [])),
 	);
@@ -61,7 +62,8 @@ type ItemBase = {
 };
 export type LaneItem =
 	| (ItemBase & { kind: "train"; train: Train; version: AppVersion; offDates: boolean })
-	| (ItemBase & { kind: "hotfix"; hotfix: Hotfix; offDates: false });
+	| (ItemBase & { kind: "hotfix"; hotfix: Hotfix; offDates: false })
+	| (ItemBase & { kind: "forecast"; forecast: Forecast; version: ForecastVersion; offDates: false });
 
 export type AppLanes = { items: LaneItem[]; laneH: number[]; laneTop: number[]; lanesH: number };
 export type LaneOptions = { focus: TrainKey | null; past: boolean; hotfixes: boolean };
@@ -116,6 +118,22 @@ export function appLanes(b: Board, tl: Timeline, app: AppId, o: LaneOptions): Ap
 			offDates: t.datesSplit.includes(app),
 		});
 	}
+	const fv = b.forecast?.versions.find((x) => x.app === app);
+	if (b.forecast && fv)
+		items.push({
+			kind: "forecast",
+			key: b.forecast.id,
+			forecast: b.forecast,
+			version: fv,
+			freeze: fv.freeze,
+			publish: fv.publish,
+			stages: [],
+			markers: false,
+			lo: fv.freeze,
+			hi: fv.publish,
+			lane: 0,
+			offDates: false,
+		});
 	if (o.hotfixes) {
 		for (const h of b.hotfixes) {
 			const freeze = h.milestone.start ?? h.milestone.due;

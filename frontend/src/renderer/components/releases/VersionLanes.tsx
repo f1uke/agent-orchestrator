@@ -257,6 +257,41 @@ function HotfixBar({
 	);
 }
 
+function ForecastBar({ it, tl, top }: { it: Extract<LaneItem, { kind: "forecast" }>; tl: Timeline; top: number }) {
+	const box = barBox(tl, it.freeze, it.publish);
+	const v = it.version;
+	const basis = `${v.basis[0].split("-")[0]}-${v.basis[v.basis.length - 1].split("-")[0]}`;
+	const title = [
+		`${it.forecast.label} is predicted, not planned: no milestone, Jira release or train page names it yet.`,
+		`Every ${v.cadence} days, from the spacing and stage offsets of #${basis}.`,
+		...v.stages.map((s) => `${STAGE_META[s.key].label} · ${dayLabel(s.date)}`),
+	].join("\n");
+	return (
+		<div
+			className="rel-bar forecast quiet"
+			data-st="todo"
+			data-train={it.forecast.id}
+			data-testid={`forecast-${v.app}-${it.forecast.id}`}
+			data-fit
+			style={{ left: box.left, width: box.width, top }}
+			title={title}
+		>
+			<span className="bl" data-sticky>
+				<span className="l1">
+					<span className="mono">{it.forecast.label}</span>
+					<span className="pdt">predicted</span>
+					<span className="dt" data-part="dates">
+						{shortDay(it.freeze)} → {shortDay(it.publish)}
+					</span>
+				</span>
+				<span className="l2">
+					every {v.cadence} days · from #{basis}
+				</span>
+			</span>
+		</div>
+	);
+}
+
 function Markers({
 	it,
 	tl,
@@ -264,7 +299,7 @@ function Markers({
 	actions,
 	now,
 }: {
-	it: LaneItem;
+	it: Exclude<LaneItem, { kind: "forecast" }>;
 	tl: Timeline;
 	y: number;
 	actions: PageActions;
@@ -323,10 +358,14 @@ export function VersionLanes({
 					<Fragment key={`${it.kind}:${it.key}`}>
 						{it.kind === "train" ? (
 							<TrainBar it={it} tl={tl} top={y} lens={lens} actions={actions} today={board.today} />
-						) : (
+						) : it.kind === "hotfix" ? (
 							<HotfixBar it={it} tl={tl} top={y} actions={actions} />
+						) : (
+							<ForecastBar it={it} tl={tl} top={y} />
 						)}
-						{it.markers && <Markers it={it} tl={tl} y={y + MARKER_TOP} actions={actions} now={now} />}
+						{it.markers && it.kind !== "forecast" && (
+							<Markers it={it} tl={tl} y={y + MARKER_TOP} actions={actions} now={now} />
+						)}
 					</Fragment>
 				);
 			})}

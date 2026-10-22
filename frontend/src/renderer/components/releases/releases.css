@@ -797,6 +797,22 @@
 		background: rgb(167 139 250 / 0.05);
 		border-color: rgb(167 139 250 / 0.35);
 	}
+	.rel-bar.forecast {
+		border-style: dotted;
+		background: transparent;
+		cursor: default;
+		opacity: 0.85;
+	}
+	.rel-bar.forecast:hover {
+		background: transparent;
+	}
+	.rel-bar .pdt {
+		font-size: 10px;
+		font-weight: 600;
+		color: var(--fg-passive);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
 	.rel-bar.offtrain {
 		border-style: dashed;
 		border-color: var(--red);

@@ -18,6 +18,7 @@ import {
 	timeline,
 } from "./layout";
 import { board, hotfix, stage, train, version } from "./testkit";
+import type { Forecast } from "./types";
 
 const t20 = train("20-2026", "2026-09-29", "2026-10-06", "past", [
 	version("20-2026", "di", "2.3.0", "2026-09-29", "2026-10-06", {
@@ -37,11 +38,49 @@ const t22 = train("22-2026", "2026-10-27", "2026-11-03", "next", [
 	version("22-2026", "di", "2.5.0", "2026-10-27", "2026-11-03"),
 ]);
 
+const f23: Forecast = {
+	id: "23-2026",
+	label: "#23",
+	freeze: "2026-11-10",
+	publish: "2026-11-17",
+	versions: [
+		{
+			app: "di",
+			freeze: "2026-11-10",
+			publish: "2026-11-17",
+			cadence: 14,
+			basis: ["20-2026", "21-2026", "22-2026"],
+			stages: [
+				{ key: "freeze", date: "2026-11-10" },
+				{ key: "publish", date: "2026-11-17" },
+			],
+		},
+	],
+};
+
+describe("forecast", () => {
+	it("pushes the timeline end to 21 days after the predicted publish", () => {
+		const tl = timeline(board({ today: "2026-10-14", trains: [t20, t21, t22], forecast: f23 }));
+		expect(tl.end).toBe("2026-12-08");
+	});
+
+	it("gives the predicted train a quiet bar in the apps it predicts, with no stage markers", () => {
+		const b = board({ today: "2026-10-14", trains: [t20, t21, t22], forecast: f23 });
+		const tl = timeline(b);
+		const opts = { focus: "21-2026", past: false, hotfixes: false };
+		const di = appLanes(b, tl, "di", opts).items.filter((it) => it.kind === "forecast");
+		expect(di.map((it) => [it.key, it.freeze, it.publish, it.markers])).toEqual([
+			["23-2026", "2026-11-10", "2026-11-17", false],
+		]);
+		expect(appLanes(b, tl, "da", opts).items.some((it) => it.kind === "forecast")).toBe(false);
+	});
+});
+
 describe("timeline", () => {
-	it("starts on the Monday eight weeks or more before today and ends 12 days after the last publish", () => {
+	it("starts on the Monday eight weeks or more before today and ends 21 days after the last publish", () => {
 		const tl = timeline(board({ today: "2026-10-14", trains: [t20, t21, t22] }));
 		expect(tl.start).toBe("2026-08-17");
-		expect(tl.end).toBe("2026-11-15");
+		expect(tl.end).toBe("2026-11-24");
 		expect(tl.x("2026-08-17")).toBe(0);
 		expect(tl.x("2026-08-18")).toBe(DW);
 		expect(tl.width).toBe(tl.days * DW);
@@ -50,7 +89,7 @@ describe("timeline", () => {
 	it("needs no sprint rows, which a cold start lacks for minutes", () => {
 		const tl = timeline(board({ today: "2026-10-14", trains: [t21], sprints: [] }));
 		expect(tl.start <= "2026-10-13").toBe(true);
-		expect(tl.end).toBe("2026-11-01");
+		expect(tl.end).toBe("2026-11-10");
 	});
 
 	it("reaches back to an active sprint that began before the eight weeks", () => {
