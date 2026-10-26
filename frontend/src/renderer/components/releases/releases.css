@@ -1755,6 +1755,18 @@
 		color: var(--c);
 		border-color: color-mix(in srgb, var(--c) 45%, transparent);
 	}
+	.rel-sheet .auto {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 10.5px;
+		padding: 0 6px;
+		border-radius: 4px;
+		border: 1px dashed var(--border-1);
+		color: var(--fg-passive);
+		white-space: nowrap;
+		flex: none;
+	}
 	.rel-sheet .plan {
 		margin-top: 12px;
 		padding: 12px;

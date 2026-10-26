@@ -53,7 +53,9 @@ type LongLivedBranch struct {
 	State LLBState `json:"state"`
 	// Train is the train a merged landing rides.
 	Train *TrainID `json:"train,omitempty"`
-	outs  []MRFact
+	// Auto means the plan does not name this branch: it joined as a twin of the branches the plan names.
+	Auto bool `json:"auto,omitempty"`
+	outs []MRFact
 }
 
 // LLBTarget is the train a long-lived branch group landed in or is meant for.
@@ -260,7 +262,9 @@ func llbState(b LongLivedBranch, ins []MRFact, cutover Day, hasCutover bool) LLB
 }
 
 // A plan naming no branches takes the derived group with its id, so
-// `ao train plan set <id> --target dropped` needs no --branch.
+// `ao train plan set <id> --target dropped` needs no --branch. A plan naming
+// branches also takes their twins in apps it does not cover yet, unless
+// another plan names them: a branch another app opens later follows the plan.
 func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epics pageEpics, cfg Config) []LLBGroup {
 	claimed := map[PlanBranch]bool{}
 	used := map[string]bool{}
@@ -270,6 +274,32 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 		}
 		if len(p.Branches) > 0 {
 			used[string(p.ID)] = true
+		}
+	}
+	auto := map[PlanBranch]PlanID{}
+	inPlan := func(p LlbPlan, b LongLivedBranch) bool {
+		id, ok := auto[PlanBranch{App: b.App, Branch: b.Branch}]
+		return containsBranch(p.Branches, b) || ok && id == p.ID
+	}
+	for _, b := range branches {
+		pb := PlanBranch{App: b.App, Branch: b.Branch}
+		if claimed[pb] {
+			continue
+		}
+		for _, p := range plans {
+			if len(p.Branches) == 0 {
+				continue
+			}
+			var members []LongLivedBranch
+			for _, x := range branches {
+				if inPlan(p, x) {
+					members = append(members, x)
+				}
+			}
+			if twins(members, b) {
+				auto[pb], claimed[pb] = p.ID, true
+				break
+			}
 		}
 	}
 	type draft struct {
@@ -312,7 +342,8 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 			}
 		}
 		for _, b := range branches {
-			if containsBranch(p.Branches, b) {
+			if inPlan(p, b) {
+				b.Auto = !containsBranch(p.Branches, b)
 				g.Branches = append(g.Branches, b)
 			}
 		}

@@ -225,11 +225,16 @@ func TestLLBCutoverIsTheFirstMergeIntoASprintBranch(t *testing.T) {
 	}
 }
 
+// llbGroups lists each group's branches as app:branch, with " (auto)" on a branch its plan does not name.
 func llbGroups(b Board) map[PlanID][]string {
 	out := map[PlanID][]string{}
 	for _, g := range b.LLBs {
 		for _, br := range g.Branches {
-			out[g.ID] = append(out[g.ID], string(br.App)+":"+br.Branch)
+			s := string(br.App) + ":" + br.Branch
+			if br.Auto {
+				s += " (auto)"
+			}
+			out[g.ID] = append(out[g.ID], s)
 		}
 	}
 	return out
@@ -290,7 +295,7 @@ func TestLLBPlanTakesALaterSameNameBranchOfAnotherApp(t *testing.T) {
 		Branches: []PlanBranch{{App: "da", Branch: "feature/demo-history-list"}},
 	}}
 	b := f.reconcile()
-	want := map[PlanID][]string{"demo-history-list": {"di:feature/demo-history-list", "da:feature/demo-history-list"}}
+	want := map[PlanID][]string{"demo-history-list": {"di:feature/demo-history-list (auto)", "da:feature/demo-history-list"}}
 	if got := llbGroups(b); !reflect.DeepEqual(got, want) {
 		t.Fatalf("groups = %v, want %v", got, want)
 	}
@@ -300,6 +305,57 @@ func TestLLBPlanTakesALaterSameNameBranchOfAnotherApp(t *testing.T) {
 	}
 	if got := firedIDs(b, "G4"); got != nil {
 		t.Fatalf("G4 hits = %v, want none", got)
+	}
+}
+
+func TestLLBPlanTwins(t *testing.T) {
+	plan := func(id PlanID, branches ...PlanBranch) LlbPlan {
+		return LlbPlan{ID: id, Name: string(id), TargetKind: TargetUnplanned, Version: 1, Branches: branches}
+	}
+	for _, tc := range []struct {
+		name  string
+		setup func(f *fixture)
+		plans []LlbPlan
+		want  map[PlanID][]string
+	}{
+		{"a branch sharing a card joins the plan", func(f *fixture) {
+			f.mr("da", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MRMerged, "2026-09-01", "2026-09-02")
+			f.mr("di", "DEMO-1 list", "feat/DEMO-1", "feature/demo-records", MRMerged, "2026-09-03", "2026-09-04")
+		}, []LlbPlan{plan("history", PlanBranch{App: "da", Branch: "feature/demo-history-list"})}, map[PlanID][]string{
+			"history": {"di:feature/demo-records (auto)", "da:feature/demo-history-list"},
+		}},
+		{"a twin in an app the plan already covers stays out", func(f *fixture) {
+			f.mr("da", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MRMerged, "2026-09-01", "2026-09-02")
+			f.mr("da", "DEMO-1 list", "feat/DEMO-1b", "feature/demo-history-list-2", MRMerged, "2026-09-03", "2026-09-04")
+		}, []LlbPlan{plan("history", PlanBranch{App: "da", Branch: "feature/demo-history-list"})}, map[PlanID][]string{
+			"history":           {"da:feature/demo-history-list"},
+			"demo-history-list": {"da:feature/demo-history-list-2"},
+		}},
+		{"a branch another plan names stays there", func(f *fixture) {
+			f.mr("da", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MRMerged, "2026-09-01", "2026-09-02")
+			f.mr("di", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MRMerged, "2026-09-03", "2026-09-04")
+		}, []LlbPlan{
+			plan("android", PlanBranch{App: "da", Branch: "feature/demo-history-list"}),
+			plan("ios", PlanBranch{App: "di", Branch: "feature/demo-history-list"}),
+		}, map[PlanID][]string{
+			"android": {"da:feature/demo-history-list"},
+			"ios":     {"di:feature/demo-history-list"},
+		}},
+		{"a plan naming no branches takes the derived group as before", func(f *fixture) {
+			f.mr("da", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MRMerged, "2026-09-01", "2026-09-02")
+			f.mr("di", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MRMerged, "2026-09-03", "2026-09-04")
+		}, []LlbPlan{plan("demo-history-list")}, map[PlanID][]string{
+			"demo-history-list": {"di:feature/demo-history-list", "da:feature/demo-history-list"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, today)
+			tc.setup(f)
+			f.human.Plans = tc.plans
+			if got := llbGroups(f.reconcile()); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("groups = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
