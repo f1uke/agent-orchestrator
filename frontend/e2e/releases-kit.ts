@@ -31,7 +31,7 @@ export const freezeRings = (page: Page) =>
 export async function open(
 	page: Page,
 	query = "",
-	variant?: "dense-lists" | "failed-source" | "identity-unknown" | "fixes" | "stale-kind" | "subjects",
+	variant?: "dense-lists" | "failed-source" | "identity-unknown" | "fixes" | "stale-kind" | "subjects" | "twin",
 ) {
 	await page.addInitScript((v) => {
 		try {

@@ -1633,6 +1633,23 @@ export function subjectsBoard(today: string): Board {
 	return markHitMine(b);
 }
 
+export function twinBoard(today: string): Board {
+	const b = demoBoard(today);
+	const wallet = b.llbs.find((g) => g.id === "demo-wallet");
+	const di = wallet?.branches[0];
+	if (!wallet?.plan || !di) return b;
+	wallet.plan.branches = [{ app: "di", branch: di.branch }];
+	wallet.branches.push({
+		...di,
+		app: "da",
+		openedOn: addDays(today, -6),
+		ahead: 3,
+		cards: di.cards.slice(1),
+		auto: true,
+	});
+	return b;
+}
+
 export function demoResponse(board: Board): BoardResponse {
 	return { config: { state: "ok", path: "~/.ao/data/release-train.json" }, board };
 }

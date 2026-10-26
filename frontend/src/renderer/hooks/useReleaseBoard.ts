@@ -8,6 +8,7 @@ import {
 	failedSourceBoard,
 	fixesBoard,
 	staleKindBoard,
+	twinBoard,
 	subjectsBoard,
 	unknownIdentityBoard,
 } from "../lib/releases/fixture";
@@ -35,6 +36,7 @@ const VARIANTS = {
 	fixes: fixesBoard,
 	subjects: subjectsBoard,
 	"stale-kind": staleKindBoard,
+	twin: twinBoard,
 } as const;
 
 function previewBoard(): BoardResponse {
