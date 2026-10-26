@@ -13452,6 +13452,8 @@ components:
           type:
           - object
           - "null"
+        forecast:
+          $ref: '#/components/schemas/ReleaseTrainForecast'
         hotfixes:
           items:
             $ref: '#/components/schemas/ReleaseTrainHotfix'
@@ -14324,6 +14326,65 @@ components:
       - version
       - createdOn
       - url
+      type: object
+    ReleaseTrainForecast:
+      properties:
+        freeze:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        id:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        label:
+          type: string
+        publish:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        versions:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainForecastVersion'
+          type: array
+      required:
+      - id
+      - label
+      - freeze
+      - publish
+      - versions
+      type: object
+    ReleaseTrainForecastStage:
+      properties:
+        date:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        key:
+          $ref: '#/components/schemas/ReleaseTrainStageKey'
+      required:
+      - key
+      - date
+      type: object
+    ReleaseTrainForecastVersion:
+      properties:
+        app:
+          type: string
+        basis:
+          items:
+            description: Train key, "21-2026" or "20-1-2026".
+            type: string
+          type: array
+        cadence:
+          type: integer
+        freeze:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        publish:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        stages:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainForecastStage'
+          type: array
+      required:
+      - app
+      - freeze
+      - publish
+      - cadence
+      - basis
+      - stages
       type: object
     ReleaseTrainHideRequest:
       properties:

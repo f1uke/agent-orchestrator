@@ -52,11 +52,14 @@ type Board struct {
 	Apps    []BoardApp        `json:"apps"`
 	Sources []SourceFreshness `json:"sources"`
 	// Kinds is every fact kind with its system, label and budget, sorted by kind.
-	Kinds      []KindFreshness `json:"kinds"`
-	Trains     []Train         `json:"trains"`
-	Hotfixes   []Hotfix        `json:"hotfixes"`
-	Mismatches []Mismatch      `json:"mismatches"`
-	LLBs       []LLBGroup      `json:"llbs"`
+	Kinds  []KindFreshness `json:"kinds"`
+	Trains []Train         `json:"trains"`
+	// Forecast is the predicted train after the last known one; nil when no app has enough
+	// history, a Jira release or train page already names it, or its window is over.
+	Forecast   *Forecast  `json:"forecast,omitempty"`
+	Hotfixes   []Hotfix   `json:"hotfixes"`
+	Mismatches []Mismatch `json:"mismatches"`
+	LLBs       []LLBGroup `json:"llbs"`
 	// Sprints is one row per configured board with an active sprint.
 	Sprints []SprintRow `json:"sprints"`
 	// Cutover is each app's first merge into a sprint branch; apps with none are absent.

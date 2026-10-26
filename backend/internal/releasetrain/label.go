@@ -47,6 +47,8 @@ func (t *TrainID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+func (t TrainID) regular() bool { return t.Extra == 0 }
+
 func (t TrainID) less(o TrainID) bool {
 	if t.Year != o.Year {
 		return t.Year < o.Year

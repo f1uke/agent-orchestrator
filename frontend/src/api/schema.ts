@@ -4730,6 +4730,7 @@ export interface components {
             cutover: {
                 [key: string]: components["schemas"]["ReleaseTrainDay"];
             } | null;
+            forecast?: components["schemas"]["ReleaseTrainForecast"];
             hotfixes: components["schemas"]["ReleaseTrainHotfix"][];
             identity: components["schemas"]["ReleaseTrainIdentity"];
             kinds: components["schemas"]["ReleaseTrainKindFreshness"][];
@@ -5058,6 +5059,26 @@ export interface components {
             statusCategory: string;
             url: string;
             version: string;
+        };
+        ReleaseTrainForecast: {
+            freeze: components["schemas"]["ReleaseTrainDay"];
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            id: string;
+            label: string;
+            publish: components["schemas"]["ReleaseTrainDay"];
+            versions: components["schemas"]["ReleaseTrainForecastVersion"][];
+        };
+        ReleaseTrainForecastStage: {
+            date: components["schemas"]["ReleaseTrainDay"];
+            key: components["schemas"]["ReleaseTrainStageKey"];
+        };
+        ReleaseTrainForecastVersion: {
+            app: string;
+            basis: string[];
+            cadence: number;
+            freeze: components["schemas"]["ReleaseTrainDay"];
+            publish: components["schemas"]["ReleaseTrainDay"];
+            stages: components["schemas"]["ReleaseTrainForecastStage"][];
         };
         ReleaseTrainHideRequest: {
             /** @description Why it is hidden; shown in the Hidden list. */
