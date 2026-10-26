@@ -70,6 +70,7 @@ type Board struct {
 	Catalogue []RuleInfo    `json:"catalogue"`
 	fix       fixContext
 	mrs       map[AppID][]MRFact
+	moved     map[string]string
 }
 
 // BoardApp is one configured app as every surface names it.

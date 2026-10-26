@@ -518,6 +518,18 @@ test.describe("releases page", () => {
 		await expect(form.getByTestId("plan-epic-suggestion")).toHaveCount(0);
 	});
 
+	test("a card key Jira moved shows where it moved, links the MR and never the card it now names", async ({ page }) => {
+		await open(page, "?sheet=llb:demo-wallet");
+		const branch = page.getByTestId("llb-branch").filter({ hasText: "feature/demo-wallet" });
+		const moved = branch.locator('.crow[data-key="OLD-1"]');
+		await expect(moved).toContainText("moved to NEW-9 in Jira");
+		await expect(moved).toContainText("Fix MR title");
+		await expect(moved.locator("a")).toHaveText("!304");
+		await expect(moved.locator("a.k")).toHaveCount(0);
+		await expect(moved).not.toHaveAttribute("role", "button");
+		await expect(branch.locator(".crow")).toHaveCount(4);
+	});
+
 	test("a long-lived branch group's drawer lists the alerts about its branches", async ({ page }) => {
 		await open(page, "?sheet=llb:demo-wallet");
 		const sheet = page.locator(".rel-sheet");

@@ -183,6 +183,18 @@ func mrKeys(mr MRFact) []string {
 	return issueKeyRE.FindAllString(mr.SourceBranch, -1)
 }
 
+func movedKeys(snap Snapshot) map[string]string {
+	out := map[string]string{}
+	for _, k := range []Kind[IssueFact]{KindLLBCards, KindBranchCards} {
+		for _, is := range AllItems(snap, k) {
+			if is.MovedTo != "" {
+				out[is.Key] = is.MovedTo
+			}
+		}
+	}
+	return out
+}
+
 func sprintOf(branch string) (int, bool) {
 	m := sprintBranchRE.FindStringSubmatch(branch)
 	if m == nil {

@@ -1,6 +1,7 @@
 package releasetrain
 
 import (
+	"slices"
 	"sort"
 	"time"
 )
@@ -139,7 +140,9 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 		live = append(live, id)
 	}
 	pv.BranchCardKeys = sprintBranchKeys(cfg, snap, live)
-	pv.WatchedCardKeys = watchedCards(b.Trains, rs, append(append([]string{}, pv.LLBCardKeys...), pv.BranchCardKeys...))
+	moved := movedKeys(snap)
+	cards := slices.DeleteFunc(append(append([]string{}, pv.LLBCardKeys...), pv.BranchCardKeys...), func(k string) bool { return moved[k] != "" })
+	pv.WatchedCardKeys = watchedCards(b.Trains, rs, cards)
 	return pv
 }
 
@@ -186,6 +189,9 @@ func plannedLLBs(cfg Config, snap Snapshot) ([]PlannedLLB, []string) {
 		}
 		for _, c := range b.Cards {
 			keys[c.Key] = true
+		}
+		for _, m := range b.Moved {
+			keys[m.Key] = true
 		}
 	}
 	sorted := make([]string, 0, len(keys))

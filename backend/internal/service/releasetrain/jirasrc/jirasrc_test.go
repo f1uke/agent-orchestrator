@@ -335,3 +335,30 @@ func TestLLBCardsCarryTheirParentAndItsTypeAndPageCardsTheirOwnType(t *testing.T
 		t.Fatalf("page cards = %+v, want DEMO-5 typed Epic", got)
 	}
 }
+
+func TestCardsReadByKeyRecordAKeyJiraMovedAndDropTheCardItNowNames(t *testing.T) {
+	jira := rttest.NewJira(t)
+	jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-1, GONE-3, OLD-1) ORDER BY key`, `{"issues":[`+
+		issue("DEMO-1", "Login", "In Progress", "indeterminate", false, nil, "")+","+
+		issue("NEW-9", "Unrelated web card", "Done", "done", false, nil, "")+`]}`)
+	jira.Set(`/rest/api/3/search/jql?jql=key = GONE-3 ORDER BY key`, `{"issues":[]}`)
+	jira.Set(`/rest/api/3/search/jql?jql=key = OLD-1 ORDER BY key`, `{"issues":[`+issue("NEW-9", "Unrelated web card", "Done", "done", false, nil, "")+`]}`)
+	v := testView()
+	v.BranchCardKeys = []string{"DEMO-1", "GONE-3", "OLD-1"}
+
+	b, err := newSource(jira).Fetch(t.Context(), rt.SpecFor(rt.KindBranchCards, rt.BranchCardsScope, ""), v, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, is := range decode(t, rt.KindBranchCards, b) {
+		got = append(got, is.Key+">"+is.MovedTo+" "+is.Summary)
+	}
+	if want := []string{"DEMO-1> Login", "OLD-1>NEW-9 "}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("branch cards = %q, want %q: a key Jira never had is left out, a moved one names its new key and nothing else", got, want)
+	}
+	if reqs := jira.TakeRequests(); len(reqs) != 3 {
+		t.Fatalf("requests = %q; want the key read and one lookup for each missing key", reqs)
+	}
+}

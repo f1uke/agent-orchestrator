@@ -222,6 +222,7 @@ func init() {
 		"SpecgenRtLLBDropped":                        "ReleaseTrainLLBDropped",
 		"ReleasetrainLLBGroup":                       "ReleaseTrainLLBGroup",
 		"ReleasetrainLLBCard":                        "ReleaseTrainLLBCard",
+		"ReleasetrainMovedKey":                       "ReleaseTrainMovedKey",
 		"ReleasetrainLLBState":                       "ReleaseTrainLLBState",
 		"ReleasetrainLongLivedBranch":                "ReleaseTrainLongLivedBranch",
 		"SpecgenRtCodeOpen":                          "ReleaseTrainCodeOpen",
