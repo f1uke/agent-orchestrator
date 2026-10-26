@@ -72,6 +72,19 @@ func everyRuleFires(t *testing.T) *fixture {
 	f.mr("di", "DEMO-80 coupon", "feat/DEMO-80", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-02")
 	f.branchIss = append(f.branchIss, &IssueFact{Key: "DEMO-80", Status: "Done", StatusCategory: StatusCategoryDone})
 	f.mr("di", "DEMO-99 part", "feat/DEMO-99", "feat/DEMO-98-base", MROpened, "2026-10-13", "")
+
+	f.mr("di", "DEMO-20 late", "feat/DEMO-20", "feature/demo-late", MRMerged, "2026-09-10", "2026-09-11")
+	f.mr("di", "DEMO-21 late", "feat/DEMO-21", "feature/demo-late", MRMerged, "2026-09-12", "2026-09-13")
+	f.mr("pi", "DEMO-30 loyalty", "feat/DEMO-30", "feature/demo-loyalty", MRMerged, "2026-09-10", "2026-09-11")
+	f.mr("pi", "DEMO-31 loyalty", "feat/DEMO-31", "feature/demo-loyalty", MRMerged, "2026-09-12", "2026-09-13")
+	f.mr("pi", "loyalty", "feature/demo-loyalty", "feature/sprint-21-2026", MROpened, "2026-10-13", "")
+	f.mr("pa", "DEMO-30 loyalty", "feat/DEMO-30", "feature/demo-loyalty", MRMerged, "2026-09-10", "2026-09-11")
+	f.mr("pa", "DEMO-31 loyalty", "feat/DEMO-31", "feature/demo-loyalty", MRMerged, "2026-09-12", "2026-09-13")
+	f.human.Plans = append(f.human.Plans,
+		LlbPlan{ID: "demo-late", Name: "Late", TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 21, Year: fixtureYear},
+			Branches: []PlanBranch{{App: "di", Branch: "feature/demo-late"}}},
+		LlbPlan{ID: "demo-loyalty", Name: "Loyalty", TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 22, Year: fixtureYear},
+			Branches: []PlanBranch{{App: "pi", Branch: "feature/demo-loyalty"}, {App: "pa", Branch: "feature/demo-loyalty"}}})
 	return f
 }
 

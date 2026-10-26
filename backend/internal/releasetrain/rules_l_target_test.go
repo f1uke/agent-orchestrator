@@ -41,7 +41,7 @@ func TestL10PlanTargetsATrainAndNoAppHasAnMRIntoItsSprintBranch(t *testing.T) {
 		t.Fatalf("L10 hits = %v, want one per app %v", got, want)
 	}
 	h := firedHits(b, "L10")[0]
-	text := "feature/demo-wallet has no MR into feature/sprint-21-2026 for #22; freeze is Fri 30 Oct, 4 working day(s) left"
+	text := "feature/demo-wallet has no MR into the sprint 21 branch for #22; freeze is Fri 30 Oct, 4 working day(s) left"
 	if h.Severity != SevInfo || h.Train == nil || *h.Train != train22 || h.Evidence["group"] != PlanID("demo-wallet") || h.Text != text {
 		t.Fatalf("L10 hit = %+v; want info on train #22, group demo-wallet, text %q", h, text)
 	}
