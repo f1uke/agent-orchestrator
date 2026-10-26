@@ -262,9 +262,7 @@ func llbState(b LongLivedBranch, ins []MRFact, cutover Day, hasCutover bool) LLB
 }
 
 // A plan naming no branches takes the derived group with its id, so
-// `ao train plan set <id> --target dropped` needs no --branch. A plan naming
-// branches also takes their twins in apps it does not cover yet, unless
-// another plan names them: a branch another app opens later follows the plan.
+// `ao train plan set <id> --target dropped` needs no --branch.
 func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epics pageEpics, cfg Config) []LLBGroup {
 	claimed := map[PlanBranch]bool{}
 	used := map[string]bool{}
@@ -276,32 +274,7 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 			used[string(p.ID)] = true
 		}
 	}
-	auto := map[PlanBranch]PlanID{}
-	inPlan := func(p LlbPlan, b LongLivedBranch) bool {
-		id, ok := auto[PlanBranch{App: b.App, Branch: b.Branch}]
-		return containsBranch(p.Branches, b) || ok && id == p.ID
-	}
-	for _, b := range branches {
-		pb := PlanBranch{App: b.App, Branch: b.Branch}
-		if claimed[pb] {
-			continue
-		}
-		for _, p := range plans {
-			if len(p.Branches) == 0 {
-				continue
-			}
-			var members []LongLivedBranch
-			for _, x := range branches {
-				if inPlan(p, x) {
-					members = append(members, x)
-				}
-			}
-			if twins(members, b) {
-				auto[pb], claimed[pb] = p.ID, true
-				break
-			}
-		}
-	}
+	twinOf := claimPlanTwins(branches, plans, claimed)
 	type draft struct {
 		id       string
 		branches []LongLivedBranch
@@ -342,7 +315,7 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 			}
 		}
 		for _, b := range branches {
-			if inPlan(p, b) {
+			if inPlan(p, b, twinOf) {
 				b.Auto = !containsBranch(p.Branches, b)
 				g.Branches = append(g.Branches, b)
 			}
@@ -376,6 +349,34 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
 	return groups
+}
+
+func claimPlanTwins(branches []LongLivedBranch, plans []LlbPlan, claimed map[PlanBranch]bool) map[PlanBranch]PlanID {
+	twinOf := map[PlanBranch]PlanID{}
+	for _, b := range branches {
+		pb := PlanBranch{App: b.App, Branch: b.Branch}
+		if claimed[pb] {
+			continue
+		}
+		for _, p := range plans {
+			var members []LongLivedBranch
+			for _, x := range branches {
+				if inPlan(p, x, twinOf) {
+					members = append(members, x)
+				}
+			}
+			if twins(members, b) {
+				twinOf[pb], claimed[pb] = p.ID, true
+				break
+			}
+		}
+	}
+	return twinOf
+}
+
+func inPlan(p LlbPlan, b LongLivedBranch, twinOf map[PlanBranch]PlanID) bool {
+	id, ok := twinOf[PlanBranch{App: b.App, Branch: b.Branch}]
+	return containsBranch(p.Branches, b) || ok && id == p.ID
 }
 
 func containsBranch(pbs []PlanBranch, b LongLivedBranch) bool {

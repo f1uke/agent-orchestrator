@@ -225,7 +225,6 @@ func TestLLBCutoverIsTheFirstMergeIntoASprintBranch(t *testing.T) {
 	}
 }
 
-// llbGroups lists each group's branches as app:branch, with " (auto)" on a branch its plan does not name.
 func llbGroups(b Board) map[PlanID][]string {
 	out := map[PlanID][]string{}
 	for _, g := range b.LLBs {
