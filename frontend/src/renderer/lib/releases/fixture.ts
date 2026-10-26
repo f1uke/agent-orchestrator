@@ -211,6 +211,7 @@ const RULES: [string, Severity, string][] = [
 	["F1", "info", "Two trains overlap"],
 	["G6", "hygiene", "MR names a card key that Jira moved to another project"],
 	["L9", "risk", "Code stranded in a branch that is not a sprint branch, a long-lived branch or develop"],
+	["L10", "info", "Long-lived branch targets a train but has no MR into its sprint branch"],
 ];
 
 const KINDS: readonly [string, string, number][] = [
@@ -263,6 +264,7 @@ const READS: Readonly<Record<string, string[]>> = {
 	L3: CARD_READS,
 	G6: ["gitlab.mrs", "jira.llb_cards", "jira.branch_cards"],
 	L9: ["gitlab.mrs"],
+	L10: [MS, "gitlab.mrs"],
 };
 
 const MINE_POLICY: Readonly<Record<string, MinePolicy>> = {
@@ -287,6 +289,7 @@ const MINE_POLICY: Readonly<Record<string, MinePolicy>> = {
 	L8: "mr",
 	G6: "mr",
 	L9: "mr",
+	L10: "listed_cards",
 };
 
 const SUBJECTS: Readonly<Record<string, SubjectKind[]>> = {
@@ -305,6 +308,7 @@ const SUBJECTS: Readonly<Record<string, SubjectKind[]>> = {
 	L3: ["cardOnTrain"],
 	G6: ["mr"],
 	L9: ["mr"],
+	L10: ["llbBranch"],
 };
 
 const FIX_KINDS: Readonly<Record<string, FixKind>> = {
@@ -520,6 +524,18 @@ function baseBoard(today: string): Board {
 				app: "da",
 				evidence: { mr: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base", state: "opened" },
 				links: [{ label: "Open MR", url: `${HOST}/merge_requests/415` }],
+			},
+		),
+		hit(
+			"L10~llb/22-2026/di/feature/demo-wallet",
+			"L10",
+			"info",
+			"feature/demo-wallet has no MR into the sprint 21 branch for #22; freeze is in 6 working day(s)",
+			{ kind: "llbBranch", train: "22-2026", app: "di", branch: "feature/demo-wallet", group: "demo-wallet" },
+			{
+				app: "di",
+				train: "22-2026",
+				evidence: { group: "demo-wallet", branch: "feature/demo-wallet", train: "22-2026" },
 			},
 		),
 		hit(

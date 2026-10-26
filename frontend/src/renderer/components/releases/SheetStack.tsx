@@ -128,7 +128,7 @@ function render(s: SheetEntry, c: Ctx): Sheet | null {
 		case "key":
 			return keySheet(c);
 		case "llb":
-			return llbSheet(s.id, c.board, c.actions);
+			return llbSheet(s.id, c);
 		case "llbs":
 			return llbsSheet(c.board, c.actions, () => true);
 		case "card":

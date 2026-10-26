@@ -28,6 +28,7 @@ const EXPECTED: Record<string, { target: Target; fallback: boolean }> = {
 	"L1~mr/di/330": { target: "llb-lane", fallback: false },
 	"L8~mr/pi/405": { target: "mr-glyph", fallback: false },
 	"L9~mr/da/415": { target: "app-label", fallback: true },
+	"L10~llb/22-2026/di/feature/demo-wallet": { target: "llb-lane", fallback: false },
 	"G5~pf/21-2026/demo/open": { target: "card-row", fallback: false },
 };
 

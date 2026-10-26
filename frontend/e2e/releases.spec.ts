@@ -116,16 +116,16 @@ test.describe("releases page", () => {
 	test("hiding an alert moves it to Hidden and Restore brings it back", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const count = page.getByTestId("attention-count");
-		await expect(count).toHaveText("8");
+		await expect(count).toHaveText("9");
 		await page.getByRole("button", { name: "Hide C1~v/21-2026/di" }).click();
-		await expect(count).toHaveText("7");
+		await expect(count).toHaveText("8");
 		await page
 			.getByTestId("hidden-fold")
 			.getByRole("button", { name: /hidden/ })
 			.click();
 		const hidden = page.locator('.al[data-hit="C1~v/21-2026/di"]');
 		await hidden.getByRole("button", { name: "Restore" }).click();
-		await expect(count).toHaveText("8");
+		await expect(count).toHaveText("9");
 	});
 
 	test("panning 500 px leaves no half-visible label and no bar at scaleX(0)", async ({ page }) => {
@@ -359,7 +359,7 @@ test.describe("releases page", () => {
 		await gitlab.hover();
 		await expect(page.getByTestId("source-card")).toContainText(/GitLab · unknown, last read \d+[mhd] ago/);
 		await page.mouse.move(700, 600);
-		await expect(page.getByTestId("attention-count")).toHaveText("8 · 1 unknown");
+		await expect(page.getByTestId("attention-count")).toHaveText("9 · 1 unknown");
 		await expect(page.locator('.rel-app[data-app="di"] .rel-mk[data-stage="scan"]')).toHaveAttribute(
 			"data-st",
 			"unknown",
@@ -528,6 +528,15 @@ test.describe("releases page", () => {
 		await expect(moved.locator("a.k")).toHaveCount(0);
 		await expect(moved).not.toHaveAttribute("role", "button");
 		await expect(branch.locator(".crow")).toHaveCount(4);
+	});
+
+	test("a long-lived branch group's drawer lists the alerts about its branches", async ({ page }) => {
+		await open(page, "?sheet=llb:demo-wallet");
+		const sheet = page.locator(".rel-sheet");
+		await expect(sheet.locator('.al[data-hit="L10~llb/22-2026/di/feature/demo-wallet"]')).toContainText(
+			"feature/demo-wallet has no MR into the sprint 21 branch for #22",
+		);
+		await expect(sheet.locator(".al[data-hit]")).toHaveCount(1);
 	});
 
 	test("a stale plan version shows the conflict and keeps the edit", async ({ page }) => {
@@ -787,7 +796,7 @@ test.describe("releases page", () => {
 
 	test("Only me filters every kind of thing and changes the badge", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
-		await expect(page.getByTestId("attention-count")).toHaveText("8");
+		await expect(page.getByTestId("attention-count")).toHaveText("9");
 		await page.getByTestId("only-me").click();
 		await expect(page).toHaveURL(/me=%221%22/);
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
@@ -973,7 +982,7 @@ test.describe("releases page", () => {
 		await expect(page.getByRole("tooltip")).toContainText(
 			"Only me needs your Jira and GitLab accounts: gitlab.user has not been read yet",
 		);
-		await expect(page.getByTestId("attention-count")).toHaveText("8");
+		await expect(page.getByTestId("attention-count")).toHaveText("9");
 		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveCount(0);
 	});
 

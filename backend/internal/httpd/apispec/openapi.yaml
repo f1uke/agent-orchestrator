@@ -15753,6 +15753,7 @@ components:
       - $ref: '#/components/schemas/ReleaseTrainSubjectMR'
       - $ref: '#/components/schemas/ReleaseTrainSubjectCard'
       - $ref: '#/components/schemas/ReleaseTrainSubjectPageFamily'
+      - $ref: '#/components/schemas/ReleaseTrainSubjectLLBBranch'
       type: object
     ReleaseTrainSubjectCard:
       properties:
@@ -15849,7 +15850,31 @@ components:
       - mr
       - card
       - pageFamily
+      - llbBranch
       type: string
+    ReleaseTrainSubjectLLBBranch:
+      properties:
+        app:
+          type: string
+        branch:
+          type: string
+        group:
+          description: The long-lived branch group whose plan sends the branch to
+            the train.
+          type: string
+        kind:
+          const: llbBranch
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      - app
+      - branch
+      - group
+      type: object
     ReleaseTrainSubjectMR:
       properties:
         app:

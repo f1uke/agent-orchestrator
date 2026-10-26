@@ -27,12 +27,13 @@ const (
 	SubjectMR          SubjectKind = "mr"
 	SubjectCard        SubjectKind = "card"
 	SubjectPageFamily  SubjectKind = "pageFamily"
+	SubjectLLBBranch   SubjectKind = "llbBranch"
 )
 
 // SubjectKinds lists every subject kind, for the API schema.
 var SubjectKinds = []SubjectKind{
 	SubjectVersion, SubjectVersionDate, SubjectJiraVersion, SubjectMilestone, SubjectHotfix, SubjectTrainPair,
-	SubjectHotfixTrain, SubjectCardOnTrain, SubjectMR, SubjectCard, SubjectPageFamily,
+	SubjectHotfixTrain, SubjectCardOnTrain, SubjectMR, SubjectCard, SubjectPageFamily, SubjectLLBBranch,
 }
 
 // Enum lists the subject kinds for the API schema.
@@ -144,8 +145,21 @@ func (s SubjHotfixTrain) subjectKey() string {
 func (s SubjCardOnTrain) subjectKey() string {
 	return fmt.Sprintf("ct/%s/%s/%s", s.Train.Key(), s.App, s.Key)
 }
+
+// SubjLLBBranch is one app's long-lived branch and the train its plan sends it to;
+// Group, the plan that owns it, does not take part in the hit's identity.
+type SubjLLBBranch struct {
+	Train  TrainID `json:"train"`
+	App    AppID   `json:"app"`
+	Branch string  `json:"branch"`
+	Group  PlanID  `json:"group"`
+}
+
 func (s SubjMR) subjectKey() string   { return fmt.Sprintf("mr/%s/%d", s.App, s.IID) }
 func (s SubjCard) subjectKey() string { return "c/" + s.Key }
+func (s SubjLLBBranch) subjectKey() string {
+	return fmt.Sprintf("llb/%s/%s/%s", s.Train.Key(), s.App, s.Branch)
+}
 func (s SubjPageFamily) subjectKey() string {
 	return fmt.Sprintf("pf/%s/%s/%s", s.Train.Key(), s.Family, s.Bucket)
 }
@@ -237,5 +251,14 @@ func (s SubjCard) MarshalJSON() ([]byte, error) { type plain SubjCard; return ta
 // MarshalJSON writes the subject with its "kind".
 func (s SubjPageFamily) MarshalJSON() ([]byte, error) {
 	type plain SubjPageFamily
+	return tagged(s, plain(s))
+}
+
+// Variant is "llbBranch".
+func (SubjLLBBranch) Variant() string { return string(SubjectLLBBranch) }
+
+// MarshalJSON writes the subject with its "kind".
+func (s SubjLLBBranch) MarshalJSON() ([]byte, error) {
+	type plain SubjLLBBranch
 	return tagged(s, plain(s))
 }

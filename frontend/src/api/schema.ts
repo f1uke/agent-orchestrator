@@ -5603,7 +5603,7 @@ export interface components {
             id: string;
             reason?: string;
         };
-        ReleaseTrainSubject: components["schemas"]["ReleaseTrainSubjectVersion"] | components["schemas"]["ReleaseTrainSubjectVersionDate"] | components["schemas"]["ReleaseTrainSubjectJiraVersion"] | components["schemas"]["ReleaseTrainSubjectMilestone"] | components["schemas"]["ReleaseTrainSubjectHotfix"] | components["schemas"]["ReleaseTrainSubjectTrainPair"] | components["schemas"]["ReleaseTrainSubjectHotfixTrain"] | components["schemas"]["ReleaseTrainSubjectCardOnTrain"] | components["schemas"]["ReleaseTrainSubjectMR"] | components["schemas"]["ReleaseTrainSubjectCard"] | components["schemas"]["ReleaseTrainSubjectPageFamily"];
+        ReleaseTrainSubject: components["schemas"]["ReleaseTrainSubjectVersion"] | components["schemas"]["ReleaseTrainSubjectVersionDate"] | components["schemas"]["ReleaseTrainSubjectJiraVersion"] | components["schemas"]["ReleaseTrainSubjectMilestone"] | components["schemas"]["ReleaseTrainSubjectHotfix"] | components["schemas"]["ReleaseTrainSubjectTrainPair"] | components["schemas"]["ReleaseTrainSubjectHotfixTrain"] | components["schemas"]["ReleaseTrainSubjectCardOnTrain"] | components["schemas"]["ReleaseTrainSubjectMR"] | components["schemas"]["ReleaseTrainSubjectCard"] | components["schemas"]["ReleaseTrainSubjectPageFamily"] | components["schemas"]["ReleaseTrainSubjectLLBBranch"];
         ReleaseTrainSubjectCard: {
             /** @description The board whose sprint row lists the card. */
             board: string;
@@ -5641,7 +5641,17 @@ export interface components {
             name: string;
         };
         /** @enum {string} */
-        ReleaseTrainSubjectKind: "version" | "versionDate" | "jiraVersion" | "milestone" | "hotfix" | "trainPair" | "hotfixTrain" | "cardOnTrain" | "mr" | "card" | "pageFamily";
+        ReleaseTrainSubjectKind: "version" | "versionDate" | "jiraVersion" | "milestone" | "hotfix" | "trainPair" | "hotfixTrain" | "cardOnTrain" | "mr" | "card" | "pageFamily" | "llbBranch";
+        ReleaseTrainSubjectLLBBranch: {
+            app: string;
+            branch: string;
+            /** @description The long-lived branch group whose plan sends the branch to the train. */
+            group: string;
+            /** @constant */
+            kind: "llbBranch";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+        };
         ReleaseTrainSubjectMR: {
             app: string;
             iid: number;

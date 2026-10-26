@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { cardHits, splitKeys, versionHits } from "./hitScope";
+import { cardHits, llbHits, splitKeys, versionHits } from "./hitScope";
 import { board } from "./testkit";
-import type { AlertHit, BoardApp } from "./types";
+import type { AlertHit, BoardApp, LLBGroup } from "./types";
 
 function hit(id: string, over: Partial<AlertHit> = {}): AlertHit {
 	return {
@@ -87,6 +87,33 @@ describe("hits about a release", () => {
 		expect(versionHits(hits, b, "21-2026", "pi").map((h) => h.id)).toEqual([
 			"G5~p/21-2026/partner/merged",
 			"F1~tp/20-2026/21-2026",
+		]);
+	});
+});
+
+describe("hits about a long-lived branch group", () => {
+	const wallet = (id: string, over: Partial<AlertHit> = {}) =>
+		hit(id, { evidence: { group: "demo-wallet", branch: "feature/demo-wallet" }, ...over });
+	const hits = [
+		wallet("L10~llb/22-2026/di/feature/demo-wallet", {
+			subject: { kind: "llbBranch", train: "22-2026", app: "di", branch: "feature/demo-wallet", group: "demo-wallet" },
+		}),
+		wallet("L11~ct/22-2026/di/DEMO-7", {
+			subject: { kind: "cardOnTrain", train: "22-2026", app: "di", key: "DEMO-7" },
+		}),
+		wallet("L1~mr/di/330", {
+			subject: { kind: "mr", app: "di", iid: 330, source: "feature/demo-wallet", target: "develop" },
+		}),
+		hit("L10~llb/22-2026/di/feature/demo-pay", { evidence: { group: "demo-pay", branch: "feature/demo-pay" } }),
+		hit("C1~v/22-2026/di"),
+	];
+
+	it("takes every hit whose evidence names the group, whatever its subject", () => {
+		const g = { id: "demo-wallet" } as LLBGroup;
+		expect(llbHits(hits, g).map((h) => h.id)).toEqual([
+			"L10~llb/22-2026/di/feature/demo-wallet",
+			"L11~ct/22-2026/di/DEMO-7",
+			"L1~mr/di/330",
 		]);
 	});
 });

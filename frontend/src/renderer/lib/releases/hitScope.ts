@@ -1,4 +1,4 @@
-import type { AlertHit, AppId, Board, TrainKey } from "./types";
+import type { AlertHit, AppId, Board, LLBGroup, TrainKey } from "./types";
 
 function hitCardKeys(h: AlertHit): readonly string[] {
 	const s = h.subject;
@@ -17,6 +17,10 @@ function hitCardKeys(h: AlertHit): readonly string[] {
 
 export function cardHits(hits: readonly AlertHit[], key: string): AlertHit[] {
 	return hits.filter((h) => hitCardKeys(h).includes(key));
+}
+
+export function llbHits(hits: readonly AlertHit[], g: LLBGroup): AlertHit[] {
+	return hits.filter((h) => h.evidence.group === g.id);
 }
 
 export function versionHits(hits: readonly AlertHit[], b: Board, train: TrainKey, app: AppId): AlertHit[] {

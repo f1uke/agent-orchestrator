@@ -17,7 +17,7 @@ import type { PageActions } from "./ReleasesPage";
 import { mineWhyOf, ruleTagOf, type Provenance } from "../../lib/releases/sources";
 import { SourceTag, useSources } from "./Sources";
 
-type AlertCtx = { board: Board; lens: Lens; actions: PageActions };
+export type AlertCtx = { board: Board; lens: Lens; actions: PageActions };
 
 export function HitWho({ board, train, app }: { board: Board; train?: string; app?: string }) {
 	const label = train ? board.trains.find((t) => t.id === train)?.label : null;

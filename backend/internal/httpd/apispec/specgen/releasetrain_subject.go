@@ -68,6 +68,13 @@ type (
 		Bucket string     `json:"bucket" enum:"merged,open"`
 		Keys   []string   `json:"keys"`
 	}
+	rtSubjectLLBBranch struct {
+		Kind   string     `json:"kind" const:"llbBranch"`
+		Train  rt.TrainID `json:"train"`
+		App    string     `json:"app"`
+		Branch string     `json:"branch"`
+		Group  string     `json:"group" description:"The long-lived branch group whose plan sends the branch to the train."`
+	}
 )
 
 // JSONSchemaOneOf lists the hit subject variants.
@@ -75,7 +82,7 @@ func (rtSubject) JSONSchemaOneOf() []interface{} {
 	return []interface{}{
 		rtSubjectVersion{}, rtSubjectVersionDate{}, rtSubjectJiraVersion{}, rtSubjectMilestone{}, rtSubjectHotfix{},
 		rtSubjectTrainPair{}, rtSubjectHotfixTrain{}, rtSubjectCardOnTrain{}, rtSubjectMR{}, rtSubjectCard{},
-		rtSubjectPageFamily{},
+		rtSubjectPageFamily{}, rtSubjectLLBBranch{},
 	}
 }
 
@@ -93,6 +100,7 @@ func init() {
 		"SpecgenRtSubjectMR":          "ReleaseTrainSubjectMR",
 		"SpecgenRtSubjectCard":        "ReleaseTrainSubjectCard",
 		"SpecgenRtSubjectPageFamily":  "ReleaseTrainSubjectPageFamily",
+		"SpecgenRtSubjectLLBBranch":   "ReleaseTrainSubjectLLBBranch",
 		"ReleasetrainSubjectKind":     "ReleaseTrainSubjectKind",
 		"ReleasetrainDateField":       "ReleaseTrainDateField",
 	} {
