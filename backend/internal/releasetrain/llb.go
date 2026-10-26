@@ -53,7 +53,9 @@ type LongLivedBranch struct {
 	State LLBState `json:"state"`
 	// Train is the train a merged landing rides.
 	Train *TrainID `json:"train,omitempty"`
-	outs  []MRFact
+	// Auto means the plan does not name this branch: it joined as a twin of the branches the plan names.
+	Auto bool `json:"auto,omitempty"`
+	outs []MRFact
 }
 
 // LLBTarget is the train a long-lived branch group landed in or is meant for.
@@ -272,6 +274,7 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 			used[string(p.ID)] = true
 		}
 	}
+	twinOf := claimPlanTwins(branches, plans, claimed)
 	type draft struct {
 		id       string
 		branches []LongLivedBranch
@@ -312,7 +315,8 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 			}
 		}
 		for _, b := range branches {
-			if containsBranch(p.Branches, b) {
+			if inPlan(p, b, twinOf) {
+				b.Auto = !containsBranch(p.Branches, b)
 				g.Branches = append(g.Branches, b)
 			}
 		}
@@ -345,6 +349,34 @@ func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, epic
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
 	return groups
+}
+
+func claimPlanTwins(branches []LongLivedBranch, plans []LlbPlan, claimed map[PlanBranch]bool) map[PlanBranch]PlanID {
+	twinOf := map[PlanBranch]PlanID{}
+	for _, b := range branches {
+		pb := PlanBranch{App: b.App, Branch: b.Branch}
+		if claimed[pb] {
+			continue
+		}
+		for _, p := range plans {
+			var members []LongLivedBranch
+			for _, x := range branches {
+				if inPlan(p, x, twinOf) {
+					members = append(members, x)
+				}
+			}
+			if twins(members, b) {
+				twinOf[pb], claimed[pb] = p.ID, true
+				break
+			}
+		}
+	}
+	return twinOf
+}
+
+func inPlan(p LlbPlan, b LongLivedBranch, twinOf map[PlanBranch]PlanID) bool {
+	id, ok := twinOf[PlanBranch{App: b.App, Branch: b.Branch}]
+	return containsBranch(p.Branches, b) || ok && id == p.ID
 }
 
 func containsBranch(pbs []PlanBranch, b LongLivedBranch) bool {

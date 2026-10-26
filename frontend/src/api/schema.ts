@@ -5267,6 +5267,7 @@ export interface components {
         ReleaseTrainLongLivedBranch: {
             ahead?: null | number;
             app: string;
+            auto?: boolean;
             branch: string;
             cards: components["schemas"]["ReleaseTrainLLBCard"][];
             gone?: boolean;

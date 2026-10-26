@@ -14854,6 +14854,8 @@ components:
           - integer
         app:
           type: string
+        auto:
+          type: boolean
         branch:
           type: string
         cards:

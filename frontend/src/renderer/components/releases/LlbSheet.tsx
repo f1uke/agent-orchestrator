@@ -28,6 +28,23 @@ const BRANCH_STATE_P = derivedOf(
 	"LongLivedBranch.state",
 );
 
+const AUTO_P = derivedOf(
+	"Joined the plan",
+	[{ kind: "gitlab.mrs", text: "same branch name or a shared card, in an app the plan does not name a branch for" }],
+	"No other plan names it. Add it to the plan to keep it there for good.",
+	"LongLivedBranch.auto",
+);
+const AUTO_TITLE = "The plan does not name this branch. It joined because it has the same name or a card in common.";
+
+function AutoMark() {
+	return (
+		<span className="auto" title={AUTO_TITLE} data-testid="llb-auto">
+			auto
+			<SourceTag p={AUTO_P} wide />
+		</span>
+	);
+}
+
 function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	const t = g.target;
 	let tone = "todo";
@@ -221,6 +238,17 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 					</button>
 				</div>
 			))}
+			{g.branches
+				.filter((b) => b.auto && !draft.branches.some((d) => d.app === b.app && d.branch === b.branch))
+				.map((b) => (
+					<div key={`${b.app}:${b.branch}:auto`} className="brow">
+						<span className="plat-pill">
+							<AppMark mark={appMarkOf(board.apps, b.app)} size="sm" />
+						</span>
+						<span className="mono">{b.branch}</span>
+						<AutoMark />
+					</div>
+				))}
 			{others.length > 0 && (
 				<select
 					className="addb"
@@ -361,6 +389,7 @@ export function llbSheet(id: string, board: Board, actions: PageActions): { titl
 									<AppMark mark={appMarkOf(board.apps, b.app)} size="sm" />
 								</span>
 								<span className="mono">{b.branch}</span>
+								{b.auto && <AutoMark />}
 								<span className="badge" data-st={st.tone}>
 									{st.label}
 								</span>
@@ -468,6 +497,7 @@ export function llbsSheet(
 						return (
 							<span key={`${b.app}:${b.branch}`} className="plat-pill c" data-st={st.tone}>
 								<AppMark mark={appMarkOf(board.apps, b.app)} size="sm" /> · {st.label}
+								{b.auto && <span title={AUTO_TITLE}> · auto</span>}
 							</span>
 						);
 					})}
