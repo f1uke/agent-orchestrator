@@ -225,6 +225,16 @@ func TestLLBCutoverIsTheFirstMergeIntoASprintBranch(t *testing.T) {
 	}
 }
 
+func llbGroups(b Board) map[PlanID][]string {
+	out := map[PlanID][]string{}
+	for _, g := range b.LLBs {
+		for _, br := range g.Branches {
+			out[g.ID] = append(out[g.ID], string(br.App)+":"+br.Branch)
+		}
+	}
+	return out
+}
+
 func TestLLBTwinsGroupBySharedCardKeysAndAPlanOverrides(t *testing.T) {
 	f := newFixture(t, today)
 	f.mr("di", "DEMO-1 call", "feat/a", "feature/demo-call-2.0", MRMerged, "2026-09-01", "2026-09-02")
@@ -233,22 +243,13 @@ func TestLLBTwinsGroupBySharedCardKeysAndAPlanOverrides(t *testing.T) {
 	f.mr("di", "DEMO-6 coupon", "feat/c", "feature/demo-coupon-3.0", MRMerged, "2026-09-01", "2026-09-02")
 	f.mr("di", "DEMO-7 coupon", "feat/d", "feature/demo-coupon-3.1", MRMerged, "2026-09-01", "2026-09-02")
 
-	groups := func(b Board) map[PlanID][]string {
-		out := map[PlanID][]string{}
-		for _, g := range b.LLBs {
-			for _, br := range g.Branches {
-				out[g.ID] = append(out[g.ID], string(br.App)+":"+br.Branch)
-			}
-		}
-		return out
-	}
 	want := map[PlanID][]string{
 		"demo-call":       {"di:feature/demo-call-2.0", "da:feature/demo-call-2"},
 		"demo-coupon":     {"di:feature/demo-coupon-3.0"},
 		"demo-coupon-3.1": {"di:feature/demo-coupon-3.1"},
 		"demo-wallet":     {"da:feature/demo-wallet"},
 	}
-	if got := groups(f.reconcile()); !reflect.DeepEqual(got, want) {
+	if got := llbGroups(f.reconcile()); !reflect.DeepEqual(got, want) {
 		t.Fatalf("derived groups = %v, want %v", got, want)
 	}
 
@@ -263,7 +264,7 @@ func TestLLBTwinsGroupBySharedCardKeysAndAPlanOverrides(t *testing.T) {
 		"demo-coupon-3.1": {"di:feature/demo-coupon-3.1"},
 	}
 	b := f.reconcile()
-	if got := groups(b); !reflect.DeepEqual(got, want) {
+	if got := llbGroups(b); !reflect.DeepEqual(got, want) {
 		t.Fatalf("groups with a plan = %v, want %v", got, want)
 	}
 	g, _ := llbBranch(t, b, "da", "feature/demo-wallet")
@@ -275,6 +276,30 @@ func TestLLBTwinsGroupBySharedCardKeysAndAPlanOverrides(t *testing.T) {
 	g, _ = llbBranch(t, f.reconcile(), "di", "feature/demo-coupon-3.1")
 	if g.ID != "demo-coupon-3.1" || g.Plan == nil || g.Name != "Coupon next" {
 		t.Fatalf("a plan with no branches attaches to the group with its id; got %+v", g)
+	}
+}
+
+func TestLLBPlanTakesALaterSameNameBranchOfAnotherApp(t *testing.T) {
+	f := newFixture(t, today)
+	f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
+	f.mr("da", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MRMerged, "2026-10-07", "2026-10-08")
+	f.mr("di", "DEMO-1 list", "feat/DEMO-1", "feature/demo-history-list", MROpened, "2026-10-09", "")
+	f.human.Plans = []LlbPlan{{
+		ID: "demo-history-list", Name: "History list", Version: 1,
+		TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 23, Year: fixtureYear},
+		Branches: []PlanBranch{{App: "da", Branch: "feature/demo-history-list"}},
+	}}
+	b := f.reconcile()
+	want := map[PlanID][]string{"demo-history-list": {"di:feature/demo-history-list", "da:feature/demo-history-list"}}
+	if got := llbGroups(b); !reflect.DeepEqual(got, want) {
+		t.Fatalf("groups = %v, want %v", got, want)
+	}
+	g, _ := llbBranch(t, b, "di", "feature/demo-history-list")
+	if want := (LLBPlanned{Train: TrainID{Number: 23, Year: fixtureYear}}); !reflect.DeepEqual(g.Target, want) {
+		t.Fatalf("target = %#v, want %#v", g.Target, want)
+	}
+	if got := firedIDs(b, "G4"); got != nil {
+		t.Fatalf("G4 hits = %v, want none", got)
 	}
 }
 
