@@ -304,3 +304,38 @@ func routeName(r Route) string {
 	}
 	return "off flow"
 }
+
+var ruleG6 = rule{
+	ID: "G6", Group: "G", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
+	Subjects: []SubjectKind{SubjectMR},
+	Mine:     MineMR,
+	Reads:    []KindName{KindMRs.Name, KindLLBCards.Name, KindBranchCards.Name},
+	Title:    "MR names a card key that Jira moved to another project",
+	Hint:     "Jira now opens the old key as a different card, so the Board leaves that key out. Put the card's current key in the MR title: AO reads the title before the branch name.",
+	Check: func(b *Board) []Hit {
+		var out []Hit
+		for _, app := range b.Apps {
+			for _, mr := range b.mrs[app.ID] {
+				if mr.State == MRClosed {
+					continue
+				}
+				var moves []string
+				for _, k := range mrKeys(mr) {
+					if to := b.moved[k]; to != "" {
+						moves = append(moves, k+" → "+to)
+					}
+				}
+				if len(moves) == 0 {
+					continue
+				}
+				out = append(out, Hit{
+					Subject: SubjMR{App: app.ID, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: app.ID,
+					Evidence: Evidence{"mr": mr.IID, "moved": moves},
+					Text:     fmt.Sprintf("!%d uses a card key that Jira moved: %s; fix the MR title", mr.IID, strings.Join(moves, ", ")),
+					Links:    []Link{{Label: "Open MR", URL: mr.URL}},
+				})
+			}
+		}
+		return out
+	},
+}

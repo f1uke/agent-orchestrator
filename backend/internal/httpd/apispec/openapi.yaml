@@ -14478,6 +14478,8 @@ components:
           type: string
         key:
           type: string
+        movedTo:
+          type: string
         parent:
           type: string
         parentType:
@@ -14868,6 +14870,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainMRFact'
         lastIn:
           $ref: '#/components/schemas/ReleaseTrainDay'
+        moved:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMovedKey'
+          type: array
         openedOn:
           $ref: '#/components/schemas/ReleaseTrainDay'
         state:
@@ -15018,6 +15024,19 @@ components:
       - no-jira
       - no-label
       type: string
+    ReleaseTrainMovedKey:
+      properties:
+        key:
+          type: string
+        movedTo:
+          type: string
+        mr:
+          $ref: '#/components/schemas/ReleaseTrainMRFact'
+      required:
+      - key
+      - movedTo
+      - mr
+      type: object
     ReleaseTrainNoMRMark:
       properties:
         markedAt:

@@ -29,9 +29,14 @@ func newSprintWorld(t *testing.T) *world {
 		`{"key":"DEMO-361","fields":{"summary":"Coupon","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"subtask":false},"created":"2026-10-01T10:00:00.000+0700"}},`+
 		`{"key":"DEMO-362","fields":{"summary":"Bond","status":{"name":"Done","statusCategory":{"key":"done"}},"issuetype":{"subtask":false},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 	w.jira.Set(`/rest/api/3/search/jql?jql=parent in (DEMO-1, DEMO-30, DEMO-361, DEMO-362, DEMO-40) AND assignee = "acc-dee" ORDER BY key`, `{"issues":[]}`)
+	w.gl.SetMRs(1001, sprintMRs())
+	return w
+}
+
+func sprintMRs() []rttest.MR {
 	mrs := baseMRs()
 	merged := at("2026-10-08T03:00:00Z")
-	mrs = append(mrs,
+	return append(mrs,
 		rttest.MR{IID: 401, Title: "DEMO-360 history", Source: "feature/DEMO-360", Target: "feature/sprint-2026-21", State: "merged", Author: "Dee Example", Username: "dee",
 			CreatedAt: at("2026-10-07T03:00:00Z"), UpdatedAt: merged, MergedAt: &merged, WebURL: "https://gitlab.example.com/mr/401"},
 		rttest.MR{IID: 402, Title: "DEMO-361 coupon", Source: "feature/DEMO-361", Target: "feature/sprint-2026-21", State: "opened", Author: "Rae Example", Username: "rae",
@@ -39,8 +44,6 @@ func newSprintWorld(t *testing.T) *world {
 		rttest.MR{IID: 403, Title: "DEMO-362 bond", Source: "feature/DEMO-362", Target: "feature/sprint-20-2026", State: "merged", Author: "Rae Example", Username: "rae",
 			CreatedAt: at("2026-10-01T03:00:00Z"), UpdatedAt: at("2026-10-02T03:00:00Z"), MergedAt: ptrTime(at("2026-10-02T03:00:00Z")), WebURL: "https://gitlab.example.com/mr/403"},
 	)
-	w.gl.SetMRs(1001, mrs)
-	return w
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }

@@ -39,15 +39,23 @@ type LLBCard struct {
 	Mine           []MineReason `json:"mine,omitempty"`
 }
 
+// MovedKey is a card key an MR into the branch names that Jira moved to another project: the key is no card of the branch.
+type MovedKey struct {
+	Key     string `json:"key"`
+	MovedTo string `json:"movedTo"`
+	MR      MRFact `json:"mr"`
+}
+
 // LongLivedBranch is a branch card MRs merge into before it lands in a sprint branch.
 type LongLivedBranch struct {
-	App      AppID     `json:"app"`
-	Branch   string    `json:"branch"`
-	OpenedOn Day       `json:"openedOn"`
-	LastIn   Day       `json:"lastIn"`
-	Cards    []LLBCard `json:"cards"`
-	Landing  *MRFact   `json:"landing,omitempty"`
-	Ahead    *int      `json:"ahead,omitempty"`
+	App      AppID      `json:"app"`
+	Branch   string     `json:"branch"`
+	OpenedOn Day        `json:"openedOn"`
+	LastIn   Day        `json:"lastIn"`
+	Cards    []LLBCard  `json:"cards"`
+	Moved    []MovedKey `json:"moved,omitempty"`
+	Landing  *MRFact    `json:"landing,omitempty"`
+	Ahead    *int       `json:"ahead,omitempty"`
 	// Gone means GitLab no longer has the branch: it was deleted without landing.
 	Gone  bool     `json:"gone,omitempty"`
 	State LLBState `json:"state"`
@@ -207,6 +215,10 @@ func llbOf(app App, name string, ins, outs []MRFact, snap Snapshot, jira map[str
 	b.LastIn = lastTouch(ins[len(ins)-1])
 	for _, m := range ins {
 		for _, k := range mrKeys(m) {
+			if to := jira[k].MovedTo; to != "" {
+				b.Moved = append(b.Moved, MovedKey{Key: k, MovedTo: to, MR: m})
+				continue
+			}
 			c := LLBCard{Key: k, MR: m}
 			if is, ok := jira[k]; ok {
 				c.Summary, c.Status, c.StatusCategory, c.Assignee = is.Summary, is.Status, is.StatusCategory, is.Assignee
