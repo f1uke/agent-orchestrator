@@ -22,6 +22,7 @@ type Forecast struct {
 	Versions []ForecastVersion `json:"versions"`
 }
 
+// ForecastVersion is one app's predicted window on the forecast train.
 type ForecastVersion struct {
 	App     AppID `json:"app"`
 	Freeze  Day   `json:"freeze"`
@@ -33,6 +34,7 @@ type ForecastVersion struct {
 	Stages []ForecastStage `json:"stages"`
 }
 
+// ForecastStage is the predicted day of one stage.
 type ForecastStage struct {
 	Key  StageKey `json:"key"`
 	Date Day      `json:"date"`
