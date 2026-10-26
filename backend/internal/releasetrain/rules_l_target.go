@@ -5,31 +5,26 @@ import (
 	"sort"
 )
 
-// trainWindow is where today sits against a train's freeze for one app.
 type trainWindow int
+
+const nearFreezeWorkDays = 3
 
 const (
 	windowEarly trainWindow = iota + 1
-	// windowNear is 3 working days or fewer before the freeze, freeze day included.
 	windowNear
-	// windowMissed is after the freeze day, or once the release MR is open: the train is cut.
 	windowMissed
 )
 
-// aim is one branch of a group whose plan sends it to a train, while the branch has not landed.
 type aim struct {
-	group   *LLBGroup
-	branch  *LongLivedBranch
-	train   *Train
-	version *AppVersion
-	freeze  *Day
-	window  trainWindow
-	// open is the branch's open MRs into the sprint branch the train takes.
-	open []MRFact
+	group          *LLBGroup
+	branch         *LongLivedBranch
+	train          *Train
+	version        *AppVersion
+	freeze         *Day
+	window         trainWindow
+	openIntoSprint []MRFact
 }
 
-// aims skips a group whose plan is unplanned or dropped, whose target is only
-// guessed from an epic, or that landed; and a train with no sprint branch of its own.
 func aims(b *Board) []aim {
 	var out []aim
 	for gi := range b.LLBs {
@@ -39,7 +34,7 @@ func aims(b *Board) []aim {
 			continue
 		}
 		t := b.train(planned.Train)
-		if t == nil || t.ID.Extra != 0 {
+		if t == nil || !t.ID.regular() {
 			continue
 		}
 		for bi := range g.Branches {
@@ -54,7 +49,7 @@ func aims(b *Board) []aim {
 			a.window = windowOf(a.freeze, a.version, b.Today)
 			for _, mr := range br.outs {
 				if into, ok := sprintTrain(mr.TargetBranch); ok && into == t.ID && mr.State == MROpened {
-					a.open = append(a.open, mr)
+					a.openIntoSprint = append(a.openIntoSprint, mr)
 				}
 			}
 			out = append(out, a)
@@ -76,7 +71,7 @@ func windowOf(freeze *Day, v *AppVersion, today Day) trainWindow {
 	switch {
 	case v != nil && v.ReleaseMR != nil, freeze != nil && today.After(*freeze):
 		return windowMissed
-	case freeze != nil && workDaysLeft(today, *freeze) <= 3:
+	case freeze != nil && workDaysLeft(today, *freeze) <= nearFreezeWorkDays:
 		return windowNear
 	}
 	return windowEarly
@@ -121,7 +116,7 @@ var ruleL10 = rule{
 	Check: func(b *Board) []Hit {
 		var out []Hit
 		for _, a := range aims(b) {
-			if a.window == windowMissed || len(a.open) > 0 {
+			if a.window == windowMissed || len(a.openIntoSprint) > 0 {
 				continue
 			}
 			h := a.hit(a.branchSubject(), fmt.Sprintf("%s has no MR into the sprint %d branch for %s; %s",
@@ -188,7 +183,7 @@ var ruleL12 = rule{
 			if a.window != windowNear {
 				continue
 			}
-			for _, mr := range a.open {
+			for _, mr := range a.openIntoSprint {
 				h := a.hit(SubjMR{App: a.branch.App, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch},
 					fmt.Sprintf("!%d %s → %s is still open for %s; %s", mr.IID, mr.SourceBranch, mr.TargetBranch, a.train.ID, a.freezeText(b.Today)),
 					Link{Label: "Open MR", URL: mr.URL})

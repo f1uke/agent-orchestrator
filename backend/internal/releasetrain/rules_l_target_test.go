@@ -13,8 +13,6 @@ const (
 
 var train22 = TrainID{Number: 22, Year: fixtureYear}
 
-// walletPlan is a plan sending feature/demo-wallet in both demo apps to train #22,
-// with two cards merged into each branch and a train #22 version per app.
 func walletPlan(t *testing.T, today, freeze string, target TargetKind) (*fixture, map[AppID]*fv) {
 	f := newFixture(t, today)
 	versions := map[AppID]*fv{}
