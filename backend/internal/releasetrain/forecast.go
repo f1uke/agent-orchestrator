@@ -13,7 +13,7 @@ const (
 var forecastKeys = []StageKey{StageFreeze, StageScan, StageApprove, StageTag, StagePublish}
 
 // Forecast is the train after the last known one, dated from the trains
-// already seen. It is not a Train: no rule, card or sprint route reads it.
+// already seen.
 type Forecast struct {
 	ID       TrainID           `json:"id"`
 	Label    string            `json:"label"`
