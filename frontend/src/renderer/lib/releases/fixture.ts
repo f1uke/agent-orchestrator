@@ -209,6 +209,7 @@ const RULES: [string, Severity, string][] = [
 	["D3", "risk", "Not every approver approved before publish"],
 	["E1", "hygiene", "Published but the Jira release is not marked released"],
 	["F1", "info", "Two trains overlap"],
+	["G6", "hygiene", "MR names a card key that Jira moved to another project"],
 	["L9", "risk", "Code stranded in a branch that is not a sprint branch, a long-lived branch or develop"],
 ];
 
@@ -260,6 +261,7 @@ const READS: Readonly<Record<string, string[]>> = {
 	F1: [MS],
 	G5: [...CARD_READS, "jira.branch_cards"],
 	L3: CARD_READS,
+	G6: ["gitlab.mrs", "jira.llb_cards", "jira.branch_cards"],
 	L9: ["gitlab.mrs"],
 };
 
@@ -283,6 +285,7 @@ const MINE_POLICY: Readonly<Record<string, MinePolicy>> = {
 	L3: "listed_cards",
 	L1: "mr",
 	L8: "mr",
+	G6: "mr",
 	L9: "mr",
 };
 
@@ -300,6 +303,7 @@ const SUBJECTS: Readonly<Record<string, SubjectKind[]>> = {
 	F1: ["trainPair"],
 	G5: ["pageFamily"],
 	L3: ["cardOnTrain"],
+	G6: ["mr"],
 	L9: ["mr"],
 };
 
@@ -783,6 +787,21 @@ function demoLlbs(b: Board): Board["llbs"] {
 							4,
 						),
 						llbCardOf("DEMO-108", "Wallet receipts", "feature/demo-wallet", 303, addDays(today, -3), undefined, 5),
+					],
+					moved: [
+						{
+							key: "OLD-1",
+							movedTo: "NEW-9",
+							mr: llbCardOf(
+								"OLD-1",
+								"top-up fix",
+								"feature/demo-wallet",
+								304,
+								addDays(today, -6),
+								addDays(today, -5),
+								3,
+							).mr,
+						},
 					],
 				},
 			],

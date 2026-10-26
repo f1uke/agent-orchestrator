@@ -461,6 +461,23 @@ export function llbSheet(id: string, board: Board, actions: PageActions): { titl
 										onOpen={() => actions.openSheet({ kind: "card", key: c.key }, "push")}
 									/>
 								))}
+								{b.moved?.map((m) => (
+									<CardLine
+										key={m.key}
+										glyph="↷"
+										glyphTone="waiting"
+										glyphTitle="Jira moved this card key to another project"
+										k={m.key}
+										summary={`moved to ${m.movedTo} in Jira`}
+										status="Fix MR title"
+										statusKind="jira.llb_cards"
+										action={
+											<a href={m.mr.url} target="_blank" rel="noreferrer">
+												!{m.mr.iid}
+											</a>
+										}
+									/>
+								))}
 							</div>
 						</div>
 					);
