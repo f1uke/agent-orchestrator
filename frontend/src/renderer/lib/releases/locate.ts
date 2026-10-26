@@ -146,21 +146,27 @@ function sprintCard(b: Board, key: string, view: RevealView, app?: AppId): Revea
 	return null;
 }
 
-function mr(s: Extract<Subject, { kind: "mr" }>, b: Board, view: RevealView): Reveal {
-	for (const g of llbGroupsFor(b, s.app)) {
-		const br = g.branches.find((x) => x.app === s.app && x.branch === s.source);
+function llbLane(b: Board, app: AppId, branch: string, view: RevealView): Reveal | null {
+	for (const g of llbGroupsFor(b, app)) {
+		const br = g.branches.find((x) => x.app === app && x.branch === branch);
 		if (br)
 			return plan(
 				"llb-lane",
-				[`.rel-app[data-app=${css(s.app)}] [data-testid=llb-lane][data-branch=${css(br.branch)}]`],
+				[`.rel-app[data-app=${css(app)}] [data-testid=llb-lane][data-branch=${css(br.branch)}]`],
 				{
 					layers: ["llb"],
-					apps: [s.app],
+					apps: [app],
 					notMine: view.me && !g.mine?.length,
-					folds: [`${s.app}:llbs`],
+					folds: [`${app}:llbs`],
 				},
 			);
 	}
+	return null;
+}
+
+function mr(s: Extract<Subject, { kind: "mr" }>, b: Board, view: RevealView): Reveal {
+	const lane = llbLane(b, s.app, s.source, view);
+	if (lane) return lane;
 	for (const row of b.sprints) {
 		const card = row.cards.find((c) => c.mrs.some((m) => m.app === s.app && m.iid === s.iid));
 		const r = card && sprintCard(b, card.key, view, s.app);
@@ -185,6 +191,8 @@ export const LOCATORS: { [K in SubjectKind]: Locator<K> } = {
 		sprintCard(b, s.key, view) ??
 		plan("sprint-band", [".rel-spr"], { fallback: "at the sprint: the card is on no board's row" }),
 	mr,
+	llbBranch: (s, b, view) =>
+		llbLane(b, s.app, s.branch, view) ?? appLabel(s.app, "at its app: the timeline draws no lane for the branch"),
 	pageFamily: (s, b) => {
 		const apps = (b.trains.find((x) => x.id === s.train)?.versions ?? [])
 			.map((v) => v.app)

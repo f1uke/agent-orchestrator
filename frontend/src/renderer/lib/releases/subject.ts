@@ -45,6 +45,8 @@ export function subjectLabel(s: Subject, b: Board): SubjectLabel {
 			return { app: null, text: cardText(b, s.key) };
 		case "mr":
 			return { app: s.app, text: `!${s.iid} ${s.source} → ${s.target}` };
+		case "llbBranch":
+			return { app: s.app, text: `${s.branch} → ${trainLabel(b, s.train)}` };
 		case "pageFamily": {
 			const cards = s.bucket === "merged" ? "merged cards" : "cards with an open MR";
 			return { app: null, text: `${trainLabel(b, s.train)} ${s.family} page · ${s.keys.length} ${cards} missing` };
@@ -71,6 +73,8 @@ export function subjectSheet(s: Subject, hit: HitId): SheetEntry | null {
 		case "jiraVersion":
 		case "milestone":
 			return { kind: "mismatch", hit };
+		case "llbBranch":
+			return { kind: "llb", id: s.group };
 		case "mr":
 			return null;
 	}

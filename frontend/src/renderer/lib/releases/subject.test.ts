@@ -128,6 +128,18 @@ describe("subjectLabel", () => {
 		).toEqual({ app: "da", text: "!415 feat/DEMO-203 → feat/DEMO-201-base" });
 	});
 
+	it("names a long-lived branch by the train its plan sends it to", () => {
+		const s = {
+			kind: "llbBranch" as const,
+			train: "21-2026",
+			app: "di",
+			branch: "feature/demo-wallet",
+			group: "demo-wallet",
+		};
+		expect(subjectLabel(s, b)).toEqual({ app: "di", text: "feature/demo-wallet → #21" });
+		expect(subjectSheet(s, "L10~llb/21-2026/di/feature/demo-wallet")).toEqual({ kind: "llb", id: "demo-wallet" });
+	});
+
 	it("names a page family's missing cards by the train, the family and whether their code merged", () => {
 		const s = { kind: "pageFamily" as const, train: "21-2026", family: "demo", keys: ["DEMO-1", "DEMO-2"] };
 		expect(subjectLabel({ ...s, bucket: "merged" }, b).text).toBe("#21 demo page · 2 merged cards missing");

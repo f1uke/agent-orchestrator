@@ -20,6 +20,8 @@ import type { PageActions } from "./ReleasesPage";
 import { TargetTag } from "./TargetTag";
 import { derivedOf, llbTargetOf, readOf } from "../../lib/releases/sources";
 import { SourceTag } from "./Sources";
+import { AlertList, type AlertCtx } from "./Alerts";
+import { llbHits } from "../../lib/releases/hitScope";
 
 const BRANCH_STATE_P = derivedOf(
 	"Branch state",
@@ -362,7 +364,8 @@ function AcceptPicker({ g, draft, onAdd }: { g: LLBGroup; draft: PlanDraft; onAd
 	);
 }
 
-export function llbSheet(id: string, board: Board, actions: PageActions): { title: ReactNode; body: ReactNode } {
+export function llbSheet(id: string, c: AlertCtx): { title: ReactNode; body: ReactNode } {
+	const { board, actions } = c;
 	const g = board.llbs.find((x) => x.id === id);
 	if (!g)
 		return { title: "Long-lived branch", body: <div className="sec empty">This group is no longer on the Board.</div> };
@@ -465,6 +468,7 @@ export function llbSheet(id: string, board: Board, actions: PageActions): { titl
 						</div>
 					);
 				})}
+				<AlertList title="Needs attention" hits={llbHits(c.lens.attention, g)} c={c} />
 			</>
 		),
 	};
