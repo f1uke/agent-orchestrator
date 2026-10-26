@@ -5119,6 +5119,7 @@ export interface components {
             fixVersions: string[];
             issueType?: string;
             key: string;
+            movedTo?: string;
             parent?: string;
             parentType?: string;
             releaseTicket: boolean;
@@ -5273,6 +5274,7 @@ export interface components {
             gone?: boolean;
             landing?: components["schemas"]["ReleaseTrainMRFact"];
             lastIn: components["schemas"]["ReleaseTrainDay"];
+            moved?: components["schemas"]["ReleaseTrainMovedKey"][];
             openedOn: components["schemas"]["ReleaseTrainDay"];
             state: components["schemas"]["ReleaseTrainLLBState"];
             /** @description Train key, "21-2026" or "20-1-2026". */
@@ -5327,6 +5329,11 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainMismatchKind: "version" | "no-milestone" | "no-jira" | "no-label";
+        ReleaseTrainMovedKey: {
+            key: string;
+            movedTo: string;
+            mr: components["schemas"]["ReleaseTrainMRFact"];
+        };
         ReleaseTrainNoMRMark: {
             /** Format: date-time */
             markedAt: string;

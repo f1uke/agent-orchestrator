@@ -72,6 +72,8 @@ func everyRuleFires(t *testing.T) *fixture {
 	f.mr("di", "DEMO-80 coupon", "feat/DEMO-80", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-02")
 	f.branchIss = append(f.branchIss, &IssueFact{Key: "DEMO-80", Status: "Done", StatusCategory: StatusCategoryDone})
 	f.mr("di", "DEMO-99 part", "feat/DEMO-99", "feat/DEMO-98-base", MROpened, "2026-10-13", "")
+	f.mr("di", "OLD-1 limit", "feat/OLD-1", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-02")
+	f.branchIss = append(f.branchIss, &IssueFact{Key: "OLD-1", MovedTo: "NEW-9"})
 	return f
 }
 

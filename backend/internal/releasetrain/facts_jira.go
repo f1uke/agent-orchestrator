@@ -56,6 +56,7 @@ type IssueFact struct {
 	Parent         string   `json:"parent,omitempty"`
 	ParentType     string   `json:"parentType,omitempty"`
 	URL            string   `json:"url"`
+	MovedTo        string   `json:"movedTo,omitempty"`
 }
 
 // IssueTypeEpic is the Jira issue type that groups a feature's cards.

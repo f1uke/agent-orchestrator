@@ -205,7 +205,9 @@ func sprintBranchKeys(cfg Config, snap Snapshot, liveTrains []TrainID) []string 
 func branchCards(snap Snapshot) map[string]IssueFact {
 	out := map[string]IssueFact{}
 	for _, is := range AllItems(snap, KindBranchCards) {
-		out[is.Key] = is
+		if is.MovedTo == "" {
+			out[is.Key] = is
+		}
 	}
 	return out
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -109,7 +110,7 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 	}
 	if keys := view.LLBCardKeys; len(keys) > 0 {
 		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindLLBCards, rt.LLBCardsScope, ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
-			return r.issues(ctx, rt.KindLLBCards, "key in ("+strings.Join(keys, ", ")+") ORDER BY key")
+			return r.cardsByKey(ctx, rt.KindLLBCards, keys)
 		}})
 	}
 	if me, keys := view.MyAccountID, view.WatchedCardKeys; me != "" && len(keys) > 0 {
@@ -134,7 +135,7 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 	}
 	if keys := view.BranchCardKeys; len(keys) > 0 {
 		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindBranchCards, rt.BranchCardsScope, ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
-			return r.issues(ctx, rt.KindBranchCards, "key in ("+strings.Join(keys, ", ")+") ORDER BY key")
+			return r.cardsByKey(ctx, rt.KindBranchCards, keys)
 		}})
 	}
 	return append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindJiraMyself, rt.MyselfScope, ""), Fetch: r.myself})
@@ -243,10 +244,40 @@ func (r reader) pageCards(ctx context.Context, keys []string) (svc.Batch, error)
 	return r.issues(ctx, rt.KindPageCards, "key in ("+strings.Join(keys, ", ")+") ORDER BY key")
 }
 
-func (r reader) issues(ctx context.Context, kind rt.Kind[rt.IssueFact], jql string) (svc.Batch, error) {
-	rows, err := r.c.SearchAllFields(ctx, jql, nil, 0)
+// Jira answers a key it moved to another project with a different card under the new key.
+func (r reader) cardsByKey(ctx context.Context, kind rt.Kind[rt.IssueFact], keys []string) (svc.Batch, error) {
+	found, err := r.issueFacts(ctx, "key in ("+strings.Join(keys, ", ")+") ORDER BY key")
 	if err != nil {
 		return svc.Batch{}, err
+	}
+	facts := slices.DeleteFunc(found, func(f rt.IssueFact) bool { return !slices.Contains(keys, f.Key) })
+	for _, k := range keys {
+		if slices.ContainsFunc(facts, func(f rt.IssueFact) bool { return f.Key == k }) {
+			continue
+		}
+		rows, err := r.c.SearchAllFields(ctx, "key = "+k+" ORDER BY key", []string{"summary"}, 1)
+		if err != nil {
+			return svc.Batch{}, err
+		}
+		if len(rows) == 1 && rows[0].Key != k {
+			facts = append(facts, rt.IssueFact{Key: k, MovedTo: rows[0].Key})
+		}
+	}
+	return svc.SnapshotOf(kind, facts)
+}
+
+func (r reader) issues(ctx context.Context, kind rt.Kind[rt.IssueFact], jql string) (svc.Batch, error) {
+	facts, err := r.issueFacts(ctx, jql)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	return svc.SnapshotOf(kind, facts)
+}
+
+func (r reader) issueFacts(ctx context.Context, jql string) ([]rt.IssueFact, error) {
+	rows, err := r.c.SearchAllFields(ctx, jql, nil, 0)
+	if err != nil {
+		return nil, err
 	}
 	ticket := r.releaseTicketPattern()
 	facts := make([]rt.IssueFact, 0, len(rows))
@@ -260,7 +291,7 @@ func (r reader) issues(ctx context.Context, kind rt.Kind[rt.IssueFact], jql stri
 		}
 		facts = append(facts, f)
 	}
-	return svc.SnapshotOf(kind, facts)
+	return facts, nil
 }
 
 func (r reader) releaseTicketPattern() *regexp.Regexp {
