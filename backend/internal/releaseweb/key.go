@@ -25,6 +25,10 @@ const (
 // ErrNoKey means key.json does not exist yet.
 var ErrNoKey = errors.New("release web: no key yet; rotate the key first")
 
+// ErrNoClipboard means this machine has no clipboard command to copy the key
+// to; the key file is the way to read it.
+var ErrNoClipboard = errors.New("release web: no clipboard command on this OS; read the key file instead")
+
 var keyEncoding = base64.RawURLEncoding.Strict()
 
 // keyFile is key.json on disk.
