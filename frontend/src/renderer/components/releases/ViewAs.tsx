@@ -1,20 +1,23 @@
 import { Check, ChevronDown, TriangleAlert, Users } from "lucide-react";
 import { useState } from "react";
-import { MATCH_HINT, MATCH_TAG, pickerPeople, SEARCH_FROM, searchPeople, viewAsState } from "../../lib/releases/people";
+import { matchHint, MATCH_TAG, pickerPeople, SEARCH_FROM, searchPeople, viewAsState } from "../../lib/releases/people";
 import type { Board, BoardPerson } from "../../lib/releases/types";
 import { Input } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { SimpleTooltip } from "../ui/tooltip";
 import { Avatar } from "./Avatar";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 
 function Option({
 	person,
 	label,
+	hint,
 	selected,
 	onPick,
 }: {
 	person: BoardPerson | null;
 	label?: string;
+	hint?: string;
 	selected: boolean;
 	onPick: (id: string | undefined) => void;
 }) {
@@ -27,7 +30,7 @@ function Option({
 			className="rel-vopt"
 			data-testid="view-as-option"
 			data-person={person?.id ?? ""}
-			title={person ? MATCH_HINT[person.match] : "Show every card and alert"}
+			title={hint ?? "Show every card and alert"}
 			onClick={() => onPick(person?.id)}
 		>
 			{person ? <Avatar accountId={person.jiraAccountId} name={person.name} size={18} /> : <Users className="size-4" />}
@@ -80,8 +83,9 @@ export function ViewAs({
 }) {
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
+	const readOnly = useReleasesReadOnly();
 	const state = viewAsState(board, person);
-	const { self, others } = pickerPeople(board.people);
+	const { self, others } = pickerPeople(board.people, readOnly);
 	const searchable = board.people.length > SEARCH_FROM;
 	const shown = searchPeople(others, query);
 	const showSelf = self !== null && searchPeople([self], query).length > 0;
@@ -140,13 +144,21 @@ export function ViewAs({
 				)}
 				<div role="listbox" aria-label="View as" className="rel-vlist">
 					{showEveryone && <Option person={null} selected={state.kind === "everyone"} onPick={pick} />}
-					{showSelf && self && <Option person={self} label="Me" selected={selectedId === self.id} onPick={pick} />}
+					{showSelf && self && (
+						<Option
+							person={self}
+							label="Me"
+							hint={matchHint(self, readOnly)}
+							selected={selectedId === self.id}
+							onPick={pick}
+						/>
+					)}
 					{shown.map((p) => (
-						<Option key={p.id} person={p} selected={selectedId === p.id} onPick={pick} />
+						<Option key={p.id} person={p} hint={matchHint(p, readOnly)} selected={selectedId === p.id} onPick={pick} />
 					))}
 					{!showEveryone && !showSelf && shown.length === 0 && <div className="rel-vnone">Nobody matches.</div>}
 				</div>
-				{board.identity.kind === "unknown" && (
+				{!readOnly && board.identity.kind === "unknown" && (
 					<div className="rel-vnote">Me needs your Jira and GitLab accounts: {board.identity.reason}</div>
 				)}
 			</PopoverContent>

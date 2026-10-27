@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { demoBoard, unknownIdentityBoard, viewBoardAs } from "./fixture";
 import { makeLens } from "./lens";
-import { pickerPeople, searchPeople, SEARCH_FROM, viewAsState } from "./people";
+import { matchHint, pickerPeople, searchPeople, SEARCH_FROM, viewAsState } from "./people";
 import { parseReleasesSearch } from "./url";
 
 const TODAY = "2026-10-14";
@@ -82,5 +82,27 @@ describe("the fixture's Board for another person", () => {
 		const ben = unknownIdentityBoard(TODAY);
 		viewBoardAs(ben, "bsample");
 		expect(ben.viewer).toMatchObject({ kind: "person", person: { id: "bsample" } });
+	});
+});
+
+describe("the picker in a read-only host", () => {
+	const people = demoBoard(TODAY).people;
+
+	it("pins no Me and lists the monitor's own person by name among the others", () => {
+		const { self, others } = pickerPeople(people, true);
+		expect(self).toBeNull();
+		expect(others.map((p) => p.id).sort()).toEqual(people.map((p) => p.id).sort());
+		const names = others.map((p) => p.name);
+		expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+		expect(names).toContain("Ada Example");
+	});
+
+	it("words the monitor's own person's hint without claiming the reader owns the accounts", () => {
+		const ada = people.find((p) => p.self) as (typeof people)[number];
+		expect(matchHint(ada, false)).toBe("The monitor's own Jira and GitLab accounts");
+		expect(matchHint(ada, true)).not.toMatch(/\bown\b|\byour\b/i);
+		expect(matchHint(people.find((p) => p.id === "bsample") as (typeof people)[number], true)).toBe(
+			"Jira and GitLab accounts joined by the people file",
+		);
 	});
 });
