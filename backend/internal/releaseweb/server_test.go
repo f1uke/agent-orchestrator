@@ -454,56 +454,20 @@ func TestClientLockoutRefusesEvenTheRightKey(t *testing.T) {
 	}
 }
 
-func TestGlobalLockoutStopsNewSignInsButNotSessions(t *testing.T) {
+func TestFailuresSpreadOverManyClientsNeverLockOutANewClientWithTheRightKey(t *testing.T) {
 	h := newHarness(t)
 	c := h.session(from("192.0.2.1:1"))
-	for i := range SigninGlobalFailures {
-		peer := "203.0.113." + strconv.Itoa(10+i/(SigninFailuresPerClient-1)) + ":1"
+	for i := range 1000 {
+		peer := "203.0.113." + strconv.Itoa(i/(SigninFailuresPerClient-1)) + ":1"
 		if res := h.signin("wrong", from(peer)); res.StatusCode != http.StatusUnauthorized {
-			t.Fatalf("failure %d = %d, want 401", i+1, res.StatusCode)
+			t.Fatalf("failure %d from %s = %d, want 401", i+1, peer, res.StatusCode)
 		}
 	}
-	res := h.signin(h.secret(), from("192.0.2.200:1"))
-	if res.StatusCode != http.StatusTooManyRequests || retryAfterSeconds(t, res) != int(SigninGlobalLockout/time.Second) {
-		t.Fatalf("fresh client under the global lock = %d Retry-After %q, want 429", res.StatusCode, res.Header.Get("Retry-After"))
+	if res := h.signin(h.secret(), from("192.0.2.200:1")); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("a client that never signed in, after 1000 failures from other clients = %d, want 303", res.StatusCode)
 	}
 	if res := h.do(http.MethodGet, "/api/v1/release-trains/board", nil, withCookie(c)); res.StatusCode != http.StatusOK {
-		t.Errorf("existing session under the global lock = %d, want 200", res.StatusCode)
-	}
-	h.clock.Advance(SigninGlobalLockout)
-	if res := h.signin(h.secret(), from("192.0.2.200:1")); res.StatusCode != http.StatusSeeOther {
-		t.Errorf("after the global lock = %d, want 303", res.StatusCode)
-	}
-}
-
-func (h *harness) lockEveryone() {
-	h.t.Helper()
-	for i := range SigninGlobalFailures {
-		peer := "203.0.113." + strconv.Itoa(10+i/(SigninFailuresPerClient-1)) + ":1"
-		if res := h.signin("wrong", from(peer)); res.StatusCode != http.StatusUnauthorized {
-			h.t.Fatalf("failure %d = %d, want 401", i+1, res.StatusCode)
-		}
-	}
-}
-
-func TestGlobalLockoutLetsInAClientThatSignedInBefore(t *testing.T) {
-	h := newHarness(t)
-	teammate := from("192.0.2.1:1")
-	h.session(teammate)
-	h.clock.Advance(time.Hour)
-	h.lockEveryone()
-
-	if res := h.signin(h.secret(), from("192.0.2.200:1")); res.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("a client that never signed in, under the global lock = %d, want 429", res.StatusCode)
-	}
-	if res := h.signin(h.secret(), teammate); res.StatusCode != http.StatusSeeOther {
-		t.Fatalf("a client that signed in an hour ago, under the global lock = %d, want 303", res.StatusCode)
-	}
-
-	h.clock.Advance(SessionAbsoluteTTL)
-	h.lockEveryone()
-	if res := h.signin(h.secret(), teammate); res.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("a client whose last sign-in is older than %v, under the global lock = %d, want 429", SessionAbsoluteTTL, res.StatusCode)
+		t.Errorf("an existing session after the failures = %d, want 200", res.StatusCode)
 	}
 }
 
