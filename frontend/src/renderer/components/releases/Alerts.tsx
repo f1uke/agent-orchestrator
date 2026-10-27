@@ -14,6 +14,7 @@ import { SEVERITY_META } from "../../lib/releases/vocab";
 import { AppMark } from "./AppMark";
 import { NoMrButton } from "./NoMr";
 import type { PageActions } from "./ReleasesPage";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import { mineWhyOf, ruleTagOf, type Provenance } from "../../lib/releases/sources";
 import { SourceTag, useSources } from "./Sources";
 
@@ -152,8 +153,9 @@ function MineLine({ h, c }: { h: AlertHit; c: AlertCtx }) {
 }
 
 function FixButton({ h, hidden, c }: { h: AlertHit; hidden: boolean; c: AlertCtx }) {
+	const readOnly = useReleasesReadOnly();
 	const a = fixAction(h, hidden);
-	if (!a) return null;
+	if (!a || readOnly) return null;
 	if (a.kind === "fix")
 		return (
 			<button type="button" className="fixb" onClick={() => c.actions.openSheet({ kind: "fix", hit: h.id }, "push")}>
@@ -178,6 +180,7 @@ function FixButton({ h, hidden, c }: { h: AlertHit; hidden: boolean; c: AlertCtx
 export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; hidden?: boolean }) {
 	const hide = useHideHit();
 	const unhide = useUnhideHit();
+	const readOnly = useReleasesReadOnly();
 	const target = sheetFor(h);
 	const subject = onlyMeSubject(h, c.lens.me);
 	const where = c.actions.whereIs(subject);
@@ -210,7 +213,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 					{h.rule === "G2" && h.subject.kind === "card" && !hidden && (
 						<NoMrButton board={c.board} k={h.subject.key} variant="link" />
 					)}
-					{hidden && (
+					{hidden && !readOnly && (
 						<button type="button" onClick={() => unhide.mutate(h.id)}>
 							Restore
 						</button>
@@ -222,7 +225,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 					</div>
 				)}
 			</div>
-			{hidden ? (
+			{hidden || readOnly ? (
 				<span />
 			) : (
 				<button

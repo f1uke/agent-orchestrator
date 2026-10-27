@@ -1,6 +1,7 @@
 import { GitFork, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useSavePlan } from "../../hooks/useReleaseBoard";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import { dayDiff, dayLabel, shortDay } from "../../lib/releases/day";
 import { branchState, isOpenLlb, targetChip, trainLabel, urgency } from "../../lib/releases/llb";
 import {
@@ -105,6 +106,20 @@ function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 			</span>
 		</div>
 	);
+}
+
+function PlanNote({ g }: { g: LLBGroup }) {
+	if (!g.plan?.note) return null;
+	return (
+		<div className="sec" data-testid="plan-note">
+			<div className="fl2">Note</div>
+			<div className="kr">{g.plan.note}</div>
+		</div>
+	);
+}
+
+function PlanSection({ g, board }: { g: LLBGroup; board: Board }) {
+	return useReleasesReadOnly() ? <PlanNote g={g} /> : <PlanForm g={g} board={board} />;
 }
 
 function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
@@ -380,7 +395,7 @@ export function llbSheet(id: string, c: AlertCtx): { title: ReactNode; body: Rea
 				<div className="sec">
 					<StatusLine g={g} board={board} />
 				</div>
-				<PlanForm key={g.id} g={g} board={board} />
+				<PlanSection key={g.id} g={g} board={board} />
 				{g.branches.map((b) => {
 					const st = branchState(g, b);
 					const keys = [...new Map(b.cards.map((c) => [c.key, c])).values()];

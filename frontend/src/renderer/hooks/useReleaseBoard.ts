@@ -16,6 +16,7 @@ import {
 import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
 import { previewConfirm, previewPlan, previewUndo, type PreviewFixStore } from "../lib/releases/fixPreview";
 import { applyNoMr } from "../lib/releases/noMr";
+import { ReadOnlyError, useReleasesReadOnly } from "../components/releases/ReleasesCapabilities";
 import { PlanConflictError, planInput, targetAfterPlan, type PlanDraft } from "../lib/releases/plan";
 import type { Board, BoardResponse, Fix, FixPlan, HitId, LlbPlan } from "../lib/releases/types";
 import { useApiReady } from "./useApiReady";
@@ -79,10 +80,20 @@ export function useReleaseBoard({ poll = true, person }: { poll?: boolean; perso
 	});
 }
 
+/** The second guard behind the controls a read-only host does not render. */
+function useWriteGuard(): () => void {
+	const readOnly = useReleasesReadOnly();
+	return () => {
+		if (readOnly) throw new ReadOnlyError();
+	};
+}
+
 function useBoardMutation<V>(run: (v: V) => Promise<void>, optimistic: (b: Board, v: V) => void) {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
 		mutationFn: async (v: V) => {
+			guard();
 			if (usePreviewData) {
 				editPreview((b) => optimistic(b, v));
 				return;
@@ -200,8 +211,10 @@ function applyPlan(b: Board, { id, draft }: PlanWrite, at: string): LlbPlan {
 
 export function useSavePlan() {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
 		mutationFn: async (w: PlanWrite): Promise<LlbPlan> => {
+			guard();
 			if (usePreviewData) {
 				const b = (globalThis as PreviewSeam).__aoReleaseBoard?.board;
 				if (!b) throw new Error("no preview board");
@@ -238,9 +251,10 @@ function previewFixes(): { board: Board; store: PreviewFixStore } {
 
 /** Planning writes nothing; each open replans against the latest observation. */
 export function useFixPlan(hit: HitId, choice: string | undefined, enabled: boolean) {
+	const readOnly = useReleasesReadOnly();
 	return useQuery({
 		queryKey: fixPlanKey(hit, choice),
-		enabled,
+		enabled: enabled && !readOnly,
 		queryFn: async (): Promise<FixPlan> => {
 			if (usePreviewData) return structuredClone(previewPlan(previewFixes().board, hit, choice));
 			const { data, error, response } = await apiClient.POST("/api/v1/release-trains/fixes/plan", {
@@ -255,8 +269,10 @@ export function useFixPlan(hit: HitId, choice: string | undefined, enabled: bool
 }
 
 export function useFixes() {
+	const readOnly = useReleasesReadOnly();
 	return useQuery({
 		queryKey: releaseFixesKey,
+		enabled: !readOnly,
 		queryFn: async (): Promise<Fix[]> => {
 			if (usePreviewData) return structuredClone(previewFixes().store.fixes);
 			const { data, error, response } = await apiClient.GET("/api/v1/release-trains/fixes");
@@ -269,8 +285,12 @@ export function useFixes() {
 
 function useFixMutation<V>(run: (v: V) => Promise<Fix>) {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
-		mutationFn: run,
+		mutationFn: (v: V) => {
+			guard();
+			return run(v);
+		},
 		onSettled: () =>
 			Promise.all([
 				qc.invalidateQueries({ queryKey: releaseBoardKey }),
@@ -317,8 +337,10 @@ export function useUndoFix() {
 
 export function useRefreshSources() {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
 		mutationFn: async () => {
+			guard();
 			if (!usePreviewData) await must(apiClient.POST("/api/v1/release-trains/refresh", { body: {} }));
 		},
 		onSettled: () => qc.invalidateQueries({ queryKey: releaseBoardKey }),

@@ -11,6 +11,7 @@ import { SEVERITY_META, SEVERITY_ORDER } from "../../lib/releases/vocab";
 import { SimpleTooltip } from "../ui/tooltip";
 import { AppMark } from "./AppMark";
 import type { PageActions } from "./ReleasesPage";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import { ViewAs } from "./ViewAs";
 import { SystemMark } from "./Sources";
 
@@ -81,6 +82,7 @@ export function TopBar({
 	idx: SourceIndex;
 }) {
 	const refresh = useRefreshSources();
+	const readOnly = useReleasesReadOnly();
 	const toggleApp = (id: string) => {
 		const on = new Set(url.apps ?? board.apps.map((a) => a.id));
 		if (on.has(id)) on.delete(id);
@@ -144,17 +146,19 @@ export function TopBar({
 				filtering={lens.me}
 				onPick={(person) => actions.setSearch({ person })}
 			/>
-			<SimpleTooltip label="Read every source again now">
-				<button
-					type="button"
-					className="rel-round"
-					aria-label="Refresh sources"
-					onClick={() => refresh.mutate()}
-					disabled={refresh.isPending}
-				>
-					<RefreshCw className="size-3" aria-hidden="true" />
-				</button>
-			</SimpleTooltip>
+			{!readOnly && (
+				<SimpleTooltip label="Read every source again now">
+					<button
+						type="button"
+						className="rel-round"
+						aria-label="Refresh sources"
+						onClick={() => refresh.mutate()}
+						disabled={refresh.isPending}
+					>
+						<RefreshCw className="size-3" aria-hidden="true" />
+					</button>
+				</SimpleTooltip>
+			)}
 			<SimpleTooltip label="Every long-lived branch and its plan, dropped ones included">
 				<button
 					type="button"
