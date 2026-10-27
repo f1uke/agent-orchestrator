@@ -334,14 +334,14 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 		cancel()
 		t.Fatalf("status = %+v, want running on port %d", st, opts.Port)
 	}
-	resp, err := http.Get(st.URL + "api/board")
+	resp, err := http.Get(st.URL + "api/v1/release-trains/board")
 	if err != nil {
 		cancel()
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("GET api/board without the key = %d, want 401", resp.StatusCode)
+		t.Errorf("GET the board without the key = %d, want 401", resp.StatusCode)
 	}
 	if _, err := os.Stat(filepath.Join(paths.DBDir(), "ao.db")); err != nil {
 		t.Errorf("the web did not open its own database: %v", err)
