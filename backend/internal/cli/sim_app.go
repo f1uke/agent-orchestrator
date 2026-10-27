@@ -107,14 +107,60 @@ type simLaunchResult struct {
 	Chosen bool `json:"chosen,omitempty"`
 	Of     int  `json:"of,omitempty"`
 	// PID is what simctl reported the app started as, when it said.
-	PID        string `json:"pid,omitempty"`
-	Terminated bool   `json:"terminated"`
+	PID        string   `json:"pid,omitempty"`
+	Terminated bool     `json:"terminated"`
+	Args       []string `json:"args,omitempty"`
+	EnvKeys    []string `json:"envKeys,omitempty"`
 	// Console is the file the app's stdout and stderr go to, with --console.
 	Console      string        `json:"console,omitempty"`
 	Build        *simBuildView `json:"build,omitempty"`
 	BuildUnknown string        `json:"buildUnknown,omitempty"`
 	Lease        simLeaseView  `json:"lease"`
 	Note         string        `json:"note"`
+}
+
+type simLaunchSpec struct {
+	Args []string
+	Env  []simLaunchEnv
+}
+
+type simLaunchEnv struct{ Key, Value string }
+
+func parseSimLaunchEnv(raw []string) ([]simLaunchEnv, error) {
+	env := make([]simLaunchEnv, 0, len(raw))
+	seen := map[string]bool{}
+	for i, pair := range raw {
+		key, value, ok := strings.Cut(pair, "=")
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("--env #%d is not KEY=VALUE: it has no '='", i+1)
+		case key == "":
+			return nil, fmt.Errorf("--env #%d has an empty key: write it as KEY=VALUE", i+1)
+		case seen[key]:
+			return nil, fmt.Errorf("--env #%d sets %s more than once", i+1, key)
+		}
+		seen[key] = true
+		env = append(env, simLaunchEnv{Key: key, Value: value})
+	}
+	return env, nil
+}
+
+// simctlEnv is the environment that carries the spec to the app: simctl passes
+// a SIMCTL_CHILD_ variable on to the app it launches with the prefix removed.
+func (s simLaunchSpec) simctlEnv() []string {
+	env := make([]string, 0, len(s.Env))
+	for _, e := range s.Env {
+		env = append(env, "SIMCTL_CHILD_"+e.Key+"="+e.Value)
+	}
+	return env
+}
+
+func (s simLaunchSpec) envKeys() []string {
+	keys := make([]string, 0, len(s.Env))
+	for _, e := range s.Env {
+		keys = append(keys, e.Key)
+	}
+	return keys
 }
 
 func newSimInstallCommand(ctx *commandContext) *cobra.Command {
@@ -163,9 +209,10 @@ func newSimLaunchCommand(ctx *commandContext) *cobra.Command {
 		terminate bool
 		console   bool
 		json      bool
+		env       []string
 	}
 	cmd := &cobra.Command{
-		Use:   "launch [bundle-id]",
+		Use:   "launch [bundle-id] [-- app-args...]",
 		Short: "Launch an installed app on a simulator this session holds",
 		Long: "Start an app on a simulator, taking the device's lease as part of doing it.\n\n" +
 			"With no bundle id it launches the most recently installed app - which after " +
@@ -178,18 +225,33 @@ func newSimLaunchCommand(ctx *commandContext) *cobra.Command {
 			"never blocks the app the way a pipe does. Only this launch is captured: a relaunch by " +
 			"anything else (a Maestro `launchApp`, the home screen) sends stdout back to /dev/null.\n\n" +
 			"With no --udid it uses the simulator assigned to this session ($AO_SIM_UDID), " +
-			"falling back to the one booted device. " + simPowerNote,
+			"falling back to the one booted device. " + simPowerNote + "\n\n" +
+			"Everything after -- goes to the app as its launch arguments, word for word, so " +
+			"`-Key value` pairs land in its UserDefaults argument domain. Each --env KEY=VALUE is in " +
+			"the app's environment (simctl's SIMCTL_CHILD_KEY). Both apply with --console and " +
+			"--terminate-first. The output lists the arguments and the env keys, never an env value.",
 		Example: `  ao sim launch
   ao sim launch --console && ao sim console --follow
   ao sim launch com.example.MyApp --terminate-first
+  ao sim launch com.example.MyApp -- -FeatureFlag YES -AppleLanguages "(th)"
+  ao sim launch --env API_HOST=https://int.example.com --console -- -UITestMode
   ao sim launch --udid 00000000-0000-0000-0000-000000000000 --json`,
-		Args: cobra.MaximumNArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			bundle, _ := splitAtDash(cmd, args)
+			return cobra.MaximumNArgs(1)(cmd, bundle)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bundleID := ""
-			if len(args) == 1 {
-				bundleID = args[0]
+			env, err := parseSimLaunchEnv(opts.env)
+			if err != nil {
+				return err
 			}
-			result, err := ctx.launchSimApp(cmd.Context(), opts.udid, bundleID, opts.ttl, opts.terminate, opts.console)
+			bundle, appArgs := splitAtDash(cmd, args)
+			bundleID := ""
+			if len(bundle) == 1 {
+				bundleID = bundle[0]
+			}
+			spec := simLaunchSpec{Args: appArgs, Env: env}
+			result, err := ctx.launchSimApp(cmd.Context(), opts.udid, bundleID, opts.ttl, opts.terminate, opts.console, spec)
 			if err != nil {
 				return err
 			}
@@ -204,8 +266,18 @@ func newSimLaunchCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold the device afterwards (e.g. 30s, 10m, 1h). Default 10m")
 	f.BoolVar(&opts.terminate, "terminate-first", false, "Terminate the app if it is already running, so the launch runs the code that is installed now")
 	f.BoolVar(&opts.console, "console", false, "Relaunch with stdout and stderr in a file that ao sim console reads (implies --terminate-first)")
+	// StringArray, not StringSlice: a value with a comma in it is one value.
+	f.StringArrayVar(&opts.env, "env", nil, "Set KEY=VALUE in the app's environment (repeatable); the output names the key, never the value")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
+}
+
+func splitAtDash(cmd *cobra.Command, args []string) ([]string, []string) {
+	dash := cmd.ArgsLenAtDash()
+	if dash < 0 {
+		return args, nil
+	}
+	return args[:dash], args[dash:]
 }
 
 func (c *commandContext) installSimApp(ctx context.Context, udid, source, rawTTL string) (simInstallResult, error) {
@@ -243,7 +315,9 @@ func (c *commandContext) installSimApp(ctx context.Context, udid, source, rawTTL
 	return result, nil
 }
 
-func (c *commandContext) launchSimApp(ctx context.Context, udid, bundleID, rawTTL string, terminate, console bool) (simLaunchResult, error) {
+func (c *commandContext) launchSimApp(
+	ctx context.Context, udid, bundleID, rawTTL string, terminate, console bool, spec simLaunchSpec,
+) (simLaunchResult, error) {
 	device, lease, err := c.takeSimDeviceFor(ctx, "`ao sim launch`", udid, rawTTL)
 	if err != nil {
 		return simLaunchResult{}, err
@@ -263,6 +337,8 @@ func (c *commandContext) launchSimApp(ctx context.Context, udid, bundleID, rawTT
 		RuntimeIdentifier: device.RuntimeIdentifier,
 		BundleID:          app.BundleID,
 		Chosen:            chosen,
+		Args:              spec.Args,
+		EnvKeys:           spec.envKeys(),
 		Lease:             lease,
 		Note:              simSharedDeviceNote,
 	}
@@ -273,7 +349,7 @@ func (c *commandContext) launchSimApp(ctx context.Context, udid, bundleID, rawTT
 		// --terminate-running-process is part of the console launch: an app
 		// already running would only be brought to the front, keeping the
 		// stdout it had.
-		pid, path, err := c.launchSimConsole(ctx, device, app.BundleID)
+		pid, path, err := c.launchSimConsole(ctx, device, app.BundleID, spec)
 		if err != nil {
 			return simLaunchResult{}, err
 		}
@@ -289,7 +365,8 @@ func (c *commandContext) launchSimApp(ctx context.Context, udid, bundleID, rawTT
 		_, _ = c.deps.CommandOutput(ctx, simctl.Binary, "simctl", "terminate", device.UDID, app.BundleID)
 		result.Terminated = true
 	}
-	out, err := c.deps.CommandOutput(ctx, simctl.Binary, "simctl", "launch", device.UDID, app.BundleID)
+	launch := append([]string{"simctl", "launch", device.UDID, app.BundleID}, spec.Args...)
+	out, err := c.deps.CommandOutputWithEnv(ctx, spec.simctlEnv(), simctl.Binary, launch...)
 	if err != nil {
 		return simLaunchResult{}, fmt.Errorf("`simctl launch` failed for %s on %s: %w: %s",
 			app.BundleID, device.Label(), err, simctl.Output(out))
@@ -444,6 +521,16 @@ func writeSimLaunch(out io.Writer, result simLaunchResult) error {
 	if _, err := fmt.Fprintf(out, "%s on %s (%s, %s).\n",
 		launched, result.Name, result.Runtime, result.UDID); err != nil {
 		return err
+	}
+	if len(result.Args) > 0 {
+		if _, err := fmt.Fprintf(out, "Arguments: %s\n", strings.Join(result.Args, " ")); err != nil {
+			return err
+		}
+	}
+	if len(result.EnvKeys) > 0 {
+		if _, err := fmt.Fprintf(out, "Environment: %s (values not shown)\n", strings.Join(result.EnvKeys, ", ")); err != nil {
+			return err
+		}
 	}
 	if err := writeSimBuildLine(out, result.Build, result.BuildUnknown); err != nil {
 		return err

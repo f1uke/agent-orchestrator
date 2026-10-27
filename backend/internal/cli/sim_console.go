@@ -109,7 +109,9 @@ func simConsolePaths(sessionID, udid, bundleID string) (string, string, error) {
 // launchSimConsole launches the app with its stdout and stderr in the session's
 // console file, and records which pid the file belongs to. The device's lease
 // is the caller's to have taken.
-func (c *commandContext) launchSimConsole(ctx context.Context, device simDevice, bundleID string) (string, string, error) {
+func (c *commandContext) launchSimConsole(
+	ctx context.Context, device simDevice, bundleID string, spec simLaunchSpec,
+) (string, string, error) {
 	sessionID, err := simSessionID("--console")
 	if err != nil {
 		return "", "", err
@@ -126,8 +128,10 @@ func (c *commandContext) launchSimConsole(ctx context.Context, device simDevice,
 			return "", "", fmt.Errorf("remove the previous capture %s: %w", path, err)
 		}
 	}
-	out, err := c.deps.CommandOutputWithEnv(ctx, []string{simConsoleUnbuffered}, simctl.Binary, "simctl", "launch",
-		"--terminate-running-process", "--stdout="+logPath, "--stderr="+logPath, device.UDID, bundleID)
+	launch := append([]string{"simctl", "launch", "--terminate-running-process",
+		"--stdout=" + logPath, "--stderr=" + logPath, device.UDID, bundleID}, spec.Args...)
+	env := append([]string{simConsoleUnbuffered}, spec.simctlEnv()...)
+	out, err := c.deps.CommandOutputWithEnv(ctx, env, simctl.Binary, launch...)
 	if err != nil {
 		return "", "", fmt.Errorf("`simctl launch` failed for %s on %s: %w: %s", bundleID, device.Label(), err, simctl.Output(out))
 	}

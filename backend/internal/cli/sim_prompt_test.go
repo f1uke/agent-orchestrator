@@ -182,6 +182,7 @@ var simPromptDecisions = map[string]bool{
 	"run --ttl":     false,
 	// `--console` is how `print` output is kept; taught with the debugging lines.
 	"launch --console": true,
+	"launch --env":     false,
 	"run --console":    false,
 	"run --attach":     false,
 	"run --no-build":   false,
@@ -342,6 +343,7 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	"launch --console":         scriptTeaches,
 	"launch --terminate-first": scriptOmits,
 	"launch --ttl":             scriptOmits,
+	"launch --env":             scriptOmits,
 	// Reading is how an agent judges the end state a script left. It never
 	// moves the app, which is why the rule leaves it with the agent.
 	"shot":            scriptTeaches,
