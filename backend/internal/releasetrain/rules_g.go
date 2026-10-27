@@ -339,3 +339,127 @@ var ruleG6 = rule{
 		return out
 	},
 }
+
+type milestoneOwner struct {
+	train *TrainID
+	name  string
+}
+
+func (b *Board) milestoneOwners() map[AppID]map[int]milestoneOwner {
+	out := map[AppID]map[int]milestoneOwner{}
+	put := func(app AppID, id int, o milestoneOwner) {
+		if out[app] == nil {
+			out[app] = map[int]milestoneOwner{}
+		}
+		out[app][id] = o
+	}
+	for i := range b.Trains {
+		t := &b.Trains[i]
+		for _, v := range t.Versions {
+			put(v.App, v.Milestone.ID, milestoneOwner{train: &t.ID, name: t.ID.String()})
+		}
+	}
+	for _, h := range b.Hotfixes {
+		put(h.App, h.Milestone.ID, milestoneOwner{name: h.Milestone.Title})
+	}
+	return out
+}
+
+func (b *Board) ridesOn(feeds TrainID, app AppID) (*Train, *AppVersion) {
+	var best *Train
+	for i := range b.Trains {
+		t := &b.Trains[i]
+		if t.ID.Number != feeds.Number || t.ID.Year != feeds.Year {
+			continue
+		}
+		if v := t.version(app); v != nil {
+			return t, v
+		}
+		if best == nil || t.ID.regular() {
+			best = t
+		}
+	}
+	return best, nil
+}
+
+func (b *Board) beforeEveryTrain(id TrainID) bool {
+	for _, t := range b.Trains {
+		if !id.less(t.ID) {
+			return false
+		}
+	}
+	return len(b.Trains) > 0
+}
+
+func cardSource(branch string) bool {
+	_, sprint := sprintOf(branch)
+	return !sprint && !trunkTargetRE.MatchString(branch) && !releaseRE.MatchString(branch)
+}
+
+func releasedOn(t *Train, v *AppVersion) bool {
+	return t.Phase == PhasePast || v != nil && (v.Tag != nil || v.Jira != nil && v.Jira.Released)
+}
+
+var ruleG9 = rule{
+	ID: "G9", Group: "G", Severity: SevHygiene, DefaultOn: true, Scope: scopePerApp,
+	Subjects: []SubjectKind{SubjectMR},
+	Mine:     MineMR,
+	Reads:    []KindName{KindMilestones.Name, KindMRs.Name, KindJiraVersions.Name, KindTags.Name},
+	Title:    "Card MR into a sprint branch has no milestone, or another train's",
+	Hint:     "The milestone should be the train the sprint branch feeds. MRs into long-lived branches, develop and release branches are skipped. Risk from 3 working days before the app's freeze; quiet once the version is released.",
+	Check: func(b *Board) []Hit {
+		owners := b.milestoneOwners()
+		var out []Hit
+		for _, app := range b.Apps {
+			for _, mr := range b.mrs[app.ID] {
+				feeds, ok := sprintTrain(mr.TargetBranch)
+				if !ok || mr.State == MRClosed || !cardSource(mr.SourceBranch) {
+					continue
+				}
+				t, v := b.ridesOn(feeds, app.ID)
+				if t == nil && b.beforeEveryTrain(feeds) || t != nil && releasedOn(t, v) {
+					continue
+				}
+				rides := feeds
+				if t != nil {
+					rides = t.ID
+				}
+				var text string
+				links := []Link{{Label: "Open MR", URL: mr.URL}}
+				if mr.MilestoneID == nil {
+					text = fmt.Sprintf("!%d has no milestone; it rides %s", mr.IID, rides)
+					if v != nil {
+						text += ", set " + v.Milestone.Title
+						links = append(links, Link{Label: "Open milestone", URL: v.Milestone.URL})
+					}
+				} else {
+					o, known := owners[app.ID][*mr.MilestoneID]
+					if !known || o.train != nil && o.train.Number == feeds.Number && o.train.Year == feeds.Year {
+						continue
+					}
+					text = fmt.Sprintf("!%d milestone says %s, code goes to %s", mr.IID, o.name, rides)
+				}
+				h := Hit{
+					Subject: SubjMR{App: app.ID, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: app.ID, Train: &rides,
+					Evidence: Evidence{"mr": mr.IID, "target": mr.TargetBranch, "milestone": mr.MilestoneID},
+					Text:     text, Links: links,
+				}
+				if keys := mrKeys(mr); len(keys) > 0 {
+					h.Evidence["card"], h.cards = keys[0], keys[:1]
+				}
+				var freeze *Day
+				if t != nil {
+					freeze = t.Freeze
+					if v != nil {
+						freeze = freezeOf(t, v)
+					}
+				}
+				if freeze != nil && workDaysLeft(b.Today, *freeze) <= nearFreezeWorkDays {
+					h.Severity = SevRisk
+				}
+				out = append(out, h)
+			}
+		}
+		return out
+	},
+}
