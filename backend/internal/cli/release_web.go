@@ -52,7 +52,7 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 			"Use start to run it in the background instead.",
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, _, err := ctx.releaseWebControl()
+			cfg, control, err := ctx.releaseWebControl()
 			if err != nil {
 				return err
 			}
@@ -68,6 +68,7 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logOut := releaseweb.WebLogWriter(control.Paths, cmd.ErrOrStderr())
 			run, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "release web: serving %s on 127.0.0.1:%d\n", dir, port)
@@ -76,7 +77,7 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 				Port:         port,
 				AssetsDir:    dir,
 				AllowedHosts: hosts,
-				Logger:       slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil)),
+				Logger:       slog.New(slog.NewTextHandler(logOut, nil)),
 			})
 		},
 	}

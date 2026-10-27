@@ -53,7 +53,7 @@ All files live in `~/.ao/release-web`. The directory is mode 0700.
 | `access.log`  | One JSON line per sign-in, failed sign-in, lockout, sign-out and rotation. `access.log.1` holds the previous 10 MiB. |
 | `run.json`    | The pid, port, start time and the process start time the OS reports, while the web runs.                             |
 | `status.json` | The signed-in session count while the web runs.                                                                      |
-| `web.log`     | Output of a web started with `start`.                                                                                |
+| `web.log`     | Output of a web started with `start`. At 10 MiB it moves to `web.log.1`, at start and while the web runs.            |
 | `db/`         | The web's own SQLite database.                                                                                       |
 | `avatars/`    | Jira avatars the web downloaded.                                                                                     |
 
