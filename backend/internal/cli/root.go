@@ -274,6 +274,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	root.AddCommand(newScriptsCommand(ctx))
 	root.AddCommand(newTestinyCommand(ctx))
 	root.AddCommand(newTrainCommand(ctx))
+	root.AddCommand(newReleaseWebCommand(ctx))
 	root.AddCommand(newLearnCommand(ctx))
 	root.AddCommand(newCompletionCommand())
 	root.AddCommand(newVersionCommand())
