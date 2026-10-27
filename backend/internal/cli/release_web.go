@@ -44,6 +44,7 @@ func (c *commandContext) releaseWebControl() (cfg config.Config, control *daemon
 func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 	var port int
 	var assets string
+	var hosts []string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the team web in the foreground on 127.0.0.1",
@@ -58,6 +59,11 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 			if port < 1 || port > 65535 {
 				return usageError{fmt.Errorf("--port %d is not a port", port)}
 			}
+			for _, h := range hosts {
+				if _, err := releaseweb.NormalizeHost(h); err != nil {
+					return usageError{fmt.Errorf("--host: %w", err)}
+				}
+			}
 			dir, err := daemon.ResolveReleaseWebAssets(assets, ctx.deps.Executable)
 			if err != nil {
 				return err
@@ -66,14 +72,16 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 			defer stop()
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "release web: serving %s on 127.0.0.1:%d\n", dir, port)
 			return daemon.RunReleaseWeb(run, daemon.ReleaseWebOptions{
-				DataDir:   cfg.DataDir,
-				Port:      port,
-				AssetsDir: dir,
-				Logger:    slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil)),
+				DataDir:      cfg.DataDir,
+				Port:         port,
+				AssetsDir:    dir,
+				AllowedHosts: hosts,
+				Logger:       slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil)),
 			})
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", releaseweb.DefaultPort, "Port to listen on, on 127.0.0.1")
+	cmd.Flags().StringArrayVar(&hosts, "host", nil, "Another host name to answer besides 127.0.0.1, localhost and *.ts.net, such as a custom domain in front of the web; repeatable")
 	cmd.Flags().StringVar(&assets, "assets", "", "Directory of the web bundle (default $"+daemon.ReleaseWebAssetsEnv+", else release-web/ beside the ao binary)")
 	return cmd
 }

@@ -310,7 +310,7 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(assets, "index.html"), []byte("<!doctype html><title>board</title>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opts := ReleaseWebOptions{DataDir: dataDir, Port: freePort(t), AssetsDir: assets, Logger: quietLogger(nil)}
+	opts := ReleaseWebOptions{DataDir: dataDir, Port: freePort(t), AssetsDir: assets, AllowedHosts: []string{"board.example.org"}, Logger: quietLogger(nil)}
 
 	if err := RunReleaseWeb(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "rotate-key") {
 		t.Fatalf("RunReleaseWeb without a key = %v, want one that names rotate-key", err)
@@ -343,6 +343,22 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("GET the board without the key = %d, want 401", resp.StatusCode)
+	}
+	for hostName, want := range map[string]int{"board.example.org": http.StatusOK, "other.example.org": http.StatusMisdirectedRequest} {
+		req, err := http.NewRequest(http.MethodGet, st.URL+"robots.txt", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = hostName
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("GET with Host %s = %d, want %d", hostName, resp.StatusCode, want)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(paths.DBDir(), "ao.db")); err != nil {
 		t.Errorf("the web did not open its own database: %v", err)

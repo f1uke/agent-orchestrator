@@ -73,12 +73,6 @@ func Serve(ctx context.Context, o Options) error {
 	if st := ReadStatus(o.Paths); st.Running {
 		return fmt.Errorf("release web: already running as pid %d at %s", st.PID, st.URL)
 	}
-	srv, err := NewServer(o)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = srv.Close() }()
-
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("release web: listen: %w", err)
@@ -88,6 +82,13 @@ func Serve(ctx context.Context, o Options) error {
 		_ = ln.Close()
 		return fmt.Errorf("release web: listener address %v is not TCP", ln.Addr())
 	}
+	o.Addr = tcp.String() // the port a loopback Host must name, when addr asked for port 0
+	srv, err := NewServer(o)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	defer func() { _ = srv.Close() }()
 	pid := os.Getpid()
 	defer removeRunFiles(o.Paths, pid)
 	sessions := srv.Sessions()

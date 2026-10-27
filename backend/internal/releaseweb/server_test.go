@@ -116,10 +116,13 @@ func header(k, v string) reqOpt { return func(r *http.Request) { r.Header.Add(k,
 
 func withCookie(c *http.Cookie) reqOpt { return func(r *http.Request) { r.AddCookie(c) } }
 
+func host(h string) reqOpt { return func(r *http.Request) { r.Host = h } }
+
 func (h *harness) do(method, target string, body io.Reader, opts ...reqOpt) *http.Response {
 	h.t.Helper()
 	r := httptest.NewRequest(method, target, body)
 	r.RemoteAddr = internetPeer
+	r.Host = "127.0.0.1:7420"
 	for _, o := range opts {
 		o(r)
 	}
@@ -740,6 +743,59 @@ func TestSignInRefusesCrossSitePostsAndOversizedBodies(t *testing.T) {
 	}
 }
 
+func TestOnlyLoopbackTailnetAndListedHostsAreServed(t *testing.T) {
+	h := newHarness(t)
+	c := h.session()
+	allowed := []string{"127.0.0.1:7420", "localhost:7420", "LocalHost:7420", "[::1]:7420", "box.tail1234.ts.net", "box.tail1234.ts.net:443", "BOX.TAIL1234.TS.NET."}
+	for _, hst := range allowed {
+		if res := h.do(http.MethodGet, "/api/v1/release-trains/board", nil, withCookie(c), host(hst)); res.StatusCode != http.StatusOK {
+			t.Errorf("Host %q = %d, want 200", hst, res.StatusCode)
+		}
+	}
+	refused := []string{"rebind.example:7420", "rebind.example", "127.0.0.1:7421", "localhost", "127.0.0.1", "ts.net", ".ts.net", "box.ts.net.evil.example", "evilts.net", ""}
+	for _, hst := range refused {
+		for _, target := range []string{"/", "/api/v1/release-trains/board", "/auth/signin"} {
+			res := h.do(http.MethodGet, target, nil, withCookie(c), host(hst))
+			if res.StatusCode != http.StatusMisdirectedRequest || strings.Contains(bodyOf(t, res), "trains") {
+				t.Errorf("GET %s with Host %q = %d, want 421", target, hst, res.StatusCode)
+			}
+		}
+	}
+	if res := h.signin(h.secret(), host("rebind.example:7420")); res.StatusCode != http.StatusMisdirectedRequest || len(res.Cookies()) != 0 {
+		t.Errorf("sign-in with a foreign Host = %d with %d cookies, want 421 and none", res.StatusCode, len(res.Cookies()))
+	}
+	if h.hasEvent("198.51.100.7", eventSigninFailed) || len(h.events()) != 1 {
+		t.Error("a misdirected request reached the sign-in logic")
+	}
+}
+
+func TestExtraAllowedHostsAreServed(t *testing.T) {
+	p := Paths{Dir: t.TempDir()}
+	if err := RotateKey(p); err != nil {
+		t.Fatal(err)
+	}
+	o := testOptions(p)
+	o.AllowedHosts = []string{"Board.Example.ORG"}
+	srv, err := NewServer(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	for hst, want := range map[string]int{"board.example.org": 200, "board.example.org:8443": 200, "other.example.org": 421} {
+		r := httptest.NewRequest(http.MethodGet, "/robots.txt", nil)
+		r.Host = hst
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Errorf("Host %q = %d, want %d", hst, w.Code, want)
+		}
+	}
+	o.AllowedHosts = []string{"https://board.example.org/"}
+	if _, err := NewServer(o); err == nil {
+		t.Error("NewServer accepted a URL as an allowed host")
+	}
+}
+
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	h := newHarness(t)
 	c := h.session(from("192.0.2.1:1"))
@@ -763,6 +819,7 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 		{"403", func() *http.Response { return h.do(http.MethodDelete, "/", nil) }, 403, false},
 		{"404", func() *http.Response { return h.do(http.MethodGet, "/api/x", nil, withCookie(c)) }, 404, false},
 		{"429", func() *http.Response { return h.signin("wrong", from("192.0.2.66:1")) }, 429, false},
+		{"421", func() *http.Response { return h.do(http.MethodGet, "/", nil, host("rebind.example:7420")) }, 421, false},
 		{"key page over https", func() *http.Response { return h.do(http.MethodGet, "/", nil, https...) }, 200, true},
 		{"401 over https", func() *http.Response {
 			return h.do(http.MethodGet, "/api/v1/release-trains/board", nil, https...)

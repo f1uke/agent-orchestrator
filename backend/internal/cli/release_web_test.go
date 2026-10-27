@@ -127,6 +127,11 @@ func TestReleaseWebServeNeedsAKeyAndABundle(t *testing.T) {
 	if err == nil || ExitCode(err) != 2 {
 		t.Fatalf("serve --port 0 = %v, want a usage error", err)
 	}
+
+	_, _, err = executeCLI(t, failingExecutable(), "release-web", "serve", "--assets", assets, "--host", "board.example.org", "--host", "https://board.example.org/")
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "--host") {
+		t.Fatalf("serve --host with a URL = %v, want a usage error naming --host", err)
+	}
 }
 
 func TestReleaseWebHelpSaysLoopbackAndThatExposingItIsTheHumansStep(t *testing.T) {

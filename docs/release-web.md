@@ -22,7 +22,7 @@ Run these with the `ao` binary.
 | `ao release-web status`     | Shows whether it runs, its address, signed-in sessions and key generation. `--json` for scripts. |
 | `ao release-web rotate-key` | Makes a new key. Everyone is signed out. Prints the generation and the key file path.            |
 | `ao release-web copy-key`   | Puts the key on the clipboard without printing it. On macOS it uses `pbcopy`.                    |
-| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420) and `--assets DIR`.                |
+| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420), `--assets DIR` and `--host NAME`. |
 
 No command prints the key. On a machine without `pbcopy`, read the key from `key.json`.
 
@@ -97,7 +97,7 @@ The web is written as if the internet reaches it.
 - The board leaves out the paths of your config and people files and their error messages. It keeps their state: absent, invalid or fine.
 - `access.log` records the time, the client address and the event. It never records the key, a token, a form body or a query string.
 - `access.log` stays small under a flood. At 10 MiB it moves to `access.log.1`, which replaces the old one. While a client is locked out, the log writes its first refused attempt once per minute. A `signin_locked_repeated` line with a `count` stands for the rest.
-- The server refuses to listen on any address except `127.0.0.1`.
+- The server refuses to listen on any address except `127.0.0.1`. It answers only known `Host` names. See [Host names the server answers](#host-names-the-server-answers).
 
 ## Cost of two pollers
 
@@ -115,7 +115,26 @@ To do it:
 
 1. Run `ao release-web start`.
 2. Run `ao release-web copy-key` and share the key with your team over a private channel.
-3. Point Funnel at port 7420 with the `tailscale funnel` command. Check the Tailscale documentation for the syntax of your version.
+3. Run `tailscale funnel 7420`. Check the Tailscale documentation for the exact syntax of your version.
 4. Stop Funnel when you want the address closed. The Team web switch in Settings does not control Funnel.
 
-Funnel terminates TLS and proxies to the loopback port. The server then sees the real client address in `X-Forwarded-For`.
+### Use the HTTPS proxy mode only
+
+Use `tailscale funnel <port>`, the HTTPS proxy mode. Do not use `--tcp` or `--tls-terminated-tcp`.
+
+In HTTPS proxy mode, Funnel terminates TLS and proxies HTTP to the loopback port. It adds `X-Forwarded-For` with the real client address and `X-Forwarded-Proto: https`. The server depends on both:
+
+- The sign-in limits count each client by its `X-Forwarded-For` address.
+- The session cookie gets `Secure`, and responses get HSTS, only when `X-Forwarded-Proto` is `https`.
+
+The TCP modes pass raw bytes and add no headers. Every visitor then looks like `127.0.0.1`. So one guesser's failures lock out everyone, the per-client limits stop working, and the cookie loses `Secure`.
+
+### Host names the server answers
+
+The server answers only these `Host` headers:
+
+- `127.0.0.1:<port>`, `localhost:<port>` and `[::1]:<port>`, where the port is the one it listens on.
+- Any name that ends in `.ts.net`, the names Funnel serves.
+- Each name you give with `--host` on `ao release-web serve`, for example a custom domain in front of the web. Repeat the flag for more names. `start` and the Settings switch do not pass `--host`.
+
+Any other `Host` gets `421 Misdirected Request` before the server looks at keys or sessions. This stops DNS rebinding: a web page on another name that resolves to `127.0.0.1` cannot use your browser to reach the web.

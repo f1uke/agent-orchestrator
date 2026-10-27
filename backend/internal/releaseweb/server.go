@@ -51,10 +51,14 @@ type Options struct {
 	Now func() time.Time
 	// Logger receives operational errors, never secrets; stderr when nil.
 	Logger *slog.Logger
+	// AllowedHosts are host names served besides loopback on Addr's port and
+	// any *.ts.net name; every other Host header gets 421.
+	AllowedHosts []string
 }
 
 // Server is the release web's HTTP handler.
 type Server struct {
+	hosts    hostAllowlist
 	board    BoardSource
 	assets   fs.FS
 	now      func() time.Time
@@ -73,10 +77,19 @@ func NewServer(o Options) (*Server, error) {
 	if o.Board == nil || o.Assets == nil {
 		return nil, errors.New("release web: Board and Assets are required")
 	}
+	addr := o.Addr
+	if addr == "" {
+		addr = DefaultAddr
+	}
+	hosts, err := newHostAllowlist(addr, o.AllowedHosts)
+	if err != nil {
+		return nil, err
+	}
 	if err := o.Paths.Ensure(); err != nil {
 		return nil, err
 	}
 	s := &Server{
+		hosts:    hosts,
 		board:    o.Board,
 		assets:   o.Assets,
 		now:      o.Now,
@@ -91,14 +104,13 @@ func NewServer(o Options) (*Server, error) {
 	if s.log == nil {
 		s.log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
-	keys, err := newKeyWatcher(o.Paths, s.log, func() {
+	s.keys, err = newKeyWatcher(o.Paths, s.log, func() {
 		s.sessions.rotate()
 		s.notifyChanged()
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.keys = keys
 	if s.access, err = openAccessLog(o.Paths.AccessLog()); err != nil {
 		return nil, err
 	}
@@ -125,6 +137,10 @@ func (s *Server) notifyChanged() {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c := clientOf(r)
 	setSecurityHeaders(w.Header(), c.https)
+	if !s.hosts.allows(r.Host) {
+		http.Error(w, "Misdirected Request", http.StatusMisdirectedRequest)
+		return
+	}
 	p := path.Clean("/" + r.URL.Path)
 	switch {
 	case p == "/robots.txt" && isRead(r):
