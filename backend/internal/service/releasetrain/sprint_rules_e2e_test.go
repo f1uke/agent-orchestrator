@@ -36,7 +36,7 @@ func TestSprintRulesFireEndToEnd(t *testing.T) {
 			g = append(g, h.ID)
 		}
 	}
-	if strings.Join(g, " ") != "G5~pf/21-2026/demo/merged G1~c/DEMO-360" {
-		t.Fatalf("sprint hits = %v; want G5 for DEMO-362 missing from the train 21 page and G1 for DEMO-360, merged but in progress", g)
+	if strings.Join(g, " ") != "G5~pf/21-2026/demo/merged G1~c/DEMO-360 G9~mr/di/401 G9~mr/di/402" {
+		t.Fatalf("sprint hits = %v; want G5 for DEMO-362 missing from the train 21 page, G1 for DEMO-360, merged but in progress, and G9 for the two sprint 21 MRs without a milestone", g)
 	}
 }

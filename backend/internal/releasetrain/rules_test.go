@@ -50,7 +50,7 @@ func firedIDs(b Board, rule RuleID) []string {
 }
 
 func TestRuleTableHasExactlyTheBuiltIDs(t *testing.T) {
-	want := strings.Fields("A1 A2 A3 A4 A5 A6 A7 B1 B3 C1 C2 C3 C5 C6 C7 D1 D2 D3 E1 E2 E4 E5 F1 F2 G1 G2 G3 G4 G5 G6 L1 L3 L8 L9 L10 L11 L12 L13")
+	want := strings.Fields("A1 A2 A3 A4 A5 A6 A7 B1 B3 C1 C2 C3 C5 C6 C7 D1 D2 D3 E1 E2 E4 E5 F1 F2 G1 G2 G3 G4 G5 G6 G9 L1 L3 L8 L9 L10 L11 L12 L13")
 	var got []string
 	for _, r := range ruleTable() {
 		got = append(got, string(r.ID))

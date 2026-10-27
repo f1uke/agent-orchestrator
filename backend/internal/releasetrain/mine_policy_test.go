@@ -18,7 +18,7 @@ func TestEveryRuleDeclaresTheApprovedMinePolicy(t *testing.T) {
 		"D3": MinePendingApprover,
 		"B3": MineListedCards, "E2": MineListedCards, "G5": MineListedCards,
 		"G1": MineListedCards, "G2": MineListedCards, "G3": MineListedCards, "G4": MineListedCards, "L3": MineListedCards,
-		"G6": MineMR, "L1": MineMR, "L8": MineMR, "L9": MineMR, "L12": MineMR,
+		"G6": MineMR, "G9": MineMR, "L1": MineMR, "L8": MineMR, "L9": MineMR, "L12": MineMR,
 		"L10": MineListedCards, "L11": MineListedCards, "L13": MineListedCards,
 	}
 	table := ruleTable()
