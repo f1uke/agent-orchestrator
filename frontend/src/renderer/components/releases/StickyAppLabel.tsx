@@ -7,6 +7,7 @@ import { SourceTag, SourceValue } from "./Sources";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
 import { versionMineText } from "../../lib/releases/sprint";
 import { alertText } from "../../lib/releases/mineWhy";
+import { ofText, ofTheir } from "../../lib/releases/who";
 import { appMark } from "../../lib/releases/appMark";
 import { AppMark } from "./AppMark";
 import { useLabelStagger } from "./ReleaseMotion";
@@ -28,10 +29,12 @@ export function Stepper({ stages, big = false }: { stages: Stage[]; big?: boolea
 function MineLine({ app, lens }: { app: string; lens: Lens }) {
 	const t = lens.focus;
 	const v = t ? versionOf(t, app) : undefined;
+	const who = lens.who;
+	if (!who) return null;
 	const units = (v?.cards ?? []).filter((u) => u.mine?.length);
 	const bits = [
-		v ? versionMineText(v, lens.viewer?.jiraAccountId) : "",
-		units.length ? `${units.length} of my card${units.length === 1 ? "" : "s"}` : "",
+		v ? versionMineText(v, lens.viewer?.jiraAccountId, who) : "",
+		units.length ? `${units.length} ${ofTheir(who)} card${units.length === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
 	return bits.length ? (
 		<div className="meline" data-testid="label-mine">
@@ -40,7 +43,7 @@ function MineLine({ app, lens }: { app: string; lens: Lens }) {
 		</div>
 	) : (
 		<div className="meline off" data-testid="label-mine">
-			Nothing of mine in {t?.label ?? "this train"}
+			Nothing {ofText(who)} in {t?.label ?? "this train"}
 		</div>
 	);
 }

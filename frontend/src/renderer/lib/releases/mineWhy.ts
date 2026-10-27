@@ -1,3 +1,4 @@
+import { their, type Who } from "./who";
 import type { AlertHit, MinePolicy, MineReason, RuleInfo, Subject } from "./types";
 
 type Why = MineReason["why"];
@@ -11,18 +12,20 @@ const refs = (mine: readonly MineReason[], why: Why) => [
 const named = (one: string, many: string, list: string[]) =>
 	list.length ? `${list.length === 1 ? one : many} ${list.join(", ")}` : "";
 
-export function mineWhy(h: AlertHit): string {
+export function mineWhy(h: AlertHit, who: Who): string {
 	const mine = h.mine ?? [];
+	const own = their(who);
 	const hotfix = h.subject.kind === "hotfix" || h.subject.kind === "hotfixTrain";
 	const phrase: Record<Why, () => string> = {
-		release_mr_author: () => named("your release MR", "your release MRs", refs(mine, "release_mr_author")),
-		release_ticket_assignee: () => (refs(mine, "release_ticket_assignee").length ? "your release ticket" : ""),
-		approver: () => (refs(mine, "approver").length ? "you have not approved" : ""),
-		card: () => named("your card", "your cards", refs(mine, "card")),
+		release_mr_author: () => named(`${own} release MR`, `${own} release MRs`, refs(mine, "release_mr_author")),
+		release_ticket_assignee: () => (refs(mine, "release_ticket_assignee").length ? `${own} release ticket` : ""),
+		approver: () =>
+			refs(mine, "approver").length ? (who.self ? "you have not approved" : `${who.name} has not approved`) : "",
+		card: () => named(`${own} card`, `${own} cards`, refs(mine, "card")),
 		mr_author: () =>
 			hotfix
-				? named("your hotfix MR", "your hotfix MRs", refs(mine, "mr_author"))
-				: named("your MR", "your MRs", refs(mine, "mr_author")),
+				? named(`${own} hotfix MR`, `${own} hotfix MRs`, refs(mine, "mr_author"))
+				: named(`${own} MR`, `${own} MRs`, refs(mine, "mr_author")),
 		assignee: () => "",
 		subtask: () => "",
 		landing_author: () => "",

@@ -16,6 +16,7 @@ import {
 	worstTone,
 } from "./lens";
 import { cardGroups } from "./cards";
+import { demoBoard, unknownIdentityBoard, viewBoardAs } from "./fixture";
 import { board, hotfix as hotfixOf, stage, train, version } from "./testkit";
 import type { AlertHit, Badge, RuleInfo, RuleOutcome } from "./types";
 import { parseReleasesSearch } from "./url";
@@ -499,5 +500,38 @@ describe("train chips", () => {
 
 	it("keeps an older train the URL focuses", () => {
 		expect(trainChips(b, false, "18-2026").map((x) => x.id)).toEqual(["18-2026", "20-2026", "21-2026", "22-2026"]);
+	});
+});
+
+describe("whose Mine the lens words", () => {
+	const own = demoBoard("2026-10-14");
+	const ben = demoBoard("2026-10-14");
+	viewBoardAs(ben, "bsample");
+
+	it("says you for the monitor's own person and the name for anyone else", () => {
+		expect(makeLens(own, parseReleasesSearch({ person: "ada" }), new Set()).scope).toEqual({
+			self: true,
+			name: "Ada Example",
+		});
+		expect(makeLens(ben, parseReleasesSearch({ person: "bsample" }), new Set()).scope).toEqual({
+			self: false,
+			name: "Ben Sample",
+		});
+	});
+
+	it("has no scope while the page shows everyone, but still knows whose Mine the Board carries", () => {
+		const all = makeLens(own, parseReleasesSearch({}), new Set());
+		expect(all.scope).toBeNull();
+		expect(all.who).toEqual({ self: true, name: "Ada Example" });
+	});
+
+	it("names even the monitor's own person in a read-only host, filtered or not", () => {
+		const adaOnly = makeLens(own, parseReleasesSearch({ person: "ada" }), new Set(), true);
+		expect(adaOnly.scope).toEqual({ self: false, name: "Ada Example" });
+		expect(makeLens(own, parseReleasesSearch({}), new Set(), true).who).toEqual({ self: false, name: "Ada Example" });
+	});
+
+	it("has no one to word when the Board's viewer is unknown", () => {
+		expect(makeLens(unknownIdentityBoard("2026-10-14"), parseReleasesSearch({}), new Set()).who).toBeNull();
 	});
 });

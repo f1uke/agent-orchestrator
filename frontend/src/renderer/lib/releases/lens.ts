@@ -21,6 +21,7 @@ import type {
 import { lensSprintCards } from "./sprint";
 import type { ReleasesSearch } from "./url";
 import { SEVERITY_META, stageTone, type Tone } from "./vocab";
+import { boardWho, type Who } from "./who";
 
 export function nowStage(stages: Stage[]): Stage | null {
 	return stages.find((s) => s.status !== "done" && s.status !== "not_observable") ?? null;
@@ -109,6 +110,10 @@ export type Lens = {
 	mobile: boolean;
 	/** That person, null while the page shows everyone. */
 	viewer: BoardPerson | null;
+	/** Whose Mine the Board's reasons are about, filtered or not: the wording of every Mine line. */
+	who: Who | null;
+	/** Whose Mine the page is narrowed to, null while it shows everyone. */
+	scope: Who | null;
 	/** Whose face marks their rows in a train's card lists, which the person filter never narrows. */
 	face: BoardPerson | null;
 	keepVersion: (v: AppVersion) => boolean;
@@ -120,10 +125,12 @@ export type Lens = {
 	llbs: LLBGroup[];
 };
 
-export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySet<string>): Lens {
+/** `readOnly` is the host: nobody there is "you", so a Mine line names its person. */
+export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySet<string>, readOnly = false): Lens {
 	const on = shown(url.apps);
 	const viewer = viewingAs(b, url.person);
 	const me = viewer !== null;
+	const who = boardWho(b, readOnly);
 	const keep = <T extends { mine?: readonly MineReason[] }>(x: T) => !me || isMine(x);
 	const focus = focusTrain(b, url.focus);
 	const ruleOff = new Set(b.catalogue.filter((r) => !r.on).map((r) => r.id));
@@ -141,6 +148,8 @@ export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySe
 		me,
 		mobile: url.mobile,
 		viewer,
+		who,
+		scope: me ? who : null,
 		face: viewer,
 		keepVersion: keep,
 		keepHotfix: keep,

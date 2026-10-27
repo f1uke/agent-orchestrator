@@ -15,6 +15,7 @@ import {
 	mineText,
 	sprintShipsIn,
 } from "../../lib/releases/sprint";
+import type { Who } from "../../lib/releases/who";
 import type { Board, CardUnit, MineReason, SprintCard, SprintRow, Train } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
 import { cardHits } from "../../lib/releases/hitScope";
@@ -49,13 +50,13 @@ function Sec({ title, source, children }: { title: string; source?: Provenance; 
 	);
 }
 
-function Mine({ mine }: { mine: MineReason[] | undefined }) {
-	if (!mine?.length) return null;
+function Mine({ mine, who }: { mine: MineReason[] | undefined; who: Who | null }) {
+	if (!mine?.length || !who) return null;
 	return (
 		<>
-			<span>Yours</span>
+			<span>{who.self ? "Yours" : who.name}</span>
 			<span className="c" data-st="accent" data-testid="card-mine">
-				{mineText(mine)}
+				{mineText(mine, who)}
 			</span>
 		</>
 	);
@@ -165,7 +166,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 						</>
 					)}
 					<NoMrLine board={b} k={key} />
-					<Mine mine={mine} />
+					<Mine mine={mine} who={c.lens.who} />
 					{url && (
 						<>
 							<span>Jira</span>

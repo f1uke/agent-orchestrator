@@ -16,6 +16,7 @@ import {
 } from "../../lib/releases/url";
 import { saveSearch, useReleasesUi } from "../../stores/releases-ui";
 import { ReleaseMotionRoot } from "./ReleaseMotion";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import { SheetStack } from "./SheetStack";
 import { SourcesProvider } from "./Sources";
 import { SummaryStrip } from "./SummaryStrip";
@@ -194,7 +195,8 @@ function Loaded({
 	fetchError: string | null;
 	updatedAt: number;
 }) {
-	const lens = useMemo(() => makeLens(board, url, hiddenBoards), [board, url, hiddenBoards]);
+	const readOnly = useReleasesReadOnly();
+	const lens = useMemo(() => makeLens(board, url, hiddenBoards, readOnly), [board, url, hiddenBoards, readOnly]);
 	const now = useNow(30_000);
 	const boardError = fetchError
 		? `${fetchError}; board last read ${Math.max(0, Math.round((now - updatedAt) / 60_000))}m ago`

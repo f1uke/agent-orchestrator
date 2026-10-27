@@ -84,13 +84,21 @@ test.describe("View as", () => {
 		await expect(page.getByTestId("label-da").getByTestId("label-blocker")).toContainText("Ben Sample");
 	});
 
+	test("another person's why lines name them, never you", async ({ page }) => {
+		await open(page, "?sheet=attention&person=bsample", "subjects");
+		await expect(row(page, "D3~v/21-2026/da").getByTestId("hit-mine")).toHaveText("Ben Sample has not approved");
+		const lines = await sheet(page).getByTestId("hit-mine").allTextContents();
+		expect(lines.length).toBeGreaterThan(0);
+		for (const line of lines) expect(line).not.toMatch(/\byou(r)?\b/i);
+	});
+
 	test("Sources names the mine policy behind the why line", async ({ page }) => {
 		await open(page, "?sheet=attention&person=ada&layers=src", "subjects");
 		const tag = row(page, "D3~v/21-2026/da").getByTestId("hit-mine").getByTestId("source-tag");
 		await expect(tag).toHaveText("AO");
 		await tag.click();
 		const card = page.getByTestId("source-card");
-		await expect(card).toContainText("D3: mine while your approval is pending");
+		await expect(card).toContainText("D3: mine while the person's approval is pending");
 		await expect(card).toContainText("ao.mine_policy");
 	});
 });

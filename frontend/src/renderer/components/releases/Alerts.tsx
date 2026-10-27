@@ -141,7 +141,7 @@ function HitText({ h, c }: { h: AlertHit; c: AlertCtx }) {
 }
 
 function MineLine({ h, c }: { h: AlertHit; c: AlertCtx }) {
-	const why = c.lens.me ? mineWhy(h) : "";
+	const why = c.lens.scope ? mineWhy(h, c.lens.scope) : "";
 	const policy = minePolicyOf(c.board.catalogue, h.rule);
 	if (!why) return null;
 	return (
