@@ -83,6 +83,8 @@ func Build() ([]byte, error) {
 			"Personal note vault: its index, its notes, and the one agent running inside it"),
 		*(&openapi31.Tag{Name: "release-trains"}).WithDescription(
 			"Read-only monitor of the mobile release trains: its config and source freshness"),
+		*(&openapi31.Tag{Name: "release-web"}).WithDescription(
+			"The team web of the release trains: a separate read-only program behind one shared key"),
 	}
 
 	for _, op := range operations() {
@@ -535,6 +537,7 @@ func operations() []operation {
 	ops = append(ops, daemonOperations()...)
 	ops = append(ops, learningOperations()...)
 	ops = append(ops, releaseTrainOperations()...)
+	ops = append(ops, releaseWebOperations()...)
 	return ops
 }
 

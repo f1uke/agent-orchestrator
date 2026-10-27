@@ -2927,6 +2927,140 @@ paths:
       summary: Show the release-train config state and each observed resource's freshness
       tags:
       - release-trains
+  /api/v1/release-web:
+    get:
+      operationId: getReleaseWebStatus
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseWebStatusResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Show whether the team web runs, where, how many are signed in, and
+        the key generation; never the key
+      tags:
+      - release-web
+  /api/v1/release-web/copy-key:
+    post:
+      operationId: copyReleaseWebKey
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseWebCopyKeyResponse'
+          description: OK
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Put the shared key on the clipboard of the machine the daemon runs
+        on; the key never crosses HTTP
+      tags:
+      - release-web
+  /api/v1/release-web/rotate-key:
+    post:
+      operationId: rotateReleaseWebKey
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseWebStatusResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Replace the shared key; every signed-in session ends
+      tags:
+      - release-web
+  /api/v1/release-web/start:
+    post:
+      operationId: startReleaseWeb
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseWebStatusResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start the team web as its own detached process, creating a key when
+        none exists
+      tags:
+      - release-web
+  /api/v1/release-web/stop:
+    post:
+      operationId: stopReleaseWeb
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseWebStatusResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop the team web
+      tags:
+      - release-web
   /api/v1/sessions:
     get:
       operationId: listSessions
@@ -16087,6 +16221,42 @@ components:
       required:
       - released
       type: object
+    ReleaseWebCopyKeyResponse:
+      properties:
+        copied:
+          type: boolean
+      required:
+      - copied
+      type: object
+    ReleaseWebStatusResponse:
+      properties:
+        keyGeneration:
+          description: Counts up on every key rotation.
+          type: integer
+        keyPresent:
+          type: boolean
+        pid:
+          type: integer
+        port:
+          type: integer
+        running:
+          type: boolean
+        sessions:
+          description: People signed in right now.
+          type: integer
+        startedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        url:
+          description: Where the web listens, on 127.0.0.1; absent while stopped.
+          type: string
+      required:
+      - running
+      - sessions
+      - keyPresent
+      type: object
     RemoveProjectResult:
       properties:
         projectId:
@@ -19300,3 +19470,6 @@ tags:
 - description: 'Read-only monitor of the mobile release trains: its config and source
     freshness'
   name: release-trains
+- description: 'The team web of the release trains: a separate read-only program behind
+    one shared key'
+  name: release-web
