@@ -365,7 +365,6 @@ func (b *Board) milestoneOwners() map[AppID]map[int]milestoneOwner {
 	return out
 }
 
-// ridesOn is the train a sprint branch feeds for app: its number and year, a split train (#N-1) when it holds app's version.
 func (b *Board) ridesOn(feeds TrainID, app AppID) (*Train, *AppVersion) {
 	var best *Train
 	for i := range b.Trains {
