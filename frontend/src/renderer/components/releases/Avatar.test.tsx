@@ -6,6 +6,7 @@ import { Avatar } from "./Avatar";
 afterEach(() => {
 	setApiBaseUrl(null);
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe("Avatar", () => {
@@ -30,12 +31,10 @@ describe("Avatar", () => {
 	it("loads a cross-origin avatar through fetch into a blob URL, as the app's loopback daemon needs", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async () => new Response(new Blob(["x"], { type: "image/png" }))),
+			vi.fn(async () => ({ ok: true, blob: async () => new Blob(["x"]) })) as unknown as typeof fetch,
 		);
-		vi.stubGlobal(
-			"URL",
-			Object.assign(URL, { createObjectURL: () => "blob:app://renderer/1", revokeObjectURL: () => {} }),
-		);
+		vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:app://renderer/1");
+		vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 		setApiBaseUrl("http://127.0.0.1:3001");
 		const { container } = render(<Avatar accountId="557058:face" name="Ada Example" />);
 		await waitFor(() => expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:app://renderer/1"));
