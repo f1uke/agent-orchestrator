@@ -15,14 +15,14 @@ AO never exposes it to the internet. Putting it behind a public address is your 
 
 Run these with the `ao` binary.
 
-| Command                     | What it does                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------------ |
-| `ao release-web start`      | Starts the web in the background. Creates a key first if there is none. Prints the status.       |
-| `ao release-web stop`       | Stops the web.                                                                                   |
-| `ao release-web status`     | Shows whether it runs, its address, signed-in sessions and key generation. `--json` for scripts. |
-| `ao release-web rotate-key` | Makes a new key. Everyone is signed out. Prints the generation and the key file path.            |
-| `ao release-web copy-key`   | Puts the key on the clipboard without printing it. On macOS it uses `pbcopy`.                    |
-| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420), `--assets DIR` and `--host NAME`. |
+| Command                     | What it does                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ao release-web start`      | Starts the web in the background. Creates a key first if there is none. Prints the status.             |
+| `ao release-web stop`       | Stops the web. Signals only a process it verifies as the web; see [Stopping safely](#stopping-safely). |
+| `ao release-web status`     | Shows whether it runs, its address, signed-in sessions and key generation. `--json` for scripts.       |
+| `ao release-web rotate-key` | Makes a new key. Everyone is signed out. Prints the generation and the key file path.                  |
+| `ao release-web copy-key`   | Puts the key on the clipboard without printing it. On macOS it uses `pbcopy`.                          |
+| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420), `--assets DIR` and `--host NAME`.       |
 
 No command prints the key. On a machine without `pbcopy`, read the key from `key.json`.
 
@@ -32,6 +32,16 @@ The daemon exposes the controls as `GET /api/v1/release-web` and `POST /api/v1/r
 
 The web outlives the daemon. Restarting the app does not stop it.
 
+### Stopping safely
+
+`run.json` records the web's pid and the start time the OS reports for that process. `stop` reads the start time of the pid again and compares the two, within 2 seconds.
+
+- The pid is gone. `stop` deletes `run.json` and `status.json`.
+- The pid is alive and the start times match. `stop` sends SIGTERM, then SIGKILL after 5 seconds.
+- The pid is alive, but its start time does not match or cannot be read. Another process can have the pid now, or a clock step can change the start time that `ps` reports. `stop` signals nothing, keeps `run.json`, and fails with an error that names the pid. Check that process yourself. If it is not the web, delete `run.json`.
+
+`status` shows such a pid as stopped, so `start` starts a new web. The new web fails to listen if the old one still holds the port.
+
 ## Files
 
 All files live in `~/.ao/release-web`. The directory is mode 0700.
@@ -40,7 +50,7 @@ All files live in `~/.ao/release-web`. The directory is mode 0700.
 | ------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `key.json`    | The shared key, its generation and its creation time. Mode 0600.                                                     |
 | `access.log`  | One JSON line per sign-in, failed sign-in, lockout, sign-out and rotation. `access.log.1` holds the previous 10 MiB. |
-| `run.json`    | The pid, port and start time while the web runs.                                                                     |
+| `run.json`    | The pid, port, start time and the process start time the OS reports, while the web runs.                             |
 | `status.json` | The signed-in session count while the web runs.                                                                      |
 | `web.log`     | Output of a web started with `start`.                                                                                |
 | `db/`         | The web's own SQLite database.                                                                                       |
