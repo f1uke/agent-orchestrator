@@ -4736,10 +4736,12 @@ export interface components {
             kinds: components["schemas"]["ReleaseTrainKindFreshness"][];
             llbs: components["schemas"]["ReleaseTrainLLBGroup"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
+            people: components["schemas"]["ReleaseTrainBoardPerson"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
             sprints: components["schemas"]["ReleaseTrainSprintRow"][];
             today: components["schemas"]["ReleaseTrainDay"];
             trains: components["schemas"]["ReleaseTrainTrain"][];
+            viewer: components["schemas"]["ReleaseTrainViewer"];
         };
         ReleaseTrainBoardApp: {
             family: string;
@@ -4752,9 +4754,18 @@ export interface components {
             key: string;
             ownsSprintBranch: boolean;
         };
+        ReleaseTrainBoardPerson: {
+            gitlabUsername?: string;
+            id: string;
+            jiraAccountId?: string;
+            match: components["schemas"]["ReleaseTrainPersonMatch"];
+            name: string;
+            self?: boolean;
+        };
         ReleaseTrainBoardResponse: {
             board?: components["schemas"]["ReleaseTrainBoard"];
             config: components["schemas"]["ReleaseTrainConfigReport"];
+            people: components["schemas"]["ReleaseTrainPeopleReport"];
         };
         /** @enum {string} */
         ReleaseTrainBucket: "badge" | "history" | "hidden";
@@ -5402,10 +5413,19 @@ export interface components {
             title: string;
             url: string;
         };
+        ReleaseTrainPeopleReport: {
+            /** @description Why the file is invalid, or what it is for when absent. */
+            message?: string;
+            path: string;
+            /** @enum {string} */
+            state: "absent" | "invalid" | "ok";
+        };
         ReleaseTrainPerson: {
             accountId: string;
             name: string;
         };
+        /** @enum {string} */
+        ReleaseTrainPersonMatch: "linked" | "self" | "name" | "jira_only" | "gitlab_only";
         ReleaseTrainPipelineFact: {
             durationSeconds?: null | number;
             id: number;
@@ -5734,6 +5754,19 @@ export interface components {
         ReleaseTrainVersionFields: {
             releaseDate?: components["schemas"]["ReleaseTrainDay"];
             released: boolean;
+        };
+        ReleaseTrainViewer: components["schemas"]["ReleaseTrainViewerPerson"] | components["schemas"]["ReleaseTrainViewerUnknown"];
+        ReleaseTrainViewerPerson: {
+            /** @constant */
+            kind: "person";
+            person: components["schemas"]["ReleaseTrainBoardPerson"];
+        };
+        ReleaseTrainViewerUnknown: {
+            /** @description The person id the request named; absent when the monitor's own identity is unknown. */
+            id?: string;
+            /** @constant */
+            kind: "unknown";
+            reason: string;
         };
         RemoveProjectResult: {
             projectId: string;
@@ -9920,7 +9953,10 @@ export interface operations {
     };
     getReleaseTrainBoard: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whose Mine the Board carries: a person id from board.people (the GitLab username, or jira:<accountId> for a Jira-only person). The monitor's own person when absent; an id the Board does not list gives board.viewer.kind unknown and no Mine. */
+                person?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9942,6 +9978,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
             };
             /** @description Internal Server Error */
             500: {

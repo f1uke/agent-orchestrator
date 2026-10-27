@@ -113,9 +113,9 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 			return r.cardsByKey(ctx, rt.KindLLBCards, keys)
 		}})
 	}
-	if me, keys := view.MyAccountID, view.WatchedCardKeys; me != "" && len(keys) > 0 {
-		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindMySubtasks, rt.MySubtasksScope, ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
-			return r.issues(ctx, rt.KindMySubtasks, "parent in ("+strings.Join(keys, ", ")+") AND assignee = "+jqlString(me)+" ORDER BY key")
+	if keys := view.WatchedCardKeys; len(keys) > 0 {
+		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindCardSubtasks, rt.CardSubtasksScope, ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
+			return r.issues(ctx, rt.KindCardSubtasks, "parent in ("+strings.Join(keys, ", ")+") ORDER BY key")
 		}})
 	}
 	for _, b := range view.Config.Boards {

@@ -38,6 +38,7 @@ import { Avatar } from "./Avatar";
 import { cardSheet, sprintSheet } from "./CardSheets";
 import { fixesSheet, fixSheet } from "./FixSheets";
 import { llbSheet, llbsSheet } from "./LlbSheet";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import { useReleaseMotion } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 import { Stepper } from "./StickyAppLabel";
@@ -45,7 +46,7 @@ import { phaseTone } from "./SummaryStrip";
 import { StageMark } from "./VersionLanes";
 import { SourceTag } from "./Sources";
 
-type Ctx = { board: Board; lens: Lens; actions: PageActions; now: number };
+type Ctx = { board: Board; lens: Lens; actions: PageActions; now: number; readOnly: boolean };
 type Sheet = { title: ReactNode; body: ReactNode; tabs?: ReactNode };
 
 export function SheetStack({
@@ -66,7 +67,8 @@ export function SheetStack({
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 	}, [s, actions]);
-	const ctx: Ctx = { board, lens, actions, now: Date.now() };
+	const readOnly = useReleasesReadOnly();
+	const ctx: Ctx = { board, lens, actions, now: Date.now(), readOnly };
 	const sheet = s ? render(s, ctx) : null;
 	const canBack = useReleasesUi((st) => st.back.length > 0);
 	const { sheet: mo } = useReleaseMotion();
@@ -122,9 +124,9 @@ function render(s: SheetEntry, c: Ctx): Sheet | null {
 		case "rules":
 			return panelSheet(s.kind, c);
 		case "fixes":
-			return { ...fixesSheet(s.fix, c), tabs: panelTabs("fixes", c) };
+			return c.readOnly ? null : { ...fixesSheet(s.fix, c), tabs: panelTabs("fixes", c) };
 		case "fix":
-			return fixSheet(s.hit, s.choice, c);
+			return c.readOnly ? null : fixSheet(s.hit, s.choice, c);
 		case "key":
 			return keySheet(c);
 		case "llb":
@@ -611,6 +613,7 @@ function UnknownCells({ rules, c }: { rules: RuleOutcome[]; c: Ctx }) {
 
 function AttentionBody({ c }: { c: Ctx }) {
 	const clear = useClearStaleHides();
+	const readOnly = useReleasesReadOnly();
 	const groups = SEVERITY_ORDER.map((s) => [s, c.lens.attention.filter((h) => h.severity === s)] as const).filter(
 		([, l]) => l.length,
 	);
@@ -663,9 +666,11 @@ function AttentionBody({ c }: { c: Ctx }) {
 							<span />
 						</div>
 					))}
-					<button type="button" className="link mt-2" onClick={() => clear.mutate()}>
-						Clear stale hides
-					</button>
+					{!readOnly && (
+						<button type="button" className="link mt-2" onClick={() => clear.mutate()}>
+							Clear stale hides
+						</button>
+					)}
 				</Fold>
 			)}
 			{c.lens.history.length > 0 && (
@@ -681,6 +686,7 @@ function AttentionBody({ c }: { c: Ctx }) {
 
 function RulesBody({ c }: { c: Ctx }) {
 	const setRule = useSetRule();
+	const readOnly = useReleasesReadOnly();
 	const outcomes = (id: string) => c.board.alerts.rules.filter((r) => r.rule === id);
 	const groups = [...new Set(c.board.catalogue.map((r) => r.group))];
 	return (
@@ -698,11 +704,17 @@ function RulesBody({ c }: { c: Ctx }) {
 							const unknown = os.filter((o) => o.outcome.kind === "unknown").length;
 							return (
 								<div key={r.id} className="rule" data-rule={r.id}>
-									<Switch
-										checked={r.on}
-										aria-label={`${r.id} ${r.on ? "on" : "off"}`}
-										onCheckedChange={(on) => setRule.mutate({ id: r.id, on })}
-									/>
+									{readOnly ? (
+										<span className="passive mono" data-testid="rule-state">
+											{r.on ? "on" : "off"}
+										</span>
+									) : (
+										<Switch
+											checked={r.on}
+											aria-label={`${r.id} ${r.on ? "on" : "off"}`}
+											onCheckedChange={(on) => setRule.mutate({ id: r.id, on })}
+										/>
+									)}
 									<div>
 										<div className="ti">{r.title}</div>
 										<div className="hn">
@@ -741,7 +753,7 @@ const PANEL_TABS = [
 function panelTabs(tab: (typeof PANEL_TABS)[number][0], c: Ctx) {
 	return (
 		<div className="tabs" role="tablist">
-			{PANEL_TABS.map(([kind, label]) => (
+			{PANEL_TABS.filter(([kind]) => kind !== "fixes" || !c.readOnly).map(([kind, label]) => (
 				<button
 					key={kind}
 					type="button"
@@ -827,25 +839,27 @@ function keySheet(c: Ctx): Sheet {
 						mine&quot;.
 					</div>
 				</Sec>
-				<Sec title="Fixes">
-					<div className="kr">
-						Fix › on an alert shows the exact request a fix would send. Every fix except L3 is a dry run: AO records it
-						and sends nothing to Jira, GitLab or Confluence. L3 applies to AO's own long-lived plan.
-					</div>
-					{KEY_FIX_STATES.map((k) => (
-						<div key={k} className="kr">
-							<span className="dot" data-st={FIX_STATE_META[k].tone} />
-							{FIX_STATE_META[k].text}
+				{!c.readOnly && (
+					<Sec title="Fixes">
+						<div className="kr">
+							Fix › on an alert shows the exact request a fix would send. Every fix except L3 is a dry run: AO records
+							it and sends nothing to Jira, GitLab or Confluence. L3 applies to AO's own long-lived plan.
 						</div>
-					))}
-					<button
-						type="button"
-						className="lnk mt-1 text-[12.5px]"
-						onClick={() => c.actions.openSheet({ kind: "fixes" }, "push")}
-					>
-						Open the Fixes list ›
-					</button>
-				</Sec>
+						{KEY_FIX_STATES.map((k) => (
+							<div key={k} className="kr">
+								<span className="dot" data-st={FIX_STATE_META[k].tone} />
+								{FIX_STATE_META[k].text}
+							</div>
+						))}
+						<button
+							type="button"
+							className="lnk mt-1 text-[12.5px]"
+							onClick={() => c.actions.openSheet({ kind: "fixes" }, "push")}
+						>
+							Open the Fixes list ›
+						</button>
+					</Sec>
+				)}
 				<Sec title="Status colours">
 					{KEY_STATUSES.map((k) => (
 						<div key={k} className="kr">

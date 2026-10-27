@@ -194,7 +194,7 @@ func (f *fixture) snapshot() Snapshot {
 	if f.gitlabUser != nil {
 		Put(&s, KindGitLabUser, f.fresh(KindGitLabUser.Name, MyselfScope, ""), []GitLabUserFact{*f.gitlabUser})
 	}
-	Put(&s, KindMySubtasks, f.fresh(KindMySubtasks.Name, MySubtasksScope, ""), deref(f.subtasks, nil))
+	Put(&s, KindCardSubtasks, f.fresh(KindCardSubtasks.Name, CardSubtasksScope, ""), deref(f.subtasks, nil))
 	Put(&s, KindLLBCards, f.fresh(KindLLBCards.Name, LLBCardsScope, ""), deref(f.llbCards, nil))
 	for _, b := range f.cfg.Boards {
 		Put(&s, KindBoardSprints, f.fresh(KindBoardSprints.Name, BoardScope(b.ID), ""), deref(f.sprints, func(sp *SprintFact) bool { return sp.Board == b.ID }))

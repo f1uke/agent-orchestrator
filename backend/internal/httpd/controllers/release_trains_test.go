@@ -163,9 +163,13 @@ func newBoardFixture(t *testing.T) *boardFixture {
 }
 
 func (f *boardFixture) get(ifNoneMatch string) *httptest.ResponseRecorder {
+	return f.getURL("/release-trains/board", ifNoneMatch)
+}
+
+func (f *boardFixture) getURL(url, ifNoneMatch string) *httptest.ResponseRecorder {
 	r := chi.NewRouter()
 	(&ReleaseTrainsController{Svc: f.svc}).Register(r)
-	req := httptest.NewRequest(http.MethodGet, "/release-trains/board", nil)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
 	if ifNoneMatch != "" {
 		req.Header.Set("If-None-Match", ifNoneMatch)
 	}
@@ -237,5 +241,38 @@ func TestReleaseTrainRefreshAccepts(t *testing.T) {
 	}
 	if len(svc.refreshed) != 2 || svc.refreshed[0] != "gitlab" || svc.refreshed[1] != "" {
 		t.Fatalf("refreshed = %q", svc.refreshed)
+	}
+}
+
+func TestReleaseTrainBoardTakesThePersonFromTheQuery(t *testing.T) {
+	f := newBoardFixture(t)
+	viewer := func(w *httptest.ResponseRecorder) (kind, id string) {
+		t.Helper()
+		var body struct {
+			Board struct {
+				Viewer struct {
+					Kind string `json:"kind"`
+					ID   string `json:"id"`
+				} `json:"viewer"`
+			} `json:"board"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("board = %d %s", w.Code, w.Body)
+		}
+		return body.Board.Viewer.Kind, body.Board.Viewer.ID
+	}
+	own := f.get("")
+	if kind, _ := viewer(own); kind != "unknown" {
+		t.Fatalf("no person: viewer kind %q, want unknown (no identity is read)", kind)
+	}
+	named := f.getURL("/release-trains/board?person=jira%3Aacc-zed", "")
+	if kind, id := viewer(named); kind != "unknown" || id != "jira:acc-zed" {
+		t.Fatalf("?person=jira%%3Aacc-zed: viewer %q %q, want the decoded id echoed", kind, id)
+	}
+	if named.Header().Get("ETag") == own.Header().Get("ETag") {
+		t.Fatal("two people's Boards share an ETag, so a 304 would show one person the other's Mine")
+	}
+	if w := f.getURL("/release-trains/board?person="+strings.Repeat("a", 257), ""); w.Code != http.StatusBadRequest {
+		t.Fatalf("a 257-byte person = %d, want 400", w.Code)
 	}
 }

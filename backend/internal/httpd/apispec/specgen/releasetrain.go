@@ -52,6 +52,17 @@ type (
 		Reason string `json:"reason"`
 	}
 
+	rtViewer       struct{}
+	rtViewerPerson struct {
+		Kind   string         `json:"kind" const:"person"`
+		Person rt.BoardPerson `json:"person"`
+	}
+	rtViewerUnknown struct {
+		Kind   string `json:"kind" const:"unknown"`
+		ID     string `json:"id,omitempty" description:"The person id the request named; absent when the monitor's own identity is unknown."`
+		Reason string `json:"reason"`
+	}
+
 	rtLLBTarget   struct{}
 	rtLLBLandedIn struct {
 		Kind   string     `json:"kind" const:"landed"`
@@ -142,6 +153,11 @@ func (rtIdentity) JSONSchemaOneOf() []interface{} {
 	return []interface{}{rtIdentityKnown{}, rtIdentityUnknown{}}
 }
 
+// JSONSchemaOneOf lists the viewer variants.
+func (rtViewer) JSONSchemaOneOf() []interface{} {
+	return []interface{}{rtViewerPerson{}, rtViewerUnknown{}}
+}
+
 // JSONSchemaOneOf lists the long-lived branch target variants.
 func (rtLLBTarget) JSONSchemaOneOf() []interface{} {
 	return []interface{}{rtLLBLandedIn{}, rtLLBPlanned{}, rtLLBFromEpic{}, rtLLBNoTarget{}, rtLLBDropped{}}
@@ -157,6 +173,7 @@ func init() {
 		"ReleasetrainBoard":                          "ReleaseTrainBoard",
 		"ReleasetrainBoardApp":                       "ReleaseTrainBoardApp",
 		"ReleasetrainBoardResponse":                  "ReleaseTrainBoardResponse",
+		"ReleasetrainPeopleReport":                   "ReleaseTrainPeopleReport",
 		"ReleasetrainCardUnit":                       "ReleaseTrainCardUnit",
 		"ReleasetrainCardEvidence":                   "ReleaseTrainCardEvidence",
 		"ReleasetrainFixVersionEvidence":             "ReleaseTrainFixVersionEvidence",
@@ -212,6 +229,11 @@ func init() {
 		"SpecgenRtIdentity":                          "ReleaseTrainIdentity",
 		"SpecgenRtIdentityKnown":                     "ReleaseTrainIdentityKnown",
 		"SpecgenRtIdentityUnknown":                   "ReleaseTrainIdentityUnknown",
+		"SpecgenRtViewer":                            "ReleaseTrainViewer",
+		"SpecgenRtViewerPerson":                      "ReleaseTrainViewerPerson",
+		"SpecgenRtViewerUnknown":                     "ReleaseTrainViewerUnknown",
+		"ReleasetrainBoardPerson":                    "ReleaseTrainBoardPerson",
+		"ReleasetrainPersonMatch":                    "ReleaseTrainPersonMatch",
 		"ReleasetrainMineReason":                     "ReleaseTrainMineReason",
 		"ReleasetrainMineWhy":                        "ReleaseTrainMineWhy",
 		"ReleasetrainMinePolicy":                     "ReleaseTrainMinePolicy",
@@ -280,6 +302,7 @@ func mapReleaseTrainTypes(r *openapi31.Reflector) {
 	js.AddTypeMapping((*rt.CodeState)(nil), rtCodeState{})
 	js.AddTypeMapping((*rt.LLBTarget)(nil), rtLLBTarget{})
 	js.AddTypeMapping((*rt.IdentityState)(nil), rtIdentity{})
+	js.AddTypeMapping((*rt.ViewerState)(nil), rtViewer{})
 	js.AddTypeMapping((*rt.Dest)(nil), rtDest{})
 	js.AddTypeMapping((*rt.Subject)(nil), rtSubject{})
 	js.AddTypeMapping((*rt.Effect)(nil), rtEffect{})

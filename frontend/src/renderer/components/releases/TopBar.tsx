@@ -10,34 +10,10 @@ import type { ReleasesSearch } from "../../lib/releases/url";
 import { SEVERITY_META, SEVERITY_ORDER } from "../../lib/releases/vocab";
 import { SimpleTooltip } from "../ui/tooltip";
 import { AppMark } from "./AppMark";
-import { Avatar } from "./Avatar";
 import type { PageActions } from "./ReleasesPage";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
+import { ViewAs } from "./ViewAs";
 import { SystemMark } from "./Sources";
-
-function OnlyMe({ board, on, onToggle }: { board: Board; on: boolean; onToggle: () => void }) {
-	const id = board.identity;
-	if (id.kind === "unknown") {
-		return (
-			<SimpleTooltip label={`Only me needs your Jira and GitLab accounts: ${id.reason}`}>
-				<span>
-					<button type="button" className="rel-me" aria-pressed="false" disabled data-testid="only-me">
-						<span className="sw" />
-						Only me
-					</button>
-				</span>
-			</SimpleTooltip>
-		);
-	}
-	return (
-		<SimpleTooltip label={`Show only what is ${id.displayName}'s`}>
-			<button type="button" className="rel-me" aria-pressed={on} onClick={onToggle} data-testid="only-me">
-				<span className="sw" />
-				<Avatar accountId={id.jiraAccountId} name={id.displayName} size={18} />
-				Only me
-			</button>
-		</SimpleTooltip>
-	);
-}
 
 const MARK_ORDER = ["jira", "gitlab", "confluence"];
 
@@ -106,6 +82,7 @@ export function TopBar({
 	idx: SourceIndex;
 }) {
 	const refresh = useRefreshSources();
+	const readOnly = useReleasesReadOnly();
 	const toggleApp = (id: string) => {
 		const on = new Set(url.apps ?? board.apps.map((a) => a.id));
 		if (on.has(id)) on.delete(id);
@@ -163,18 +140,25 @@ export function TopBar({
 						<SourceMark key={s.system} age={s} idx={idx} />
 					))}
 			</div>
-			<OnlyMe board={board} on={lens.me} onToggle={() => actions.setSearch({ me: !url.me })} />
-			<SimpleTooltip label="Read every source again now">
-				<button
-					type="button"
-					className="rel-round"
-					aria-label="Refresh sources"
-					onClick={() => refresh.mutate()}
-					disabled={refresh.isPending}
-				>
-					<RefreshCw className="size-3" aria-hidden="true" />
-				</button>
-			</SimpleTooltip>
+			<ViewAs
+				board={board}
+				person={url.person}
+				filtering={lens.me}
+				onPick={(person) => actions.setSearch({ person })}
+			/>
+			{!readOnly && (
+				<SimpleTooltip label="Read every source again now">
+					<button
+						type="button"
+						className="rel-round"
+						aria-label="Refresh sources"
+						onClick={() => refresh.mutate()}
+						disabled={refresh.isPending}
+					>
+						<RefreshCw className="size-3" aria-hidden="true" />
+					</button>
+				</SimpleTooltip>
+			)}
 			<SimpleTooltip label="Every long-lived branch and its plan, dropped ones included">
 				<button
 					type="button"

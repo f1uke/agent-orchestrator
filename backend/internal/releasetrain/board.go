@@ -18,6 +18,10 @@ type Inputs struct {
 	Config Config
 	Snap   Snapshot
 	Human  HumanState
+	// Links is the people file: accounts a person has in Jira and in GitLab.
+	Links []PersonLink
+	// Viewer is the id of the person whose Mine the Board carries; empty is the monitor's own person.
+	Viewer string
 }
 
 // HumanState is what people set: rule toggles, hides, long-lived-branch plans
@@ -65,9 +69,13 @@ type Board struct {
 	// Cutover is each app's first merge into a sprint branch; apps with none are absent.
 	Cutover map[AppID]Day `json:"cutover"`
 	// Identity is who "me" is for every Mine on the Board.
-	Identity  IdentityState `json:"identity"`
-	Alerts    Alerts        `json:"alerts"`
-	Catalogue []RuleInfo    `json:"catalogue"`
+	Identity IdentityState `json:"identity"`
+	// People is everyone the Board mentions, sorted by name; the monitor's own person is always there once Identity is known.
+	People []BoardPerson `json:"people"`
+	// Viewer is whose Mine the Board carries: the person Inputs.Viewer names, else the monitor's own.
+	Viewer    ViewerState `json:"viewer"`
+	Alerts    Alerts      `json:"alerts"`
+	Catalogue []RuleInfo  `json:"catalogue"`
 	fix       fixContext
 	mrs       map[AppID][]MRFact
 	moved     map[string]string

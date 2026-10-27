@@ -329,7 +329,7 @@ describe("mineText", () => {
 	});
 
 	it("says whether my approval is done on a version, as d4's label does", () => {
-		const me = { kind: "known" as const, jiraAccountId: "acc-dee", gitlabUsername: "dee", displayName: "Dee" };
+		const me = "acc-dee";
 		const v = version("21-2026", "di", "2.4.0", "2026-10-13", "2026-10-20", {
 			jira: {
 				id: "1",

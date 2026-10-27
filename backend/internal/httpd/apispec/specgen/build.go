@@ -561,10 +561,12 @@ func releaseTrainOperations() []operation {
 		},
 		{
 			method: http.MethodGet, path: "/api/v1/release-trains/board", id: "getReleaseTrainBoard", tag: "release-trains",
-			summary: "Read the release-train Board; send If-None-Match with the last ETag to get 304 while nothing changed",
+			summary:    "Read the release-train Board; send If-None-Match with the last ETag to get 304 while nothing changed",
+			pathParams: []any{controllers.ReleaseTrainBoardQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ReleaseTrainBoardResponse{}},
 				{http.StatusNotModified, nil},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

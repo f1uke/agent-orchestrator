@@ -35,9 +35,7 @@ type PlanView struct {
 	LLBs []PlannedLLB
 	// LLBCardKeys are the card keys every long-lived branch carries.
 	LLBCardKeys []string
-	// MyAccountID is the Jira account jira.myself read; empty until it is read.
-	MyAccountID string
-	// WatchedCardKeys are the cards whose subtasks may be mine.
+	// WatchedCardKeys are the cards whose subtasks are read.
 	WatchedCardKeys []string
 	Sprints         []PlannedSprint
 	// BranchCardKeys are the cards with an MR into a sprint branch the Board follows.
@@ -76,7 +74,7 @@ type PlannedVersion struct {
 }
 
 // peopleKinds are the issue kinds whose assignees the page draws a face for.
-var peopleKinds = []Kind[IssueFact]{KindCards, KindPageCards, KindLLBCards, KindMySubtasks, KindSprintCards, KindBranchCards}
+var peopleKinds = []Kind[IssueFact]{KindCards, KindPageCards, KindLLBCards, KindCardSubtasks, KindSprintCards, KindBranchCards}
 
 // NewPlanView joins the snapshot as Reconcile does and lists the versions and people to fetch.
 func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
@@ -118,7 +116,6 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 	}
 	pv.LLBs, pv.LLBCardKeys = plannedLLBs(cfg, snap)
 	for _, m := range AllItems(snap, KindJiraMyself) {
-		pv.MyAccountID = m.AccountID
 		people[m.AccountID] = true
 	}
 	for _, k := range peopleKinds {

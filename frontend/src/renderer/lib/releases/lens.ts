@@ -6,8 +6,7 @@ import type {
 	Board,
 	BoardApp,
 	Hotfix,
-	Identity,
-	IdentityKnown,
+	BoardPerson,
 	LLBGroup,
 	MineReason,
 	SprintCard,
@@ -83,6 +82,20 @@ export function lensBadge(b: Board, apps: ReadonlySet<AppId> | null, me = false)
 	return { count: hits.length, unknown, worst: hits[0]?.severity };
 }
 
+/** Whether id names p in any of the forms the API accepts for a person. */
+export function isPerson(p: BoardPerson, id: string): boolean {
+	return p.id === id || p.gitlabUsername === id || (!!p.jiraAccountId && id === `jira:${p.jiraAccountId}`);
+}
+
+/**
+ * The person ?person= names, once this Board carries their Mine. A Board fetched for the previous
+ * person, or one that does not know the id, has another viewer and so filters nothing.
+ */
+export function viewingAs(b: Board, person: string | undefined): BoardPerson | null {
+	if (!person || b.viewer.kind !== "person") return null;
+	return isPerson(b.viewer.person, person) ? b.viewer.person : null;
+}
+
 export type Lens = {
 	focus: Train | null;
 	apps: BoardApp[];
@@ -91,12 +104,13 @@ export type Lens = {
 	history: AlertHit[];
 	hidden: AlertHit[];
 	appHits: (app: AppId) => AlertHit[];
-	/** Only me is on and the identity is known; with an unknown identity ?me=1 filters nothing. */
+	/** The page shows one person's Mine: ?person= names them and the Board carries theirs. */
 	me: boolean;
 	mobile: boolean;
-	identity: Identity;
-	/** Whose face marks my rows in a train's card lists, which Only me never filters. */
-	face: IdentityKnown | null;
+	/** That person, null while the page shows everyone. */
+	viewer: BoardPerson | null;
+	/** Whose face marks their rows in a train's card lists, which the person filter never narrows. */
+	face: BoardPerson | null;
 	keepVersion: (v: AppVersion) => boolean;
 	keepHotfix: (h: Hotfix) => boolean;
 	/** Hiding a row is a view choice, so the hidden board's alerts still count. */
@@ -108,7 +122,8 @@ export type Lens = {
 
 export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySet<string>): Lens {
 	const on = shown(url.apps);
-	const me = url.me && b.identity.kind === "known";
+	const viewer = viewingAs(b, url.person);
+	const me = viewer !== null;
 	const keep = <T extends { mine?: readonly MineReason[] }>(x: T) => !me || isMine(x);
 	const focus = focusTrain(b, url.focus);
 	const ruleOff = new Set(b.catalogue.filter((r) => !r.on).map((r) => r.id));
@@ -125,8 +140,8 @@ export function makeLens(b: Board, url: ReleasesSearch, hiddenBoards: ReadonlySe
 		appHits: (app) => attention.filter((h) => h.app === app && h.train === focus?.id),
 		me,
 		mobile: url.mobile,
-		identity: b.identity,
-		face: me && b.identity.kind === "known" ? b.identity : null,
+		viewer,
+		face: viewer,
 		keepVersion: keep,
 		keepHotfix: keep,
 		hiddenBoards,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ type boardWorld struct {
 	t      *testing.T
 	store  *sqlite.Store
 	path   string
+	people string
 	now    time.Time
 	svc    *BoardService
 	builds int
@@ -26,7 +28,7 @@ type boardWorld struct {
 func newBoardWorld(t *testing.T) *boardWorld {
 	t.Helper()
 	dir := t.TempDir()
-	w := &boardWorld{t: t, path: filepath.Join(dir, ConfigFileName), now: time.Date(2026, 10, 14, 3, 0, 0, 0, time.UTC)}
+	w := &boardWorld{t: t, path: filepath.Join(dir, ConfigFileName), people: filepath.Join(dir, PeopleFileName), now: time.Date(2026, 10, 14, 3, 0, 0, 0, time.UTC)}
 	writeConfig(t, w.path, rt.ExampleConfigJSON, w.now)
 	st, err := sqlite.Open(dir)
 	if err != nil {
@@ -34,7 +36,7 @@ func newBoardWorld(t *testing.T) *boardWorld {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	w.store = st
-	w.svc = NewBoardService(BoardDeps{Config: NewConfigLoader(w.path), Store: st, Clock: func() time.Time { return w.now }})
+	w.svc = NewBoardService(BoardDeps{Config: NewConfigLoader(w.path), People: NewPeopleLoader(w.people), Store: st, Clock: func() time.Time { return w.now }})
 	w.svc.onBuild = func() { w.builds++ }
 	return w
 }
@@ -70,7 +72,7 @@ func (w *boardWorld) seed() {
 		Project: 1001, ID: ms, Title: "Release 3.5.0", Description: "Release Train #21/2026", State: "active", Start: &start, Due: &due}))
 	w.write(rt.KindMRs.Name, rt.ProjectScope(1001), item(t, rt.KindMRs, rt.MRFact{
 		Project: 1001, IID: 301, Title: "Release 3.5.0", SourceBranch: "release/3.5.0", TargetBranch: "main", State: rt.MROpened,
-		Author: "Rae Example", CreatedOn: start, MilestoneID: &ms}))
+		Author: "Rae Example", AuthorUsername: "rae", CreatedOn: start, MilestoneID: &ms}))
 	w.write(rt.KindMRDetail.Name, rt.MRScope(1001, 301), item(t, rt.KindMRDetail, rt.MRDetailFact{
 		Project: 1001, IID: 301, Pipeline: &rt.PipelineFact{ID: 9001, Status: "success"}}))
 	w.write(rt.KindJobs.Name, rt.PipelineScope(1001, 9001), item(t, rt.KindJobs, rt.JobsFact{
@@ -79,7 +81,34 @@ func (w *boardWorld) seed() {
 
 func (w *boardWorld) board(ifNoneMatch string) ([]byte, string, error) {
 	w.t.Helper()
-	return w.svc.Board(context.Background(), ifNoneMatch)
+	return w.svc.Board(context.Background(), ifNoneMatch, "")
+}
+
+type viewed struct {
+	People PeopleReport `json:"people"`
+	Board  struct {
+		Viewer struct {
+			Kind   string `json:"kind"`
+			Reason string `json:"reason"`
+			Person struct {
+				ID    string `json:"id"`
+				Match string `json:"match"`
+			} `json:"person"`
+		} `json:"viewer"`
+	} `json:"board"`
+}
+
+func (w *boardWorld) viewedBy(person string) (viewed, string) {
+	w.t.Helper()
+	body, etag, err := w.svc.Board(context.Background(), "", person)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	var v viewed
+	if err := json.Unmarshal(body, &v); err != nil {
+		w.t.Fatal(err)
+	}
+	return v, etag
 }
 
 func (w *boardWorld) mustBoard() ([]byte, string) {
@@ -235,5 +264,66 @@ func TestBoardOfAnInvalidFirstConfigHasNoBoard(t *testing.T) {
 	}
 	if r.Config.State != ConfigInvalid || r.Board != nil {
 		t.Fatalf("invalid first config = %s", body)
+	}
+}
+
+func TestBoardKeepsEachPersonsViewSeparateAndCached(t *testing.T) {
+	w := newBoardWorld(t)
+	w.seed()
+	own, ownTag := w.viewedBy("")
+	if own.Board.Viewer.Kind != "unknown" {
+		t.Fatalf("own viewer = %+v, want unknown while no identity is read", own.Board.Viewer)
+	}
+	rae, raeTag := w.viewedBy("rae")
+	if rae.Board.Viewer.Kind != "person" || rae.Board.Viewer.Person.ID != "rae" || raeTag == ownTag || w.builds != 2 {
+		t.Fatalf("rae viewer = %+v, etag same=%v, builds %d", rae.Board.Viewer, raeTag == ownTag, w.builds)
+	}
+	if _, tag := w.viewedBy(""); tag != ownTag || w.builds != 2 {
+		t.Fatalf("asking for rae evicted the monitor's own view: etag same=%v, builds %d", tag == ownTag, w.builds)
+	}
+	if _, tag := w.viewedBy("rae"); tag != raeTag || w.builds != 2 {
+		t.Fatalf("rae's view was rebuilt: builds %d", w.builds)
+	}
+	if _, _, err := w.svc.Board(context.Background(), raeTag, "rae"); !errors.Is(err, ErrNotModified) {
+		t.Fatalf("If-None-Match %s for rae gave %v, want ErrNotModified", raeTag, err)
+	}
+	if _, _, err := w.svc.Board(context.Background(), raeTag, ""); errors.Is(err, ErrNotModified) {
+		t.Fatal("rae's ETag answered 304 for the monitor's own view")
+	}
+}
+
+func TestBoardForgetsOldViewsOnceTooManyPeopleAreAsked(t *testing.T) {
+	w := newBoardWorld(t)
+	w.seed()
+	for i := range MaxCachedBoards + 5 {
+		w.viewedBy(fmt.Sprintf("nobody-%d", i))
+	}
+	if n := len(w.svc.cached); n > MaxCachedBoards {
+		t.Fatalf("%d views cached, want at most %d", n, MaxCachedBoards)
+	}
+	if v, _ := w.viewedBy("rae"); v.Board.Viewer.Person.ID != "rae" {
+		t.Fatalf("a view built after the cache started over is wrong: %+v", v.Board.Viewer)
+	}
+}
+
+func TestBoardRebuildsEveryViewWhenThePeopleFileChanges(t *testing.T) {
+	w := newBoardWorld(t)
+	w.seed()
+	before, tag := w.viewedBy("rae")
+	if before.People.State != PeopleAbsent || before.Board.Viewer.Person.Match != "gitlab_only" || before.People.Path != w.people {
+		t.Fatalf("before the file: people %+v, viewer %+v", before.People, before.Board.Viewer)
+	}
+	builds := w.builds
+
+	writeConfig(t, w.people, `{"people":[{"jiraAccountId":"acc-rae","gitlabUsername":"rae","name":"Rae Example"}]}`, w.now.Add(time.Second))
+	after, tag2 := w.viewedBy("rae")
+	if after.People.State != PeopleOK || after.Board.Viewer.Person.Match != "linked" || tag2 == tag || w.builds != builds+1 {
+		t.Fatalf("after the link: people %+v, viewer %+v, etag same=%v, builds %d (was %d)", after.People, after.Board.Viewer, tag2 == tag, w.builds, builds)
+	}
+
+	writeConfig(t, w.people, `{"people": [{"jiraAccountId": "acc-rae"}]}`, w.now.Add(2*time.Second))
+	broken, _ := w.viewedBy("rae")
+	if broken.People.State != PeopleInvalid || !strings.Contains(broken.People.Message, "people[0]") || broken.Board.Viewer.Person.Match != "gitlab_only" {
+		t.Fatalf("an invalid file: people %+v, viewer %+v; want the report and no link", broken.People, broken.Board.Viewer)
 	}
 }

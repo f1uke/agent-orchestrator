@@ -90,14 +90,14 @@ var (
 	KindCards        = newKind[IssueFact]("jira.cards", "fixVersion cards", Snapshotted, 5*time.Minute, perEntity)
 	KindTechReq      = newKind[ForceUpdateFact]("jira.techreq", "force-update tickets", Snapshotted, 30*time.Minute, global)
 	KindLLBCards     = newKind[IssueFact]("jira.llb_cards", "long-lived branch cards", Snapshotted, 10*time.Minute, global)
-	KindMySubtasks   = newKind[IssueFact]("jira.my_subtasks", "my subtasks", Snapshotted, 5*time.Minute, global)
+	KindCardSubtasks = newKind[IssueFact]("jira.card_subtasks", "card subtasks", Snapshotted, 5*time.Minute, global)
 )
 
 // LLBCardsScope is the scope of the Jira read of every long-lived-branch card.
 const LLBCardsScope Scope = "llb"
 
-// MySubtasksScope is the scope of the Jira read of my subtasks under the cards the Board shows.
-const MySubtasksScope Scope = "mine"
+// CardSubtasksScope is the scope of the Jira read of every subtask under the cards the Board watches.
+const CardSubtasksScope Scope = "watched"
 
 // ItemKey keys a JiraVersionFact within its resource.
 func (f JiraVersionFact) ItemKey() string { return f.ID }

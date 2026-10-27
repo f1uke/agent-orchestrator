@@ -151,7 +151,7 @@ export function moveKeys(
 ): MoveKeys {
 	const rows = [
 		url.apps ? [...url.apps].sort().join(",") : "*",
-		url.me ? "me" : "",
+		url.person ? `person:${url.person}` : "",
 		url.mobile ? "mobile" : "",
 		url.hotfixes ? "hf" : "",
 		LAYER_ORDER.filter((k) => layers[k]).join(","),

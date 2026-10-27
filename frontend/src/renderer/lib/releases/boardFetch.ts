@@ -1,6 +1,29 @@
 import { apiErrorMessage } from "../api-client";
 import type { BoardResponse } from "./types";
 
+/** The Board's path for a person's Mine; no person is the monitor's own. */
+export function boardPath(person: string | undefined): string {
+	return `/api/v1/release-trains/board${person ? `?person=${encodeURIComponent(person)}` : ""}`;
+}
+
+const KEPT_FETCHERS = 4;
+
+/** One ETag memory per person, since each person's Board has its own ETag; the least recently asked are dropped. */
+export function personFetchers(
+	makeGet: (person: string) => BoardGet,
+): (person: string | undefined) => Promise<BoardResponse> {
+	const fetchers = new Map<string, () => Promise<BoardResponse>>();
+	return (person) => {
+		const key = person ?? "";
+		let fetcher = fetchers.get(key);
+		if (fetcher) fetchers.delete(key);
+		else fetcher = boardFetcher(makeGet(key));
+		fetchers.set(key, fetcher);
+		if (fetchers.size > KEPT_FETCHERS) fetchers.delete(fetchers.keys().next().value as string);
+		return fetcher();
+	};
+}
+
 export type BoardGet = (ifNoneMatch: string | null) => Promise<Response>;
 
 /**

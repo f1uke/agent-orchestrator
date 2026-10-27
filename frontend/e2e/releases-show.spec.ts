@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
 	animationNow,
+	expectFiltered,
 	expectRinged,
 	expectSpotted,
 	freezeRings,
@@ -229,18 +230,18 @@ test.describe("Show on an alert", () => {
 	});
 
 	test("an alert of mine on a hotfix keeps Only me on and shows the hotfix bar", async ({ page }) => {
-		await openFrozen(page, "?sheet=attention&me=1");
-		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
+		await openFrozen(page, "?sheet=attention&person=ada");
+		await expectFiltered(page);
 		await show(page, "F2~ht/da/2.3.1/21-2026");
 		await expectSpotted(page, ['[data-testid="hotfix-da-2.3.1"]']);
-		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
+		await expectFiltered(page);
 	});
 
 	test("an alert of mine keeps Only me on and shows the version without writing the focus", async ({ page }) => {
-		await openFrozen(page, "?sheet=attention&me=1");
+		await openFrozen(page, "?sheet=attention&person=ada");
 		await show(page, "C5~v/21-2026/di");
 		await expectSpotted(page, ['[data-testid="bar-di-21-2026"]']);
-		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
+		await expectFiltered(page);
 		expect(page.url()).not.toContain("focus=");
 	});
 

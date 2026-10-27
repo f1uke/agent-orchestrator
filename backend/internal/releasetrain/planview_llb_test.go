@@ -23,12 +23,7 @@ func TestPlanViewListsLongLivedReadsAndMySubtaskCards(t *testing.T) {
 	if want := []string{"DEMO-2", "DEMO-3"}; !reflect.DeepEqual(pv.LLBCardKeys, want) {
 		t.Fatalf("long-lived card keys = %v, want %v", pv.LLBCardKeys, want)
 	}
-	if pv.MyAccountID != "" {
-		t.Fatalf("my account = %q before jira.myself is read", pv.MyAccountID)
-	}
-	f.me()
-	pv = NewPlanView(f.cfg, f.snapshot(), f.env())
-	if want := []string{"DEMO-1", "DEMO-2", "DEMO-3", "DEMO-5"}; pv.MyAccountID != "acc-dee" || !reflect.DeepEqual(pv.WatchedCardKeys, want) {
-		t.Fatalf("my account %q watched %v, want acc-dee and %v (the settled #18 card left out)", pv.MyAccountID, pv.WatchedCardKeys, want)
+	if want := []string{"DEMO-1", "DEMO-2", "DEMO-3", "DEMO-5"}; !reflect.DeepEqual(pv.WatchedCardKeys, want) {
+		t.Fatalf("watched %v, want %v (the settled #18 card left out)", pv.WatchedCardKeys, want)
 	}
 }

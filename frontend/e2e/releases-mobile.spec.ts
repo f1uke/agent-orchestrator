@@ -79,7 +79,7 @@ test.describe("releases Mobile only filter", () => {
 	});
 
 	test("Only me keeps its of mine wording with the filter on", async ({ page }) => {
-		await open(page, `${LAYERS}&me=1&mobile=1`);
+		await open(page, `${LAYERS}&person=ada&mobile=1`);
 		await expect(bar(page.getByTestId("sprint-row-DEMO"), "active").locator(".sl > b")).toContainText("of mine");
 	});
 
