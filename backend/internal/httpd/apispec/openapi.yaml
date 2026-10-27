@@ -16335,6 +16335,12 @@ components:
       type: object
     ReleaseWebStatusResponse:
       properties:
+        hosts:
+          description: 'Public names the web answers besides 127.0.0.1 and localhost:
+            the running web''s, or while it is stopped the configured ones.'
+          items:
+            type: string
+          type: array
         keyGeneration:
           description: Counts up on every key rotation.
           type: integer
@@ -16361,6 +16367,7 @@ components:
       - running
       - sessions
       - keyPresent
+      - hosts
       type: object
     RemoveProjectResult:
       properties:

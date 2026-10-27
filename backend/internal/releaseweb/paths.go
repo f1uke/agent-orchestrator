@@ -53,5 +53,8 @@ func (p Paths) StatusFile() string { return filepath.Join(p.Dir, "status.json") 
 // WebLog receives a started server's stdout and stderr.
 func (p Paths) WebLog() string { return filepath.Join(p.Dir, "web.log") }
 
+// HostsFile lists the public names the web answers besides loopback, one per line.
+func (p Paths) HostsFile() string { return filepath.Join(p.Dir, "hosts") }
+
 // DBDir is the release web's own SQLite directory.
 func (p Paths) DBDir() string { return filepath.Join(p.Dir, "db") }

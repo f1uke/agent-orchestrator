@@ -413,6 +413,9 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	if err := releaseweb.RotateKey(paths); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(paths.Dir, "hosts"), []byte("box.tail1234.ts.net\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- RunReleaseWeb(ctx, opts) }()
@@ -437,7 +440,8 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("GET the board without the key = %d, want 401", resp.StatusCode)
 	}
-	for hostName, want := range map[string]int{"board.example.org": http.StatusOK, "other.example.org": http.StatusMisdirectedRequest} {
+	for hostName, want := range map[string]int{"board.example.org": http.StatusOK, "other.example.org": http.StatusMisdirectedRequest,
+		"box.tail1234.ts.net": http.StatusOK, "other.tail1234.ts.net": http.StatusMisdirectedRequest} {
 		req, err := http.NewRequest(http.MethodGet, st.URL+"robots.txt", nil)
 		if err != nil {
 			t.Fatal(err)

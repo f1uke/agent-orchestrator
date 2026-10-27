@@ -5857,6 +5857,8 @@ export interface components {
             copied: boolean;
         };
         ReleaseWebStatusResponse: {
+            /** @description Public names the web answers besides 127.0.0.1 and localhost: the running web's, or while it is stopped the configured ones. */
+            hosts: string[];
             /** @description Counts up on every key rotation. */
             keyGeneration?: number;
             keyPresent: boolean;

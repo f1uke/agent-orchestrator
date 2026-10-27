@@ -43,6 +43,7 @@ type ReleaseWebStatusResponse struct {
 	StartedAt     *time.Time `json:"startedAt,omitempty"`
 	KeyPresent    bool       `json:"keyPresent"`
 	KeyGeneration int        `json:"keyGeneration,omitempty" description:"Counts up on every key rotation."`
+	Hosts         []string   `json:"hosts" description:"Public names the web answers besides 127.0.0.1 and localhost: the running web's, or while it is stopped the configured ones."`
 }
 
 // ReleaseWebCopyKeyResponse is the body of POST /api/v1/release-web/copy-key.
@@ -62,7 +63,7 @@ func (c *ReleaseWebController) Register(r chi.Router) {
 func releaseWebStatus(st releaseweb.Status) ReleaseWebStatusResponse {
 	out := ReleaseWebStatusResponse{
 		Running: st.Running, PID: st.PID, URL: st.URL, Port: st.Port, Sessions: st.Sessions,
-		KeyPresent: st.KeyPresent, KeyGeneration: st.KeyGeneration,
+		KeyPresent: st.KeyPresent, KeyGeneration: st.KeyGeneration, Hosts: append([]string{}, st.Hosts...),
 	}
 	if !st.StartedAt.IsZero() {
 		started := st.StartedAt

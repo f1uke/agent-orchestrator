@@ -704,16 +704,17 @@ func TestSignInRefusesCrossSitePostsAndOversizedBodies(t *testing.T) {
 	}
 }
 
-func TestOnlyLoopbackTailnetAndListedHostsAreServed(t *testing.T) {
+func TestOnlyLoopbackAndListedHostsAreServed(t *testing.T) {
 	h := newHarness(t)
 	c := h.session()
-	allowed := []string{"127.0.0.1:7420", "localhost:7420", "LocalHost:7420", "[::1]:7420", "box.tail1234.ts.net", "box.tail1234.ts.net:443", "BOX.TAIL1234.TS.NET."}
+	allowed := []string{"127.0.0.1:7420", "localhost:7420", "LocalHost:7420", "[::1]:7420"}
 	for _, hst := range allowed {
 		if res := h.do(http.MethodGet, "/api/v1/release-trains/board", nil, withCookie(c), host(hst)); res.StatusCode != http.StatusOK {
 			t.Errorf("Host %q = %d, want 200", hst, res.StatusCode)
 		}
 	}
-	refused := []string{"rebind.example:7420", "rebind.example", "127.0.0.1:7421", "localhost", "127.0.0.1", "ts.net", ".ts.net", "box.ts.net.evil.example", "evilts.net", ""}
+	refused := []string{"rebind.example:7420", "rebind.example", "127.0.0.1:7421", "localhost", "127.0.0.1", "ts.net", ".ts.net", "box.ts.net.evil.example", "evilts.net", "",
+		"box.tail1234.ts.net", "attacker-machine.tail0000.ts.net:443"}
 	for _, hst := range refused {
 		for _, target := range []string{"/", "/api/v1/release-trains/board", "/auth/signin"} {
 			res := h.do(http.MethodGet, target, nil, withCookie(c), host(hst))
@@ -736,13 +737,14 @@ func TestExtraAllowedHostsAreServed(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := testOptions(p)
-	o.AllowedHosts = []string{"Board.Example.ORG"}
+	o.AllowedHosts = []string{"Board.Example.ORG", "box.tail1234.ts.net"}
 	srv, err := NewServer(o)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = srv.Close() })
-	for hst, want := range map[string]int{"board.example.org": 200, "board.example.org:8443": 200, "other.example.org": 421} {
+	for hst, want := range map[string]int{"board.example.org": 200, "board.example.org:8443": 200, "other.example.org": 421,
+		"box.tail1234.ts.net": 200, "BOX.TAIL1234.TS.NET.": 200, "box.tail1234.ts.net:443": 200, "other.tail1234.ts.net": 421} {
 		r := httptest.NewRequest(http.MethodGet, "/robots.txt", nil)
 		r.Host = hst
 		w := httptest.NewRecorder()

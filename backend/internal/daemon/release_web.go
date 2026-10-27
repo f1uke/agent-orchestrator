@@ -73,6 +73,10 @@ func RunReleaseWeb(ctx context.Context, o ReleaseWebOptions) error {
 		}
 		return err
 	}
+	hosts, err := releaseweb.ReadHosts(paths)
+	if err != nil {
+		return err
+	}
 	store, err := sqlite.Open(paths.DBDir())
 	if err != nil {
 		return fmt.Errorf("release web: open its database: %w", err)
@@ -91,7 +95,7 @@ func RunReleaseWeb(ctx context.Context, o ReleaseWebOptions) error {
 		Assets:       os.DirFS(o.AssetsDir),
 		Addr:         net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
 		Logger:       logger,
-		AllowedHosts: o.AllowedHosts,
+		AllowedHosts: append(hosts, o.AllowedHosts...),
 	})
 	cancel()
 	<-loopDone

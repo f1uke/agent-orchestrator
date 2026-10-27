@@ -15,7 +15,7 @@ vi.mock("../../lib/api-client", () => ({
 			: "Request failed",
 }));
 
-const stopped = { running: false, sessions: 0, keyPresent: true, keyGeneration: 1 };
+const stopped = { running: false, sessions: 0, keyPresent: true, keyGeneration: 1, hosts: [] };
 const running = {
 	running: true,
 	pid: 4242,
@@ -24,6 +24,7 @@ const running = {
 	sessions: 3,
 	keyPresent: true,
 	keyGeneration: 1,
+	hosts: ["box.tail1234.ts.net"],
 };
 
 beforeEach(() => {
@@ -58,6 +59,16 @@ describe("TeamWebControls", () => {
 		expect(screen.getByText("http://127.0.0.1:7420/")).toBeInTheDocument();
 		expect(screen.getByText("3")).toBeInTheDocument();
 		expect(screen.getByText("Running")).toBeInTheDocument();
+	});
+
+	it("names the public hosts the web answers, or says there are none and how to add one", async () => {
+		renderControls();
+		await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+		expect(screen.getByText(/None\. Add yours with ao release-web start --host/)).toBeInTheDocument();
+
+		GET.mockResolvedValue({ data: running });
+		renderControls();
+		expect(await screen.findByText("box.tail1234.ts.net")).toBeInTheDocument();
 	});
 
 	it("starts the web from the switch and reads the status again", async () => {
@@ -97,7 +108,7 @@ describe("TeamWebControls", () => {
 	});
 
 	it("will not copy a key that does not exist yet", async () => {
-		GET.mockResolvedValue({ data: { running: false, sessions: 0, keyPresent: false } });
+		GET.mockResolvedValue({ data: { running: false, sessions: 0, keyPresent: false, hosts: [] } });
 		renderControls();
 
 		await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
