@@ -9,6 +9,11 @@ describe("project settings search", () => {
 });
 
 describe("global settings search", () => {
+	it("finds the Team web section when searching for tailscale", () => {
+		const hits = sectionsForScope("global").filter((section) => matchesSearch(section, "Tailscale"));
+		expect(hits.map((section) => section.key)).toEqual(["team-web"]);
+	});
+
 	it("finds the section holding the Claude profiles when searching for omniroute", () => {
 		const hits = sectionsForScope("global").filter((section) => matchesSearch(section, "OmniRoute"));
 		expect(hits.map((section) => section.key)).toEqual(["every-agent"]);

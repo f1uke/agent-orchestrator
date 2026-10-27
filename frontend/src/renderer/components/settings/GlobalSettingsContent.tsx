@@ -8,6 +8,7 @@ import { Textarea } from "../ui/textarea";
 import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
 import { SettingEditorControl } from "./SettingEditorControl";
 import { CompanionControls } from "./CompanionControls";
+import { TeamWebControls, useTeamWebStatus } from "./TeamWebControls";
 import { InlineCompletionControls, inlineCompletionSummary } from "./InlineCompletionControls";
 import { useInlineCompletionStatus } from "../../lib/inline-completion/status";
 import { CompanionPreview } from "./CompanionPreview";
@@ -86,6 +87,8 @@ export function GlobalSettingsContent({ form, activeSection }: { form: GlobalFor
 			return <SimulatorsSection form={form} />;
 		case "mac":
 			return <ThisMacSection form={form} />;
+		case "team-web":
+			return <TeamWebSection />;
 		default:
 			return <EveryAgentSection form={form} />;
 	}
@@ -540,6 +543,28 @@ function SavedCaFiles({ caFiles, found }: { caFiles: string[]; found: boolean[] 
 				);
 			})}
 		</ul>
+	);
+}
+
+function TeamWebSection() {
+	const status = useTeamWebStatus();
+	return (
+		<>
+			<SectionHeading title="Team web" hint={hint("team-web")} />
+			<SettingRows>
+				<SettingRow
+					name="Team web"
+					summary="Serves the Release Train board to your team behind one shared key. People can look, never change."
+					detail="It runs as its own program on this Mac and listens on 127.0.0.1 only. It keeps running when AO restarts."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+					value={status.data === undefined ? undefined : status.data.running ? "Running" : "Stopped"}
+					defaultOpen
+				>
+					<TeamWebControls />
+				</SettingRow>
+			</SettingRows>
+		</>
 	);
 }
 
