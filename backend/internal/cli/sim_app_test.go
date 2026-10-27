@@ -81,6 +81,10 @@ func appDeps(t *testing.T) (Deps, *simDaemon, string, *[][]string) {
 		}
 		return inner(ctx, name, args...)
 	}
+	fake := deps.CommandOutput
+	deps.CommandOutputWithEnv = func(ctx context.Context, _ []string, name string, args ...string) ([]byte, error) {
+		return fake(ctx, name, args...)
+	}
 	daemon := newSimDaemon(t, cfg)
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	return deps, daemon, dataPath, calls

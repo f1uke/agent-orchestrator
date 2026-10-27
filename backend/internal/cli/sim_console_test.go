@@ -91,14 +91,15 @@ func TestSimLaunchConsole_RemovesTheOldFileAndRedirectsBothStreamsUnbuffered(t *
 }
 
 func TestSimLaunch_WithoutConsoleKeepsTheOldLaunch(t *testing.T) {
-	deps, _, dataPath, calls := appDeps(t)
+	deps, _, dataPath, _ := appDeps(t)
 	installFixture(t, dataPath, "Nimbus", "com.example.Nimbus", "1.0", "1", "nimbus")
 	deps, launches := withConsoleLaunch(deps)
 	if _, _, err := executeCLI(t, deps, "sim", "launch", "com.example.Nimbus"); err != nil {
 		t.Fatal(err)
 	}
-	if len(launches.calls) != 0 || ranSimctl(*calls, "launch") == nil {
-		t.Fatalf("a plain launch changed: console=%v", launches.calls)
+	want := []string{"xcrun", "simctl", "launch", simUDIDProMax, "com.example.Nimbus"}
+	if len(launches.calls) != 1 || !sameStrings(launches.calls[0], want) || len(launches.envs[0]) != 0 {
+		t.Fatalf("a plain launch changed: %q with env %q", launches.calls, launches.envs)
 	}
 }
 

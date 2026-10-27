@@ -28,6 +28,23 @@ terminates before it launches. Confirm with the `Build:` line of `ao sim shot`, 
 With no bundle id, `ao sim launch` starts the most recently installed app and says when it chose
 between several; `AO_SIM_APP` in the project's environment pins it.
 
+## Launch arguments and environment
+
+Everything after `--` goes to the app as its launch arguments, word for word. A `-Key value` pair
+lands in the app's UserDefaults argument domain. Each `--env KEY=VALUE` (repeatable) is set in the
+app's environment, through simctl's `SIMCTL_CHILD_KEY`. Both apply with `--console` and
+`--terminate-first`.
+
+```bash
+ao sim launch -- -FeatureFlag YES                              # the default app, with an argument
+ao sim launch com.example.MyApp --env API_HOST=https://int.example.com -- -UITestMode
+ao sim launch --console --env LOG_LEVEL=debug && ao sim console
+```
+
+The output, and `--json` (`args`, `envKeys`), lists the arguments and the env keys, never an env
+value: a value may be a token. A malformed `--env` (no `=`, an empty key, a key given twice) is
+refused before the device is touched.
+
 ## ao sim run: scheme AND configuration
 
 `ao sim run` builds the `.xcworkspace` or `.xcodeproj` at the root of the current directory (a

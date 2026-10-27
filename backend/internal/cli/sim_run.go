@@ -311,7 +311,7 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 	// outcome this command could have. A terminate that finds nothing running
 	// exits non-zero, which is why its error is dropped.
 	if req.console {
-		pid, path, err := c.launchSimConsole(ctx, device, bundleID)
+		pid, path, err := c.launchSimConsole(ctx, device, bundleID, simLaunchSpec{})
 		if err != nil {
 			return simRunResult{}, err
 		}
