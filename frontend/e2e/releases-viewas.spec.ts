@@ -166,6 +166,16 @@ test.describe("the View as picker", () => {
 		await expect(row(page, "E1~h/da/2.3.1")).toHaveCount(0);
 	});
 
+	test("an open sheet starts below the top bar, so the picker stays reachable", async ({ page }) => {
+		await open(page, "?sheet=attention", "subjects");
+		const barBottom = await page.locator(".rel-top").evaluate((el) => el.getBoundingClientRect().bottom);
+		await expect
+			.poll(() => sheet(page).evaluate((el) => el.getBoundingClientRect().top))
+			.toBeGreaterThanOrEqual(barBottom);
+		await viewAs(page, "bsample");
+		await expect(page).toHaveURL(/person=bsample/);
+	});
+
 	test("an id the Board does not list shows as is with the reason, and filters nothing", async ({ page }) => {
 		await open(page, "?person=zed", "subjects");
 		const picker = page.getByTestId("view-as");

@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronRight, X } from "lucide-react";
 import { AnimatePresence, m } from "motion/react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useClearStaleHides, useSetRule } from "../../hooks/useReleaseBoard";
 import { FIX_STATE_META } from "../../lib/releases/fix";
 import { dayLabel } from "../../lib/releases/day";
@@ -49,6 +49,28 @@ import { SourceTag } from "./Sources";
 type Ctx = { board: Board; lens: Lens; actions: PageActions; now: number; readOnly: boolean };
 type Sheet = { title: ReactNode; body: ReactNode; tabs?: ReactNode };
 
+const SHEET_GAP = 8;
+
+// The top bar's height depends on its host (the app's shell, the team web's sign-out
+// bar) and on font metrics, so the sheet starts below the bar as drawn, never over it.
+function useBelowTopBar(open: boolean): number | null {
+	const [top, setTop] = useState<number | null>(null);
+	useLayoutEffect(() => {
+		const bar = open ? document.querySelector<HTMLElement>(".rel-top") : null;
+		if (!bar) return;
+		const measure = () => setTop(Math.round(bar.getBoundingClientRect().bottom) + SHEET_GAP);
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(bar);
+		window.addEventListener("resize", measure);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", measure);
+		};
+	}, [open]);
+	return top;
+}
+
 export function SheetStack({
 	board,
 	url,
@@ -72,12 +94,14 @@ export function SheetStack({
 	const sheet = s ? render(s, ctx) : null;
 	const canBack = useReleasesUi((st) => st.back.length > 0);
 	const { sheet: mo } = useReleaseMotion();
+	const top = useBelowTopBar(sheet !== null);
 	return (
 		<AnimatePresence>
 			{sheet && (
 				<m.aside
 					key="sheet"
 					className="rel-sheet"
+					style={top === null ? undefined : { top }}
 					role="dialog"
 					aria-modal="false"
 					aria-label="Release details"
