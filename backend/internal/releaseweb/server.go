@@ -21,38 +21,26 @@ import (
 
 const (
 	// CookieName names the session cookie.
-	CookieName = "rtw_session"
-	// maxSigninBody caps the sign-in form; a real one is under 100 bytes.
-	maxSigninBody = 4 << 10
-	// avatarCacheSeconds matches the daemon's avatar route.
+	CookieName         = "rtw_session"
+	maxSigninBody      = 4 << 10
 	avatarCacheSeconds = 24 * 60 * 60
-	// maxPersonBytes bounds the board's person query, as the daemon's board route does.
-	maxPersonBytes = 256
+	maxPersonBytes     = 256
 )
 
 // BoardSource is what the release web reads the board from.
 type BoardSource interface {
-	// Board returns the serialized board and its ETag, or rtsvc.ErrNotModified
-	// with the ETag when ifNoneMatch already names it.
 	Board(ctx context.Context, ifNoneMatch, person string) ([]byte, string, error)
-	// Avatar returns rtsvc.ErrNoAvatar or rtsvc.ErrBadAccountID when it has no image.
 	Avatar(accountID string) ([]byte, error)
 }
 
 // Options configures a Server and Serve.
 type Options struct {
-	Paths  Paths
-	Board  BoardSource
-	Assets fs.FS
-	// Addr is where Serve listens: DefaultAddr when empty, and always on
-	// 127.0.0.1. Port 0 picks a free one.
-	Addr string
-	// Now is the clock; time.Now when nil.
-	Now func() time.Time
-	// Logger receives operational errors, never secrets; stderr when nil.
-	Logger *slog.Logger
-	// AllowedHosts are host names served besides loopback on Addr's port and
-	// any *.ts.net name; every other Host header gets 421.
+	Paths        Paths
+	Board        BoardSource
+	Assets       fs.FS
+	Addr         string
+	Now          func() time.Time
+	Logger       *slog.Logger
 	AllowedHosts []string
 }
 
@@ -67,12 +55,10 @@ type Server struct {
 	sessions *sessionStore
 	limiter  *signinLimiter
 	access   *accessLog
-	// changed receives a value whenever the session count may have moved.
-	changed chan struct{}
+	changed  chan struct{}
 }
 
-// NewServer loads the key and opens the access log. It refuses to build a
-// server without a valid key.
+// NewServer loads the key and opens the access log.
 func NewServer(o Options) (*Server, error) {
 	if o.Board == nil || o.Assets == nil {
 		return nil, errors.New("release web: Board and Assets are required")
@@ -117,8 +103,7 @@ func NewServer(o Options) (*Server, error) {
 	return s, nil
 }
 
-// Sessions counts the live sessions, after following a key rotation that no
-// request has noticed yet.
+// Sessions counts the live sessions.
 func (s *Server) Sessions() int {
 	s.keys.current()
 	return s.sessions.count(s.now())
@@ -165,7 +150,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func isRead(r *http.Request) bool { return r.Method == http.MethodGet || r.Method == http.MethodHead }
 
-// setSecurityHeaders runs before every response, errors included.
 func setSecurityHeaders(h http.Header, https bool) {
 	h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
 		"img-src 'self' data:; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; "+
@@ -182,8 +166,6 @@ func setSecurityHeaders(h http.Header, https bool) {
 	}
 }
 
-// signedIn reports whether the request carries a live session cookie, and
-// clears a cookie that no longer names one.
 func (s *Server) signedIn(w http.ResponseWriter, r *http.Request, c client) bool {
 	cookie, err := r.Cookie(CookieName)
 	if err != nil {
@@ -224,10 +206,8 @@ func (s *Server) auth(w http.ResponseWriter, r *http.Request, c client, p string
 	s.signin(w, r, c)
 }
 
-// sameOrigin refuses a cross-site form post. A browser's Sec-Fetch-Site
-// settles it: under Referrer-Policy no-referrer the same browser sends
-// "Origin: null" on its own form post. Without it, Funnel may rewrite Host to
-// the loopback address, so a loopback peer's X-Forwarded-Host also counts.
+// Under Referrer-Policy no-referrer a browser sends "Origin: null" on its own form post, and
+// Funnel may rewrite Host to loopback, so a loopback peer's X-Forwarded-Host also counts.
 func sameOrigin(r *http.Request, c client) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "same-origin", "none":
@@ -363,8 +343,7 @@ func (s *Server) serveBoard(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("release web: board", "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorInternal)
 	default:
-		// private, no-cache instead of no-store: the browser must keep the
-		// body for If-None-Match to save the next download.
+		// no-store would drop the body that If-None-Match needs.
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Cache-Control", "private, no-cache")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -395,8 +374,6 @@ func (s *Server) serveAvatar(w http.ResponseWriter, accountID string) {
 	_, _ = w.Write(b) //nolint:gosec // G705: sniffed as a raster image above and served with nosniff
 }
 
-// asset serves the web build. Any path that is not a file gets index.html, so
-// a hash-router app loads from every URL.
 func (s *Server) asset(w http.ResponseWriter, r *http.Request, p string) {
 	name := strings.TrimPrefix(p, "/")
 	if st, err := fs.Stat(s.assets, name); name == "" || err != nil || !st.Mode().IsRegular() {
@@ -407,7 +384,7 @@ func (s *Server) asset(w http.ResponseWriter, r *http.Request, p string) {
 		http.ServeFileFS(w, r, s.assets, name)
 		return
 	}
-	// Written directly: ServeFileFS redirects /index.html to ./.
+	// ServeFileFS redirects /index.html to ./, so write it directly.
 	b, err := fs.ReadFile(s.assets, name)
 	if err != nil {
 		http.Error(w, "Not Found", http.StatusNotFound)

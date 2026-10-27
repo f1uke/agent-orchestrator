@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// accessEvent is one line kind in access.log.
 type accessEvent string
 
 const (
@@ -21,28 +20,20 @@ const (
 )
 
 const (
-	// MaxAccessLogBytes caps access.log. Past it the file moves to access.log.1,
-	// replacing the one before, so the two never hold more than twice this.
+	// MaxAccessLogBytes caps access.log before it rotates.
 	MaxAccessLogBytes = 10 << 20
-	// LockedLogInterval is how often one client's refused attempts are written:
-	// the first one, then a count of the rest once the interval is over.
+	// LockedLogInterval is how often one client's refused attempts are written.
 	LockedLogInterval = time.Minute
-	// anyClient stands for the clients whose refused attempts were counted
-	// together because too many were being counted one by one.
-	anyClient = "*"
+	anyClient         = "*"
 )
 
-// accessLine is the whole of what access.log records: never the key, a token,
-// a form body or a query string.
 type accessLine struct {
 	Time  time.Time   `json:"time"`
 	IP    string      `json:"ip"`
 	Event accessEvent `json:"event"`
-	// Count is how many refused attempts a signin_locked_repeated line stands for.
-	Count int `json:"count,omitempty"`
+	Count int         `json:"count,omitempty"`
 }
 
-// lockedRun is one client's refused attempts since its last signin_locked line.
 type lockedRun struct {
 	ip      string
 	since   time.Time
@@ -50,15 +41,12 @@ type lockedRun struct {
 }
 
 type accessLog struct {
-	mu    sync.Mutex
-	path  string
-	f     *os.File
-	size  int64
-	limit int64
-	// runs coalesces refused attempts by rate-limit bucket, so a flood against
-	// a locked sign-in writes a line per client per LockedLogInterval.
-	runs map[string]*lockedRun
-	// overflow counts refused attempts from clients runs had no room for.
+	mu       sync.Mutex
+	path     string
+	f        *os.File
+	size     int64
+	limit    int64
+	runs     map[string]*lockedRun
 	overflow int
 }
 
@@ -87,16 +75,12 @@ func (a *accessLog) open() error {
 	return nil
 }
 
-// record appends one line.
 func (a *accessLog) record(now time.Time, ip string, ev accessEvent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.writeLocked(accessLine{Time: now.UTC(), IP: ip, Event: ev})
 }
 
-// recordLocked notes a refused sign-in. Only the first per client within
-// LockedLogInterval is written; the rest are counted and written as one
-// signin_locked_repeated line when the interval is over.
 func (a *accessLog) recordLocked(now time.Time, c client) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -115,8 +99,6 @@ func (a *accessLog) recordLocked(now time.Time, c client) {
 	a.runs[c.bucket] = &lockedRun{ip: c.ip, since: now}
 }
 
-// flush writes the counts of the runs whose interval is over. The server calls
-// it periodically, so the count of a flood that stopped still reaches the log.
 func (a *accessLog) flush(now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -138,8 +120,6 @@ func (a *accessLog) endRunLocked(bucket string, run *lockedRun, now time.Time) {
 	delete(a.runs, bucket)
 }
 
-// writeLocked appends one line, first moving a full log to access.log.1. A
-// failed write is dropped: the log must never take sign-in down with it.
 func (a *accessLog) writeLocked(l accessLine) {
 	b, err := json.Marshal(l)
 	if err != nil {

@@ -7,26 +7,15 @@ import (
 	"strings"
 )
 
-// client is who sent a request, as far as the release web can tell.
 type client struct {
-	// ip is the client address written to the access log.
-	ip string
-	// bucket keys the sign-in rate limit: the address, or its /64 for IPv6,
-	// since one host commonly holds a whole /64.
-	bucket string
-	// viaLoopback means the TCP peer is this machine, so its forwarding
-	// headers are trusted.
+	ip          string
+	bucket      string
 	viaLoopback bool
 	https       bool
 }
 
-// clientOf reads the client from the TCP peer. Tailscale Funnel terminates TLS
-// in tailscaled and proxies to this loopback port, so its requests arrive from
-// a loopback peer carrying X-Forwarded-For (the real client, appended as the
-// last hop) and X-Forwarded-Proto: https. Those headers are honoured only from
-// a loopback peer, and only XFF's last value, the one the local proxy wrote:
-// earlier values come from the internet. A local browser sends no XFF and
-// counts as 127.0.0.1.
+// Tailscale Funnel proxies from a loopback peer with X-Forwarded-For (real client last) and
+// X-Forwarded-Proto; both are trusted only from loopback, and only XFF's last value.
 func clientOf(r *http.Request) client {
 	peer := parseAddr(r.RemoteAddr)
 	c := client{viaLoopback: peer.IsValid() && peer.IsLoopback(), https: r.TLS != nil}

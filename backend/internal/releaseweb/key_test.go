@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// secretOf reads the raw key a person would paste. Tests never print it.
 func secretOf(t *testing.T, p Paths) string {
 	t.Helper()
 	b, err := os.ReadFile(p.KeyFile())

@@ -140,7 +140,6 @@ func (h *harness) signin(key string, opts ...reqOpt) *http.Response {
 
 func (h *harness) secret() string { return secretOf(h.t, h.p) }
 
-// session signs in from peer and returns the session cookie.
 func (h *harness) session(opts ...reqOpt) *http.Cookie {
 	h.t.Helper()
 	res := h.signin(h.secret(), opts...)
@@ -477,8 +476,6 @@ func TestGlobalLockoutStopsNewSignInsButNotSessions(t *testing.T) {
 	}
 }
 
-// lockEveryone spreads failures over clients, each under its own limit, until
-// the global lock engages.
 func (h *harness) lockEveryone() {
 	h.t.Helper()
 	for i := range SigninGlobalFailures {

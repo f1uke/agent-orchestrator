@@ -20,9 +20,7 @@ import (
 
 const (
 	// DefaultPort is where the release web listens unless told otherwise.
-	DefaultPort = 7420
-	// statusInterval refreshes status.json even when nothing changed, so
-	// expired sessions drop out of the count.
+	DefaultPort    = 7420
 	statusInterval = 30 * time.Second
 	startTimeout   = 10 * time.Second
 	stopGrace      = 5 * time.Second
@@ -35,25 +33,20 @@ const (
 // DefaultAddr is DefaultPort on loopback.
 var DefaultAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(DefaultPort))
 
-// runInfo is run.json: the process serving and where.
 type runInfo struct {
-	PID       int       `json:"pid"`
-	Port      int       `json:"port"`
-	URL       string    `json:"url"`
-	StartedAt time.Time `json:"startedAt"`
-	// ProcessStart is the serving process's start time as the OS reports it,
-	// read at Serve. A fresh read from the same source tells the server from
-	// another process that got its pid.
+	PID          int       `json:"pid"`
+	Port         int       `json:"port"`
+	URL          string    `json:"url"`
+	StartedAt    time.Time `json:"startedAt"`
 	ProcessStart time.Time `json:"processStart"`
 }
 
-// statusInfo is status.json.
 type statusInfo struct {
 	Sessions  int       `json:"sessions"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// Status is what ReadStatus reports. It never carries the key.
+// Status is what ReadStatus reports.
 type Status struct {
 	Running       bool      `json:"running"`
 	PID           int       `json:"pid,omitempty"`
@@ -65,10 +58,7 @@ type Status struct {
 	KeyGeneration int       `json:"keyGeneration,omitempty"`
 }
 
-// Serve listens on o.Addr (DefaultAddr when empty), which must be on
-// 127.0.0.1, until ctx is cancelled; the caller cancels ctx on SIGTERM so Stop
-// shuts it down cleanly. It writes run.json once listening, keeps status.json
-// current, and removes both on the way out.
+// Serve serves the release web on o.Addr until ctx is cancelled.
 func Serve(ctx context.Context, o Options) error {
 	addr := o.Addr
 	if addr == "" {
@@ -94,7 +84,7 @@ func Serve(ctx context.Context, o Options) error {
 		_ = ln.Close()
 		return fmt.Errorf("release web: listener address %v is not TCP", ln.Addr())
 	}
-	o.Addr = tcp.String() // the port a loopback Host must name, when addr asked for port 0
+	o.Addr = tcp.String()
 	srv, err := NewServer(o)
 	if err != nil {
 		_ = ln.Close()
@@ -180,8 +170,6 @@ func readJSONFile(path string, v any) bool {
 	return err == nil && json.Unmarshal(b, v) == nil
 }
 
-// removeRunFiles removes run.json and status.json while run.json still names
-// pid, or is unreadable, so a stopping server never deletes a successor's.
 func removeRunFiles(p Paths, pid int) {
 	var info runInfo
 	if readJSONFile(p.RunFile(), &info) && info.PID != pid {
@@ -191,22 +179,14 @@ func removeRunFiles(p Paths, pid int) {
 	_ = os.Remove(p.StatusFile())
 }
 
-// processIdentity is what the pid in run.json turns out to be.
 type processIdentity int
 
 const (
-	// processGone means no live process has the pid, so run.json is stale.
 	processGone processIdentity = iota
-	// processOurs means the pid is alive and started when run.json records.
 	processOurs
-	// processUnverified means the pid is alive but its start time cannot be
-	// read or does not match: another process may hold the pid now, or the
-	// server's start time reads differently after a clock step. Nothing may
-	// signal it or forget it.
 	processUnverified
 )
 
-// identify tells what run.json's pid is, and why when it is unverified.
 func identify(info runInfo) (processIdentity, error) {
 	if !processalive.Alive(info.PID) {
 		return processGone, nil
@@ -222,8 +202,7 @@ func identify(info runInfo) (processIdentity, error) {
 	return processOurs, nil
 }
 
-// ReadStatus reports whether a release web is serving, where, and with how
-// many sessions, and whether a usable key exists.
+// ReadStatus reports whether a release web is serving and the state of its key.
 func ReadStatus(p Paths) Status {
 	var st Status
 	if k, err := ReadKey(p); err == nil {
@@ -244,9 +223,7 @@ func ReadStatus(p Paths) Status {
 	return st
 }
 
-// Start returns the running server's status, or spawns `exe args...` detached
-// (own session, output to web.log, stdin from /dev/null) and waits until it
-// listens.
+// Start returns the running server's status, or spawns it detached.
 func Start(p Paths, exe string, args []string) (Status, error) {
 	if st := ReadStatus(p); st.Running {
 		return st, nil
@@ -294,10 +271,7 @@ func Start(p Paths, exe string, args []string) (Status, error) {
 	}
 }
 
-// Stop ends the server run.json names: SIGTERM, then SIGKILL after a grace
-// period. It signals only a pid it verifies as the server, removes the files
-// of a dead one, and does nothing when no server runs. A live pid it cannot
-// verify is an error that names it, and run.json stays for the human to check.
+// Stop ends the server run.json names, signalling only a pid it verifies.
 func Stop(p Paths) error {
 	var info runInfo
 	if !readJSONFile(p.RunFile(), &info) {

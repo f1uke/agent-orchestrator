@@ -20,7 +20,6 @@ func kill(pid int) error {
 	return p.Kill()
 }
 
-// processStartedAt reads a process's creation time, to 100 ns.
 func processStartedAt(pid int) (time.Time, error) {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid)) //nolint:gosec // G115: a Windows pid is a DWORD; callers pass os.Getpid or a pid processalive.Alive accepted
 	if err != nil {

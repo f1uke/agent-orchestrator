@@ -6,14 +6,11 @@ import (
 	"strings"
 )
 
-// tailnetSuffix ends every name Tailscale Funnel serves.
 const tailnetSuffix = ".ts.net"
 
-// hostAllowlist is the Host headers the release web answers. A page on any
-// other name that resolves to 127.0.0.1 (DNS rebinding) sends its own name, so
-// the server refuses it before any auth logic runs.
+// hostAllowlist refuses DNS-rebinding names: a page on another name that resolves to
+// 127.0.0.1 sends its own Host.
 type hostAllowlist struct {
-	// port is the listening port, which a loopback Host must name.
 	port  string
 	extra map[string]bool
 }
@@ -34,8 +31,7 @@ func newHostAllowlist(addr string, extra []string) (hostAllowlist, error) {
 	return l, nil
 }
 
-// NormalizeHost checks a host name an operator allows, such as a custom domain
-// in front of the web, and returns it lower-cased without a trailing dot.
+// NormalizeHost validates an allowed host name and canonicalizes it.
 func NormalizeHost(h string) (string, error) {
 	name := canonicalName(h)
 	if !validName(name) {
@@ -64,8 +60,6 @@ func canonicalName(h string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
 }
 
-// validName reports whether name is dot-separated non-empty labels of letters,
-// digits and hyphens.
 func validName(name string) bool {
 	if name == "" || len(name) > 253 {
 		return false

@@ -68,7 +68,6 @@ function Trigger({ board, person }: { board: Board; person: string | undefined }
 	);
 }
 
-/** Whose Mine the page shows. The Board is fetched per person, so this is a URL choice, not a filter on one Board. */
 export function ViewAs({
 	board,
 	person,
@@ -77,7 +76,6 @@ export function ViewAs({
 }: {
 	board: Board;
 	person: string | undefined;
-	/** The Board carries this person's Mine, so the page is filtered to it. */
 	filtering: boolean;
 	onPick: (id: string | undefined) => void;
 }) {

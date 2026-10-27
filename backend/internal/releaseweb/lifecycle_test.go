@@ -21,7 +21,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
 )
 
-// helperDirEnv turns the test binary into a release web server for Start.
 const helperDirEnv = "RELEASEWEB_TEST_HELPER_DIR"
 
 func TestMain(m *testing.M) {
@@ -217,9 +216,6 @@ func TestStopClearsTheRecordOfADeadPid(t *testing.T) {
 	}
 }
 
-// bystander is a live process that is not the release web, standing in for
-// whatever holds the pid run.json names.
-// The returned channel closes once it exits.
 func bystander(t *testing.T) (int, <-chan struct{}) {
 	t.Helper()
 	cmd := exec.Command("sleep", "60")
@@ -232,8 +228,6 @@ func bystander(t *testing.T) (int, <-chan struct{}) {
 	return cmd.Process.Pid, exited
 }
 
-// assertStopRefuses checks that Stop names pid, leaves it running and keeps
-// run.json for the human to check.
 func assertStopRefuses(t *testing.T, p Paths, pid int, exited <-chan struct{}) {
 	t.Helper()
 	err := Stop(p)
@@ -259,7 +253,6 @@ func TestStopNeverSignalsOrForgetsALivePidWhoseStartTimeDiffers(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid, exited := bystander(t)
-	// A clock step, or a recycled pid: the record's times are an hour off the process's.
 	hourAgo := time.Now().Add(-time.Hour)
 	if err := writeJSONFile(p.RunFile(), runInfo{PID: pid, Port: 1, StartedAt: hourAgo, ProcessStart: hourAgo}); err != nil {
 		t.Fatal(err)
@@ -283,6 +276,6 @@ func TestStopNeverSignalsAPidWhoseStartTimeCannotBeRead(t *testing.T) {
 	if err := writeJSONFile(p.RunFile(), runInfo{PID: pid, Port: 1, StartedAt: started, ProcessStart: started}); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", t.TempDir()) // no ps to read the start time with
+	t.Setenv("PATH", t.TempDir())
 	assertStopRefuses(t, p, pid, exited)
 }

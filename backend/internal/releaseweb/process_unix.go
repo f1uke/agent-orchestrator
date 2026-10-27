@@ -15,7 +15,6 @@ func terminate(pid int) error { return syscall.Kill(pid, syscall.SIGTERM) }
 
 func kill(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }
 
-// processStartedAt reads a process's start time from ps, to whole seconds.
 func processStartedAt(pid int) (time.Time, error) {
 	cmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
 	cmd.Env = append(os.Environ(), "LC_ALL=C")

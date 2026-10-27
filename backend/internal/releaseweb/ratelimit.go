@@ -6,33 +6,24 @@ import (
 )
 
 const (
-	// SigninWindow is how far back sign-ins, failed or successful, count.
+	// SigninWindow is how far back sign-ins count.
 	SigninWindow = 15 * time.Minute
-	// SigninFailuresPerClient failures from one client within the window lock
-	// that client out. It is high enough that an office behind one address
-	// survives a morning of typos.
+	// SigninFailuresPerClient failures within the window lock a client out.
 	SigninFailuresPerClient = 10
 	// SigninClientLockout is a client's first lockout; each repeat doubles it.
 	SigninClientLockout = 5 * time.Minute
-	// SigninMaxClientLockout caps the doubling, and is how long a client must
-	// stay out of lockout before the doubling starts over.
+	// SigninMaxClientLockout caps the doubling.
 	SigninMaxClientLockout = 24 * time.Hour
-	// SigninGlobalFailures failures from all clients within the window lock
-	// sign-in for every client that is not known.
+	// SigninGlobalFailures failures from all clients lock sign-in for unknown clients.
 	SigninGlobalFailures = 30
-	// SigninGlobalLockout is how long the global lock lasts. Existing sessions keep working.
+	// SigninGlobalLockout is how long the global lock lasts.
 	SigninGlobalLockout = 15 * time.Minute
-	// SigninSuccessesPerClient successful sign-ins from one client within the
-	// window refuse the next, so one key holder cannot churn the session store.
+	// SigninSuccessesPerClient successes within the window refuse the next.
 	SigninSuccessesPerClient = 20
-	// maxTrackedClients bounds the client table. Entries appear on a failure or
-	// a success; the global lock caps failures and only key holders succeed.
-	maxTrackedClients = 10000
-	// maxKnownClients bounds the clients the global lock lets through.
-	maxKnownClients = 1000
+	maxTrackedClients        = 10000
+	maxKnownClients          = 1000
 )
 
-// window keeps event times inside SigninWindow, oldest first.
 type window []time.Time
 
 func (w *window) prune(now time.Time) {
@@ -45,8 +36,6 @@ func (w *window) prune(now time.Time) {
 	*w = kept
 }
 
-// add records an event and reports whether the window now holds limit
-// events, emptying it when it does.
 func (w *window) add(now time.Time, limit int) bool {
 	w.prune(now)
 	*w = append(*w, now)
@@ -57,7 +46,6 @@ func (w *window) add(now time.Time, limit int) bool {
 	return false
 }
 
-// waitBelow is how long until the window holds fewer than limit events.
 func (w *window) waitBelow(now time.Time, limit int) time.Duration {
 	w.prune(now)
 	if len(*w) < limit {
@@ -78,31 +66,18 @@ func (b *clientBucket) idle(now time.Time) bool {
 	return !now.Before(b.lockedUntil) && now.Sub(b.lastSeen) >= SigninMaxClientLockout
 }
 
-// signinLimiter throttles sign-ins per client and failed sign-ins across all
-// clients.
-//
-// The global lock stops a guesser who spreads over many addresses, but it
-// would also let anyone without the key lock every teammate out. So it spares
-// known clients: those that signed in successfully within SessionAbsoluteTTL.
-// A guesser never becomes known. A teammate who has never signed in from his
-// address still waits out the global lock.
 type signinLimiter struct {
 	mu                sync.Mutex
 	clients           map[string]*clientBucket
 	global            window
 	globalLockedUntil time.Time
-	// known maps a client to its last successful sign-in. It is kept apart
-	// from clients so a flood of failures cannot evict it.
-	known map[string]time.Time
+	known             map[string]time.Time
 }
 
 func newSigninLimiter() *signinLimiter {
 	return &signinLimiter{clients: map[string]*clientBucket{}, known: map[string]time.Time{}}
 }
 
-// attempt runs check unless client is locked out, and records its outcome. The
-// check runs under the limiter's lock, so parallel guesses cannot slip past the
-// limit between the lockout test and the failure count. check must be fast.
 func (l *signinLimiter) attempt(client string, now time.Time, check func() bool) (ok bool, retryAfter time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -113,7 +88,6 @@ func (l *signinLimiter) attempt(client string, now time.Time, check func() bool)
 		l.recordFailureLocked(client, now)
 		return false, 0
 	}
-	// Forget recent failures but keep the lockout history, so a correct key
 	// between lockouts does not reset the doubling.
 	b := l.bucketLocked(client, now)
 	b.failures = b.failures[:0]
@@ -168,8 +142,6 @@ func (l *signinLimiter) isKnownLocked(client string, now time.Time) bool {
 	return ok && now.Sub(at) < SessionAbsoluteTTL
 }
 
-// rememberLocked marks client known, dropping expired entries and then the
-// least recently signed-in one when the set is full.
 func (l *signinLimiter) rememberLocked(client string, now time.Time) {
 	if _, ok := l.known[client]; !ok && len(l.known) >= maxKnownClients {
 		var oldest string
@@ -202,7 +174,6 @@ func (l *signinLimiter) makeRoomLocked(now time.Time) {
 	if len(l.clients) < maxTrackedClients {
 		return
 	}
-	// Evict the least recently seen client, preferring one not locked out.
 	var victim string
 	var victimSeen time.Time
 	victimLocked := true

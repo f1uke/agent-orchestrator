@@ -15,7 +15,6 @@ func TestSessionsExpireOnIdleAndAbsoluteTTL(t *testing.T) {
 	idle, _ := s.create(keyA, "203.0.113.9", t0)
 	busy, _ := s.create(keyA, "203.0.113.9", t0)
 
-	// Touch busy every 6h; idle never comes back.
 	now := t0
 	for now.Add(6 * time.Hour).Before(t0.Add(SessionAbsoluteTTL)) {
 		now = now.Add(6 * time.Hour)
@@ -51,9 +50,6 @@ func TestSessionFromAnotherKeyIsRotated(t *testing.T) {
 	}
 }
 
-// A sign-in that passed Matches under the old key and creates its session
-// after a rotation must not be live under the new key, even when key.json was
-// lost first and the generation started over.
 func TestSignInThatRacedARotationIsNotLiveUnderTheNewKey(t *testing.T) {
 	p := Paths{Dir: t.TempDir()}
 	if err := RotateKey(p); err != nil {

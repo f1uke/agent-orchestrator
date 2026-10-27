@@ -1,7 +1,5 @@
-// Package releaseweb serves a read-only Release Train board to the team over a
-// loopback port that the human exposes on the public internet with Tailscale
-// Funnel. One shared secret key is the only gate, so every route here is
-// written as internet-facing.
+// Package releaseweb serves a read-only Release Train board over a loopback port that
+// Tailscale Funnel exposes; one shared key is the only gate, so every route is internet-facing.
 package releaseweb
 
 import (
@@ -10,16 +8,12 @@ import (
 	"path/filepath"
 )
 
-// Paths names every file the release web keeps. All of them live in one
-// directory under ~/.ao so the hard rule on app state holds.
+// Paths names every file the release web keeps.
 type Paths struct {
 	Dir string
 }
 
-// DirFor is $AO_RELEASE_WEB_DIR, else the release-web directory beside the AO
-// data dir. The default data dir is ~/.ao/data, so the default is
-// ~/.ao/release-web, and a sandbox daemon with its own AO_DATA_DIR gets its own
-// release web instead of sharing the real one.
+// DirFor is $AO_RELEASE_WEB_DIR, else the release-web directory beside the AO data dir.
 func DirFor(dataDir string) string {
 	if d := os.Getenv("AO_RELEASE_WEB_DIR"); d != "" {
 		return d
@@ -27,8 +21,7 @@ func DirFor(dataDir string) string {
 	return filepath.Join(filepath.Dir(dataDir), "release-web")
 }
 
-// Ensure creates Dir with 0700, and tightens it to 0700 when it already exists:
-// key.json and access.log sit in it.
+// Ensure creates Dir with mode 0700.
 func (p Paths) Ensure() error {
 	if p.Dir == "" {
 		return fmt.Errorf("release web: empty dir")

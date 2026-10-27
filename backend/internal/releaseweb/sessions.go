@@ -11,10 +11,9 @@ import (
 const (
 	// SessionIdleTTL signs a browser out after this long without a request.
 	SessionIdleTTL = 12 * time.Hour
-	// SessionAbsoluteTTL signs a browser out this long after sign-in, however active.
+	// SessionAbsoluteTTL signs a browser out this long after sign-in.
 	SessionAbsoluteTTL = 7 * 24 * time.Hour
-	// MaxSessions bounds the store. A full store drops the least recently seen
-	// session of the client signing in, else the least recently seen of all.
+	// MaxSessions bounds the session store.
 	MaxSessions = 1000
 )
 
@@ -23,9 +22,7 @@ type tokenHash [sha256.Size]byte
 func hashToken(token string) tokenHash { return sha256.Sum256([]byte(token)) }
 
 type session struct {
-	key keyID
-	// client is the rate-limit bucket that signed in, so one key holder signing
-	// in over and over evicts his own sessions before anyone else's.
+	key       keyID
 	client    string
 	createdAt time.Time
 	lastSeen  time.Time
@@ -35,24 +32,18 @@ func (s *session) expired(now time.Time) bool {
 	return now.Sub(s.lastSeen) >= SessionIdleTTL || now.Sub(s.createdAt) >= SessionAbsoluteTTL
 }
 
-// lookupResult says why a cookie did or did not name a live session.
 type lookupResult int
 
 const (
 	sessionMissing lookupResult = iota
 	sessionLive
-	// sessionRotated means the token was live until the key rotated.
 	sessionRotated
 )
 
-// sessionStore keeps sessions in memory, keyed by the SHA-256 of the token, so
-// a heap dump does not hand out cookies. A restart signs everyone out.
 type sessionStore struct {
 	mu       sync.Mutex
 	sessions map[tokenHash]*session
-	// rotated holds the hashes the last key rotation dropped, only so the
-	// access log can tell a rotated cookie from a forged one.
-	rotated map[tokenHash]struct{}
+	rotated  map[tokenHash]struct{}
 }
 
 func newSessionStore() *sessionStore {
@@ -75,8 +66,6 @@ func (s *sessionStore) create(key keyID, client string, now time.Time) (string, 
 	return token, nil
 }
 
-// lookup refreshes a live session's lastSeen. A session minted under another
-// key is dropped: it can only exist when a sign-in raced a rotation.
 func (s *sessionStore) lookup(token string, key keyID, now time.Time) lookupResult {
 	h := hashToken(token)
 	s.mu.Lock()
@@ -107,7 +96,6 @@ func (s *sessionStore) remove(token string) {
 	delete(s.sessions, hashToken(token))
 }
 
-// rotate signs every session out.
 func (s *sessionStore) rotate() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -133,8 +121,6 @@ func (s *sessionStore) purgeLocked(now time.Time) {
 	}
 }
 
-// evictLeastRecentLocked drops client's least recently seen session, or the
-// least recently seen of all when client has none.
 func (s *sessionStore) evictLeastRecentLocked(client string) {
 	var oldest tokenHash
 	var oldestSeen time.Time

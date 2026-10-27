@@ -26,27 +26,19 @@ import (
 	sqlitestore "github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite/store"
 )
 
-// ReleaseWebAssetsEnv names the directory of the web bundle when --assets is
-// not given.
+// ReleaseWebAssetsEnv names the directory of the web bundle.
 const ReleaseWebAssetsEnv = "AO_RELEASE_WEB_ASSETS"
 
 // ReleaseWebOptions configures RunReleaseWeb.
 type ReleaseWebOptions struct {
-	// DataDir is the AO data dir: release-train.json and the app's ao.db sit in
-	// it, and the web's own directory sits beside it (releaseweb.DirFor).
-	DataDir string
-	// Port is where the web listens on 127.0.0.1; releaseweb.DefaultPort when 0.
-	Port int
-	// AssetsDir is the web bundle; see ResolveReleaseWebAssets.
-	AssetsDir string
-	// AllowedHosts are extra Host names the web answers; see releaseweb.Options.
+	DataDir      string
+	Port         int
+	AssetsDir    string
 	AllowedHosts []string
 	Logger       *slog.Logger
 }
 
-// ResolveReleaseWebAssets picks the web bundle: the flag, else
-// $AO_RELEASE_WEB_ASSETS, else release-web/ beside the ao binary. It fails
-// with the flag's name when the directory is missing.
+// ResolveReleaseWebAssets picks the web bundle directory.
 func ResolveReleaseWebAssets(flag string, executable func() (string, error)) (string, error) {
 	dir := flag
 	if dir == "" {
@@ -65,13 +57,7 @@ func ResolveReleaseWebAssets(flag string, executable func() (string, error)) (st
 	return dir, nil
 }
 
-// RunReleaseWeb runs the team web until ctx is cancelled. It owns a SQLite
-// store and a poller of its own, so it works whether or not the daemon runs.
-//
-// Cost: the daemon polls GitLab, Jira and Confluence on rtsvc.Tick, and so does
-// this program. Running both doubles the read load on those hosts; the web
-// polls no faster than the app. The human's plans, hides, rule toggles and
-// No-MR marks are read from the app's database and never written.
+// RunReleaseWeb runs the team web until ctx is cancelled.
 func RunReleaseWeb(ctx context.Context, o ReleaseWebOptions) error {
 	logger := o.Logger
 	if logger == nil {
@@ -112,8 +98,6 @@ func RunReleaseWeb(ctx context.Context, o ReleaseWebOptions) error {
 	return err
 }
 
-// releaseWebBoard adapts the board service and avatar store to
-// releaseweb.BoardSource.
 type releaseWebBoard struct {
 	*rtsvc.BoardService
 	avatars *rtsvc.AvatarStore
@@ -147,14 +131,10 @@ func startReleaseWebBoard(ctx context.Context, web *sqlite.Store, dataDir string
 // ErrReleaseWebReadOnly is what every write on the team web's store returns.
 var ErrReleaseWebReadOnly = errors.New("release web: read-only")
 
-// humanStateReader is where the human's state comes from.
 type humanStateReader interface {
 	LoadReleaseHumanState(ctx context.Context) (rt.HumanState, error)
 }
 
-// releaseWebStore is the BoardStore of the team web: the snapshot and the
-// resources come from the web's own database, the human state from the app's,
-// and every write is refused.
 type releaseWebStore struct {
 	web   *sqlite.Store
 	human humanStateReader
@@ -207,10 +187,6 @@ func (releaseWebStore) UnmarkReleaseCardNoMR(context.Context, string) (bool, err
 	return false, ErrReleaseWebReadOnly
 }
 
-// appHumanState reads the human state from the app's ao.db through a read-only
-// connection: no migration, no write. The file may appear after the web
-// started, so it is opened on first use. While it is absent or unreadable the
-// state is empty, and the cause is logged once until a read succeeds again.
 type appHumanState struct {
 	path string
 	log  *slog.Logger

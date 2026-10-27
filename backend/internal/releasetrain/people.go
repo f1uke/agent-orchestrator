@@ -18,15 +18,10 @@ type PersonMatch string
 
 // Ways a person's two accounts are joined, or not.
 const (
-	// MatchLinked means the people file names both accounts.
-	MatchLinked PersonMatch = "linked"
-	// MatchSelf means they are the monitor's own two accounts (jira.myself and gitlab.user).
-	MatchSelf PersonMatch = "self"
-	// MatchName means exactly one account on each side carries the same display name.
-	MatchName PersonMatch = "name"
-	// MatchJiraOnly means no GitLab user was joined to the Jira account.
-	MatchJiraOnly PersonMatch = "jira_only"
-	// MatchGitLabOnly means no Jira account was joined to the GitLab user.
+	MatchLinked     PersonMatch = "linked"
+	MatchSelf       PersonMatch = "self"
+	MatchName       PersonMatch = "name"
+	MatchJiraOnly   PersonMatch = "jira_only"
 	MatchGitLabOnly PersonMatch = "gitlab_only"
 )
 
@@ -36,15 +31,13 @@ func (PersonMatch) Enum() []any {
 }
 
 // BoardPerson is one human on the Board, with whichever of his two accounts are known.
-// ID is the GitLab username when known, else "jira:" and the Jira account id.
 type BoardPerson struct {
 	ID             string      `json:"id"`
 	Name           string      `json:"name"`
 	JiraAccountID  string      `json:"jiraAccountId,omitempty"`
 	GitLabUsername string      `json:"gitlabUsername,omitempty"`
 	Match          PersonMatch `json:"match"`
-	// Self is the person the monitor's own tokens belong to.
-	Self bool `json:"self,omitempty"`
+	Self           bool        `json:"self,omitempty"`
 }
 
 // ViewerState is whose Mine the Board carries.
@@ -79,7 +72,6 @@ func (p BoardPerson) is(id string) bool {
 
 func normalizeName(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
 
-// peopleSeen is the accounts the Board mentions, each with the name it was seen under.
 type peopleSeen struct {
 	jira   map[string]string
 	gitlab map[string]string
@@ -105,7 +97,6 @@ func (s *peopleSeen) gitlabUser(username, name string) {
 
 func (s *peopleSeen) author(mr MRFact) { s.gitlabUser(mr.AuthorUsername, mr.Author) }
 
-// seenOnBoard collects every account a Mine reason can be about, walking the Board as mine does.
 func seenOnBoard(b *Board, mrs mrIndex, snap Snapshot, cfg Config) peopleSeen {
 	s := peopleSeen{jira: map[string]string{}, gitlab: map[string]string{}}
 	parents := map[string]bool{}
@@ -179,8 +170,6 @@ type accountPair struct {
 	match        PersonMatch
 }
 
-// buildPeople joins the accounts into people: a people-file link first, then the
-// monitor's own two accounts, then an unambiguous display name. The rest stay one-sided.
 func buildPeople(seen peopleSeen, links []PersonLink, identity IdentityState, snap Snapshot) []BoardPerson {
 	self, known := identity.(IdentityKnown)
 	if known {

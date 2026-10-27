@@ -1,6 +1,5 @@
 import { Button } from "../renderer/components/ui/button";
 
-/** Reloads to the sign-in page once the server stops honouring the session (a rotated key, an expired cookie). */
 export function signOutOnUnauthorized(): void {
 	const fetchOnce = window.fetch.bind(window);
 	window.fetch = async (input, init) => {

@@ -17,8 +17,6 @@ async function must<T>(call: Promise<{ data?: T; error?: unknown }>): Promise<T>
 	return data;
 }
 
-// The status polls while the section is on screen: the people count moves when a
-// teammate signs in, and the web can be started or stopped from the CLI.
 export function useTeamWebStatus() {
 	const ready = useApiReady();
 	return useQuery({
@@ -30,11 +28,6 @@ export function useTeamWebStatus() {
 	});
 }
 
-// The Team web controls. INSTANT actions, deliberately out of the global save
-// bar like the companion switch: each one starts, stops or re-keys a program
-// running on this Mac, and a control with a visible consequence that waits for a
-// Save press reads as broken. The switch controls only the web program; putting
-// it on the internet (Tailscale Funnel) is the person's own step.
 export function TeamWebControls() {
 	const queryClient = useQueryClient();
 	const status = useTeamWebStatus();

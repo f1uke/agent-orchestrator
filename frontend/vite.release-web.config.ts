@@ -5,13 +5,8 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-// The team web's read-only Releases page, served by `ao release-web serve`. The
-// server sends the CSP header, so this build injects no CSP meta, and its output
-// sits next to the packaged `ao` binary (frontend/daemon/release-web).
 const outDir = process.env.RELEASE_WEB_OUT_DIR ?? "daemon/release-web";
 
-// The server answers `/` with index.html; the entry keeps its own name in the
-// source tree so it never shadows the app's index.html.
 const servedAsIndex: Plugin = {
 	name: "release-web-index",
 	writeBundle(options) {

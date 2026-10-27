@@ -28,7 +28,7 @@ func TestClientLockoutDoublesUpToTheCap(t *testing.T) {
 		wait := lockedFor(l, "203.0.113.9", now)
 		got = append(got, wait)
 		now = now.Add(wait)
-		l.globalLockedUntil = time.Time{} // isolate the per-client doubling
+		l.globalLockedUntil = time.Time{}
 	}
 	for i := range want {
 		if got[i] != want[i] {
