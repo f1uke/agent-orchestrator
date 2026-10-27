@@ -30,7 +30,7 @@ function MineLine({ app, lens }: { app: string; lens: Lens }) {
 	const v = t ? versionOf(t, app) : undefined;
 	const units = (v?.cards ?? []).filter((u) => u.mine?.length);
 	const bits = [
-		v ? versionMineText(v, lens.identity) : "",
+		v ? versionMineText(v, lens.viewer?.jiraAccountId) : "",
 		units.length ? `${units.length} of my card${units.length === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
 	return bits.length ? (

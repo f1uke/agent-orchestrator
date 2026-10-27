@@ -3,6 +3,7 @@ import type {
 	AlertHit,
 	AppVersion,
 	Board,
+	BoardPerson,
 	BoardResponse,
 	FixKind,
 	MineReason,
@@ -15,6 +16,7 @@ import type {
 	SubjectKind,
 	Train,
 } from "./types";
+import { isPerson } from "./lens";
 
 /** A fictional Board for the browser preview and Playwright: DEMO keys, made-up people, versions and hosts. */
 
@@ -32,6 +34,29 @@ const PEOPLE = [
 	["acc-hal", "Hal Madeup"],
 	["acc-ivy", "Ivy Dummy"],
 ] as const;
+
+/** Ada is the monitor's own person; the rest show each way the API can join, or fail to join, two accounts. */
+const GITLAB_OF: Readonly<Record<string, [username: string, match: BoardPerson["match"]]>> = {
+	"acc-ada": ["ada", "self"],
+	"acc-ben": ["bsample", "linked"],
+	"acc-cy": ["cyp", "name"],
+};
+
+function demoPeople(): BoardPerson[] {
+	const jira = PEOPLE.map(([accountId, name]): BoardPerson => {
+		const [gitlabUsername, match] = GITLAB_OF[accountId] ?? [undefined, "jira_only" as const];
+		return {
+			id: gitlabUsername ?? `jira:${accountId}`,
+			name,
+			jiraAccountId: accountId,
+			...(gitlabUsername ? { gitlabUsername } : {}),
+			match,
+			...(accountId === "acc-ada" ? { self: true } : {}),
+		};
+	});
+	const rae: BoardPerson = { id: "rae", name: "Rae Fiction", gitlabUsername: "rae", match: "gitlab_only" };
+	return [...jira, rae].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
 
 const APPS = [
 	{ id: "di", name: "Demo iOS", family: "demo", platform: "ios" },
@@ -620,6 +645,8 @@ function baseBoard(today: string): Board {
 		}),
 		cutover: null,
 		identity: { kind: "known", jiraAccountId: "acc-ada", gitlabUsername: "ada", displayName: "Ada Example" },
+		people: demoPeople(),
+		viewer: { kind: "person", person: demoPeople().find((p) => p.self) as BoardPerson },
 		alerts: {
 			badge: { count: badge.length, unknown: 0, worst: "block" },
 			hits,
@@ -1222,8 +1249,14 @@ function markMine(b: Board): void {
 		if (c.key === "DEMO-108") c.mine = [{ why: "mr_author", ref: "!303" }];
 }
 
-const ME = "acc-ada";
-const myName = (b: Board) => (b.identity.kind === "known" ? b.identity.displayName : "");
+/** Who a Mine is about: the Jira account and the GitLab author name the fixture's MRs carry. */
+type Who = { jira: string | undefined; gitlab: boolean; name: string };
+
+const whoIsMe = (b: Board): Who => ({
+	jira: b.identity.kind === "known" ? b.identity.jiraAccountId : undefined,
+	gitlab: true,
+	name: b.identity.kind === "known" ? b.identity.displayName : "",
+});
 
 function myCards(b: Board): Set<string> {
 	const owns = (m?: readonly MineReason[]) => m?.some((x) => x.why !== "no_mr") ?? false;
@@ -1243,7 +1276,7 @@ function listedCards(h: AlertHit): string[] {
 	return Array.isArray(cards) ? cards.filter((k): k is string => typeof k === "string") : [];
 }
 
-function mineAsTheBackendPolicyComputes(b: Board, h: AlertHit): MineReason[] {
+function mineAsTheBackendPolicyComputes(b: Board, h: AlertHit, who: Who): MineReason[] {
 	const cards = myCards(b);
 	const byCard = listedCards(h)
 		.filter((k) => cards.has(k))
@@ -1260,7 +1293,7 @@ function mineAsTheBackendPolicyComputes(b: Board, h: AlertHit): MineReason[] {
 		case "pending_approver": {
 			if (s.kind !== "version") return [];
 			const v = b.trains.find((t) => t.id === s.train)?.versions.find((x) => x.app === s.app);
-			const pending = v?.jira?.approvers.some((a) => a.accountId === ME && a.status !== "APPROVED");
+			const pending = !!who.jira && v?.jira?.approvers.some((a) => a.accountId === who.jira && a.status !== "APPROVED");
 			return pending ? [{ why: "approver" }] : [];
 		}
 		case "listed_cards":
@@ -1269,17 +1302,18 @@ function mineAsTheBackendPolicyComputes(b: Board, h: AlertHit): MineReason[] {
 			if (s.kind !== "mr") return byCard;
 			const mine = b.sprints
 				.flatMap((r) => r.cards.flatMap((c) => c.mrs))
-				.some((m) => m.app === s.app && m.iid === s.iid && m.author === myName(b));
+				.some((m) => m.app === s.app && m.iid === s.iid && who.gitlab && m.author === who.name);
 			return mine ? [{ why: "mr_author", ref: `!${s.iid}` }] : byCard;
 		}
 	}
 	return [];
 }
 
-function markHitMine(b: Board): Board {
-	if (b.identity.kind !== "known") return b;
+function markHitMine(b: Board, who?: Who): Board {
+	if (!who && b.identity.kind !== "known") return b;
+	const viewer = who ?? whoIsMe(b);
 	for (const h of b.alerts.hits) {
-		const mine = mineAsTheBackendPolicyComputes(b, h);
+		const mine = mineAsTheBackendPolicyComputes(b, h, viewer);
 		if (mine.length) h.mine = mine;
 		else delete h.mine;
 	}
@@ -1385,7 +1419,77 @@ export function unknownIdentityBoard(today: string): Board {
 	const b = demoBoard(today);
 	stripMine(b);
 	b.identity = { kind: "unknown", reason: "gitlab.user has not been read yet" };
+	b.people = b.people.map(({ self: _self, ...p }) => (p.match === "self" ? { ...p, match: "name" as const } : p));
+	b.viewer = { kind: "unknown", reason: "gitlab.user has not been read yet" };
 	return b;
+}
+
+function mineForPerson(b: Board, p: BoardPerson): void {
+	const jira = p.jiraAccountId;
+	const assigned = (a?: { accountId: string } | null) => !!jira && a?.accountId === jira;
+	const wrote = (author: string) => !!p.gitlabUsername && author === p.name;
+	for (const t of b.trains)
+		for (const v of t.versions) {
+			const cards: MineReason[] = [];
+			for (const u of v.cards)
+				if (assigned(u.assignee)) {
+					u.mine = [{ why: "assignee" }];
+					cards.push({ why: "card", ref: u.key });
+				}
+			const own: MineReason[] = [];
+			if (v.releaseMr && wrote(v.releaseMr.mr.author))
+				own.push({ why: "release_mr_author", ref: `!${v.releaseMr.mr.iid}` });
+			if (assigned(v.ticket?.assignee)) own.push({ why: "release_ticket_assignee", ref: v.ticket?.key });
+			if (jira && v.jira?.approvers.some((a) => a.accountId === jira)) own.push({ why: "approver" });
+			const mine = [...own, ...cards];
+			if (mine.length) v.mine = mine;
+		}
+	for (const r of b.sprints)
+		for (const c of r.cards) {
+			if (!c.mobile) continue;
+			const mine: MineReason[] = [];
+			if (assigned(c.assignee)) mine.push({ why: "assignee" });
+			for (const s of c.subtasks) if (assigned(s.assignee)) mine.push({ why: "subtask", ref: s.key });
+			for (const m of c.mrs) if (wrote(m.author)) mine.push({ why: "mr_author", ref: `!${m.iid}` });
+			if (mine.length) c.mine = mine;
+		}
+	for (const g of b.llbs) {
+		const group: MineReason[] = [];
+		for (const br of g.branches) {
+			for (const c of br.cards) {
+				const mine: MineReason[] = [];
+				if (assigned(c.assignee)) mine.push({ why: "assignee" });
+				if (wrote(c.mr.author)) mine.push({ why: "mr_author", ref: `!${c.mr.iid}` });
+				if (mine.length) {
+					c.mine = mine;
+					group.push({ why: "card", ref: c.key });
+				}
+			}
+			if (br.landing && wrote(br.landing.author)) group.push({ why: "landing_author", ref: `!${br.landing.iid}` });
+		}
+		if (group.length) g.mine = group;
+	}
+}
+
+/**
+ * Turns the fixture Board into the one the daemon would serve for ?person=: the same cards, with the
+ * viewer and every Mine recomputed from who is assigned, who wrote and who approves.
+ */
+export function viewBoardAs(b: Board, person: string): void {
+	const self = b.people.find((p) => p.self);
+	if (!person || (self && isPerson(self, person))) {
+		if (self) b.viewer = { kind: "person", person: self };
+		return;
+	}
+	stripMine(b);
+	const p = b.people.find((x) => isPerson(x, person));
+	if (!p) {
+		b.viewer = { kind: "unknown", id: person, reason: `no person "${person}" on the Board` };
+		return;
+	}
+	b.viewer = { kind: "person", person: p };
+	mineForPerson(b, p);
+	markHitMine(b, { jira: p.jiraAccountId, gitlab: !!p.gitlabUsername, name: p.name });
 }
 
 export function failedSourceBoard(today: string): Board {
@@ -1686,5 +1790,9 @@ export function twinBoard(today: string): Board {
 }
 
 export function demoResponse(board: Board): BoardResponse {
-	return { config: { state: "ok", path: "~/.ao/data/release-train.json" }, board };
+	return {
+		config: { state: "ok", path: "~/.ao/data/release-train.json" },
+		people: { state: "absent", path: "~/.ao/data/release-train-people.json" },
+		board,
+	};
 }

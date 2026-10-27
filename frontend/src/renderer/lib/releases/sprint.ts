@@ -11,7 +11,6 @@ import type {
 	Day,
 	Dest,
 	DestKind,
-	Identity,
 	MineReason,
 	Route,
 	SprintCard,
@@ -427,10 +426,10 @@ export function mineText(mine: readonly MineReason[]): string {
 	return mine.map((m) => (m.ref ? `${MINE_TEXT[m.why]} ${m.ref}` : MINE_TEXT[m.why])).join(" · ");
 }
 
-export function versionMineText(v: AppVersion, me: Identity): string {
+export function versionMineText(v: AppVersion, jiraAccountId: string | undefined): string {
 	const mine = (v.mine ?? []).filter((m) => m.why !== "card");
 	const approved =
-		me.kind === "known" && v.jira?.approvers.some((a) => a.accountId === me.jiraAccountId && a.status === "APPROVED");
+		!!jiraAccountId && v.jira?.approvers.some((a) => a.accountId === jiraAccountId && a.status === "APPROVED");
 	return mine
 		.map((m) => (m.why === "approver" ? (approved ? "approved" : "approver, pending") : mineText([m])))
 		.join(" · ");

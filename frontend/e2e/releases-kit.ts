@@ -28,6 +28,16 @@ export const freezeRings = (page: Page) =>
 		(globalThis as unknown as { __rings: RingWatch }).__rings.freeze = true;
 	});
 
+/** Opens the View as picker and chooses a person by id; "" chooses Everyone. */
+export async function viewAs(page: Page, person: string) {
+	await page.getByTestId("view-as").click();
+	await page.locator(`[data-testid="view-as-option"][data-person="${person}"]`).click();
+}
+
+/** The page is filtered to a person: the Board in hand carries that person's Mine. */
+export const expectFiltered = (page: Page, filtering = true) =>
+	expect(page.getByTestId("view-as")).toHaveAttribute("data-filtering", String(filtering));
+
 export async function open(
 	page: Page,
 	query = "",

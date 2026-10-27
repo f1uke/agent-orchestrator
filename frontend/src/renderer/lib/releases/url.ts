@@ -20,7 +20,8 @@ export const DEFAULT_LAYERS: Layers = { sprint: false, llb: true, cards: true, p
 
 export type ReleasesSearch = {
 	focus: TrainKey | null;
-	me: boolean;
+	/** A person id from Board.people whose Mine the page shows; absent shows everyone. */
+	person?: string;
 	/** null shows every app. */
 	apps: ReadonlySet<AppId> | null;
 	hotfixes: boolean;
@@ -136,9 +137,10 @@ export function boardKeysParam(keys: ReadonlySet<string>): string {
 export function parseReleasesSearch(raw: Record<string, unknown>): ReleasesSearch {
 	const apps = str(raw.apps);
 	const hideBoards = str(raw.hideBoards);
+	const person = str(raw.person);
 	return {
 		focus: str(raw.focus) || null,
-		me: flag(raw.me) ?? false,
+		...(person ? { person } : {}),
 		apps: apps ? new Set(apps.split(",").filter(Boolean)) : null,
 		hotfixes: flag(raw.hotfixes) ?? true,
 		sheet: parseSheet(str(raw.sheet)),
@@ -151,7 +153,7 @@ export function parseReleasesSearch(raw: Record<string, unknown>): ReleasesSearc
 export function releasesSearch(s: ReleasesSearch): ReleasesSearchRaw {
 	const out: ReleasesSearchRaw = {};
 	if (s.focus) out.focus = s.focus;
-	if (s.me) out.me = "1";
+	if (s.person) out.person = s.person;
 	if (s.apps) out.apps = [...s.apps].join(",");
 	if (!s.hotfixes) out.hotfixes = "0";
 	if (s.sheet) out.sheet = sheetParam(s.sheet);

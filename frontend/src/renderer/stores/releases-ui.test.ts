@@ -110,11 +110,16 @@ describe("releases page memory", () => {
 
 	it("keeps the last search and scroll across a reload", async () => {
 		const first = await import("./releases-ui");
-		first.saveSearch({ apps: "di", me: "1", sheet: "attention", layers: "sprint,cards" });
+		first.saveSearch({ apps: "di", person: "ann", sheet: "attention", layers: "sprint,cards" });
 		first.useReleasesUi.getState().setScroll({ left: 700, top: 120, focus: "21-2026" });
 		vi.resetModules();
 		const reloaded = await import("./releases-ui");
-		expect(reloaded.readSavedSearch()).toEqual({ apps: "di", me: "1", sheet: "attention", layers: "sprint,cards" });
+		expect(reloaded.readSavedSearch()).toEqual({
+			apps: "di",
+			person: "ann",
+			sheet: "attention",
+			layers: "sprint,cards",
+		});
 		expect(reloaded.useReleasesUi.getState().scroll).toEqual({ left: 700, top: 120, focus: "21-2026" });
 	});
 

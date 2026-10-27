@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage, getApiBaseUrl, hasTrustedApiBaseUrl } from "../lib/api-client";
-import { boardFetcher } from "../lib/releases/boardFetch";
+import { boardPath, personFetchers } from "../lib/releases/boardFetch";
 import {
 	demoBoard,
 	demoResponse,
@@ -11,6 +11,7 @@ import {
 	twinBoard,
 	subjectsBoard,
 	unknownIdentityBoard,
+	viewBoardAs,
 } from "../lib/releases/fixture";
 import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
 import { previewConfirm, previewPlan, previewUndo, type PreviewFixStore } from "../lib/releases/fixPreview";
@@ -20,6 +21,7 @@ import type { Board, BoardResponse, Fix, FixPlan, HitId, LlbPlan } from "../lib/
 import { useApiReady } from "./useApiReady";
 
 export const releaseBoardKey = ["release-trains", "board"] as const;
+const boardKeyOf = (person: string | undefined) => [...releaseBoardKey, person ?? ""] as const;
 const POLL_MS = 15_000;
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
@@ -39,12 +41,14 @@ const VARIANTS = {
 	twin: twinBoard,
 } as const;
 
-function previewBoard(): BoardResponse {
+function previewBoard(person: string | undefined): BoardResponse {
 	const seam = globalThis as PreviewSeam;
 	const today = new Date().toISOString().slice(0, 10);
 	const variant = seam.__aoReleaseBoardVariant;
 	seam.__aoReleaseBoard ??= demoResponse(variant ? VARIANTS[variant](today) : demoBoard(today));
-	return structuredClone(seam.__aoReleaseBoard);
+	const response = structuredClone(seam.__aoReleaseBoard);
+	if (response.board) viewBoardAs(response.board, person ?? "");
+	return response;
 }
 
 function editPreview(edit: (b: Board) => void): void {
@@ -52,19 +56,22 @@ function editPreview(edit: (b: Board) => void): void {
 	if (b) edit(b);
 }
 
-const fetchLiveBoard = boardFetcher((ifNoneMatch) => {
+const fetchLiveBoard = personFetchers((person) => (ifNoneMatch) => {
 	const headers: Record<string, string> = { Accept: "application/json" };
 	if (ifNoneMatch) headers["If-None-Match"] = ifNoneMatch;
-	return fetch(`${getApiBaseUrl()}/api/v1/release-trains/board`, { headers, cache: "no-store" });
+	return fetch(`${getApiBaseUrl()}${boardPath(person)}`, { headers, cache: "no-store" });
 });
 
-/** The page polls; the sidebar passes poll: false and rides on the page's cache entry. */
-export function useReleaseBoard({ poll = true }: { poll?: boolean } = {}) {
+/**
+ * The Board carrying person's Mine; none is the monitor's own. The page polls; the sidebar passes
+ * poll: false and reads the monitor's own Board, which its attention count does not depend on.
+ */
+export function useReleaseBoard({ poll = true, person }: { poll?: boolean; person?: string } = {}) {
 	const ready = useApiReady();
 	return useQuery({
-		queryKey: releaseBoardKey,
+		queryKey: boardKeyOf(person),
 		enabled: usePreviewData || ready,
-		queryFn: async () => (usePreviewData || !hasTrustedApiBaseUrl() ? previewBoard() : fetchLiveBoard()),
+		queryFn: async () => (usePreviewData || !hasTrustedApiBaseUrl() ? previewBoard(person) : fetchLiveBoard(person)),
 		refetchInterval: poll ? POLL_MS : false,
 		refetchIntervalInBackground: false,
 		placeholderData: keepPreviousData,
@@ -84,16 +91,17 @@ function useBoardMutation<V>(run: (v: V) => Promise<void>, optimistic: (b: Board
 		},
 		onMutate: async (v) => {
 			await qc.cancelQueries({ queryKey: releaseBoardKey });
-			const before = qc.getQueryData<BoardResponse>(releaseBoardKey);
-			if (before?.board) {
-				const next = structuredClone(before);
+			const before = qc.getQueriesData<BoardResponse>({ queryKey: releaseBoardKey });
+			for (const [key, data] of before) {
+				if (!data?.board) continue;
+				const next = structuredClone(data);
 				if (next.board) optimistic(next.board, v);
-				qc.setQueryData(releaseBoardKey, next);
+				qc.setQueryData(key, next);
 			}
 			return { before };
 		},
 		onError: (_e, _v, ctx) => {
-			if (ctx?.before) qc.setQueryData(releaseBoardKey, ctx.before);
+			for (const [key, data] of ctx?.before ?? []) qc.setQueryData(key, data);
 		},
 		onSettled: () => qc.invalidateQueries({ queryKey: releaseBoardKey }),
 	});

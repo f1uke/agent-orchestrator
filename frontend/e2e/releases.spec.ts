@@ -1,5 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
-import { NARROW, VIEWPORTS, halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
+import {
+	NARROW,
+	VIEWPORTS,
+	expectFiltered,
+	halfLabels,
+	labelOverlaps,
+	layer,
+	open,
+	settle,
+	viewAs,
+} from "./releases-kit";
 
 // dev:web (VITE_NO_ELECTRON=1) serves lib/releases/fixture.ts: a fictional Board
 // with DEMO apps, made-up people and versions. Sticky labels, clipping, pan and
@@ -186,7 +196,7 @@ test.describe("releases page", () => {
 		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
 		await settle(page);
 		expect(await stripes()).toEqual([]);
-		await open(page, "?layers=sprint,llb,cards&me=1");
+		await open(page, "?layers=sprint,llb,cards&person=ada");
 		await demo.locator(".spsrc[data-sprint='active'] .csum").click();
 		await expect(page.locator(".crow.mine").first()).toBeVisible();
 		expect(await stripes()).toEqual([]);
@@ -197,7 +207,7 @@ test.describe("releases page", () => {
 	});
 
 	test("the sticky app label stays opaque over the lanes when hovered, focused and under Only me", async ({ page }) => {
-		await open(page, "?me=1");
+		await open(page, "?person=ada");
 		await page.getByTestId("release-timeline").evaluate((el) => (el.scrollLeft = el.scrollWidth));
 		await page.waitForTimeout(200);
 		const label = page.getByTestId("label-di");
@@ -794,12 +804,12 @@ test.describe("releases page", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-sheet.png` });
 	});
 
-	test("Only me filters every kind of thing and changes the badge", async ({ page }) => {
+	test("viewing as a person filters every kind of thing and changes the badge", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		await expect(page.getByTestId("attention-count")).toHaveText("9");
-		await page.getByTestId("only-me").click();
-		await expect(page).toHaveURL(/me=%221%22/);
-		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
+		await viewAs(page, "ada");
+		await expect(page).toHaveURL(/person=ada/);
+		await expectFiltered(page);
 		await expect(page.getByTestId("attention-count")).toHaveText("3");
 		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveText(
 			"your release MR !77 · 1 of my card",
@@ -817,8 +827,8 @@ test.describe("releases page", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-only-me.png` });
 	});
 
-	test("?me=1 leaves the train's card groups whole and puts my face on my cards", async ({ page }) => {
-		await open(page, "?me=1");
+	test("a person leaves the train's card groups whole and puts my face on my cards", async ({ page }) => {
+		await open(page, "?person=ada");
 		const group = page.getByTestId("cards-di:21-2026");
 		await expect(group.locator(".csum")).toContainText("6 cards");
 		await expect(group.locator(".csum")).not.toContainText("of mine");
@@ -973,17 +983,24 @@ test.describe("releases page", () => {
 		await expect(links.getByRole("link", { name: "Open milestone" })).toBeVisible();
 	});
 
-	test("with the identity unknown Only me is disabled with the reason and ?me=1 filters nothing", async ({ page }) => {
-		await open(page, "?me=1", "identity-unknown");
-		const toggle = page.getByTestId("only-me");
-		await expect(toggle).toBeDisabled();
-		await expect(toggle).toHaveAttribute("aria-pressed", "false");
-		await toggle.hover({ force: true });
-		await expect(page.getByRole("tooltip")).toContainText(
-			"Only me needs your Jira and GitLab accounts: gitlab.user has not been read yet",
+	test("with the identity unknown there is no Me, the picker says why, and another person still works", async ({
+		page,
+	}) => {
+		await open(page, "?person=zed", "identity-unknown");
+		const picker = page.getByTestId("view-as");
+		await expectFiltered(page, false);
+		await expect(picker).toHaveAttribute("data-st", "unknown");
+		await picker.hover();
+		await expect(page.getByRole("tooltip")).toContainText('no person "zed" on the Board');
+		await picker.click();
+		await expect(page.getByTestId("view-as-menu")).toContainText(
+			"Me needs your Jira and GitLab accounts: gitlab.user has not been read yet",
 		);
-		await expect(page.getByTestId("attention-count")).toHaveText("9");
-		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveCount(0);
+		await expect(page.locator('[data-testid="view-as-option"]').filter({ hasText: /^Me/ })).toHaveCount(0);
+		await page.getByTestId("view-as-option").and(page.locator('[data-person="bsample"]')).click();
+		await expectFiltered(page);
+		await expect(page.getByTestId("attention-count")).not.toHaveText("9");
+		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toBeVisible();
 	});
 
 	test("with no config the page says how to make one", async ({ page }) => {

@@ -209,7 +209,7 @@ test.describe("releases next sprint on its board's row", () => {
 	});
 
 	test("Only me keeps the next bar and counts only my cards on it", async ({ page }) => {
-		await open(page, `${LAYERS}&me=1`);
+		await open(page, `${LAYERS}&person=ada`);
 		const demo = page.getByTestId("sprint-row-DEMO");
 		await expect(demo.getByTestId("sprint-bar")).toHaveCount(2);
 		await expect(bar(demo, "next")).toContainText("of mine");

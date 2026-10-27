@@ -120,7 +120,7 @@ test.describe("No MR needed", () => {
 	});
 
 	test("Only me keeps a card I marked and says marked by you; Sources names AO's mark", async ({ page }) => {
-		await open(page, "?layers=sprint,llb,cards,src&me=1", "subjects");
+		await open(page, "?layers=sprint,llb,cards,src&person=ada", "subjects");
 		await expect(demo(page).getByTestId("sprint-dests")).not.toContainText("no code");
 		await page.goto("/#/releases?layers=sprint,llb,cards,src&sheet=card:DEMO-304");
 		const line = page.getByRole("dialog", { name: "Release details" }).getByTestId("card-no-mr");
@@ -137,7 +137,7 @@ test.describe("No MR needed", () => {
 		await expect(card).not.toContainText("GitLab");
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/nomr-sources-card.png` });
 		await page.keyboard.press("Escape");
-		await page.goto("/#/releases?layers=sprint,llb,cards,src&me=1");
+		await page.goto("/#/releases?layers=sprint,llb,cards,src&person=ada");
 		await expect(demo(page).getByTestId("sprint-dests")).toContainText("no code 1");
 		await demo(page).locator(".spsrc[data-sprint='active'] .csum").click();
 		await settle(page);
