@@ -165,7 +165,7 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 				Plan
 				<span className="who">
 					{g.plan
-						? `set by ${g.plan.updatedBy} · ${shortDay(g.plan.updatedAt.slice(0, 10))} · v${g.plan.version}`
+						? `set${g.plan.updatedBy ? ` by ${g.plan.updatedBy}` : ""} · ${shortDay(g.plan.updatedAt.slice(0, 10))} · v${g.plan.version}`
 						: "not set"}
 					<SourceTag
 						p={readOf("Plan", "ao.plans", "saved by a person on this page or with ao train", "LLBGroup.plan")}

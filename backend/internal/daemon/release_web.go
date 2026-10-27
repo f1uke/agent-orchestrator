@@ -154,8 +154,35 @@ func (s releaseWebStore) LoadReleaseResources(ctx context.Context) ([]rt.Resourc
 	return s.web.LoadReleaseResources(ctx)
 }
 
+// LoadReleaseHumanState leaves out what people typed and who did it: everyone who
+// holds the shared key reads the board.
 func (s releaseWebStore) LoadReleaseHumanState(ctx context.Context) (rt.HumanState, error) {
-	return s.human.LoadReleaseHumanState(ctx)
+	human, err := s.human.LoadReleaseHumanState(ctx)
+	return withoutNotes(human), err
+}
+
+func withoutNotes(h rt.HumanState) rt.HumanState {
+	hides := make(map[rt.HitID]rt.Hide, len(h.Hides))
+	for id, hide := range h.Hides {
+		hide.Reason = ""
+		hides[id] = hide
+	}
+	noMR := make(map[string]rt.NoMRMark, len(h.NoMR))
+	for key, m := range h.NoMR {
+		noMR[key] = rt.NoMRMark{MarkedAt: m.MarkedAt}
+	}
+	plans := make([]rt.LlbPlan, len(h.Plans))
+	for i, p := range h.Plans {
+		p.Note, p.UpdatedBy = "", ""
+		accepted := make([]rt.PlanAccepted, len(p.Accepted))
+		for j, a := range p.Accepted {
+			accepted[j] = rt.PlanAccepted{MRRef: a.MRRef}
+		}
+		p.Accepted = accepted
+		plans[i] = p
+	}
+	h.Hides, h.NoMR, h.Plans = hides, noMR, plans
+	return h
 }
 
 func (releaseWebStore) SetReleaseRuleSetting(context.Context, rt.RuleID, *bool, time.Time) error {
@@ -171,7 +198,7 @@ func (releaseWebStore) UnhideReleaseHits(context.Context, []rt.HitID) ([]rt.HitI
 }
 
 func (s releaseWebStore) ListReleaseLlbPlans(ctx context.Context) ([]rt.LlbPlan, error) {
-	human, err := s.human.LoadReleaseHumanState(ctx)
+	human, err := s.LoadReleaseHumanState(ctx)
 	return human.Plans, err
 }
 

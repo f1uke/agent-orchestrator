@@ -363,6 +363,10 @@ describe("No MR needed provenance", () => {
 			"marked by cli:demo-7 · 2026-10-14",
 		);
 	});
+
+	it("says only when it was marked when the team web leaves out who", () => {
+		expect(noMrOf("DEMO-1", { markedBy: "", markedAt: mark.markedAt }).lines[0].text).toBe("marked · 2026-10-14");
+	});
 });
 
 describe("releasePage", () => {

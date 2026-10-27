@@ -10,6 +10,7 @@ AO never exposes it to the internet. Putting it behind a public address is your 
 - Lets people look and never change anything. Every write route answers 403.
 - Keeps its own database and polls GitLab, Jira and Confluence itself. It works when the daemon is stopped.
 - Reads your plans for long-lived branches, hides, rule toggles and No-MR marks from the app's database, read-only. It never writes them.
+- Leaves out what people typed and who did it: plan notes, the reasons of accepted MRs, hide reasons, No-MR notes, and the "set by" and "marked by" names. Everyone with the key sees the plans, hides and marks themselves, not that text.
 
 ## Commands
 
