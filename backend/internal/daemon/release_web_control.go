@@ -77,11 +77,11 @@ func (c *ReleaseWebControl) RotateKey(context.Context) (releaseweb.Status, error
 
 // CopyKey pipes the key into the clipboard command.
 func (c *ReleaseWebControl) CopyKey(context.Context) error {
-	if c.Clipboard == nil {
-		return releaseweb.ErrNoClipboard
-	}
 	if _, err := releaseweb.ReadKey(c.Paths); err != nil {
 		return err
+	}
+	if c.Clipboard == nil {
+		return releaseweb.ErrNoClipboard
 	}
 	cmd := c.Clipboard()
 	stdin, err := cmd.StdinPipe()
