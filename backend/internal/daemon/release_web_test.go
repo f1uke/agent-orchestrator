@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -44,15 +46,20 @@ func appDBWithHumanState(t *testing.T) (dir string, app *sqlite.Store) {
 	train := rt.TrainID{Number: 22, Year: 2026}
 	plan := rt.LlbPlan{
 		ID: "demo-llb", Name: "Demo cards", TargetKind: rt.TargetTrain, TargetTrain: &train,
+		Note:      "plan note typed in the app",
 		Branches:  []rt.PlanBranch{{App: "da", Branch: "feature/demo-llb"}},
-		Accepted:  []rt.PlanAccepted{},
-		UpdatedBy: "cli", UpdatedAt: webFixtureAt,
+		Accepted:  []rt.PlanAccepted{{MRRef: "demo/app!7", Reason: "accepted reason typed in the app"}},
+		UpdatedBy: "plan-editor-person", UpdatedAt: webFixtureAt,
 	}
 	if _, err := app.PutReleaseLlbPlan(ctx, plan, 0); err != nil {
 		t.Fatal(err)
 	}
 	hide := rt.Hide{Fingerprint: "a1b2c3", Severity: rt.SevRisk, Reason: "waiting on the approver", HiddenAt: webFixtureAt}
 	if err := app.HideReleaseHit(ctx, "D3~v/21-2026/di", hide); err != nil {
+		t.Fatal(err)
+	}
+	mark := rt.NoMRMark{Note: "no-MR note typed in the app", MarkedBy: "no-mr-marker-person", MarkedAt: webFixtureAt}
+	if err := app.MarkReleaseCardNoMR(ctx, "DEMO-1", mark); err != nil {
 		t.Fatal(err)
 	}
 	return dir, app
@@ -78,15 +85,38 @@ func TestReleaseWebStoreReadsTheAppsHumanStateFromAReadOnlyDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(human.Plans) != 1 || human.Plans[0].ID != "demo-llb" {
-		t.Fatalf("plans = %+v, want the app's demo-llb plan", human.Plans)
+	if len(human.Plans) != 1 || human.Plans[0].ID != "demo-llb" || len(human.Plans[0].Accepted) != 1 || human.Plans[0].Accepted[0].MRRef != "demo/app!7" {
+		t.Fatalf("plans = %+v, want the app's demo-llb plan with its accepted MR", human.Plans)
 	}
-	if h := human.Hides["D3~v/21-2026/di"]; h.Reason != "waiting on the approver" {
+	if h, ok := human.Hides["D3~v/21-2026/di"]; !ok || h.Fingerprint != "a1b2c3" {
 		t.Fatalf("hides = %+v, want the app's hide", human.Hides)
+	}
+	if m, ok := human.NoMR["DEMO-1"]; !ok || !m.MarkedAt.Equal(webFixtureAt) {
+		t.Fatalf("no-MR marks = %+v, want the app's mark", human.NoMR)
 	}
 	plans, err := store.ListReleaseLlbPlans(context.Background())
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("ListReleaseLlbPlans = %+v, %v", plans, err)
+	}
+}
+
+func TestReleaseWebStoreLeavesOutWhatPeopleTypedAndWhoDidIt(t *testing.T) {
+	appDir, app := appDBWithHumanState(t)
+	t.Cleanup(func() { _ = app.Close() })
+	store := newWebStore(t, appDir, nil)
+	human, err := store.LoadReleaseHumanState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := store.ListReleaseLlbPlans(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := fmt.Sprintf("%+v %+v", human, plans)
+	for _, typed := range []string{"plan note typed", "accepted reason typed", "plan-editor-person", "waiting on the approver", "no-MR note typed", "no-mr-marker-person"} {
+		if strings.Contains(seen, typed) {
+			t.Errorf("the team web's board source carries %q", typed)
+		}
 	}
 }
 
@@ -129,7 +159,7 @@ func TestReleaseWebStoreRefusesEveryWriteAndLeavesTheAppDBAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fromApp.Plans) != 1 || len(fromApp.Hides) != 1 || len(fromApp.RuleSettings) != 0 || len(fromApp.NoMR) != 0 {
+	if len(fromApp.Plans) != 1 || len(fromApp.Hides) != 1 || len(fromApp.RuleSettings) != 0 || len(fromApp.NoMR) != 1 || fromApp.NoMR["DEMO-1"].Note == "" {
 		t.Fatalf("app db changed: %+v", fromApp)
 	}
 }
@@ -266,6 +296,53 @@ func TestReleaseWebControlStartCreatesAKeyBeforeSpawning(t *testing.T) {
 	}
 }
 
+func TestReleaseWebControlStartsTheWebWithOnlyTheEnvironmentItNeeds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in web is a shell script")
+	}
+	c := newControl(t)
+	dir := t.TempDir()
+	dump := filepath.Join(dir, "env")
+	exe := filepath.Join(dir, "ao")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nenv > \""+dump+"\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c.Executable = func() (string, error) { return exe, nil }
+	given := map[string]bool{
+		"AO_JIRA_TOKEN": true, "JIRA_API_TOKEN": true, "AO_GITLAB_TOKEN": true, "GITLAB_TOKEN": true,
+		"AO_DATA_DIR": true, "XDG_CONFIG_HOME": true, "LC_CTYPE": true, "SSL_CERT_FILE": true, "HTTPS_PROXY": true,
+		"ANTHROPIC_API_KEY": false, "FIGMA_TOKEN": false, "AO_TELEMETRY_POSTHOG_KEY": false, "AO_SESSION_ID": false,
+		"RELEASE_WEB_TEST_CANARY": false,
+	}
+	for name := range given {
+		t.Setenv(name, "fake-value-for-the-env-test")
+	}
+
+	// The stand-in exits before listening, so Start fails after it has run.
+	_, _ = c.Start(context.Background())
+
+	b, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatalf("the web never ran: %v", err)
+	}
+	got := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		if name, _, ok := strings.Cut(line, "="); ok {
+			got[name] = true
+		}
+	}
+	for name, wanted := range given {
+		if got[name] != wanted {
+			t.Errorf("%s reached the web = %v, want %v", name, got[name], wanted)
+		}
+	}
+	for _, name := range []string{"HOME", "PATH"} {
+		if !got[name] {
+			t.Errorf("the web did not get %s", name)
+		}
+	}
+}
+
 func TestReleaseWebControlRotateAndStopWithoutAServer(t *testing.T) {
 	c := newControl(t)
 	ctx := context.Background()
@@ -336,6 +413,9 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	if err := releaseweb.RotateKey(paths); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(paths.Dir, "hosts"), []byte("box.tail1234.ts.net\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- RunReleaseWeb(ctx, opts) }()
@@ -360,7 +440,8 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("GET the board without the key = %d, want 401", resp.StatusCode)
 	}
-	for hostName, want := range map[string]int{"board.example.org": http.StatusOK, "other.example.org": http.StatusMisdirectedRequest} {
+	for hostName, want := range map[string]int{"board.example.org": http.StatusOK, "other.example.org": http.StatusMisdirectedRequest,
+		"box.tail1234.ts.net": http.StatusOK, "other.tail1234.ts.net": http.StatusMisdirectedRequest} {
 		req, err := http.NewRequest(http.MethodGet, st.URL+"robots.txt", nil)
 		if err != nil {
 			t.Fatal(err)

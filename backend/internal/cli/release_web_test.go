@@ -101,6 +101,33 @@ func TestReleaseWebStartCreatesAKeyWithoutPrintingIt(t *testing.T) {
 	}
 }
 
+func TestReleaseWebStartHostKeepsTheNamesAndStatusShowsThem(t *testing.T) {
+	dir := releaseWebEnv(t)
+	out, _, _ := executeCLI(t, failingExecutable(), "release-web", "status")
+	if !strings.Contains(out, "hosts: none") {
+		t.Errorf("status before any --host =\n%s", out)
+	}
+
+	// /bin/false never listens, so start fails after it has kept the names.
+	_, _, _ = executeCLI(t, failingExecutable(), "release-web", "start", "--host", "Box.Tail1234.ts.net", "--host", "board.example.org")
+	b, err := os.ReadFile(filepath.Join(dir, "hosts"))
+	if err != nil || string(b) != "box.tail1234.ts.net\nboard.example.org\n" {
+		t.Fatalf("hosts file = %q, %v", b, err)
+	}
+	out, _, err = executeCLI(t, failingExecutable(), "release-web", "status")
+	if err != nil || !strings.Contains(out, "hosts: box.tail1234.ts.net, board.example.org") {
+		t.Errorf("status after start --host = %v\n%s", err, out)
+	}
+
+	_, _, err = executeCLI(t, failingExecutable(), "release-web", "start", "--host", "https://box.tail1234.ts.net/")
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "--host") {
+		t.Fatalf("start --host with a URL = %v, want a usage error naming --host", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "hosts")); string(b) != "box.tail1234.ts.net\nboard.example.org\n" {
+		t.Errorf("a refused --host changed the hosts file to %q", b)
+	}
+}
+
 func TestReleaseWebStopWithNothingRunning(t *testing.T) {
 	releaseWebEnv(t)
 	out, _, err := executeCLI(t, failingExecutable(), "release-web", "stop")

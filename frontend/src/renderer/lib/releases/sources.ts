@@ -147,7 +147,7 @@ export function planSaysText(planFrom: readonly CardWhy[] | undefined): string {
 }
 
 export function markedText(m: NoMRMark): string {
-	return `marked by ${m.markedBy} · ${m.markedAt.slice(0, 10)}${m.note ? ` · "${m.note}"` : ""}`;
+	return `marked${m.markedBy ? ` by ${m.markedBy}` : ""} · ${m.markedAt.slice(0, 10)}${m.note ? ` · "${m.note}"` : ""}`;
 }
 
 export function noMrOf(key: string, m: NoMRMark): Provenance {

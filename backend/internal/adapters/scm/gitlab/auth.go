@@ -40,6 +40,9 @@ func (s StaticTokenSource) Token(context.Context) (string, error) {
 	return t, nil
 }
 
+// DefaultTokenEnv is the variable EnvTokenSource falls back to.
+const DefaultTokenEnv = "GITLAB_TOKEN"
+
 // EnvTokenSource reads the first non-empty value from the listed env vars,
 // falling back to GITLAB_TOKEN. Order matters: a project-scoped variable
 // (AO_GITLAB_TOKEN) should win over the global default.
@@ -54,7 +57,7 @@ func (s EnvTokenSource) Token(context.Context) (string, error) {
 			return v, nil
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv("GITLAB_TOKEN")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(DefaultTokenEnv)); v != "" {
 		return v, nil
 	}
 	return "", ErrNoToken

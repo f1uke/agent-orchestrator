@@ -13,9 +13,12 @@ type Paths struct {
 	Dir string
 }
 
+// DirEnv names the variable that moves the release web's directory.
+const DirEnv = "AO_RELEASE_WEB_DIR"
+
 // DirFor is $AO_RELEASE_WEB_DIR, else the release-web directory beside the AO data dir.
 func DirFor(dataDir string) string {
-	if d := os.Getenv("AO_RELEASE_WEB_DIR"); d != "" {
+	if d := os.Getenv(DirEnv); d != "" {
 		return d
 	}
 	return filepath.Join(filepath.Dir(dataDir), "release-web")
@@ -49,6 +52,9 @@ func (p Paths) StatusFile() string { return filepath.Join(p.Dir, "status.json") 
 
 // WebLog receives a started server's stdout and stderr.
 func (p Paths) WebLog() string { return filepath.Join(p.Dir, "web.log") }
+
+// HostsFile lists the public names the web answers besides loopback, one per line.
+func (p Paths) HostsFile() string { return filepath.Join(p.Dir, "hosts") }
 
 // DBDir is the release web's own SQLite directory.
 func (p Paths) DBDir() string { return filepath.Join(p.Dir, "db") }

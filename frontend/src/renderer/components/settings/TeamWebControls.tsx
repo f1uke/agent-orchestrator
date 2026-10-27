@@ -116,6 +116,19 @@ export function TeamWebControls() {
 				</div>
 			)}
 
+			{web && (
+				<div className="flex flex-wrap items-center gap-2 text-[12px]">
+					<span className="text-passive">Public hosts</span>
+					{web.hosts.length > 0 ? (
+						<span className="font-mono text-[11.5px] text-foreground">{web.hosts.join(", ")}</span>
+					) : (
+						<span className="text-[11.5px] text-passive">
+							None. Add yours with ao release-web start --host &lt;machine&gt;.&lt;tailnet&gt;.ts.net
+						</span>
+					)}
+				</div>
+			)}
+
 			<div className="flex flex-wrap items-center gap-2">
 				<Button
 					type="button"

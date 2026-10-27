@@ -14,14 +14,9 @@ const (
 	SigninClientLockout = 5 * time.Minute
 	// SigninMaxClientLockout caps the doubling.
 	SigninMaxClientLockout = 24 * time.Hour
-	// SigninGlobalFailures failures from all clients lock sign-in for unknown clients.
-	SigninGlobalFailures = 30
-	// SigninGlobalLockout is how long the global lock lasts.
-	SigninGlobalLockout = 15 * time.Minute
 	// SigninSuccessesPerClient successes within the window refuse the next.
 	SigninSuccessesPerClient = 20
 	maxTrackedClients        = 10000
-	maxKnownClients          = 1000
 )
 
 type window []time.Time
@@ -67,15 +62,12 @@ func (b *clientBucket) idle(now time.Time) bool {
 }
 
 type signinLimiter struct {
-	mu                sync.Mutex
-	clients           map[string]*clientBucket
-	global            window
-	globalLockedUntil time.Time
-	known             map[string]time.Time
+	mu      sync.Mutex
+	clients map[string]*clientBucket
 }
 
 func newSigninLimiter() *signinLimiter {
-	return &signinLimiter{clients: map[string]*clientBucket{}, known: map[string]time.Time{}}
+	return &signinLimiter{clients: map[string]*clientBucket{}}
 }
 
 func (l *signinLimiter) attempt(client string, now time.Time, check func() bool) (ok bool, retryAfter time.Duration) {
@@ -92,25 +84,18 @@ func (l *signinLimiter) attempt(client string, now time.Time, check func() bool)
 	b := l.bucketLocked(client, now)
 	b.failures = b.failures[:0]
 	b.successes = append(b.successes, now)
-	l.rememberLocked(client, now)
 	return true, 0
 }
 
 func (l *signinLimiter) retryAfterLocked(client string, now time.Time) time.Duration {
-	var wait time.Duration
-	if !l.isKnownLocked(client, now) {
-		wait = l.globalLockedUntil.Sub(now)
+	b, ok := l.clients[client]
+	if !ok {
+		return 0
 	}
-	if b, ok := l.clients[client]; ok {
-		wait = max(wait, b.lockedUntil.Sub(now), b.successes.waitBelow(now, SigninSuccessesPerClient))
-	}
-	return max(wait, 0)
+	return max(b.lockedUntil.Sub(now), b.successes.waitBelow(now, SigninSuccessesPerClient), 0)
 }
 
 func (l *signinLimiter) recordFailureLocked(client string, now time.Time) {
-	if l.global.add(now, SigninGlobalFailures) {
-		l.globalLockedUntil = now.Add(SigninGlobalLockout)
-	}
 	b := l.bucketLocked(client, now)
 	if !b.failures.add(now, SigninFailuresPerClient) {
 		return
@@ -135,31 +120,6 @@ func (l *signinLimiter) bucketLocked(client string, now time.Time) *clientBucket
 	}
 	b.lastSeen = now
 	return b
-}
-
-func (l *signinLimiter) isKnownLocked(client string, now time.Time) bool {
-	at, ok := l.known[client]
-	return ok && now.Sub(at) < SessionAbsoluteTTL
-}
-
-func (l *signinLimiter) rememberLocked(client string, now time.Time) {
-	if _, ok := l.known[client]; !ok && len(l.known) >= maxKnownClients {
-		var oldest string
-		var oldestAt time.Time
-		for c, at := range l.known {
-			if now.Sub(at) >= SessionAbsoluteTTL {
-				delete(l.known, c)
-				continue
-			}
-			if oldest == "" || at.Before(oldestAt) {
-				oldest, oldestAt = c, at
-			}
-		}
-		if len(l.known) >= maxKnownClients {
-			delete(l.known, oldest)
-		}
-	}
-	l.known[client] = now
 }
 
 func (l *signinLimiter) makeRoomLocked(now time.Time) {

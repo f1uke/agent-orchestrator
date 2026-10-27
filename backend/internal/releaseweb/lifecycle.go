@@ -39,6 +39,7 @@ type runInfo struct {
 	URL          string    `json:"url"`
 	StartedAt    time.Time `json:"startedAt"`
 	ProcessStart time.Time `json:"processStart"`
+	Hosts        []string  `json:"hosts,omitempty"`
 }
 
 type statusInfo struct {
@@ -56,6 +57,9 @@ type Status struct {
 	StartedAt     time.Time `json:"startedAt,omitzero"`
 	KeyPresent    bool      `json:"keyPresent"`
 	KeyGeneration int       `json:"keyGeneration,omitempty"`
+	// Hosts are the public names the running web answers, or while it is stopped the
+	// names in the hosts file.
+	Hosts []string `json:"hosts,omitempty"`
 }
 
 // Serve serves the release web on o.Addr until ctx is cancelled.
@@ -103,6 +107,7 @@ func Serve(ctx context.Context, o Options) error {
 		URL:          fmt.Sprintf("http://127.0.0.1:%d/", tcp.Port),
 		StartedAt:    time.Now().UTC(),
 		ProcessStart: processStart.UTC(),
+		Hosts:        srv.hosts.names,
 	}); err != nil {
 		_ = ln.Close()
 		return err
@@ -208,6 +213,7 @@ func ReadStatus(p Paths) Status {
 	if k, err := ReadKey(p); err == nil {
 		st.KeyPresent, st.KeyGeneration = true, k.Generation
 	}
+	st.Hosts, _ = ReadHosts(p)
 	var info runInfo
 	if !readJSONFile(p.RunFile(), &info) {
 		return st
@@ -215,7 +221,7 @@ func ReadStatus(p Paths) Status {
 	if id, _ := identify(info); id != processOurs {
 		return st
 	}
-	st.Running, st.PID, st.URL, st.Port, st.StartedAt = true, info.PID, info.URL, info.Port, info.StartedAt
+	st.Running, st.PID, st.URL, st.Port, st.StartedAt, st.Hosts = true, info.PID, info.URL, info.Port, info.StartedAt, info.Hosts
 	var s statusInfo
 	if readJSONFile(p.StatusFile(), &s) {
 		st.Sessions = s.Sessions
@@ -223,8 +229,18 @@ func ReadStatus(p Paths) Status {
 	return st
 }
 
-// Start returns the running server's status, or spawns it detached.
-func Start(p Paths, exe string, args []string) (Status, error) {
+// RecordedPort is the port run.json names, or 0. It does not check the process.
+func RecordedPort(p Paths) int {
+	var info runInfo
+	if !readJSONFile(p.RunFile(), &info) {
+		return 0
+	}
+	return info.Port
+}
+
+// Start returns the running server's status, or spawns it detached with env as its
+// whole environment.
+func Start(p Paths, exe string, args, env []string) (Status, error) {
 	if st := ReadStatus(p); st.Running {
 		return st, nil
 	}
@@ -240,6 +256,7 @@ func Start(p Paths, exe string, args []string) (Status, error) {
 	}
 	defer func() { _ = logf.Close() }()
 	cmd := exec.Command(exe, args...) //nolint:gosec // G204: exe is the caller's own binary
+	cmd.Env = append(make([]string, 0, len(env)), env...)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	process.Detach(cmd)
 	if err := cmd.Start(); err != nil {

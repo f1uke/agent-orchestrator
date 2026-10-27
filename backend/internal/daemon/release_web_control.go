@@ -7,7 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
+	"strings"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
+	scmgitlab "github.com/aoagents/agent-orchestrator/backend/internal/adapters/scm/gitlab"
 	"github.com/aoagents/agent-orchestrator/backend/internal/releaseweb"
 )
 
@@ -55,7 +59,7 @@ func (c *ReleaseWebControl) StartReportingKey(context.Context) (st releaseweb.St
 	if err != nil {
 		return releaseweb.Status{}, keyCreated, fmt.Errorf("release web: find the ao binary: %w", err)
 	}
-	st, err = releaseweb.Start(c.Paths, exe, []string{"release-web", "serve"})
+	st, err = releaseweb.Start(c.Paths, exe, []string{"release-web", "serve"}, releaseWebEnv(os.Environ()))
 	return st, keyCreated, err
 }
 
@@ -97,4 +101,28 @@ func (c *ReleaseWebControl) CopyKey(context.Context) error {
 		return fmt.Errorf("release web: clipboard command failed: %w", err)
 	}
 	return copyErr
+}
+
+// releaseWebEnvNames is all the environment the team web gets. It faces the internet,
+// so it must not inherit the daemon's other tokens.
+var releaseWebEnvNames = slices.Concat(
+	[]string{"HOME", "PATH", "USER", "LOGNAME", "TMPDIR", "LANG", "TZ"},
+	[]string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"},
+	[]string{"AO_DATA_DIR", releaseweb.DirEnv, ReleaseWebAssetsEnv, "AO_GITLAB_HOST"},
+	[]string{gitlabTokenEnv, scmgitlab.DefaultTokenEnv, "GLAB_CONFIG_DIR", "XDG_CONFIG_HOME"},
+	atlassian.EnvNames(),
+)
+
+var releaseWebEnvPrefixes = []string{"LC_", "SSL_CERT_"}
+
+func releaseWebEnv(environ []string) []string {
+	var out []string
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(releaseWebEnvNames, name) ||
+			slices.ContainsFunc(releaseWebEnvPrefixes, func(p string) bool { return strings.HasPrefix(name, p) }) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

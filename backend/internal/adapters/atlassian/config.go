@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -43,14 +44,26 @@ func (c Config) String() string {
 // httptest server with a static identity.
 type ConfigSource func() (Config, error)
 
+var (
+	urlEnv        = []string{"AO_JIRA_URL", "JIRA_SERVER"}
+	emailEnv      = []string{"AO_JIRA_EMAIL", "JIRA_LOGIN"}
+	tokenEnv      = []string{"AO_JIRA_TOKEN", "JIRA_API_TOKEN"}
+	configFileEnv = "JIRA_CONFIG_FILE"
+)
+
+// EnvNames lists every environment variable DefaultConfigSource reads.
+func EnvNames() []string {
+	return slices.Concat(urlEnv, emailEnv, tokenEnv, []string{configFileEnv})
+}
+
 // DefaultConfigSource resolves the config from env, then jira-cli's config
 // file for the non-secret base URL and login. Mirrors the SCM adapters'
 // precedence (an AO_-prefixed override, then the generic value jira-cli honors).
 func DefaultConfigSource() (Config, error) {
 	cfg := Config{
-		BaseURL: firstEnv("AO_JIRA_URL", "JIRA_SERVER"),
-		Email:   firstEnv("AO_JIRA_EMAIL", "JIRA_LOGIN"),
-		Token:   firstEnv("AO_JIRA_TOKEN", "JIRA_API_TOKEN"),
+		BaseURL: firstEnv(urlEnv...),
+		Email:   firstEnv(emailEnv...),
+		Token:   firstEnv(tokenEnv...),
 	}
 	if cfg.BaseURL == "" || cfg.Email == "" {
 		server, login := readCLIConfig()
@@ -84,7 +97,7 @@ func firstEnv(names ...string) string {
 // readCLIConfig line-scans jira-cli's config for the top-level `server:`/`login:`
 // values (no YAML dependency). Honors $JIRA_CONFIG_FILE, else the default path.
 func readCLIConfig() (server, login string) {
-	path := strings.TrimSpace(os.Getenv("JIRA_CONFIG_FILE"))
+	path := strings.TrimSpace(os.Getenv(configFileEnv))
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -52,7 +54,7 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 			"Use start to run it in the background instead.",
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, _, err := ctx.releaseWebControl()
+			cfg, control, err := ctx.releaseWebControl()
 			if err != nil {
 				return err
 			}
@@ -68,6 +70,7 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logOut := releaseweb.WebLogWriter(control.Paths, cmd.ErrOrStderr())
 			run, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "release web: serving %s on 127.0.0.1:%d\n", dir, port)
@@ -76,25 +79,33 @@ func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
 				Port:         port,
 				AssetsDir:    dir,
 				AllowedHosts: hosts,
-				Logger:       slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil)),
+				Logger:       slog.New(slog.NewTextHandler(logOut, nil)),
 			})
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", releaseweb.DefaultPort, "Port to listen on, on 127.0.0.1")
-	cmd.Flags().StringArrayVar(&hosts, "host", nil, "Another host name to answer besides 127.0.0.1, localhost and *.ts.net, such as a custom domain in front of the web; repeatable")
+	cmd.Flags().StringArrayVar(&hosts, "host", nil, "A public host name to answer besides 127.0.0.1 and localhost, on top of the hosts file; repeatable")
 	cmd.Flags().StringVar(&assets, "assets", "", "Directory of the web bundle (default $"+daemon.ReleaseWebAssetsEnv+", else release-web/ beside the ao binary)")
 	return cmd
 }
 
 func newReleaseWebStartCommand(ctx *commandContext) *cobra.Command {
-	return &cobra.Command{
+	var hosts []string
+	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the team web in the background, creating a key if there is none",
-		Args:  exactArgs(0),
+		Long: "Starts the team web in the background. --host replaces the public names it answers, " +
+			"such as your Funnel name <machine>.<tailnet>.ts.net, and keeps them in the hosts file for later starts.",
+		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, control, err := ctx.releaseWebControl()
 			if err != nil {
 				return err
+			}
+			if len(hosts) > 0 {
+				if err := releaseweb.WriteHosts(control.Paths, hosts); err != nil {
+					return usageError{fmt.Errorf("--host: %w", err)}
+				}
 			}
 			st, created, err := control.StartReportingKey(cmd.Context())
 			if created {
@@ -103,9 +114,17 @@ func newReleaseWebStartCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeReleaseWebStatus(cmd.OutOrStdout(), control.Paths, st)
+			if err := writeReleaseWebStatus(cmd.OutOrStdout(), control.Paths, st); err != nil {
+				return err
+			}
+			if configured, _ := releaseweb.ReadHosts(control.Paths); !slices.Equal(configured, st.Hosts) {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "the running web still answers its old hosts; stop and start it to answer %s\n", hostList(configured))
+			}
+			return err
 		},
 	}
+	cmd.Flags().StringArrayVar(&hosts, "host", nil, "A public host name to answer besides 127.0.0.1 and localhost, such as <machine>.<tailnet>.ts.net; repeatable, replaces the hosts file")
+	return cmd
 }
 
 func newReleaseWebStopCommand(ctx *commandContext) *cobra.Command {
@@ -209,10 +228,20 @@ func writeReleaseWebStatus(w io.Writer, p releaseweb.Paths, st releaseweb.Status
 			return err
 		}
 	}
+	if _, err = fmt.Fprintf(w, "hosts: %s\n", hostList(st.Hosts)); err != nil {
+		return err
+	}
 	if st.KeyPresent {
 		_, err = fmt.Fprintf(w, "key: generation %d (%s)\n", st.KeyGeneration, p.KeyFile())
 	} else {
 		_, err = fmt.Fprintf(w, "key: none yet; start or rotate-key creates one (%s)\n", p.KeyFile())
 	}
 	return err
+}
+
+func hostList(hosts []string) string {
+	if len(hosts) == 0 {
+		return "none; only 127.0.0.1 and localhost answer (add yours with start --host)"
+	}
+	return strings.Join(hosts, ", ")
 }

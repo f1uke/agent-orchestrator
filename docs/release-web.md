@@ -10,25 +10,30 @@ AO never exposes it to the internet. Putting it behind a public address is your 
 - Lets people look and never change anything. Every write route answers 403.
 - Keeps its own database and polls GitLab, Jira and Confluence itself. It works when the daemon is stopped.
 - Reads your plans for long-lived branches, hides, rule toggles and No-MR marks from the app's database, read-only. It never writes them.
+- Leaves out what people typed and who did it: plan notes, the reasons of accepted MRs, hide reasons, No-MR notes, and the "set by" and "marked by" names. Everyone with the key sees the plans, hides and marks themselves, not that text.
 
 ## Commands
 
 Run these with the `ao` binary.
 
-| Command                     | What it does                                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `ao release-web start`      | Starts the web in the background. Creates a key first if there is none. Prints the status.             |
-| `ao release-web stop`       | Stops the web. Signals only a process it verifies as the web; see [Stopping safely](#stopping-safely). |
-| `ao release-web status`     | Shows whether it runs, its address, signed-in sessions and key generation. `--json` for scripts.       |
-| `ao release-web rotate-key` | Makes a new key. Everyone is signed out. Prints the generation and the key file path.                  |
-| `ao release-web copy-key`   | Puts the key on the clipboard without printing it. On macOS it uses `pbcopy`.                          |
-| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420), `--assets DIR` and `--host NAME`.       |
+| Command                     | What it does                                                                                                                                                                                 |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ao release-web start`      | Starts the web in the background. Creates a key first if there is none. Prints the status. `--host NAME` sets the public names it answers; see [Host names](#host-names-the-server-answers). |
+| `ao release-web stop`       | Stops the web. Signals only a process it verifies as the web; see [Stopping safely](#stopping-safely).                                                                                       |
+| `ao release-web status`     | Shows whether it runs, its address, signed-in sessions, public host names and key generation. `--json` for scripts.                                                                          |
+| `ao release-web rotate-key` | Makes a new key. Everyone is signed out. Prints the generation and the key file path.                                                                                                        |
+| `ao release-web copy-key`   | Puts the key on the clipboard without printing it. On macOS it uses `pbcopy`.                                                                                                                |
+| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420), `--assets DIR` and `--host NAME`.                                                                                             |
 
 No command prints the key. On a machine without `pbcopy`, read the key from `key.json`.
 
-The app has the same controls. Open Settings, then Team web. The switch starts and stops the web. The panel shows the local address and the number of people signed in. It has Copy key and Rotate key buttons. Rotate key asks for confirmation first.
+The app has the same controls. Open Settings, then Team web. The switch starts and stops the web. The panel shows the local address, the number of people signed in and the public host names. It has Copy key and Rotate key buttons. Rotate key asks for confirmation first.
 
 The daemon exposes the controls as `GET /api/v1/release-web` and `POST /api/v1/release-web/{start,stop,rotate-key,copy-key}`. The daemon copies the key to the clipboard itself. The key never crosses HTTP.
+
+The `POST` routes accept only the app's own origin (`AO_ALLOWED_ORIGINS`, by default `app://renderer`) or a local caller that sends no `Origin`, such as `curl`. A page on a loopback port gets 403, so a local dev server or notebook cannot switch the web on or rotate the key. To use the switch from a dev renderer, add its origin to `AO_ALLOWED_ORIGINS`.
+
+The daemon does not trust the release web's own origin, `http://127.0.0.1:7420` or `http://localhost:7420` (or the port in `run.json`), as a loopback origin. A script on a web page, if one ever ran, gets 403 from every daemon route. The web's content security policy blocks such requests before that.
 
 The web outlives the daemon. Restarting the app does not stop it.
 
@@ -52,7 +57,8 @@ All files live in `~/.ao/release-web`. The directory is mode 0700.
 | `access.log`  | One JSON line per sign-in, failed sign-in, lockout, sign-out and rotation. `access.log.1` holds the previous 10 MiB. |
 | `run.json`    | The pid, port, start time and the process start time the OS reports, while the web runs.                             |
 | `status.json` | The signed-in session count while the web runs.                                                                      |
-| `web.log`     | Output of a web started with `start`.                                                                                |
+| `hosts`       | The public host names the web answers, one per line. `start --host` writes it. Mode 0600.                            |
+| `web.log`     | Output of a web started with `start`. At 10 MiB it moves to `web.log.1`, at start and while the web runs.            |
 | `db/`         | The web's own SQLite database.                                                                                       |
 | `avatars/`    | Jira avatars the web downloaded.                                                                                     |
 
@@ -97,8 +103,7 @@ The web is written as if the internet reaches it.
 - Sign-ins are limited per client. A client is an IP address, or the /64 for IPv6.
   - Ten failures from one client within 15 minutes lock that client out for 5 minutes. Each repeat doubles the lockout, up to 24 hours. An office behind one address can make nine typos and still sign in.
   - Twenty successful sign-ins from one client within 15 minutes refuse the next one until the oldest is 15 minutes old. When the session store is full, a sign-in drops the least recently used session of its own client first. So one person with the key cannot sign everyone else out by signing in over and over.
-- Thirty failures from all clients within 15 minutes lock sign-in for 15 minutes. Existing sessions keep working. The lock does not apply to a known client: one that signed in successfully within the last 7 days. The server remembers up to 1000 known clients and forgets the least recent first. A guesser without the key never becomes known, so he cannot lock your team out.
-- Trade-off: a teammate who never signed in from his current address cannot sign in while the global lock lasts. He waits up to 15 minutes, or signs in from an address he used before.
+- No limit counts failures across clients. Such a lock would let anyone on the internet keep your team out without the key, and it adds no protection: nobody can guess a 256-bit key.
 - Rotating the key signs out every session. A session belongs to the key that signed it in, not to the generation number, which starts over at 1 when `key.json` was deleted.
 - The server trusts `X-Forwarded-For` and `X-Forwarded-Proto` only when the TCP peer is loopback. It uses the last `X-Forwarded-For` value, the one the local proxy wrote.
 - Every response carries a content security policy, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` and a `noindex` header.
@@ -107,6 +112,7 @@ The web is written as if the internet reaches it.
 - The board leaves out the paths of your config and people files and their error messages. It keeps their state: absent, invalid or fine.
 - `access.log` records the time, the client address and the event. It never records the key, a token, a form body or a query string.
 - `access.log` stays small under a flood. At 10 MiB it moves to `access.log.1`, which replaces the old one. While a client is locked out, the log writes its first refused attempt once per minute. A `signin_locked_repeated` line with a `count` stands for the rest.
+- `start` and the Settings switch give the web only the environment it needs: `HOME`, `PATH`, `USER`, `LOGNAME`, `TMPDIR`, `LANG`, `LC_*`, `TZ`, `SSL_CERT_*`, the proxy variables, `AO_DATA_DIR`, `AO_RELEASE_WEB_DIR`, `AO_RELEASE_WEB_ASSETS`, `AO_GITLAB_HOST`, the GitLab token variables (`AO_GITLAB_TOKEN`, `GITLAB_TOKEN`), `glab`'s config location (`GLAB_CONFIG_DIR`, `XDG_CONFIG_HOME`) and the Atlassian variables (`AO_JIRA_*`, `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `JIRA_CONFIG_FILE`). Other tokens in the daemon's environment do not reach it. The list is `releaseWebEnvNames` in `backend/internal/daemon/release_web_control.go`.
 - The server refuses to listen on any address except `127.0.0.1`. It answers only known `Host` names. See [Host names the server answers](#host-names-the-server-answers).
 
 ## Cost of two pollers
@@ -123,10 +129,12 @@ The release web listens on `127.0.0.1:7420`. Tailscale Funnel can put that port 
 
 To do it:
 
-1. Run `ao release-web start`.
-2. Run `ao release-web copy-key` and share the key with your team over a private channel.
-3. Run `tailscale funnel 7420`. Check the Tailscale documentation for the exact syntax of your version.
-4. Stop Funnel when you want the address closed. The Team web switch in Settings does not control Funnel.
+1. Find your machine's Funnel name, `<machine>.<tailnet>.ts.net`. `tailscale status --self` or the Tailscale admin console shows it.
+2. Run `ao release-web start --host <machine>.<tailnet>.ts.net`. If the web already runs, run `ao release-web stop` first: a running web keeps the names it started with.
+3. Run `ao release-web status` and check the `hosts:` line.
+4. Run `ao release-web copy-key` and share the key with your team over a private channel.
+5. Run `tailscale funnel 7420`. Check the Tailscale documentation for the exact syntax of your version.
+6. Stop Funnel when you want the address closed. The Team web switch in Settings does not control Funnel.
 
 ### Use the HTTPS proxy mode only
 
@@ -144,7 +152,9 @@ The TCP modes pass raw bytes and add no headers. Every visitor then looks like `
 The server answers only these `Host` headers:
 
 - `127.0.0.1:<port>`, `localhost:<port>` and `[::1]:<port>`, where the port is the one it listens on.
-- Any name that ends in `.ts.net`, the names Funnel serves.
-- Each name you give with `--host` on `ao release-web serve`, for example a custom domain in front of the web. Repeat the flag for more names. `start` and the Settings switch do not pass `--host`.
+- Each name in the `hosts` file, `~/.ao/release-web/hosts`.
+- Each name you give with `--host` on `ao release-web serve`, for example a custom domain in front of the web. Repeat the flag for more names.
 
-Any other `Host` gets `421 Misdirected Request` before the server looks at keys or sessions. This stops DNS rebinding: a web page on another name that resolves to `127.0.0.1` cannot use your browser to reach the web.
+Set the `hosts` file with `ao release-web start --host <machine>.<tailnet>.ts.net`, your own Funnel name. Repeat `--host` for more names. Each `start --host` replaces the whole list. `start` without `--host` keeps it. To answer no public name, delete the file. A web reads the file when it starts, so stop and start it after a change. `ao release-web status` and Settings show the names the running web answers, or the names in the file while it is stopped.
+
+Any other `Host` gets `421 Misdirected Request` before the server looks at keys or sessions. Without a `hosts` file, Funnel visitors get 421 too. This stops DNS rebinding: a web page on another name that resolves to `127.0.0.1` cannot use your browser to reach the web. It also stops a Funnel name that is not yours, such as `attacker-machine.tail0000.ts.net`.
