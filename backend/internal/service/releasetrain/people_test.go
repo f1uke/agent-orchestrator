@@ -47,7 +47,7 @@ func TestPeopleLoaderReadsLinksAndReReadsOnlyAfterAChange(t *testing.T) {
 func TestPeopleLoaderRefusesAFileItCannotTrust(t *testing.T) {
 	for name, body := range map[string]string{
 		"not JSON":             `{"people":`,
-		"a typo in a key":      `{"people":[{"jiraAccountId":"acc-ann","gitlabUsername":"ann","nmae":"Ann"}]}`,
+		"a typo in a key":      `{"people":[{"jiraAccountId":"acc-ann","gitlabUsername":"ann","jiraAccount":"acc-ann"}]}`,
 		"a missing gitlab":     `{"people":[{"jiraAccountId":"acc-ann"}]}`,
 		"a missing jira":       `{"people":[{"gitlabUsername":"ann"}]}`,
 		"a wrong top-level":    `[{"jiraAccountId":"acc-ann","gitlabUsername":"ann"}]`,
