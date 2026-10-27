@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 
 	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/releaseweb"
+	rtsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
@@ -357,5 +359,38 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	}
 	if releaseweb.ReadStatus(paths).Running {
 		t.Fatal("still running after cancel")
+	}
+}
+
+func TestReleaseWebBoardHidesTheHostsFilePathsAndFileErrors(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, rtsvc.PeopleFileName), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	web, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = web.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	board, done := startReleaseWebBoard(ctx, web, dataDir, releaseweb.Paths{Dir: t.TempDir()}, quietLogger(nil))
+	t.Cleanup(func() { cancel(); <-done })
+
+	body, _, err := board.Board(ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), dataDir) {
+		t.Errorf("the team web's board names the data dir: %s", body)
+	}
+	var r rtsvc.BoardResponse
+	if err := json.Unmarshal(body, &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.State != rtsvc.ConfigAbsent || r.Config.Path != "" || r.Config.Message != "" {
+		t.Errorf("config report = %+v, want the absent state with no path or message", r.Config)
+	}
+	if r.People.State != rtsvc.PeopleInvalid || r.People.Path != "" || r.People.Message != "" {
+		t.Errorf("people report = %+v, want the invalid state with no path or message", r.People)
 	}
 }

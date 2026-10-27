@@ -90,6 +90,7 @@ The web is written as if the internet reaches it.
 - Every response carries a content security policy, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` and a `noindex` header.
 - Sign-in and sign-out reject cross-site posts.
 - The API is read-only. It serves the board and avatars. Any other method answers 403.
+- The board leaves out the paths of your config and people files and their error messages. It keeps their state: absent, invalid or fine.
 - `access.log` records the time, the client address and the event. It never records the key, a token, a form body or a query string.
 - The server refuses to listen on any address except `127.0.0.1`.
 

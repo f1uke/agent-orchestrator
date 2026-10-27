@@ -136,7 +136,7 @@ func startReleaseWebBoard(ctx context.Context, web *sqlite.Store, dataDir string
 	})
 	store := newReleaseWebStore(web, &appHumanState{path: filepath.Join(dataDir, "ao.db"), log: logger})
 	people := rtsvc.NewPeopleLoader(filepath.Join(dataDir, rtsvc.PeopleFileName))
-	svc := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, People: people, Store: store, Fixes: web, Clock: clock})
+	svc := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, People: people, Store: store, Fixes: web, Clock: clock, HideFileDetails: true})
 	done := observe.StartPollLoop(ctx, rtsvc.Tick, poller.Poll, logger, "release web", nil)
 	return releaseWebBoard{BoardService: svc, avatars: avatars}, done
 }

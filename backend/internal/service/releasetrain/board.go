@@ -58,6 +58,10 @@ type BoardDeps struct {
 	// Executors are the effect kinds that really apply; every other is a dry run.
 	Executors Executors
 	Clock     func() time.Time
+	// HideFileDetails leaves the config and people files' paths and messages
+	// out of the response, keeping their states, for viewers who must not
+	// learn the host's file system.
+	HideFileDetails bool
 }
 
 // BoardService reconciles the stored observations into the Board and caches
@@ -149,6 +153,10 @@ func (s *BoardService) build(ctx context.Context, cfg ConfigStatus, people Peopl
 		s.onBuild()
 	}
 	resp := BoardResponse{Config: ConfigReport{State: cfg.State, Message: cfg.Message, Path: cfg.Path}, People: people.PeopleReport}
+	if s.d.HideFileDetails {
+		resp.Config = ConfigReport{State: cfg.State}
+		resp.People = PeopleReport{State: people.State}
+	}
 	if cfg.Config != nil {
 		snap, _, err := s.d.Store.LoadReleaseSnapshot(ctx)
 		if err != nil {
