@@ -229,6 +229,15 @@ func ReadStatus(p Paths) Status {
 	return st
 }
 
+// RecordedPort is the port run.json names, or 0. It does not check the process.
+func RecordedPort(p Paths) int {
+	var info runInfo
+	if !readJSONFile(p.RunFile(), &info) {
+		return 0
+	}
+	return info.Port
+}
+
 // Start returns the running server's status, or spawns it detached with env as its
 // whole environment.
 func Start(p Paths, exe string, args, env []string) (Status, error) {

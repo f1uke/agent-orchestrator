@@ -289,7 +289,10 @@ func (a *API) Register(root chi.Router) {
 			a.learningRules.Register(r)
 			a.learningDecide.Register(r)
 			a.releaseTrains.Register(r)
-			a.releaseWeb.Register(r)
+			r.Group(func(r chi.Router) {
+				r.Use(appOriginOnly(a.cfg.AllowedOrigins))
+				a.releaseWeb.Register(r)
+			})
 			// Sibling REST controllers plug in here.
 
 			// THE TASK-SCOPED SURFACES, and the only place that list lives.

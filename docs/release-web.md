@@ -31,6 +31,10 @@ The app has the same controls. Open Settings, then Team web. The switch starts a
 
 The daemon exposes the controls as `GET /api/v1/release-web` and `POST /api/v1/release-web/{start,stop,rotate-key,copy-key}`. The daemon copies the key to the clipboard itself. The key never crosses HTTP.
 
+The `POST` routes accept only the app's own origin (`AO_ALLOWED_ORIGINS`, by default `app://renderer`) or a local caller that sends no `Origin`, such as `curl`. A page on a loopback port gets 403, so a local dev server or notebook cannot switch the web on or rotate the key. To use the switch from a dev renderer, add its origin to `AO_ALLOWED_ORIGINS`.
+
+The daemon does not trust the release web's own origin, `http://127.0.0.1:7420` or `http://localhost:7420` (or the port in `run.json`), as a loopback origin. A script on a web page, if one ever ran, gets 403 from every daemon route. The web's content security policy blocks such requests before that.
+
 The web outlives the daemon. Restarting the app does not stop it.
 
 ### Stopping safely
