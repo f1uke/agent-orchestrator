@@ -107,6 +107,7 @@ The web is written as if the internet reaches it.
 - The board leaves out the paths of your config and people files and their error messages. It keeps their state: absent, invalid or fine.
 - `access.log` records the time, the client address and the event. It never records the key, a token, a form body or a query string.
 - `access.log` stays small under a flood. At 10 MiB it moves to `access.log.1`, which replaces the old one. While a client is locked out, the log writes its first refused attempt once per minute. A `signin_locked_repeated` line with a `count` stands for the rest.
+- `start` and the Settings switch give the web only the environment it needs: `HOME`, `PATH`, `USER`, `LOGNAME`, `TMPDIR`, `LANG`, `LC_*`, `TZ`, `SSL_CERT_*`, the proxy variables, `AO_DATA_DIR`, `AO_RELEASE_WEB_DIR`, `AO_RELEASE_WEB_ASSETS`, `AO_GITLAB_HOST`, the GitLab token variables (`AO_GITLAB_TOKEN`, `GITLAB_TOKEN`), `glab`'s config location (`GLAB_CONFIG_DIR`, `XDG_CONFIG_HOME`) and the Atlassian variables (`AO_JIRA_*`, `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `JIRA_CONFIG_FILE`). Other tokens in the daemon's environment do not reach it. The list is `releaseWebEnvNames` in `backend/internal/daemon/release_web_control.go`.
 - The server refuses to listen on any address except `127.0.0.1`. It answers only known `Host` names. See [Host names the server answers](#host-names-the-server-answers).
 
 ## Cost of two pollers

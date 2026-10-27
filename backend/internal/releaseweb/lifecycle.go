@@ -223,8 +223,9 @@ func ReadStatus(p Paths) Status {
 	return st
 }
 
-// Start returns the running server's status, or spawns it detached.
-func Start(p Paths, exe string, args []string) (Status, error) {
+// Start returns the running server's status, or spawns it detached with env as its
+// whole environment.
+func Start(p Paths, exe string, args, env []string) (Status, error) {
 	if st := ReadStatus(p); st.Running {
 		return st, nil
 	}
@@ -240,6 +241,7 @@ func Start(p Paths, exe string, args []string) (Status, error) {
 	}
 	defer func() { _ = logf.Close() }()
 	cmd := exec.Command(exe, args...) //nolint:gosec // G204: exe is the caller's own binary
+	cmd.Env = append(make([]string, 0, len(env)), env...)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	process.Detach(cmd)
 	if err := cmd.Start(); err != nil {

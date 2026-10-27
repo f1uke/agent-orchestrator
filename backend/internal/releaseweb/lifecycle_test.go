@@ -148,7 +148,7 @@ func TestStartStopRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Start(p, exe, nil); err == nil {
+	if _, err := Start(p, exe, nil, os.Environ()); err == nil {
 		t.Fatal("Start without a key succeeded")
 	}
 	if err := RotateKey(p); err != nil {
@@ -156,7 +156,7 @@ func TestStartStopRoundTrip(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = Stop(p) })
 
-	st, err := Start(p, exe, nil)
+	st, err := Start(p, exe, nil, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestStartStopRoundTrip(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("started server robots.txt = %d", res.StatusCode)
 	}
-	again, err := Start(p, exe, nil)
+	again, err := Start(p, exe, nil, os.Environ())
 	if err != nil || again.PID != st.PID {
 		t.Errorf("second Start = pid %d err %v, want the running pid %d", again.PID, err, st.PID)
 	}

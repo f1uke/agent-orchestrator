@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -292,6 +293,53 @@ func TestReleaseWebControlStartCreatesAKeyBeforeSpawning(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(c.Paths.KeyFile()); string(b) != "{not json" {
 		t.Error("start overwrote an unusable key file")
+	}
+}
+
+func TestReleaseWebControlStartsTheWebWithOnlyTheEnvironmentItNeeds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in web is a shell script")
+	}
+	c := newControl(t)
+	dir := t.TempDir()
+	dump := filepath.Join(dir, "env")
+	exe := filepath.Join(dir, "ao")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nenv > \""+dump+"\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c.Executable = func() (string, error) { return exe, nil }
+	given := map[string]bool{
+		"AO_JIRA_TOKEN": true, "JIRA_API_TOKEN": true, "AO_GITLAB_TOKEN": true, "GITLAB_TOKEN": true,
+		"AO_DATA_DIR": true, "XDG_CONFIG_HOME": true, "LC_CTYPE": true, "SSL_CERT_FILE": true, "HTTPS_PROXY": true,
+		"ANTHROPIC_API_KEY": false, "FIGMA_TOKEN": false, "AO_TELEMETRY_POSTHOG_KEY": false, "AO_SESSION_ID": false,
+		"RELEASE_WEB_TEST_CANARY": false,
+	}
+	for name := range given {
+		t.Setenv(name, "fake-value-for-the-env-test")
+	}
+
+	// The stand-in exits before listening, so Start fails after it has run.
+	_, _ = c.Start(context.Background())
+
+	b, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatalf("the web never ran: %v", err)
+	}
+	got := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		if name, _, ok := strings.Cut(line, "="); ok {
+			got[name] = true
+		}
+	}
+	for name, wanted := range given {
+		if got[name] != wanted {
+			t.Errorf("%s reached the web = %v, want %v", name, got[name], wanted)
+		}
+	}
+	for _, name := range []string{"HOME", "PATH"} {
+		if !got[name] {
+			t.Errorf("the web did not get %s", name)
+		}
 	}
 }
 
