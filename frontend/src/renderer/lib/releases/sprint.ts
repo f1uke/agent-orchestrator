@@ -11,7 +11,6 @@ import type {
 	Day,
 	Dest,
 	DestKind,
-	Identity,
 	MineReason,
 	Route,
 	SprintCard,
@@ -19,6 +18,7 @@ import type {
 	Train,
 } from "./types";
 import type { Tone } from "./vocab";
+import { ofText, their, type Who } from "./who";
 
 export const DEST_META: Readonly<Record<DestKind, { tone: Tone; glyph: string; label: string }>> = {
 	sprint: { tone: "done", glyph: "✓", label: "sprint branch" },
@@ -141,18 +141,19 @@ function routeChip(b: Board, d: Dest, n: number): string {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-export type CardView = { me: boolean; mobile: boolean };
+/** `scope` is whose Mine the page is narrowed to, null while it shows everyone. */
+export type CardView = { scope: Who | null; mobile: boolean };
 export type CardCount = { text: string; sub: string | null };
 
 export function cardCount(cards: readonly SprintCard[], view: CardView): CardCount {
-	if (view.me) return { text: `${plural(cards.length, "card")} of mine`, sub: null };
+	if (view.scope) return { text: `${plural(cards.length, "card")} ${ofText(view.scope)}`, sub: null };
 	if (view.mobile) return { text: plural(cards.length, "mobile card"), sub: null };
 	const mobile = cards.filter((c) => c.mobile).length;
 	return { text: plural(cards.length, "card"), sub: mobile < cards.length ? `${mobile} mobile` : null };
 }
 
 export function emptyCountText(cards: readonly SprintCard[], view: CardView): string {
-	if (view.me) return "nothing of mine";
+	if (view.scope) return `nothing ${ofText(view.scope)}`;
 	if (cards.length === 0 && !view.mobile) return "no cards";
 	return cards.some((c) => c.mobile) ? "no cards" : "no mobile cards";
 }
@@ -411,28 +412,28 @@ export function mrPills(c: SprintCard, apps: readonly BoardApp[]): MrPill[] {
 	}));
 }
 
-const MINE_TEXT: Readonly<Record<MineReason["why"], string>> = {
-	assignee: "assignee",
-	subtask: "subtask",
-	mr_author: "your MR",
-	release_mr_author: "your release MR",
-	release_ticket_assignee: "release ticket",
-	approver: "approver",
-	card: "your card",
-	landing_author: "your landing MR",
-	no_mr: "marked by you",
+const MINE_TEXT: Readonly<Record<MineReason["why"], (who: Who) => string>> = {
+	assignee: () => "assignee",
+	subtask: () => "subtask",
+	mr_author: (w) => `${their(w)} MR`,
+	release_mr_author: (w) => `${their(w)} release MR`,
+	release_ticket_assignee: () => "release ticket",
+	approver: () => "approver",
+	card: (w) => `${their(w)} card`,
+	landing_author: (w) => `${their(w)} landing MR`,
+	no_mr: () => "marked No MR needed",
 };
 
-export function mineText(mine: readonly MineReason[]): string {
-	return mine.map((m) => (m.ref ? `${MINE_TEXT[m.why]} ${m.ref}` : MINE_TEXT[m.why])).join(" · ");
+export function mineText(mine: readonly MineReason[], who: Who): string {
+	return mine.map((m) => (m.ref ? `${MINE_TEXT[m.why](who)} ${m.ref}` : MINE_TEXT[m.why](who))).join(" · ");
 }
 
-export function versionMineText(v: AppVersion, me: Identity): string {
+export function versionMineText(v: AppVersion, jiraAccountId: string | undefined, who: Who): string {
 	const mine = (v.mine ?? []).filter((m) => m.why !== "card");
 	const approved =
-		me.kind === "known" && v.jira?.approvers.some((a) => a.accountId === me.jiraAccountId && a.status === "APPROVED");
+		!!jiraAccountId && v.jira?.approvers.some((a) => a.accountId === jiraAccountId && a.status === "APPROVED");
 	return mine
-		.map((m) => (m.why === "approver" ? (approved ? "approved" : "approver, pending") : mineText([m])))
+		.map((m) => (m.why === "approver" ? (approved ? "approved" : "approver, pending") : mineText([m], who)))
 		.join(" · ");
 }
 

@@ -1,0 +1,327 @@
+package releaseweb
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"strconv"
+	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/fsatomic"
+	"github.com/aoagents/agent-orchestrator/backend/internal/process"
+	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
+)
+
+const (
+	// DefaultPort is where the release web listens unless told otherwise.
+	DefaultPort    = 7420
+	statusInterval = 30 * time.Second
+	startTimeout   = 10 * time.Second
+	stopGrace      = 5 * time.Second
+	shutdownGrace  = 5 * time.Second
+	pollInterval   = 50 * time.Millisecond
+	// processStartTolerance absorbs ps reporting start times to whole seconds.
+	processStartTolerance = 2 * time.Second
+)
+
+// DefaultAddr is DefaultPort on loopback.
+var DefaultAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(DefaultPort))
+
+type runInfo struct {
+	PID          int       `json:"pid"`
+	Port         int       `json:"port"`
+	URL          string    `json:"url"`
+	StartedAt    time.Time `json:"startedAt"`
+	ProcessStart time.Time `json:"processStart"`
+	Hosts        []string  `json:"hosts,omitempty"`
+}
+
+type statusInfo struct {
+	Sessions  int       `json:"sessions"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Status is what ReadStatus reports.
+type Status struct {
+	Running       bool      `json:"running"`
+	PID           int       `json:"pid,omitempty"`
+	URL           string    `json:"url,omitempty"`
+	Port          int       `json:"port,omitempty"`
+	Sessions      int       `json:"sessions"`
+	StartedAt     time.Time `json:"startedAt,omitzero"`
+	KeyPresent    bool      `json:"keyPresent"`
+	KeyGeneration int       `json:"keyGeneration,omitempty"`
+	// Hosts are the public names the running web answers, or while it is stopped the
+	// names in the hosts file.
+	Hosts []string `json:"hosts,omitempty"`
+}
+
+// Serve serves the release web on o.Addr until ctx is cancelled.
+func Serve(ctx context.Context, o Options) error {
+	addr := o.Addr
+	if addr == "" {
+		addr = DefaultAddr
+	}
+	if host, _, err := net.SplitHostPort(addr); err != nil || host != "127.0.0.1" {
+		return fmt.Errorf("release web: refusing to listen on %q: only 127.0.0.1 is allowed", addr)
+	}
+	if st := ReadStatus(o.Paths); st.Running {
+		return fmt.Errorf("release web: already running as pid %d at %s", st.PID, st.URL)
+	}
+	pid := os.Getpid()
+	processStart, err := processStartedAt(pid)
+	if err != nil {
+		return fmt.Errorf("release web: read this process's start time, which stop needs to tell it from another process: %w", err)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("release web: listen: %w", err)
+	}
+	tcp, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		return fmt.Errorf("release web: listener address %v is not TCP", ln.Addr())
+	}
+	o.Addr = tcp.String()
+	srv, err := NewServer(o)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	defer func() { _ = srv.Close() }()
+	defer removeRunFiles(o.Paths, pid)
+	sessions := srv.Sessions()
+	if err := writeStatusFile(o.Paths, sessions); err != nil {
+		_ = ln.Close()
+		return err
+	}
+	if err := writeJSONFile(o.Paths.RunFile(), runInfo{
+		PID:          pid,
+		Port:         tcp.Port,
+		URL:          fmt.Sprintf("http://127.0.0.1:%d/", tcp.Port),
+		StartedAt:    time.Now().UTC(),
+		ProcessStart: processStart.UTC(),
+		Hosts:        srv.hosts.names,
+	}); err != nil {
+		_ = ln.Close()
+		return err
+	}
+
+	hs := &http.Server{
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+		ErrorLog:          slog.NewLogLogger(srv.log.Handler(), slog.LevelWarn),
+	}
+	served := make(chan error, 1)
+	go func() { served <- hs.Serve(ln) }()
+	tick := time.NewTicker(statusInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+			err := hs.Shutdown(shutdownCtx)
+			cancel()
+			<-served
+			return err
+		case err := <-served:
+			return fmt.Errorf("release web: serve: %w", err)
+		case <-srv.changed:
+			if n := srv.Sessions(); n != sessions {
+				sessions = n
+				srv.writeStatus(o.Paths, n)
+			}
+		case <-tick.C:
+			sessions = srv.Sessions()
+			srv.writeStatus(o.Paths, sessions)
+			srv.access.flush(srv.now())
+		}
+	}
+}
+
+func (s *Server) writeStatus(p Paths, sessions int) {
+	if err := writeStatusFile(p, sessions); err != nil {
+		s.log.Error("release web: write status", "err", err)
+	}
+}
+
+func writeStatusFile(p Paths, sessions int) error {
+	return writeJSONFile(p.StatusFile(), statusInfo{Sessions: sessions, UpdatedAt: time.Now().UTC()})
+}
+
+func writeJSONFile(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := fsatomic.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+		return fmt.Errorf("release web: write %s: %w", path, err)
+	}
+	return nil
+}
+
+func readJSONFile(path string, v any) bool {
+	b, err := os.ReadFile(path)
+	return err == nil && json.Unmarshal(b, v) == nil
+}
+
+func removeRunFiles(p Paths, pid int) {
+	var info runInfo
+	if readJSONFile(p.RunFile(), &info) && info.PID != pid {
+		return
+	}
+	_ = os.Remove(p.RunFile())
+	_ = os.Remove(p.StatusFile())
+}
+
+type processIdentity int
+
+const (
+	processGone processIdentity = iota
+	processOurs
+	processUnverified
+)
+
+func identify(info runInfo) (processIdentity, error) {
+	if !processalive.Alive(info.PID) {
+		return processGone, nil
+	}
+	started, err := processStartedAt(info.PID)
+	if err != nil {
+		return processUnverified, fmt.Errorf("its start time cannot be read: %w", err)
+	}
+	if d := started.Sub(info.ProcessStart).Abs(); d > processStartTolerance {
+		return processUnverified, fmt.Errorf("it started at %s, not at %s as run.json records",
+			started.UTC().Format(time.RFC3339), info.ProcessStart.UTC().Format(time.RFC3339))
+	}
+	return processOurs, nil
+}
+
+// ReadStatus reports whether a release web is serving and the state of its key.
+func ReadStatus(p Paths) Status {
+	var st Status
+	if k, err := ReadKey(p); err == nil {
+		st.KeyPresent, st.KeyGeneration = true, k.Generation
+	}
+	st.Hosts, _ = ReadHosts(p)
+	var info runInfo
+	if !readJSONFile(p.RunFile(), &info) {
+		return st
+	}
+	if id, _ := identify(info); id != processOurs {
+		return st
+	}
+	st.Running, st.PID, st.URL, st.Port, st.StartedAt, st.Hosts = true, info.PID, info.URL, info.Port, info.StartedAt, info.Hosts
+	var s statusInfo
+	if readJSONFile(p.StatusFile(), &s) {
+		st.Sessions = s.Sessions
+	}
+	return st
+}
+
+// RecordedPort is the port run.json names, or 0. It does not check the process.
+func RecordedPort(p Paths) int {
+	var info runInfo
+	if !readJSONFile(p.RunFile(), &info) {
+		return 0
+	}
+	return info.Port
+}
+
+// Start returns the running server's status, or spawns it detached with env as its
+// whole environment.
+func Start(p Paths, exe string, args, env []string) (Status, error) {
+	if st := ReadStatus(p); st.Running {
+		return st, nil
+	}
+	if _, err := ReadKey(p); err != nil {
+		return Status{}, err
+	}
+	if err := p.Ensure(); err != nil {
+		return Status{}, err
+	}
+	logf, err := os.OpenFile(p.WebLog(), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return Status{}, fmt.Errorf("release web: open web log: %w", err)
+	}
+	defer func() { _ = logf.Close() }()
+	cmd := exec.Command(exe, args...) //nolint:gosec // G204: exe is the caller's own binary
+	cmd.Env = append(make([]string, 0, len(env)), env...)
+	cmd.Stdout, cmd.Stderr = logf, logf
+	process.Detach(cmd)
+	if err := cmd.Start(); err != nil {
+		return Status{}, fmt.Errorf("release web: start: %w", err)
+	}
+	pid := cmd.Process.Pid
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	deadline := time.NewTimer(startTimeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(pollInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-exited:
+			if err == nil {
+				err = errors.New("exit status 0")
+			}
+			return Status{}, fmt.Errorf("release web: exited before listening, see %s: %w", p.WebLog(), err)
+		case <-deadline.C:
+			_ = cmd.Process.Kill()
+			return Status{}, fmt.Errorf("release web: not listening after %v; see %s", startTimeout, p.WebLog())
+		case <-tick.C:
+			if st := ReadStatus(p); st.Running && st.PID == pid {
+				return st, nil
+			}
+		}
+	}
+}
+
+// Stop ends the server run.json names, signalling only a pid it verifies.
+func Stop(p Paths) error {
+	var info runInfo
+	if !readJSONFile(p.RunFile(), &info) {
+		removeRunFiles(p, 0)
+		return nil
+	}
+	switch id, why := identify(info); id {
+	case processGone:
+	case processUnverified:
+		return fmt.Errorf("release web: run.json names pid %d, which is alive but not verifiably the release web (%v); "+
+			"check it, stop it yourself if it is the web, then delete %s", info.PID, why, p.RunFile())
+	case processOurs:
+		if err := terminate(info.PID); err != nil && processalive.Alive(info.PID) {
+			return fmt.Errorf("release web: stop pid %d: %w", info.PID, err)
+		}
+		if !waitGone(info.PID, stopGrace) {
+			_ = kill(info.PID)
+			if !waitGone(info.PID, stopGrace) {
+				return fmt.Errorf("release web: pid %d did not exit", info.PID)
+			}
+		}
+	}
+	removeRunFiles(p, info.PID)
+	return nil
+}
+
+func waitGone(pid int, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for processalive.Alive(pid) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(pollInterval)
+	}
+	return true
+}

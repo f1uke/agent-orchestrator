@@ -38,6 +38,7 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 	})
 	path := filepath.Join(dataDir, rtsvc.ConfigFileName)
 	config := rtsvc.NewConfigLoader(path)
+	people := rtsvc.NewPeopleLoader(filepath.Join(dataDir, rtsvc.PeopleFileName))
 	avatars := rtsvc.NewAvatarStore(filepath.Join(dataDir, "release-train", "avatars"))
 	clock := func() time.Time { return time.Now().UTC() }
 	poller := rtsvc.NewPoller(rtsvc.PollerDeps{
@@ -52,7 +53,7 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 		Rand:   rand.Float64, //nolint:gosec // backoff jitter, not security
 		Logger: logger,
 	})
-	board := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, Store: store, Fixes: store, Clock: clock})
+	board := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, People: people, Store: store, Fixes: store, Clock: clock})
 	board.UsePlanTargetExecutor()
 	pass := func(ctx context.Context) error {
 		if err := poller.Poll(ctx); err != nil {

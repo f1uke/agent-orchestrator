@@ -160,17 +160,19 @@ describe("mineWhyOf", () => {
 	it("says AO derives the why line from the rule's mine policy", () => {
 		const p = mineWhyOf("D3", "pending_approver");
 		expect(p.how).toBe("derived");
-		expect(p.lines).toEqual([{ kind: "ao.mine_policy", text: "D3: mine while your approval is pending" }]);
+		expect(p.lines).toEqual([{ kind: "ao.mine_policy", text: "D3: mine while the person's approval is pending" }]);
 		expect(index().labelOf("ao.mine_policy")).toBe("mine policy");
 		expect(tag(p)).toBe("AO");
 	});
 
 	it("says what each policy reads", () => {
 		expect(mineWhyOf("C1", "owner").lines[0].text).toBe(
-			"C1: mine when you own it: the release MR, the release ticket or a hotfix MR",
+			"C1: mine when the person owns it: the release MR, the release ticket or a hotfix MR",
 		);
-		expect(mineWhyOf("G5", "listed_cards").lines[0].text).toBe("G5: mine through the cards it lists that are yours");
-		expect(mineWhyOf("L9", "mr").lines[0].text).toBe("L9: mine when you wrote the MR or own its card");
+		expect(mineWhyOf("G5", "listed_cards").lines[0].text).toBe(
+			"G5: mine through the cards it lists that are the person's",
+		);
+		expect(mineWhyOf("L9", "mr").lines[0].text).toBe("L9: mine when the person wrote the MR or owns its card");
 	});
 });
 
@@ -352,14 +354,18 @@ describe("No MR needed provenance", () => {
 	it("tags a marked card's code as AO's own mark, not GitLab, and names who marked it", () => {
 		const p = codeStateOf(unit({ code: { kind: "no_mr", ...mark } }));
 		expect(tag(p)).toBe("AO mark");
-		expect(p.lines[0]).toEqual({ kind: "ao.no_mr", text: 'marked by you · app · 2026-10-14 · "config only"' });
+		expect(p.lines[0]).toEqual({ kind: "ao.no_mr", text: 'marked by app · 2026-10-14 · "config only"' });
 		expect(p.title).toBe("Code: no code: marked No MR needed");
 	});
 
 	it("drops the note when there is none", () => {
 		expect(noMrOf("DEMO-1", { markedBy: "cli:demo-7", markedAt: mark.markedAt }).lines[0].text).toBe(
-			"marked by you · cli:demo-7 · 2026-10-14",
+			"marked by cli:demo-7 · 2026-10-14",
 		);
+	});
+
+	it("says only when it was marked when the team web leaves out who", () => {
+		expect(noMrOf("DEMO-1", { markedBy: "", markedAt: mark.markedAt }).lines[0].text).toBe("marked · 2026-10-14");
 	});
 });
 

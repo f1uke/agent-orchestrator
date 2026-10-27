@@ -149,7 +149,7 @@ describe("releases motion", () => {
 		expect(momentumDistance(-1)).toBeLessThan(0);
 	});
 
-	it("moves rows when apps, Only me, hotfixes or a layer change, and blocks also on a fold, never on focus or a refetch", () => {
+	it("moves rows when apps, the viewed person, hotfixes or a layer change, and blocks also on a fold, never on focus or a refetch", () => {
 		const url = parseReleasesSearch({});
 		const folds = new Set(["di:21-2026"]);
 		const none = new Set<string>();
@@ -158,7 +158,7 @@ describe("releases motion", () => {
 		expect(moveKeys({ ...url, focus: "20-2026", sheet: { kind: "key" } }, DEFAULT_LAYERS, folds, none)).toEqual(base);
 		const filters = [
 			moveKeys({ ...url, apps: new Set(["di"]) }, DEFAULT_LAYERS, folds, none),
-			moveKeys({ ...url, me: true }, DEFAULT_LAYERS, folds, none),
+			moveKeys({ ...url, person: "dee" }, DEFAULT_LAYERS, folds, none),
 			moveKeys({ ...url, mobile: true }, DEFAULT_LAYERS, folds, none),
 			moveKeys({ ...url, hotfixes: !url.hotfixes }, DEFAULT_LAYERS, folds, none),
 			moveKeys(url, { ...DEFAULT_LAYERS, sprint: true }, folds, none),

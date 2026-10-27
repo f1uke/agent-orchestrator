@@ -4,6 +4,7 @@ import { epicNote, llbWire, shortBranch, targetTrain, trainLabel, urgency, type 
 import { derivedOf, llbTargetOf } from "../../lib/releases/sources";
 import { SourceTag } from "./Sources";
 import { TargetTag } from "./TargetTag";
+import { ofText, type Who } from "../../lib/releases/who";
 import type { Board, LLBGroup, Train, TrainKey } from "../../lib/releases/types";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Chev } from "./CardGroups";
@@ -28,7 +29,7 @@ export function LongLivedSummary({
 	width,
 	height,
 	barOf,
-	mine,
+	scope,
 	actions,
 }: {
 	app: string;
@@ -39,7 +40,7 @@ export function LongLivedSummary({
 	width: number;
 	height: number;
 	barOf: (train: TrainKey) => BarSpot | null;
-	mine: boolean;
+	scope: Who | null;
 	actions: PageActions;
 }) {
 	const key = `${app}:llbs`;
@@ -56,7 +57,7 @@ export function LongLivedSummary({
 						<GitFork className="ic size-3" aria-hidden="true" />
 						<SourceTag p={LLBS_P} />
 						<b>
-							{groups.length} long-lived{mine ? " of mine" : ""}
+							{groups.length} long-lived{scope ? ` ${ofText(scope)}` : ""}
 						</b>
 						{due.length > 0 && focus && (
 							<>

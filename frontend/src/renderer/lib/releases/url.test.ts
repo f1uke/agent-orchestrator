@@ -3,7 +3,6 @@ import { DEFAULT_LAYERS, parseReleasesSearch, releasesSearch, type ReleasesSearc
 
 const empty: ReleasesSearch = {
 	focus: null,
-	me: false,
 	apps: null,
 	hotfixes: true,
 	sheet: null,
@@ -21,7 +20,7 @@ describe("releases search params", () => {
 	it("round-trips every field", () => {
 		const s: ReleasesSearch = {
 			focus: "20-1-2026",
-			me: true,
+			person: "jira:acc-ann",
 			apps: new Set(["di", "pa"]),
 			hotfixes: false,
 			sheet: { kind: "version", train: "21-2026", app: "di" },
@@ -32,7 +31,7 @@ describe("releases search params", () => {
 		const raw = releasesSearch(s);
 		expect(raw).toEqual({
 			focus: "20-1-2026",
-			me: "1",
+			person: "jira:acc-ann",
 			apps: "di,pa",
 			hotfixes: "0",
 			sheet: "version:21-2026:di",
@@ -51,11 +50,26 @@ describe("releases search params", () => {
 	});
 
 	it("accepts the values the router's JSON search parser produces", () => {
-		expect(parseReleasesSearch({ me: 1, hotfixes: 0, focus: 22 })).toMatchObject({
-			me: true,
+		expect(parseReleasesSearch({ person: 7, hotfixes: 0, focus: 22 })).toMatchObject({
+			person: "7",
 			hotfixes: false,
 			focus: "22",
 		});
+	});
+
+	it("names a person by the id the API gives, whatever it holds, and writes nothing for everyone", () => {
+		for (const id of ["ann", "jira:acc-ann", "ann.b-c_d", "jira:557058:ab12"]) {
+			expect(parseReleasesSearch({ person: id }).person).toBe(id);
+			expect(releasesSearch({ ...empty, person: id })).toEqual({ person: id });
+		}
+		expect(parseReleasesSearch({ person: "" }).person).toBeUndefined();
+		expect(releasesSearch(parseReleasesSearch({}))).toEqual({});
+	});
+
+	it("ignores the Only me flag an old link or a saved search still carries", () => {
+		const parsed = parseReleasesSearch({ me: "1", apps: "di" });
+		expect(parsed.person).toBeUndefined();
+		expect(releasesSearch(parsed)).toEqual({ apps: "di" });
 	});
 
 	it("keeps a hit id whole, slashes, tildes and colons included", () => {

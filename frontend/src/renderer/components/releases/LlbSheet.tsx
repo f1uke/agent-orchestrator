@@ -1,6 +1,7 @@
 import { GitFork, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useSavePlan } from "../../hooks/useReleaseBoard";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import { dayDiff, dayLabel, shortDay } from "../../lib/releases/day";
 import { branchState, isOpenLlb, targetChip, trainLabel, urgency } from "../../lib/releases/llb";
 import {
@@ -107,6 +108,20 @@ function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	);
 }
 
+function PlanNote({ g }: { g: LLBGroup }) {
+	if (!g.plan?.note) return null;
+	return (
+		<div className="sec" data-testid="plan-note">
+			<div className="fl2">Note</div>
+			<div className="kr">{g.plan.note}</div>
+		</div>
+	);
+}
+
+function PlanSection({ g, board }: { g: LLBGroup; board: Board }) {
+	return useReleasesReadOnly() ? <PlanNote g={g} /> : <PlanForm g={g} board={board} />;
+}
+
 function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 	const [draft, setDraft] = useState<PlanDraft>(() => draftFrom(g));
 	const [conflict, setConflict] = useState(false);
@@ -150,7 +165,7 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 				Plan
 				<span className="who">
 					{g.plan
-						? `set by ${g.plan.updatedBy} · ${shortDay(g.plan.updatedAt.slice(0, 10))} · v${g.plan.version}`
+						? `set${g.plan.updatedBy ? ` by ${g.plan.updatedBy}` : ""} · ${shortDay(g.plan.updatedAt.slice(0, 10))} · v${g.plan.version}`
 						: "not set"}
 					<SourceTag
 						p={readOf("Plan", "ao.plans", "saved by a person on this page or with ao train", "LLBGroup.plan")}
@@ -380,7 +395,7 @@ export function llbSheet(id: string, c: AlertCtx): { title: ReactNode; body: Rea
 				<div className="sec">
 					<StatusLine g={g} board={board} />
 				</div>
-				<PlanForm key={g.id} g={g} board={board} />
+				<PlanSection key={g.id} g={g} board={board} />
 				{g.branches.map((b) => {
 					const st = branchState(g, b);
 					const keys = [...new Map(b.cards.map((c) => [c.key, c])).values()];

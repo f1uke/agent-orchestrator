@@ -7,6 +7,7 @@ import { SourceTag, SourceValue } from "./Sources";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
 import { versionMineText } from "../../lib/releases/sprint";
 import { alertText } from "../../lib/releases/mineWhy";
+import { ofText, ofTheir } from "../../lib/releases/who";
 import { appMark } from "../../lib/releases/appMark";
 import { AppMark } from "./AppMark";
 import { useLabelStagger } from "./ReleaseMotion";
@@ -28,10 +29,12 @@ export function Stepper({ stages, big = false }: { stages: Stage[]; big?: boolea
 function MineLine({ app, lens }: { app: string; lens: Lens }) {
 	const t = lens.focus;
 	const v = t ? versionOf(t, app) : undefined;
+	const who = lens.who;
+	if (!who) return null;
 	const units = (v?.cards ?? []).filter((u) => u.mine?.length);
 	const bits = [
-		v ? versionMineText(v, lens.identity) : "",
-		units.length ? `${units.length} of my card${units.length === 1 ? "" : "s"}` : "",
+		v ? versionMineText(v, lens.viewer?.jiraAccountId, who) : "",
+		units.length ? `${units.length} ${ofTheir(who)} card${units.length === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
 	return bits.length ? (
 		<div className="meline" data-testid="label-mine">
@@ -40,7 +43,7 @@ function MineLine({ app, lens }: { app: string; lens: Lens }) {
 		</div>
 	) : (
 		<div className="meline off" data-testid="label-mine">
-			Nothing of mine in {t?.label ?? "this train"}
+			Nothing {ofText(who)} in {t?.label ?? "this train"}
 		</div>
 	);
 }
@@ -68,10 +71,10 @@ const MERGED_P = derivedOf(
 const MINE_P = derivedOf(
 	"Mine",
 	[
-		{ kind: "gitlab.mrs", text: "release MR or card MRs you authored" },
-		{ kind: "jira.versions", text: "you are an approver" },
-		{ kind: "jira.cards", text: "cards assigned to you" },
-		{ kind: "jira.my_subtasks", text: "subtasks assigned to you" },
+		{ kind: "gitlab.mrs", text: "release MR or card MRs the person authored" },
+		{ kind: "jira.versions", text: "the person is an approver" },
+		{ kind: "jira.cards", text: "cards assigned to the person" },
+		{ kind: "jira.card_subtasks", text: "subtasks assigned to the person" },
 	],
 	undefined,
 	"Version.mine, cards[].mine",

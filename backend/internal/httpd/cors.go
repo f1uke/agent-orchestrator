@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
@@ -24,15 +25,8 @@ import (
 // "simple" cross-origin POSTs (no-cors mode, text/plain body) that handlers
 // would otherwise execute. Same philosophy as localControlRequest on
 // /shutdown, applied to the whole surface.
-func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
-	allowed := make(map[string]struct{}, len(allowedOrigins))
-	for _, origin := range allowedOrigins {
-		origin = strings.TrimSpace(origin)
-		if origin == "" || origin == "null" || origin == "*" {
-			continue
-		}
-		allowed[origin] = struct{}{}
-	}
+func corsMiddleware(allowedOrigins []string, releaseWebPort func(port int) bool) func(http.Handler) http.Handler {
+	allowed := appOrigins(allowedOrigins)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +38,7 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 			// Cache keys must split on Origin even for rejected values, or a
 			// 403 could be replayed to an allowed origin.
 			w.Header().Add("Vary", "Origin")
-			if _, ok := allowed[origin]; !ok && !isLoopbackOrigin(origin) {
+			if _, ok := allowed[origin]; !ok && !isLoopbackOrigin(origin, releaseWebPort) {
 				envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "ORIGIN_FORBIDDEN",
 					"Origin is not allowed to access this daemon", nil)
 				return
@@ -74,14 +68,31 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
+func appOrigins(allowedOrigins []string) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		origin = strings.TrimSpace(origin)
+		if origin == "" || origin == "null" || origin == "*" {
+			continue
+		}
+		allowed[origin] = struct{}{}
+	}
+	return allowed
+}
+
 // isLoopbackOrigin reports whether a browser origin is content served from
 // this machine's loopback (the Vite dev server / preview server on whatever
 // port it picked). Such content can already reach the no-auth daemon directly,
 // so granting it CORS adds no exposure — while a remote page can never bear a
 // loopback origin (DNS rebinding changes resolution, not the Origin header).
-func isLoopbackOrigin(origin string) bool {
+// The release web's port is the exception: its pages render text from Jira and
+// GitLab to the internet, so a script on them must not reach the daemon.
+func isLoopbackOrigin(origin string, releaseWebPort func(port int) bool) bool {
 	u, err := url.Parse(origin)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	if port, err := strconv.Atoi(u.Port()); err == nil && releaseWebPort(port) {
 		return false
 	}
 	host := u.Hostname()
@@ -92,4 +103,25 @@ func isLoopbackOrigin(origin string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// appOriginOnly refuses a state-changing request unless it comes from the app's
+// own origin (AllowedOrigins) or from a local caller without an Origin, as
+// localControlRequest decides. A page on a loopback port is not the app.
+func appOriginOnly(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := appOrigins(allowedOrigins)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				origin := r.Header.Get("Origin")
+				_, app := allowed[origin]
+				if (origin == "" && !localControlRequest(r)) || (origin != "" && !app) {
+					envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "ORIGIN_FORBIDDEN",
+						"Only the app's own origin may make this request", nil)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

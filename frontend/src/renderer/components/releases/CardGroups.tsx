@@ -13,11 +13,13 @@ import {
 	type Provenance,
 } from "../../lib/releases/sources";
 import { mineText } from "../../lib/releases/sprint";
-import type { Board, CardUnit, IdentityKnown, MineReason, Person } from "../../lib/releases/types";
+import { viewerLabel } from "../../lib/releases/who";
+import type { Board, BoardPerson, CardUnit, MineReason, Person } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Avatar } from "./Avatar";
 import { Unfold } from "./ReleaseMotion";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import type { PageActions } from "./ReleasesPage";
 import { SourceCell, SourceTag, SourceValue } from "./Sources";
 import { NoMrButton } from "./NoMr";
@@ -52,12 +54,14 @@ export function JiraKey({ k, url }: { k: string; url?: string }) {
 	);
 }
 
-export function MineFace({ face, mine }: { face: IdentityKnown | null; mine?: readonly MineReason[] }) {
+export function MineFace({ face, mine }: { face: BoardPerson | null; mine?: readonly MineReason[] }) {
+	const readOnly = useReleasesReadOnly();
 	if (!face || !mine?.length) return <span />;
-	const why = `Yours: ${mineText(mine)}`;
+	const who = viewerLabel(face, readOnly);
+	const why = `${who.self ? "Yours" : who.name}: ${mineText(mine, who)}`;
 	return (
 		<span className="mecell" title={why} aria-label={why} data-testid="mine-face">
-			<Avatar accountId={face.jiraAccountId} name={face.displayName} size={18} />
+			<Avatar accountId={face.jiraAccountId} name={face.name} size={18} />
 		</span>
 	);
 }
@@ -150,7 +154,7 @@ function UnitRow({
 	board: Board;
 	train: string;
 	tagged: boolean;
-	face: IdentityKnown | null;
+	face: BoardPerson | null;
 	actions: PageActions;
 }) {
 	const m = CODE_META[u.code.kind];
@@ -198,7 +202,7 @@ function BranchCardRow({
 	landed: boolean;
 	tagged: boolean;
 	url?: string;
-	face: IdentityKnown | null;
+	face: BoardPerson | null;
 	actions: PageActions;
 }) {
 	const [glyph, tone, title] = c.pending
@@ -254,7 +258,7 @@ function GroupRows({
 	g: CardGroup;
 	board: Board;
 	tagged: boolean;
-	face: IdentityKnown | null;
+	face: BoardPerson | null;
 	actions: PageActions;
 	isOpen: (k: string) => boolean;
 	jira: (key: string) => string | undefined;
@@ -366,7 +370,7 @@ export function CardGroupBox({
 	room: number;
 	top: number;
 	focused: boolean;
-	face: IdentityKnown | null;
+	face: BoardPerson | null;
 	actions: PageActions;
 	jira: (key: string) => string | undefined;
 }) {

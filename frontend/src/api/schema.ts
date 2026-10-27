@@ -1067,6 +1067,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/release-web": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Show whether the team web runs, where, how many are signed in, and the key generation; never the key */
+        get: operations["getReleaseWebStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-web/copy-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Put the shared key on the clipboard of the machine the daemon runs on; the key never crosses HTTP */
+        post: operations["copyReleaseWebKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-web/rotate-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace the shared key; every signed-in session ends */
+        post: operations["rotateReleaseWebKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-web/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start the team web as its own detached process, creating a key when none exists */
+        post: operations["startReleaseWeb"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-web/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop the team web */
+        post: operations["stopReleaseWeb"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions": {
         parameters: {
             query?: never;
@@ -4736,10 +4821,12 @@ export interface components {
             kinds: components["schemas"]["ReleaseTrainKindFreshness"][];
             llbs: components["schemas"]["ReleaseTrainLLBGroup"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
+            people: components["schemas"]["ReleaseTrainBoardPerson"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
             sprints: components["schemas"]["ReleaseTrainSprintRow"][];
             today: components["schemas"]["ReleaseTrainDay"];
             trains: components["schemas"]["ReleaseTrainTrain"][];
+            viewer: components["schemas"]["ReleaseTrainViewer"];
         };
         ReleaseTrainBoardApp: {
             family: string;
@@ -4752,9 +4839,18 @@ export interface components {
             key: string;
             ownsSprintBranch: boolean;
         };
+        ReleaseTrainBoardPerson: {
+            gitlabUsername?: string;
+            id: string;
+            jiraAccountId?: string;
+            match: components["schemas"]["ReleaseTrainPersonMatch"];
+            name: string;
+            self?: boolean;
+        };
         ReleaseTrainBoardResponse: {
             board?: components["schemas"]["ReleaseTrainBoard"];
             config: components["schemas"]["ReleaseTrainConfigReport"];
+            people: components["schemas"]["ReleaseTrainPeopleReport"];
         };
         /** @enum {string} */
         ReleaseTrainBucket: "badge" | "history" | "hidden";
@@ -5402,10 +5498,19 @@ export interface components {
             title: string;
             url: string;
         };
+        ReleaseTrainPeopleReport: {
+            /** @description Why the file is invalid, or what it is for when absent. */
+            message?: string;
+            path: string;
+            /** @enum {string} */
+            state: "absent" | "invalid" | "ok";
+        };
         ReleaseTrainPerson: {
             accountId: string;
             name: string;
         };
+        /** @enum {string} */
+        ReleaseTrainPersonMatch: "linked" | "self" | "name" | "jira_only" | "gitlab_only";
         ReleaseTrainPipelineFact: {
             durationSeconds?: null | number;
             id: number;
@@ -5734,6 +5839,38 @@ export interface components {
         ReleaseTrainVersionFields: {
             releaseDate?: components["schemas"]["ReleaseTrainDay"];
             released: boolean;
+        };
+        ReleaseTrainViewer: components["schemas"]["ReleaseTrainViewerPerson"] | components["schemas"]["ReleaseTrainViewerUnknown"];
+        ReleaseTrainViewerPerson: {
+            /** @constant */
+            kind: "person";
+            person: components["schemas"]["ReleaseTrainBoardPerson"];
+        };
+        ReleaseTrainViewerUnknown: {
+            /** @description The person id the request named; absent when the monitor's own identity is unknown. */
+            id?: string;
+            /** @constant */
+            kind: "unknown";
+            reason: string;
+        };
+        ReleaseWebCopyKeyResponse: {
+            copied: boolean;
+        };
+        ReleaseWebStatusResponse: {
+            /** @description Public names the web answers besides 127.0.0.1 and localhost: the running web's, or while it is stopped the configured ones. */
+            hosts: string[];
+            /** @description Counts up on every key rotation. */
+            keyGeneration?: number;
+            keyPresent: boolean;
+            pid?: number;
+            port?: number;
+            running: boolean;
+            /** @description People signed in right now. */
+            sessions: number;
+            /** Format: date-time */
+            startedAt?: null | string;
+            /** @description Where the web listens, on 127.0.0.1; absent while stopped. */
+            url?: string;
         };
         RemoveProjectResult: {
             projectId: string;
@@ -9920,7 +10057,10 @@ export interface operations {
     };
     getReleaseTrainBoard: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whose Mine the Board carries: a person id from board.people (the GitLab username, or jira:<accountId> for a Jira-only person). The monitor's own person when absent; an id the Board does not list gives board.viewer.kind unknown and no Mine. */
+                person?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9942,6 +10082,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
             };
             /** @description Internal Server Error */
             500: {
@@ -10799,6 +10948,205 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ControllersReleaseTrainSourcesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getReleaseWebStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseWebStatusResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    copyReleaseWebKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseWebCopyKeyResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    rotateReleaseWebKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseWebStatusResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startReleaseWeb: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseWebStatusResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopReleaseWeb: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseWebStatusResponse"];
                 };
             };
             /** @description Internal Server Error */

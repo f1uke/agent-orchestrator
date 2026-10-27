@@ -47,17 +47,16 @@ func testView() rt.PlanView {
 		},
 		PersonIDs:       []string{"acc-ann", "acc-bob"},
 		LLBCardKeys:     []string{"DEMO-30", "DEMO-31"},
-		MyAccountID:     "acc-dee",
 		WatchedCardKeys: []string{"DEMO-1", "DEMO-30"},
 	}
 }
 
-func TestPlanLeavesMySubtasksOutUntilMyselfIsRead(t *testing.T) {
+func TestPlanLeavesCardSubtasksOutWhenNoCardIsWatched(t *testing.T) {
 	v := testView()
-	v.MyAccountID = ""
+	v.WatchedCardKeys = nil
 	for _, s := range newSource(rttest.NewJira(t)).Plan(v) {
-		if s.Kind == rt.KindMySubtasks.Name {
-			t.Fatalf("planned %s before jira.myself was read", s.Kind)
+		if s.Kind == rt.KindCardSubtasks.Name {
+			t.Fatalf("planned %s with no watched card", s.Kind)
 		}
 	}
 }
@@ -83,7 +82,7 @@ func TestPlanListsEveryJiraResourceTheViewNeeds(t *testing.T) {
 		"jira.users u:acc-ann  24h0m0s",
 		"jira.users u:acc-bob  24h0m0s",
 		"jira.llb_cards llb  10m0s",
-		"jira.my_subtasks mine  5m0s",
+		"jira.card_subtasks watched  5m0s",
 		"jira.myself me  24h0m0s",
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -24,8 +24,8 @@ type ReleaseTrainsService interface {
 	// InitConfig returns rtsvc.ErrConfigExists when the config file is already there.
 	InitConfig() (string, error)
 	// Board returns the serialized ReleaseTrainBoardResponse and its ETag, or
-	// rtsvc.ErrNotModified when ifNoneMatch names it.
-	Board(ctx context.Context, ifNoneMatch string) ([]byte, string, error)
+	// rtsvc.ErrNotModified when ifNoneMatch names it. person is whose Mine it carries; empty is the monitor's own.
+	Board(ctx context.Context, ifNoneMatch, person string) ([]byte, string, error)
 	// Refresh returns rtsvc.ErrUnknownSource for a source no poller has.
 	Refresh(source string) error
 	// SetRule returns rtsvc.ErrUnknownRule for an id no rule has.
@@ -61,6 +61,14 @@ type ReleaseTrainAccountIDParam struct {
 
 // ReleaseTrainBoardResponse is the body of GET /api/v1/release-trains/board.
 type ReleaseTrainBoardResponse = rtsvc.BoardResponse
+
+// maxPersonIDLength bounds the person query so a caller cannot grow the Board cache's keys.
+const maxPersonIDLength = 256
+
+// ReleaseTrainBoardQuery is the query of GET /api/v1/release-trains/board.
+type ReleaseTrainBoardQuery struct {
+	Person string `query:"person" description:"Whose Mine the Board carries: a person id from board.people (the GitLab username, or jira:<accountId> for a Jira-only person). The monitor's own person when absent; an id the Board does not list gives board.viewer.kind unknown and no Mine."`
+}
 
 // ReleaseTrainRefreshRequest is the body of POST /api/v1/release-trains/refresh.
 type ReleaseTrainRefreshRequest struct {
@@ -177,7 +185,12 @@ func (c *ReleaseTrainsController) board(w http.ResponseWriter, r *http.Request) 
 		apispec.NotImplemented(w, r, "GET", "/api/v1/release-trains/board")
 		return
 	}
-	body, etag, err := c.Svc.Board(r.Context(), r.Header.Get("If-None-Match"))
+	person := r.URL.Query().Get("person")
+	if len(person) > maxPersonIDLength {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_PERSON", "a person id is at most 256 bytes", nil)
+		return
+	}
+	body, etag, err := c.Svc.Board(r.Context(), r.Header.Get("If-None-Match"), person)
 	switch {
 	case errors.Is(err, rtsvc.ErrNotModified):
 		w.Header().Set("ETag", etag)

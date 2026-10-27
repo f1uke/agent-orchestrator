@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { NARROW, halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
+import { NARROW, expectFiltered, halfLabels, labelOverlaps, layer, open, settle, viewAs } from "./releases-kit";
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 
@@ -256,8 +256,8 @@ for (const reduced of [false, true]) {
 			await expectSameAsColdLoad(page);
 			await act(
 				page,
-				() => page.getByTestId("only-me").click(),
-				() => expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true"),
+				() => viewAs(page, "ada"),
+				() => expectFiltered(page),
 			);
 			await expectSameAsColdLoad(page);
 			await act(

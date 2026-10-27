@@ -16,6 +16,7 @@ import {
 	worstTone,
 } from "./lens";
 import { cardGroups } from "./cards";
+import { demoBoard, unknownIdentityBoard, viewBoardAs } from "./fixture";
 import { board, hotfix as hotfixOf, stage, train, version } from "./testkit";
 import type { AlertHit, Badge, RuleInfo, RuleOutcome } from "./types";
 import { parseReleasesSearch } from "./url";
@@ -313,8 +314,18 @@ describe("Only me", () => {
 		created: "2026-10-01",
 		dest: "sprint" as const,
 	});
+	const deePerson = {
+		id: "dee",
+		name: "Dee Example",
+		jiraAccountId: "acc-dee",
+		gitlabUsername: "dee",
+		match: "self" as const,
+		self: true,
+	};
 	const b = board({
 		identity: { kind: "known", jiraAccountId: "acc-dee", gitlabUsername: "dee", displayName: "Dee Example" },
+		people: [deePerson],
+		viewer: { kind: "person", person: deePerson },
 		trains: [t21],
 		hotfixes: [
 			{ ...hotfixOf("di", "2.3.1", "2026-10-14", "2026-10-16"), mine },
@@ -347,7 +358,7 @@ describe("Only me", () => {
 			staleHides: [],
 		},
 	});
-	const me = makeLens(b, parseReleasesSearch({ me: "1" }), new Set());
+	const me = makeLens(b, parseReleasesSearch({ person: "dee" }), new Set());
 	const all = makeLens(b, parseReleasesSearch({}), new Set());
 
 	it("keeps only my versions, sprint cards, long-lived groups, hotfixes and hits", () => {
@@ -364,6 +375,7 @@ describe("Only me", () => {
 		expect(cardGroups(b, "di")[0].units.map((u) => u.key)).toEqual(["DEMO-1", "DEMO-2"]);
 		expect(cardGroups(b, "da")[0].units.map((u) => u.key)).toEqual(["DEMO-3"]);
 		expect(me.face?.jiraAccountId).toBe("acc-dee");
+		expect(me.viewer?.name).toBe("Dee Example");
 		expect(all.face).toBeNull();
 	});
 
@@ -423,15 +435,51 @@ describe("Only me", () => {
 		expect(hid.sprintCards(withNext.sprints[1])).toEqual([]);
 	});
 
-	it("ignores ?me=1 when the identity is unknown, so nothing filters to empty", () => {
-		const blind = makeLens(
-			{ ...b, identity: { kind: "unknown", reason: "gitlab.user never read" } },
-			parseReleasesSearch({ me: "1" }),
+	it("filters only once the Board carries the named person's Mine, so a Board fetched for someone else never filters wrongly", () => {
+		const ann = {
+			id: "ann",
+			name: "Ann Example",
+			jiraAccountId: "acc-ann",
+			gitlabUsername: "ann",
+			match: "name" as const,
+		};
+		const stale = makeLens(b, parseReleasesSearch({ person: "ann" }), new Set());
+		expect(stale.me).toBe(false);
+		expect(stale.face).toBeNull();
+		expect(stale.attention).toHaveLength(2);
+		expect(stale.llbs).toHaveLength(2);
+		const fresh = makeLens(
+			{ ...b, people: [deePerson, ann], viewer: { kind: "person", person: ann } },
+			parseReleasesSearch({ person: "ann" }),
 			new Set(),
 		);
-		expect(blind.me).toBe(false);
-		expect(blind.face).toBeNull();
-		expect(blind.badge.count).toBe(2);
+		expect(fresh.me).toBe(true);
+		expect(fresh.viewer?.id).toBe("ann");
+	});
+
+	it("takes the person in any form the API accepts, so a link added to the people file keeps an old URL working", () => {
+		const bobby = {
+			id: "bobby",
+			name: "Bob Builder",
+			jiraAccountId: "acc-bob",
+			gitlabUsername: "bobby",
+			match: "linked" as const,
+		};
+		const withBobby = { ...b, people: [deePerson, bobby], viewer: { kind: "person" as const, person: bobby } };
+		for (const id of ["bobby", "jira:acc-bob"])
+			expect(makeLens(withBobby, parseReleasesSearch({ person: id }), new Set()).me).toBe(true);
+	});
+
+	it("filters nothing when the person is not on the Board, whatever the reason", () => {
+		const unknown = makeLens(
+			{ ...b, viewer: { kind: "unknown", id: "zed", reason: 'no person "zed" on the Board' } },
+			parseReleasesSearch({ person: "zed" }),
+			new Set(),
+		);
+		expect(unknown.me).toBe(false);
+		expect(unknown.face).toBeNull();
+		expect(unknown.badge.count).toBe(2);
+		expect(unknown.attention).toHaveLength(2);
 	});
 });
 
@@ -452,5 +500,38 @@ describe("train chips", () => {
 
 	it("keeps an older train the URL focuses", () => {
 		expect(trainChips(b, false, "18-2026").map((x) => x.id)).toEqual(["18-2026", "20-2026", "21-2026", "22-2026"]);
+	});
+});
+
+describe("whose Mine the lens words", () => {
+	const own = demoBoard("2026-10-14");
+	const ben = demoBoard("2026-10-14");
+	viewBoardAs(ben, "bsample");
+
+	it("says you for the monitor's own person and the name for anyone else", () => {
+		expect(makeLens(own, parseReleasesSearch({ person: "ada" }), new Set()).scope).toEqual({
+			self: true,
+			name: "Ada Example",
+		});
+		expect(makeLens(ben, parseReleasesSearch({ person: "bsample" }), new Set()).scope).toEqual({
+			self: false,
+			name: "Ben Sample",
+		});
+	});
+
+	it("has no scope while the page shows everyone, but still knows whose Mine the Board carries", () => {
+		const all = makeLens(own, parseReleasesSearch({}), new Set());
+		expect(all.scope).toBeNull();
+		expect(all.who).toEqual({ self: true, name: "Ada Example" });
+	});
+
+	it("names even the monitor's own person in a read-only host, filtered or not", () => {
+		const adaOnly = makeLens(own, parseReleasesSearch({ person: "ada" }), new Set(), true);
+		expect(adaOnly.scope).toEqual({ self: false, name: "Ada Example" });
+		expect(makeLens(own, parseReleasesSearch({}), new Set(), true).who).toEqual({ self: false, name: "Ada Example" });
+	});
+
+	it("has no one to word when the Board's viewer is unknown", () => {
+		expect(makeLens(unknownIdentityBoard("2026-10-14"), parseReleasesSearch({}), new Set()).who).toBeNull();
 	});
 });

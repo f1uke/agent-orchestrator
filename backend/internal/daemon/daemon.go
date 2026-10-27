@@ -605,6 +605,7 @@ func Run() error {
 		LearningRules:      learningSvc,
 		LearningDecide:     learningSvc,
 		ReleaseTrains:      releaseTrainSvc,
+		ReleaseWeb:         NewReleaseWebControl(cfg.DataDir),
 	})
 	if err != nil {
 		stop()

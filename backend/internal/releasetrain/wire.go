@@ -52,6 +52,24 @@ func (i IdentityUnknown) MarshalJSON() ([]byte, error) {
 	return tagged(i, plain(i))
 }
 
+// Variant is "person".
+func (ViewerPerson) Variant() string { return "person" }
+
+// Variant is "unknown".
+func (ViewerUnknown) Variant() string { return "unknown" }
+
+// MarshalJSON writes the viewer with "kind": "person".
+func (v ViewerPerson) MarshalJSON() ([]byte, error) {
+	type plain ViewerPerson
+	return tagged(v, plain(v))
+}
+
+// MarshalJSON writes the viewer with "kind": "unknown".
+func (v ViewerUnknown) MarshalJSON() ([]byte, error) {
+	type plain ViewerUnknown
+	return tagged(v, plain(v))
+}
+
 // Variant is "landed".
 func (LLBLandedIn) Variant() string { return "landed" }
 

@@ -28,7 +28,7 @@ func newSprintWorld(t *testing.T) *world {
 	w.jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-361, DEMO-362) ORDER BY key`, `{"issues":[`+
 		`{"key":"DEMO-361","fields":{"summary":"Coupon","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"subtask":false},"created":"2026-10-01T10:00:00.000+0700"}},`+
 		`{"key":"DEMO-362","fields":{"summary":"Bond","status":{"name":"Done","statusCategory":{"key":"done"}},"issuetype":{"subtask":false},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
-	w.jira.Set(`/rest/api/3/search/jql?jql=parent in (DEMO-1, DEMO-30, DEMO-361, DEMO-362, DEMO-40) AND assignee = "acc-dee" ORDER BY key`, `{"issues":[]}`)
+	w.jira.Set(`/rest/api/3/search/jql?jql=parent in (DEMO-1, DEMO-30, DEMO-361, DEMO-362, DEMO-40) ORDER BY key`, `{"issues":[]}`)
 	w.gl.SetMRs(1001, sprintMRs())
 	return w
 }
@@ -52,7 +52,7 @@ func TestSprintRowsAndSprintBranchMembershipEndToEnd(t *testing.T) {
 	w := newSprintWorld(t)
 	w.settle()
 	board := svc.NewBoardService(svc.BoardDeps{Config: svc.NewConfigLoader(w.configPath), Store: w.store, Clock: func() time.Time { return w.now }})
-	body, _, err := board.Board(context.Background(), "")
+	body, _, err := board.Board(context.Background(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestBoardSprintsStoredByTheActiveOnlyDaemonAreRefetchedInTheFirstPassAfterT
 		w.pass()
 	}
 	board := svc.NewBoardService(svc.BoardDeps{Config: svc.NewConfigLoader(w.configPath), Store: w.store, Clock: func() time.Time { return w.now }})
-	body, _, err := board.Board(ctx, "")
+	body, _, err := board.Board(ctx, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

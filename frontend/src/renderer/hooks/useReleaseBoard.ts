@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage, getApiBaseUrl, hasTrustedApiBaseUrl } from "../lib/api-client";
-import { boardFetcher } from "../lib/releases/boardFetch";
+import { boardPath, personFetchers } from "../lib/releases/boardFetch";
 import {
 	demoBoard,
 	demoResponse,
@@ -11,15 +11,18 @@ import {
 	twinBoard,
 	subjectsBoard,
 	unknownIdentityBoard,
+	viewBoardAs,
 } from "../lib/releases/fixture";
 import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
 import { previewConfirm, previewPlan, previewUndo, type PreviewFixStore } from "../lib/releases/fixPreview";
 import { applyNoMr } from "../lib/releases/noMr";
+import { ReadOnlyError, useReleasesReadOnly } from "../components/releases/ReleasesCapabilities";
 import { PlanConflictError, planInput, targetAfterPlan, type PlanDraft } from "../lib/releases/plan";
 import type { Board, BoardResponse, Fix, FixPlan, HitId, LlbPlan } from "../lib/releases/types";
 import { useApiReady } from "./useApiReady";
 
 export const releaseBoardKey = ["release-trains", "board"] as const;
+const boardKeyOf = (person: string | undefined) => [...releaseBoardKey, person ?? ""] as const;
 const POLL_MS = 15_000;
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
@@ -39,12 +42,14 @@ const VARIANTS = {
 	twin: twinBoard,
 } as const;
 
-function previewBoard(): BoardResponse {
+function previewBoard(person: string | undefined): BoardResponse {
 	const seam = globalThis as PreviewSeam;
 	const today = new Date().toISOString().slice(0, 10);
 	const variant = seam.__aoReleaseBoardVariant;
 	seam.__aoReleaseBoard ??= demoResponse(variant ? VARIANTS[variant](today) : demoBoard(today));
-	return structuredClone(seam.__aoReleaseBoard);
+	const response = structuredClone(seam.__aoReleaseBoard);
+	if (response.board) viewBoardAs(response.board, person ?? "");
+	return response;
 }
 
 function editPreview(edit: (b: Board) => void): void {
@@ -52,19 +57,22 @@ function editPreview(edit: (b: Board) => void): void {
 	if (b) edit(b);
 }
 
-const fetchLiveBoard = boardFetcher((ifNoneMatch) => {
+const fetchLiveBoard = personFetchers((person) => (ifNoneMatch) => {
 	const headers: Record<string, string> = { Accept: "application/json" };
 	if (ifNoneMatch) headers["If-None-Match"] = ifNoneMatch;
-	return fetch(`${getApiBaseUrl()}/api/v1/release-trains/board`, { headers, cache: "no-store" });
+	return fetch(`${getApiBaseUrl()}${boardPath(person)}`, { headers, cache: "no-store" });
 });
 
-/** The page polls; the sidebar passes poll: false and rides on the page's cache entry. */
-export function useReleaseBoard({ poll = true }: { poll?: boolean } = {}) {
+/**
+ * The Board carrying person's Mine; none is the monitor's own. The page polls; the sidebar passes
+ * poll: false and reads the monitor's own Board, which its attention count does not depend on.
+ */
+export function useReleaseBoard({ poll = true, person }: { poll?: boolean; person?: string } = {}) {
 	const ready = useApiReady();
 	return useQuery({
-		queryKey: releaseBoardKey,
+		queryKey: boardKeyOf(person),
 		enabled: usePreviewData || ready,
-		queryFn: async () => (usePreviewData || !hasTrustedApiBaseUrl() ? previewBoard() : fetchLiveBoard()),
+		queryFn: async () => (usePreviewData || !hasTrustedApiBaseUrl() ? previewBoard(person) : fetchLiveBoard(person)),
 		refetchInterval: poll ? POLL_MS : false,
 		refetchIntervalInBackground: false,
 		placeholderData: keepPreviousData,
@@ -72,10 +80,20 @@ export function useReleaseBoard({ poll = true }: { poll?: boolean } = {}) {
 	});
 }
 
+/** The second guard behind the controls a read-only host does not render. */
+function useWriteGuard(): () => void {
+	const readOnly = useReleasesReadOnly();
+	return () => {
+		if (readOnly) throw new ReadOnlyError();
+	};
+}
+
 function useBoardMutation<V>(run: (v: V) => Promise<void>, optimistic: (b: Board, v: V) => void) {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
 		mutationFn: async (v: V) => {
+			guard();
 			if (usePreviewData) {
 				editPreview((b) => optimistic(b, v));
 				return;
@@ -84,16 +102,17 @@ function useBoardMutation<V>(run: (v: V) => Promise<void>, optimistic: (b: Board
 		},
 		onMutate: async (v) => {
 			await qc.cancelQueries({ queryKey: releaseBoardKey });
-			const before = qc.getQueryData<BoardResponse>(releaseBoardKey);
-			if (before?.board) {
-				const next = structuredClone(before);
+			const before = qc.getQueriesData<BoardResponse>({ queryKey: releaseBoardKey });
+			for (const [key, data] of before) {
+				if (!data?.board) continue;
+				const next = structuredClone(data);
 				if (next.board) optimistic(next.board, v);
-				qc.setQueryData(releaseBoardKey, next);
+				qc.setQueryData(key, next);
 			}
 			return { before };
 		},
 		onError: (_e, _v, ctx) => {
-			if (ctx?.before) qc.setQueryData(releaseBoardKey, ctx.before);
+			for (const [key, data] of ctx?.before ?? []) qc.setQueryData(key, data);
 		},
 		onSettled: () => qc.invalidateQueries({ queryKey: releaseBoardKey }),
 	});
@@ -192,8 +211,10 @@ function applyPlan(b: Board, { id, draft }: PlanWrite, at: string): LlbPlan {
 
 export function useSavePlan() {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
 		mutationFn: async (w: PlanWrite): Promise<LlbPlan> => {
+			guard();
 			if (usePreviewData) {
 				const b = (globalThis as PreviewSeam).__aoReleaseBoard?.board;
 				if (!b) throw new Error("no preview board");
@@ -230,9 +251,10 @@ function previewFixes(): { board: Board; store: PreviewFixStore } {
 
 /** Planning writes nothing; each open replans against the latest observation. */
 export function useFixPlan(hit: HitId, choice: string | undefined, enabled: boolean) {
+	const readOnly = useReleasesReadOnly();
 	return useQuery({
 		queryKey: fixPlanKey(hit, choice),
-		enabled,
+		enabled: enabled && !readOnly,
 		queryFn: async (): Promise<FixPlan> => {
 			if (usePreviewData) return structuredClone(previewPlan(previewFixes().board, hit, choice));
 			const { data, error, response } = await apiClient.POST("/api/v1/release-trains/fixes/plan", {
@@ -247,8 +269,10 @@ export function useFixPlan(hit: HitId, choice: string | undefined, enabled: bool
 }
 
 export function useFixes() {
+	const readOnly = useReleasesReadOnly();
 	return useQuery({
 		queryKey: releaseFixesKey,
+		enabled: !readOnly,
 		queryFn: async (): Promise<Fix[]> => {
 			if (usePreviewData) return structuredClone(previewFixes().store.fixes);
 			const { data, error, response } = await apiClient.GET("/api/v1/release-trains/fixes");
@@ -261,8 +285,12 @@ export function useFixes() {
 
 function useFixMutation<V>(run: (v: V) => Promise<Fix>) {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
-		mutationFn: run,
+		mutationFn: (v: V) => {
+			guard();
+			return run(v);
+		},
 		onSettled: () =>
 			Promise.all([
 				qc.invalidateQueries({ queryKey: releaseBoardKey }),
@@ -309,8 +337,10 @@ export function useUndoFix() {
 
 export function useRefreshSources() {
 	const qc = useQueryClient();
+	const guard = useWriteGuard();
 	return useMutation({
 		mutationFn: async () => {
+			guard();
 			if (!usePreviewData) await must(apiClient.POST("/api/v1/release-trains/refresh", { body: {} }));
 		},
 		onSettled: () => qc.invalidateQueries({ queryKey: releaseBoardKey }),

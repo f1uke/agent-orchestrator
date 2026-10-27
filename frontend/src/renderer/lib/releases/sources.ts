@@ -147,7 +147,7 @@ export function planSaysText(planFrom: readonly CardWhy[] | undefined): string {
 }
 
 export function markedText(m: NoMRMark): string {
-	return `marked by you · ${m.markedBy} · ${m.markedAt.slice(0, 10)}${m.note ? ` · "${m.note}"` : ""}`;
+	return `marked${m.markedBy ? ` by ${m.markedBy}` : ""} · ${m.markedAt.slice(0, 10)}${m.note ? ` · "${m.note}"` : ""}`;
 }
 
 export function noMrOf(key: string, m: NoMRMark): Provenance {
@@ -202,18 +202,18 @@ export function stageOf(s: Stage): Provenance {
 
 const POLICY_TEXT: Readonly<Record<MinePolicy, string>> = {
 	never: "never mine: nobody owns a data check",
-	owner: "mine when you own it: the release MR, the release ticket or a hotfix MR",
-	pending_approver: "mine while your approval is pending",
-	listed_cards: "mine through the cards it lists that are yours",
-	mr: "mine when you wrote the MR or own its card",
+	owner: "mine when the person owns it: the release MR, the release ticket or a hotfix MR",
+	pending_approver: "mine while the person's approval is pending",
+	listed_cards: "mine through the cards it lists that are the person's",
+	mr: "mine when the person wrote the MR or owns its card",
 };
 
 export function mineWhyOf(rule: string, policy: MinePolicy): Provenance {
 	return {
-		title: "Why it is yours",
+		title: "Why it is in Mine",
 		how: "derived",
 		lines: [{ kind: "ao.mine_policy", text: `${rule}: ${POLICY_TEXT[policy]}` }],
-		note: "AO derives it from the rule's mine policy and the reasons the hit is yours.",
+		note: "AO derives it from the rule's mine policy and the reasons the hit is the person's.",
 		field: "RuleInfo.minePolicy, Hit.mine",
 	};
 }

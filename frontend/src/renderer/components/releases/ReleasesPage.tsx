@@ -1,7 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
-import { focusTrain, makeLens } from "../../lib/releases/lens";
+import { focusTrain, makeLens, viewingAs } from "../../lib/releases/lens";
 import { sourceIndex } from "../../lib/releases/sources";
 import { locate, sheetReveal, type RevealView } from "../../lib/releases/locate";
 import type { Board, Subject } from "../../lib/releases/types";
@@ -16,6 +16,7 @@ import {
 } from "../../lib/releases/url";
 import { saveSearch, useReleasesUi } from "../../stores/releases-ui";
 import { ReleaseMotionRoot } from "./ReleaseMotion";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import { SheetStack } from "./SheetStack";
 import { SourcesProvider } from "./Sources";
 import { SummaryStrip } from "./SummaryStrip";
@@ -39,7 +40,7 @@ export function ReleasesPage() {
 	const raw = useSearch({ strict: false }) as Record<string, unknown>;
 	const url = useMemo(() => parseReleasesSearch(raw), [raw]);
 	const navigate = useNavigate();
-	const query = useReleaseBoard();
+	const query = useReleaseBoard({ person: url.person });
 	const response = query.data;
 	const board = response?.board ?? null;
 	const stored = useReleasesUi((s) => s.layers);
@@ -54,10 +55,10 @@ export function ReleasesPage() {
 			hiddenBoards,
 			apps: url.apps,
 			focus: board ? (focusTrain(board, url.focus)?.id ?? null) : null,
-			me: url.me,
+			me: board ? viewingAs(board, url.person) !== null : false,
 			mobile: url.mobile,
 		}),
-		[layers, hiddenBoards, url.apps, url.focus, url.me, url.mobile, board],
+		[layers, hiddenBoards, url.apps, url.focus, url.person, url.mobile, board],
 	);
 
 	const setSearch = useCallback(
@@ -95,7 +96,7 @@ export function ReleasesPage() {
 				if (!board) return;
 				const r = locate(subject, board, view);
 				const patch: Partial<ReleasesSearch> = {};
-				if (r.notMine && url.me) patch.me = false;
+				if (r.notMine && url.person) patch.person = undefined;
 				if (r.notMobile && url.mobile) patch.mobile = false;
 				const nextLayers = { ...layers, ...Object.fromEntries(r.layers.map((k) => [k, true])) };
 				if (r.layers.some((k) => !layers[k])) {
@@ -131,7 +132,7 @@ export function ReleasesPage() {
 			url.hideBoards,
 			url.apps,
 			url.hotfixes,
-			url.me,
+			url.person,
 			url.mobile,
 			view,
 			board,
@@ -194,7 +195,8 @@ function Loaded({
 	fetchError: string | null;
 	updatedAt: number;
 }) {
-	const lens = useMemo(() => makeLens(board, url, hiddenBoards), [board, url, hiddenBoards]);
+	const readOnly = useReleasesReadOnly();
+	const lens = useMemo(() => makeLens(board, url, hiddenBoards, readOnly), [board, url, hiddenBoards, readOnly]);
 	const now = useNow(30_000);
 	const boardError = fetchError
 		? `${fetchError}; board last read ${Math.max(0, Math.round((now - updatedAt) / 60_000))}m ago`

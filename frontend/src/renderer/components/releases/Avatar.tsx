@@ -10,10 +10,11 @@ function initials(name: string): string {
 		.join("");
 }
 
-export function Avatar({ accountId, name, size = 22 }: { accountId: string; name: string; size?: number }) {
-	const src = hasTrustedApiBaseUrl()
-		? `${getApiBaseUrl()}/api/v1/release-trains/avatars/${encodeURIComponent(accountId)}`
-		: "";
+export function Avatar({ accountId, name, size = 22 }: { accountId?: string; name: string; size?: number }) {
+	const src =
+		accountId && hasTrustedApiBaseUrl()
+			? `${getApiBaseUrl()}/api/v1/release-trains/avatars/${encodeURIComponent(accountId)}`
+			: "";
 	const { url } = useObjectUrl(src);
 	const style = { width: size, height: size };
 	return url ? (

@@ -42,7 +42,7 @@ func TestACompareThePlanDroppedMidBackfillLeavesGitLabFresh(t *testing.T) {
 	}
 
 	board := svc.NewBoardService(svc.BoardDeps{Config: svc.NewConfigLoader(w.configPath), Store: w.store, Clock: func() time.Time { return w.now }})
-	body, _, err := board.Board(context.Background(), "")
+	body, _, err := board.Board(context.Background(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

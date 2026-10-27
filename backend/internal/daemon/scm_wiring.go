@@ -93,9 +93,11 @@ func gitlabHosts() []string {
 // gitlabTokenSource builds the GitLab token precedence used by daemon
 // wiring: an env override first, falling back to `glab auth status` for the
 // given host.
+const gitlabTokenEnv = "AO_GITLAB_TOKEN" //nolint:gosec // G101: the name of the variable, not a credential
+
 func gitlabTokenSource(host string) scmgitlab.TokenSource {
 	return scmgitlab.FallbackTokenSource{
-		scmgitlab.EnvTokenSource{EnvVars: []string{"AO_GITLAB_TOKEN"}},
+		scmgitlab.EnvTokenSource{EnvVars: []string{gitlabTokenEnv}},
 		&scmgitlab.GlabTokenSource{Host: host},
 	}
 }

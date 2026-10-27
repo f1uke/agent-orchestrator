@@ -17,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonmeta"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/releaseweb"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
 	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
 )
@@ -51,7 +52,7 @@ func NewRouterWithControl(cfg config.Config, log *slog.Logger, termMgr *terminal
 	// vector (chi deprecated it for this reason: GHSA-3fxj-6jh8-hvhx).
 	r.Use(requestLogger(log, deps.Telemetry))
 	r.Use(recoverTelemetry(log, deps.Telemetry))
-	r.Use(corsMiddleware(cfg.AllowedOrigins))
+	r.Use(corsMiddleware(cfg.AllowedOrigins, releaseWebPorts(cfg.DataDir)))
 
 	// JSON envelopes for unmatched routes / methods — chi's defaults are
 	// text/plain, which would break consumers that parse every response as
@@ -200,6 +201,15 @@ func mountTelemetry(r chi.Router, sink ports.EventSink) {
 		})
 		w.WriteHeader(http.StatusAccepted)
 	})
+}
+
+// releaseWebPorts reports whether a port is the release web's: its default port, or
+// the one its run.json names.
+func releaseWebPorts(dataDir string) func(port int) bool {
+	paths := releaseweb.Paths{Dir: releaseweb.DirFor(dataDir)}
+	return func(port int) bool {
+		return port == releaseweb.DefaultPort || port == releaseweb.RecordedPort(paths)
+	}
 }
 
 // localControlRequest reports whether a control request is a trusted local

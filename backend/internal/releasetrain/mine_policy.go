@@ -79,14 +79,14 @@ func (b *Board) ownerMine(s Subject) []MineReason {
 }
 
 func (b *Board) pendingApproverMine(s Subject) []MineReason {
-	id, known := b.Identity.(IdentityKnown)
+	m := meOf(b.Viewer, Snapshot{})
 	sv, ok := s.(SubjVersion)
-	if !known || !ok {
+	if m == nil || !ok {
 		return nil
 	}
 	if v := b.versionOf(sv.Train, sv.App); v != nil && v.Jira != nil {
 		for _, a := range v.Jira.Approvers {
-			if a.AccountID == id.JiraAccountID && a.Status != ApproverApproved {
+			if m.isJira(a.AccountID) && a.Status != ApproverApproved {
 				return []MineReason{{Why: MineApprover}}
 			}
 		}
@@ -146,12 +146,12 @@ func cardsMine(mine map[string]bool, keys []string) []MineReason {
 }
 
 func (b *Board) authoredMine(s SubjMR) []MineReason {
-	id, ok := b.Identity.(IdentityKnown)
-	if !ok {
+	m := meOf(b.Viewer, Snapshot{})
+	if m == nil {
 		return nil
 	}
 	for _, mr := range b.mrs[s.App] {
-		if mr.IID == s.IID && mr.AuthorUsername != "" && mr.AuthorUsername == id.GitLabUsername {
+		if mr.IID == s.IID && m.authored(mr) {
 			return []MineReason{{Why: MineMRAuthor, Ref: mrRef(mr)}}
 		}
 	}
