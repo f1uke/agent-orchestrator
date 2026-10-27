@@ -254,7 +254,7 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request, c client) {
 	ok, retryAfter := s.limiter.attempt(c.bucket, now, func() bool { return key.Matches(submitted) })
 	switch {
 	case retryAfter > 0:
-		s.access.record(now, c.ip, eventSigninLocked)
+		s.access.recordLocked(now, c)
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
 		s.keyPage(w, http.StatusTooManyRequests, msgLocked)
 		return

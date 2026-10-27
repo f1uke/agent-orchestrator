@@ -36,15 +36,15 @@ The web outlives the daemon. Restarting the app does not stop it.
 
 All files live in `~/.ao/release-web`. The directory is mode 0700.
 
-| File          | Content                                                                    |
-| ------------- | -------------------------------------------------------------------------- |
-| `key.json`    | The shared key, its generation and its creation time. Mode 0600.           |
-| `access.log`  | One JSON line per sign-in, failed sign-in, lockout, sign-out and rotation. |
-| `run.json`    | The pid, port and start time while the web runs.                           |
-| `status.json` | The signed-in session count while the web runs.                            |
-| `web.log`     | Output of a web started with `start`.                                      |
-| `db/`         | The web's own SQLite database.                                             |
-| `avatars/`    | Jira avatars the web downloaded.                                           |
+| File          | Content                                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `key.json`    | The shared key, its generation and its creation time. Mode 0600.                                                     |
+| `access.log`  | One JSON line per sign-in, failed sign-in, lockout, sign-out and rotation. `access.log.1` holds the previous 10 MiB. |
+| `run.json`    | The pid, port and start time while the web runs.                                                                     |
+| `status.json` | The signed-in session count while the web runs.                                                                      |
+| `web.log`     | Output of a web started with `start`.                                                                                |
+| `db/`         | The web's own SQLite database.                                                                                       |
+| `avatars/`    | Jira avatars the web downloaded.                                                                                     |
 
 Set `AO_RELEASE_WEB_DIR` to use another directory. Without it, the directory sits beside the AO data dir. A sandbox daemon with its own `AO_DATA_DIR` gets its own release web.
 
@@ -96,6 +96,7 @@ The web is written as if the internet reaches it.
 - The API is read-only. It serves the board and avatars. Any other method answers 403.
 - The board leaves out the paths of your config and people files and their error messages. It keeps their state: absent, invalid or fine.
 - `access.log` records the time, the client address and the event. It never records the key, a token, a form body or a query string.
+- `access.log` stays small under a flood. At 10 MiB it moves to `access.log.1`, which replaces the old one. While a client is locked out, the log writes its first refused attempt once per minute. A `signin_locked_repeated` line with a `count` stands for the rest.
 - The server refuses to listen on any address except `127.0.0.1`.
 
 ## Cost of two pollers

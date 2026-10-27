@@ -136,6 +136,7 @@ func Serve(ctx context.Context, o Options) error {
 		case <-tick.C:
 			sessions = srv.Sessions()
 			srv.writeStatus(o.Paths, sessions)
+			srv.access.flush(srv.now())
 		}
 	}
 }

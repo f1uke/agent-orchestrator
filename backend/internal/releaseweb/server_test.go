@@ -547,6 +547,73 @@ func TestSuccessfulSignInsAreLimitedPerClient(t *testing.T) {
 	}
 }
 
+func TestAFloodAgainstALockedSignInWritesOneLinePerClientPerMinute(t *testing.T) {
+	h := newHarness(t)
+	for range SigninFailuresPerClient {
+		h.signin("wrong")
+	}
+	for range 500 {
+		if res := h.signin(h.secret()); res.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("attempt while locked = %d, want 429", res.StatusCode)
+		}
+	}
+	count := func(ev accessEvent) (lines, total int) {
+		for _, l := range h.events() {
+			if l.IP == "198.51.100.7" && l.Event == ev {
+				lines++
+				total += max(l.Count, 1)
+			}
+		}
+		return lines, total
+	}
+	if lines, _ := count(eventSigninLocked); lines != 1 {
+		t.Fatalf("500 refused attempts in one minute wrote %d signin_locked lines, want 1", lines)
+	}
+
+	h.clock.Advance(LockedLogInterval)
+	h.signin(h.secret())
+	if lines, _ := count(eventSigninLocked); lines != 2 {
+		t.Errorf("a refused attempt a minute later wrote %d signin_locked lines in all, want 2", lines)
+	}
+	if _, total := count(eventSigninLockedRepeated); total != 499 {
+		t.Errorf("the repeats of the first minute count %d, want 499", total)
+	}
+
+	for range 7 {
+		h.signin(h.secret())
+	}
+	h.clock.Advance(LockedLogInterval)
+	h.srv.access.flush(h.clock.Now())
+	if _, total := count(eventSigninLockedRepeated); total != 499+7 {
+		t.Errorf("after the periodic flush the repeats count %d, want %d", total, 499+7)
+	}
+}
+
+func TestAccessLogRotatesAtItsCapAndKeepsOneOldFile(t *testing.T) {
+	h := newHarness(t)
+	const limit = 4 << 10
+	h.srv.access.limit = limit
+	for range 1000 {
+		h.do(http.MethodPost, "/auth/signout", nil)
+	}
+	for _, name := range []string{h.p.AccessLog(), h.p.AccessLog() + ".1"} {
+		st, err := os.Stat(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if st.Size() > limit || st.Mode().Perm() != 0o600 {
+			t.Errorf("%s is %d bytes mode %v, want at most %d and 0600", name, st.Size(), st.Mode().Perm(), limit)
+		}
+	}
+	if exists(h.p.AccessLog() + ".2") {
+		t.Error("rotation kept more than one old file")
+	}
+	h.signin("wrong")
+	if !h.hasEvent("198.51.100.7", eventSigninFailed) {
+		t.Error("the newest line is not in access.log")
+	}
+}
+
 func TestForwardedForCountsOnlyFromTheLocalProxy(t *testing.T) {
 	t.Run("internet peer cannot spread guesses over forged addresses", func(t *testing.T) {
 		h := newHarness(t)
