@@ -28,8 +28,14 @@ describe("Avatar", () => {
 	});
 
 	it("loads a cross-origin avatar through fetch into a blob URL, as the app's loopback daemon needs", async () => {
-		vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["x"], { type: "image/png" }))));
-		vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:app://renderer/1", revokeObjectURL: () => {} }));
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(new Blob(["x"], { type: "image/png" }))),
+		);
+		vi.stubGlobal(
+			"URL",
+			Object.assign(URL, { createObjectURL: () => "blob:app://renderer/1", revokeObjectURL: () => {} }),
+		);
 		setApiBaseUrl("http://127.0.0.1:3001");
 		const { container } = render(<Avatar accountId="557058:face" name="Ada Example" />);
 		await waitFor(() => expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:app://renderer/1"));
