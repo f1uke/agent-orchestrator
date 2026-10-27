@@ -91,7 +91,7 @@ func PlanTargetExecutor(put func(ctx context.Context, p rt.LlbPlan, ifVersion in
 
 // PlanFix plans hit's fix against the current Board; it writes nothing.
 func (s *BoardService) PlanFix(ctx context.Context, hit rt.HitID, choice string) (rt.FixPlan, error) {
-	c, err := s.current(ctx)
+	c, err := s.current(ctx, "")
 	if err != nil {
 		return rt.FixPlan{}, err
 	}
@@ -259,7 +259,7 @@ type ruleCell struct {
 // Board: no fired outcome lists it and the rule's cell for the hit's app (or
 // its one global cell) is not unknown, so a cold start supersedes nothing.
 func (s *BoardService) SupersedeFixes(ctx context.Context) error {
-	c, err := s.current(ctx)
+	c, err := s.current(ctx, "")
 	if err != nil || c.board == nil {
 		return err
 	}

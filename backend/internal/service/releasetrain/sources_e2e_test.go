@@ -233,7 +233,7 @@ func TestAPageOnlyCardRidesItsTrainEndToEnd(t *testing.T) {
 	w.settle()
 	cfg := svc.NewConfigLoader(w.configPath)
 	board := svc.NewBoardService(svc.BoardDeps{Config: cfg, Store: w.store, Clock: func() time.Time { return w.now }})
-	body, _, err := board.Board(context.Background(), "")
+	body, _, err := board.Board(context.Background(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

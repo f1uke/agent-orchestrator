@@ -52,7 +52,7 @@ func TestSprintRowsAndSprintBranchMembershipEndToEnd(t *testing.T) {
 	w := newSprintWorld(t)
 	w.settle()
 	board := svc.NewBoardService(svc.BoardDeps{Config: svc.NewConfigLoader(w.configPath), Store: w.store, Clock: func() time.Time { return w.now }})
-	body, _, err := board.Board(context.Background(), "")
+	body, _, err := board.Board(context.Background(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestBoardSprintsStoredByTheActiveOnlyDaemonAreRefetchedInTheFirstPassAfterT
 		w.pass()
 	}
 	board := svc.NewBoardService(svc.BoardDeps{Config: svc.NewConfigLoader(w.configPath), Store: w.store, Clock: func() time.Time { return w.now }})
-	body, _, err := board.Board(ctx, "")
+	body, _, err := board.Board(ctx, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

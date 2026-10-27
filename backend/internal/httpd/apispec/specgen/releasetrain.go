@@ -173,6 +173,7 @@ func init() {
 		"ReleasetrainBoard":                          "ReleaseTrainBoard",
 		"ReleasetrainBoardApp":                       "ReleaseTrainBoardApp",
 		"ReleasetrainBoardResponse":                  "ReleaseTrainBoardResponse",
+		"ReleasetrainPeopleReport":                   "ReleaseTrainPeopleReport",
 		"ReleasetrainCardUnit":                       "ReleaseTrainCardUnit",
 		"ReleasetrainCardEvidence":                   "ReleaseTrainCardEvidence",
 		"ReleasetrainFixVersionEvidence":             "ReleaseTrainFixVersionEvidence",

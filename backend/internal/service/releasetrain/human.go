@@ -37,7 +37,7 @@ func (s *BoardService) SetRule(ctx context.Context, id rt.RuleID, enabled *bool)
 // severity so the Board can tell when it changed or escalated. Hiding a hit
 // again replaces the hide with the hit as it is now.
 func (s *BoardService) Hide(ctx context.Context, id rt.HitID, reason string) (rt.Hide, error) {
-	c, err := s.current(ctx)
+	c, err := s.current(ctx, "")
 	if err != nil {
 		return rt.Hide{}, err
 	}
@@ -68,7 +68,7 @@ func (s *BoardService) Unhide(ctx context.Context, id rt.HitID) error {
 // UnhideStale removes every hide the current Board lists as no longer matching
 // and returns their ids.
 func (s *BoardService) UnhideStale(ctx context.Context) ([]rt.HitID, error) {
-	c, err := s.current(ctx)
+	c, err := s.current(ctx, "")
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (s *BoardService) UnhideStale(ctx context.Context) ([]rt.HitID, error) {
 // MarkNoMR marks a card on the current Board as needing no MR, or replaces
 // its mark. The mark lives in AO only.
 func (s *BoardService) MarkNoMR(ctx context.Context, key, note, by string) (rt.NoMRMark, error) {
-	c, err := s.current(ctx)
+	c, err := s.current(ctx, "")
 	if err != nil {
 		return rt.NoMRMark{}, err
 	}

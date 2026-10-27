@@ -2258,6 +2258,19 @@ paths:
   /api/v1/release-trains/board:
     get:
       operationId: getReleaseTrainBoard
+      parameters:
+      - description: 'Whose Mine the Board carries: a person id from board.people
+          (the GitLab username, or jira:<accountId> for a Jira-only person). The monitor''s
+          own person when absent; an id the Board does not list gives board.viewer.kind
+          unknown and no Mine.'
+        in: query
+        name: person
+        schema:
+          description: 'Whose Mine the Board carries: a person id from board.people
+            (the GitLab username, or jira:<accountId> for a Jira-only person). The
+            monitor''s own person when absent; an id the Board does not list gives
+            board.viewer.kind unknown and no Mine.'
+          type: string
       responses:
         "200":
           content:
@@ -2267,6 +2280,12 @@ paths:
           description: OK
         "304":
           description: Not Modified
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
         "500":
           content:
             application/json:
@@ -13563,8 +13582,11 @@ components:
           $ref: '#/components/schemas/ReleaseTrainBoard'
         config:
           $ref: '#/components/schemas/ReleaseTrainConfigReport'
+        people:
+          $ref: '#/components/schemas/ReleaseTrainPeopleReport'
       required:
       - config
+      - people
       type: object
     ReleaseTrainBucket:
       enum:
@@ -15223,6 +15245,23 @@ components:
       - keys
       - tasks
       - ticked
+      type: object
+    ReleaseTrainPeopleReport:
+      properties:
+        message:
+          description: Why the file is invalid, or what it is for when absent.
+          type: string
+        path:
+          type: string
+        state:
+          enum:
+          - absent
+          - invalid
+          - ok
+          type: string
+      required:
+      - state
+      - path
       type: object
     ReleaseTrainPerson:
       properties:

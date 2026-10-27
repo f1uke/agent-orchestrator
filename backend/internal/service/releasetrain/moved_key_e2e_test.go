@@ -53,7 +53,7 @@ func (w *world) board() movedBoard {
 		w.now = w.now.Add(svc.Tick)
 	}
 	board := svc.NewBoardService(svc.BoardDeps{Config: svc.NewConfigLoader(w.configPath), Store: w.store, Clock: func() time.Time { return w.now }})
-	body, _, err := board.Board(context.Background(), "")
+	body, _, err := board.Board(context.Background(), "", "")
 	if err != nil {
 		w.t.Fatal(err)
 	}

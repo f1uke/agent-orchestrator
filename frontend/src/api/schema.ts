@@ -4765,6 +4765,7 @@ export interface components {
         ReleaseTrainBoardResponse: {
             board?: components["schemas"]["ReleaseTrainBoard"];
             config: components["schemas"]["ReleaseTrainConfigReport"];
+            people: components["schemas"]["ReleaseTrainPeopleReport"];
         };
         /** @enum {string} */
         ReleaseTrainBucket: "badge" | "history" | "hidden";
@@ -5411,6 +5412,13 @@ export interface components {
             ticked: number;
             title: string;
             url: string;
+        };
+        ReleaseTrainPeopleReport: {
+            /** @description Why the file is invalid, or what it is for when absent. */
+            message?: string;
+            path: string;
+            /** @enum {string} */
+            state: "absent" | "invalid" | "ok";
         };
         ReleaseTrainPerson: {
             accountId: string;
@@ -9945,7 +9953,10 @@ export interface operations {
     };
     getReleaseTrainBoard: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whose Mine the Board carries: a person id from board.people (the GitLab username, or jira:<accountId> for a Jira-only person). The monitor's own person when absent; an id the Board does not list gives board.viewer.kind unknown and no Mine. */
+                person?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9967,6 +9978,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
             };
             /** @description Internal Server Error */
             500: {
