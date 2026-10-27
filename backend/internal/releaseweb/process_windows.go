@@ -4,16 +4,10 @@ package releaseweb
 
 import (
 	"os"
-	"os/exec"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
 )
-
-func detach(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
-}
 
 // terminate has no SIGTERM to send on Windows, so it ends the process outright.
 func terminate(pid int) error { return kill(pid) }

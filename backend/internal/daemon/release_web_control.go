@@ -41,27 +41,31 @@ func (c *ReleaseWebControl) Status(context.Context) (releaseweb.Status, error) {
 	return releaseweb.ReadStatus(c.Paths), nil
 }
 
-// EnsureKey creates the first key when none exists and reports whether it did.
-// A key file that exists but is unusable is an error, never overwritten.
-func (c *ReleaseWebControl) EnsureKey() (created bool, err error) {
-	_, err = releaseweb.ReadKey(c.Paths)
-	if !errors.Is(err, releaseweb.ErrNoKey) {
-		return false, err
-	}
-	return true, releaseweb.RotateKey(c.Paths)
-}
-
 // Start creates a key if none exists, then starts the web detached, or reports
 // the one already running.
-func (c *ReleaseWebControl) Start(context.Context) (releaseweb.Status, error) {
-	if _, err := c.EnsureKey(); err != nil {
-		return releaseweb.Status{}, err
+func (c *ReleaseWebControl) Start(ctx context.Context) (releaseweb.Status, error) {
+	st, _, err := c.StartReportingKey(ctx)
+	return st, err
+}
+
+// StartReportingKey is Start, and also reports whether it created the key,
+// which it does even when the start then fails. A key file that exists but is
+// unusable is an error, never overwritten.
+func (c *ReleaseWebControl) StartReportingKey(context.Context) (st releaseweb.Status, keyCreated bool, err error) {
+	if _, err := releaseweb.ReadKey(c.Paths); errors.Is(err, releaseweb.ErrNoKey) {
+		if err := releaseweb.RotateKey(c.Paths); err != nil {
+			return releaseweb.Status{}, false, err
+		}
+		keyCreated = true
+	} else if err != nil {
+		return releaseweb.Status{}, false, err
 	}
 	exe, err := c.Executable()
 	if err != nil {
-		return releaseweb.Status{}, fmt.Errorf("release web: find the ao binary: %w", err)
+		return releaseweb.Status{}, keyCreated, fmt.Errorf("release web: find the ao binary: %w", err)
 	}
-	return releaseweb.Start(c.Paths, exe, []string{"release-web", "serve"})
+	st, err = releaseweb.Start(c.Paths, exe, []string{"release-web", "serve"})
+	return st, keyCreated, err
 }
 
 // Stop ends the web if it runs and reports the status afterwards.

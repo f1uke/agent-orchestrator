@@ -96,14 +96,10 @@ func newReleaseWebStartCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			created, err := control.EnsureKey()
-			if err != nil {
-				return err
-			}
+			st, created, err := control.StartReportingKey(cmd.Context())
 			if created {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created a key at %s; copy-key puts it on the clipboard\n", control.Paths.KeyFile())
 			}
-			st, err := control.Start(cmd.Context())
 			if err != nil {
 				return err
 			}

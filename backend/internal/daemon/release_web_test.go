@@ -248,6 +248,22 @@ func TestReleaseWebControlStartCreatesAKeyBeforeSpawning(t *testing.T) {
 	if !st.KeyPresent || st.KeyGeneration != 1 || st.Running {
 		t.Fatalf("status after a failed start = %+v", st)
 	}
+	if _, created, _ := c.StartReportingKey(context.Background()); created {
+		t.Error("a second start reported creating a key")
+	}
+	if st, _ := c.Status(context.Background()); st.KeyGeneration != 1 {
+		t.Errorf("a second start replaced the key: generation %d", st.KeyGeneration)
+	}
+
+	if err := os.WriteFile(c.Paths.KeyFile(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := c.StartReportingKey(context.Background()); err == nil || created {
+		t.Errorf("start with an unusable key file = created %v, err %v; want an error", created, err)
+	}
+	if b, _ := os.ReadFile(c.Paths.KeyFile()); string(b) != "{not json" {
+		t.Error("start overwrote an unusable key file")
+	}
 }
 
 func TestReleaseWebControlRotateAndStopWithoutAServer(t *testing.T) {

@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// detach puts the child in its own session so it outlives the terminal and the
-// command that started it.
-func detach(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
-
 func terminate(pid int) error { return syscall.Kill(pid, syscall.SIGTERM) }
 
 func kill(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }

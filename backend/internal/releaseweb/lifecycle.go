@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/fsatomic"
+	"github.com/aoagents/agent-orchestrator/backend/internal/process"
 	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
 )
 
@@ -263,7 +264,7 @@ func Start(p Paths, exe string, args []string) (Status, error) {
 	defer func() { _ = logf.Close() }()
 	cmd := exec.Command(exe, args...) //nolint:gosec // G204: exe is the caller's own binary
 	cmd.Stdout, cmd.Stderr = logf, logf
-	detach(cmd)
+	process.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return Status{}, fmt.Errorf("release web: start: %w", err)
 	}
