@@ -23,11 +23,10 @@ import (
 var webFixtureAt = time.Date(2026, 10, 15, 3, 0, 0, 0, time.UTC)
 
 func quietLogger(buf *bytes.Buffer) *slog.Logger {
-	var w io.Writer = io.Discard
-	if buf != nil {
-		w = buf
+	if buf == nil {
+		return slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return slog.New(slog.NewTextHandler(w, nil))
+	return slog.New(slog.NewTextHandler(buf, nil))
 }
 
 // appDBWithHumanState builds a stand-in for the app's ao.db holding one plan
