@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -23,6 +24,10 @@ const (
 
 // ErrNoKey means key.json does not exist yet.
 var ErrNoKey = errors.New("release web: no key yet; rotate the key first")
+
+// ErrNoClipboard means this machine has no clipboard command to copy the key
+// to; the key file is the way to read it.
+var ErrNoClipboard = errors.New("release web: no clipboard command on this OS; read the key file instead")
 
 var keyEncoding = base64.RawURLEncoding.Strict()
 
@@ -70,25 +75,47 @@ func (k Key) MarshalJSON() ([]byte, error) {
 // padding or that decodes to fewer than 16 bytes; its errors never echo the
 // value.
 func ReadKey(p Paths) (Key, error) {
+	f, err := readKeyFile(p)
+	if err != nil {
+		return Key{}, err
+	}
+	return Key{digest: sha256.Sum256([]byte(f.Key)), Generation: f.Generation}, nil
+}
+
+// CopyKey writes the raw key to w with no newline, so a caller can hand it to
+// a clipboard without ever holding it as a string. The same checks as ReadKey
+// apply.
+func CopyKey(p Paths, w io.Writer) error {
+	f, err := readKeyFile(p)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, f.Key); err != nil {
+		return fmt.Errorf("release web: write key: %w", err)
+	}
+	return nil
+}
+
+func readKeyFile(p Paths) (keyFile, error) {
 	b, err := os.ReadFile(p.KeyFile())
 	if errors.Is(err, os.ErrNotExist) {
-		return Key{}, ErrNoKey
+		return keyFile{}, ErrNoKey
 	}
 	if err != nil {
-		return Key{}, fmt.Errorf("release web: read key file: %w", err)
+		return keyFile{}, fmt.Errorf("release web: read key file: %w", err)
 	}
 	var f keyFile
 	if err := json.Unmarshal(b, &f); err != nil {
-		return Key{}, fmt.Errorf("release web: %s is not valid JSON", p.KeyFile())
+		return keyFile{}, fmt.Errorf("release web: %s is not valid JSON", p.KeyFile())
 	}
 	raw, err := keyEncoding.DecodeString(f.Key)
 	if err != nil {
-		return Key{}, fmt.Errorf("release web: the key in %s is not base64url without padding", p.KeyFile())
+		return keyFile{}, fmt.Errorf("release web: the key in %s is not base64url without padding", p.KeyFile())
 	}
 	if len(raw) < minKeyBytes {
-		return Key{}, fmt.Errorf("release web: the key in %s decodes to %d bytes, need at least %d", p.KeyFile(), len(raw), minKeyBytes)
+		return keyFile{}, fmt.Errorf("release web: the key in %s decodes to %d bytes, need at least %d", p.KeyFile(), len(raw), minKeyBytes)
 	}
-	return Key{digest: sha256.Sum256([]byte(f.Key)), Generation: f.Generation}, nil
+	return f, nil
 }
 
 // RotateKey writes a fresh random key with the next generation. A running

@@ -1,0 +1,214 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os/signal"
+	"syscall"
+
+	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/daemon"
+	"github.com/aoagents/agent-orchestrator/backend/internal/releaseweb"
+)
+
+func newReleaseWebCommand(ctx *commandContext) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "release-web",
+		Short: "Run the read-only team web of the release trains",
+		Long: "The team web shows the Release Train board to your team behind one shared key. " +
+			"It runs as its own program, listens on 127.0.0.1 only, and never writes the board. " +
+			"Putting it on the internet (Tailscale Funnel) is your step; ao never runs tailscale. " +
+			"The key is never printed: copy-key puts it on the clipboard, and key.json holds it.",
+	}
+	cmd.AddCommand(newReleaseWebServeCommand(ctx), newReleaseWebStartCommand(ctx), newReleaseWebStopCommand(ctx),
+		newReleaseWebStatusCommand(ctx), newReleaseWebRotateKeyCommand(ctx), newReleaseWebCopyKeyCommand(ctx))
+	return cmd
+}
+
+// releaseWebControl resolves the data dir the way the daemon does, so the CLI
+// and the daemon's routes act on the same release web.
+func (c *commandContext) releaseWebControl() (cfg config.Config, control *daemon.ReleaseWebControl, err error) {
+	cfg, err = config.Load()
+	if err != nil {
+		return config.Config{}, nil, err
+	}
+	control = daemon.NewReleaseWebControl(cfg.DataDir)
+	control.Executable = c.deps.Executable
+	return cfg, control, nil
+}
+
+func newReleaseWebServeCommand(ctx *commandContext) *cobra.Command {
+	var port int
+	var assets string
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Serve the team web in the foreground on 127.0.0.1",
+		Long: "Serves the team web until interrupted. It needs a key: run rotate-key first. " +
+			"Use start to run it in the background instead.",
+		Args: exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, _, err := ctx.releaseWebControl()
+			if err != nil {
+				return err
+			}
+			if port < 1 || port > 65535 {
+				return usageError{fmt.Errorf("--port %d is not a port", port)}
+			}
+			dir, err := daemon.ResolveReleaseWebAssets(assets, ctx.deps.Executable)
+			if err != nil {
+				return err
+			}
+			run, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "release web: serving %s on 127.0.0.1:%d\n", dir, port)
+			return daemon.RunReleaseWeb(run, daemon.ReleaseWebOptions{
+				DataDir:   cfg.DataDir,
+				Port:      port,
+				AssetsDir: dir,
+				Logger:    slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil)),
+			})
+		},
+	}
+	cmd.Flags().IntVar(&port, "port", releaseweb.DefaultPort, "Port to listen on, on 127.0.0.1")
+	cmd.Flags().StringVar(&assets, "assets", "", "Directory of the web bundle (default $"+daemon.ReleaseWebAssetsEnv+", else release-web/ beside the ao binary)")
+	return cmd
+}
+
+func newReleaseWebStartCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "start",
+		Short: "Start the team web in the background, creating a key if there is none",
+		Args:  exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, control, err := ctx.releaseWebControl()
+			if err != nil {
+				return err
+			}
+			created, err := control.EnsureKey()
+			if err != nil {
+				return err
+			}
+			if created {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created a key at %s; copy-key puts it on the clipboard\n", control.Paths.KeyFile())
+			}
+			st, err := control.Start(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return writeReleaseWebStatus(cmd.OutOrStdout(), control.Paths, st)
+		},
+	}
+}
+
+func newReleaseWebStopCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the team web",
+		Args:  exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, control, err := ctx.releaseWebControl()
+			if err != nil {
+				return err
+			}
+			if _, err := control.Stop(cmd.Context()); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "release web: stopped")
+			return err
+		},
+	}
+}
+
+func newReleaseWebStatusCommand(ctx *commandContext) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show whether the team web runs, its address, signed-in sessions and key generation",
+		Args:  exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, control, err := ctx.releaseWebControl()
+			if err != nil {
+				return err
+			}
+			st, err := control.Status(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return writeJSON(cmd.OutOrStdout(), st)
+			}
+			return writeReleaseWebStatus(cmd.OutOrStdout(), control.Paths, st)
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Print the status as JSON")
+	return cmd
+}
+
+func newReleaseWebRotateKeyCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rotate-key",
+		Short: "Replace the shared key and sign everyone out",
+		Args:  exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, control, err := ctx.releaseWebControl()
+			if err != nil {
+				return err
+			}
+			st, err := control.RotateKey(cmd.Context())
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "rotated the key: generation %d\nkey file: %s\neveryone is signed out; share the new key with copy-key\n",
+				st.KeyGeneration, control.Paths.KeyFile())
+			return err
+		},
+	}
+}
+
+func newReleaseWebCopyKeyCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "copy-key",
+		Short: "Put the shared key on the clipboard without printing it",
+		Args:  exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, control, err := ctx.releaseWebControl()
+			if err != nil {
+				return err
+			}
+			if err := control.CopyKey(cmd.Context()); err != nil {
+				if errors.Is(err, releaseweb.ErrNoClipboard) {
+					return fmt.Errorf("%w: %s", err, control.Paths.KeyFile())
+				}
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "copied the key to the clipboard")
+			return err
+		},
+	}
+}
+
+func writeReleaseWebStatus(w io.Writer, p releaseweb.Paths, st releaseweb.Status) error {
+	state := "stopped"
+	if st.Running {
+		state = "running"
+	}
+	_, err := fmt.Fprintf(w, "release web: %s\n", state)
+	if err != nil {
+		return err
+	}
+	if st.Running {
+		if _, err = fmt.Fprintf(w, "url: %s\npid: %d\nsessions: %d\n", st.URL, st.PID, st.Sessions); err != nil {
+			return err
+		}
+	}
+	if st.KeyPresent {
+		_, err = fmt.Fprintf(w, "key: generation %d (%s)\n", st.KeyGeneration, p.KeyFile())
+	} else {
+		_, err = fmt.Fprintf(w, "key: none yet; start or rotate-key creates one (%s)\n", p.KeyFile())
+	}
+	return err
+}

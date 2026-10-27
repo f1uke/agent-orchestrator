@@ -16,16 +16,15 @@ type Paths struct {
 	Dir string
 }
 
-// DefaultDir is $AO_RELEASE_WEB_DIR, else ~/.ao/release-web.
-func DefaultDir() (string, error) {
+// DirFor is $AO_RELEASE_WEB_DIR, else the release-web directory beside the AO
+// data dir. The default data dir is ~/.ao/data, so the default is
+// ~/.ao/release-web, and a sandbox daemon with its own AO_DATA_DIR gets its own
+// release web instead of sharing the real one.
+func DirFor(dataDir string) string {
 	if d := os.Getenv("AO_RELEASE_WEB_DIR"); d != "" {
-		return d, nil
+		return d
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("release web: resolve home dir: %w", err)
-	}
-	return filepath.Join(home, ".ao", "release-web"), nil
+	return filepath.Join(filepath.Dir(dataDir), "release-web")
 }
 
 // Ensure creates Dir with 0700, and tightens it to 0700 when it already exists:

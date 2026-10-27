@@ -4,6 +4,7 @@ import {
 	CodeXml,
 	FolderGit2,
 	GitBranch,
+	Globe,
 	Inbox,
 	Laptop,
 	MessagesSquare,
@@ -121,6 +122,14 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		hint: "the app itself, not the agents",
 		keywords:
 			"updates automatic channel stable nightly version check install restart wiki vault obsidian notes knowledge base folder path tasks links jira gitlab merge request mr repo alias default repo qa evidence google drive rclone testiny upload screenshot recording notifications test banner companion desktop pet overlay procs library creature species migration import legacy",
+	},
+	{
+		key: "team-web",
+		label: "Team web",
+		Icon: Globe,
+		hint: "a read-only copy of the Release Train board for your team",
+		keywords:
+			"team web release train board share public internet tailscale funnel shared key copy rotate sign in signed in sessions read-only localhost 127.0.0.1 port release-web",
 	},
 ];
 
