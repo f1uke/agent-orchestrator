@@ -23,6 +23,10 @@ import {
 	stackTop,
 } from "./sprint";
 import { timeline, DW } from "./layout";
+import type { Who } from "./who";
+
+const ME: Who = { self: true, name: "Ada Example" };
+const BEN: Who = { self: false, name: "Ben Sample" };
 import { board, train, version } from "./testkit";
 import type { Route, SprintCard, SprintMR, SprintRow } from "./types";
 
@@ -323,8 +327,29 @@ describe("MR family pills", () => {
 
 describe("mineText", () => {
 	it("says why something is mine in a few words", () => {
-		expect(mineText([{ why: "assignee" }, { why: "mr_author", ref: "!12" }, { why: "subtask", ref: "DEMO-9" }])).toBe(
-			"assignee · your MR !12 · subtask DEMO-9",
+		const why: Parameters<typeof mineText>[0] = [
+			{ why: "assignee" },
+			{ why: "mr_author", ref: "!12" },
+			{ why: "subtask", ref: "DEMO-9" },
+		];
+		expect(mineText(why, ME)).toBe("assignee · your MR !12 · subtask DEMO-9");
+		expect(mineText(why, BEN)).toBe("assignee · Ben Sample's MR !12 · subtask DEMO-9");
+	});
+
+	it("names the person in every reason that says whose it is, and never says you for another person", () => {
+		const every: Parameters<typeof mineText>[0] = [
+			{ why: "mr_author", ref: "!1" },
+			{ why: "release_mr_author", ref: "!2" },
+			{ why: "release_ticket_assignee" },
+			{ why: "card", ref: "DEMO-1" },
+			{ why: "landing_author", ref: "!3" },
+			{ why: "no_mr" },
+		];
+		expect(mineText(every, ME)).toBe(
+			"your MR !1 · your release MR !2 · release ticket · your card DEMO-1 · your landing MR !3 · marked No MR needed",
+		);
+		expect(mineText(every, BEN)).toBe(
+			"Ben Sample's MR !1 · Ben Sample's release MR !2 · release ticket · Ben Sample's card DEMO-1 · Ben Sample's landing MR !3 · marked No MR needed",
 		);
 	});
 
@@ -341,12 +366,13 @@ describe("mineText", () => {
 			},
 			mine: [{ why: "release_mr_author", ref: "!7" }, { why: "approver" }],
 		});
-		expect(versionMineText(v, me)).toBe("your release MR !7 · approved");
+		expect(versionMineText(v, me, ME)).toBe("your release MR !7 · approved");
+		expect(versionMineText(v, me, BEN)).toBe("Ben Sample's release MR !7 · approved");
 		const pending = {
 			...v,
 			jira: { ...v.jira!, approvers: [{ accountId: "acc-dee", name: "Dee", status: "PENDING" }] },
 		};
-		expect(versionMineText(pending, me)).toBe("your release MR !7 · approver, pending");
+		expect(versionMineText(pending, me, ME)).toBe("your release MR !7 · approver, pending");
 	});
 });
 
@@ -381,9 +407,9 @@ describe("cards marked No MR needed", () => {
 		expect(destLabel(b, { kind: "nomr" })).toBe("∅ no code");
 	});
 
-	it("say marked by you under Only me", () => {
-		expect(mineText([{ why: "no_mr" }])).toBe("marked by you");
-		expect(mineText([{ why: "assignee" }, { why: "no_mr" }])).toBe("assignee · marked by you");
+	it("say a No MR needed mark without claiming who made it, under Only me", () => {
+		expect(mineText([{ why: "no_mr" }], ME)).toBe("marked No MR needed");
+		expect(mineText([{ why: "assignee" }, { why: "no_mr" }], BEN)).toBe("assignee · marked No MR needed");
 	});
 });
 
@@ -457,8 +483,8 @@ describe("card count text", () => {
 	const mobile = (n: number) => Array.from({ length: n }, (_, i) => card(`DEMO-${i + 1}`));
 	const web = (n: number) =>
 		Array.from({ length: n }, (_, i) => card(`DEMO-${i + 90}`, [], { mobile: false, active: false, activeWhy: [] }));
-	const count = (cardsOn: SprintCard[], opts: { me?: boolean; mobile?: boolean } = {}) =>
-		cardCount(cardsOn, { me: opts.me ?? false, mobile: opts.mobile ?? false });
+	const count = (cardsOn: SprintCard[], opts: { scope?: Who; mobile?: boolean } = {}) =>
+		cardCount(cardsOn, { scope: opts.scope ?? null, mobile: opts.mobile ?? false });
 
 	it("says N cards and a muted M mobile when some cards are not mobile", () => {
 		expect(count([...mobile(4), ...web(3)])).toEqual({ text: "7 cards", sub: "4 mobile" });
@@ -480,16 +506,22 @@ describe("card count text", () => {
 	});
 
 	it("keeps of mine under Only me, with no mobile wording", () => {
-		expect(count(mobile(2), { me: true })).toEqual({ text: "2 cards of mine", sub: null });
-		expect(count(mobile(1), { me: true, mobile: true })).toEqual({ text: "1 card of mine", sub: null });
-		expect(count([], { me: true })).toEqual({ text: "0 cards of mine", sub: null });
+		expect(count(mobile(2), { scope: ME })).toEqual({ text: "2 cards of mine", sub: null });
+		expect(count(mobile(1), { scope: ME, mobile: true })).toEqual({ text: "1 card of mine", sub: null });
+		expect(count([], { scope: ME })).toEqual({ text: "0 cards of mine", sub: null });
+	});
+
+	it("names another person instead of saying mine", () => {
+		expect(count(mobile(2), { scope: BEN })).toEqual({ text: "2 cards of Ben Sample's", sub: null });
+		expect(count([], { scope: BEN, mobile: true })).toEqual({ text: "0 cards of Ben Sample's", sub: null });
 	});
 
 	it("names the left label by what is missing", () => {
-		expect(emptyCountText([], { me: false, mobile: false })).toBe("no cards");
-		expect(emptyCountText([], { me: false, mobile: true })).toBe("no mobile cards");
-		expect(emptyCountText(web(2), { me: false, mobile: false })).toBe("no mobile cards");
-		expect(emptyCountText([], { me: true, mobile: false })).toBe("nothing of mine");
+		expect(emptyCountText([], { scope: null, mobile: false })).toBe("no cards");
+		expect(emptyCountText([], { scope: null, mobile: true })).toBe("no mobile cards");
+		expect(emptyCountText(web(2), { scope: null, mobile: false })).toBe("no mobile cards");
+		expect(emptyCountText([], { scope: ME, mobile: false })).toBe("nothing of mine");
+		expect(emptyCountText([], { scope: BEN, mobile: false })).toBe("nothing of Ben Sample's");
 	});
 });
 

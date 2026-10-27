@@ -6,8 +6,13 @@ export const SEARCH_FROM = 8;
 
 export type PickerPeople = { self: BoardPerson | null; others: BoardPerson[] };
 
-/** The monitor's own person leads, then everyone else by name, the way the API sorts them. */
-export function pickerPeople(people: readonly BoardPerson[]): PickerPeople {
+/**
+ * The monitor's own person leads as "Me", then everyone else by name, the way the API sorts them.
+ * A read-only host has no "Me": every teammate reads through the host's tokens, so its own person is
+ * one more name in the list.
+ */
+export function pickerPeople(people: readonly BoardPerson[], readOnly = false): PickerPeople {
+	if (readOnly) return { self: null, others: [...people].sort((a, b) => a.name.localeCompare(b.name)) };
 	const self = people.find((p) => p.self) ?? null;
 	return { self, others: people.filter((p) => p !== self) };
 }
@@ -27,11 +32,17 @@ export const MATCH_TAG: Readonly<Partial<Record<BoardPerson["match"], string>>> 
 
 export const MATCH_HINT: Readonly<Record<BoardPerson["match"], string>> = {
 	linked: "Jira and GitLab accounts joined by the people file",
-	self: "Your own Jira and GitLab accounts",
+	self: "The monitor's own Jira and GitLab accounts",
 	name: "Jira and GitLab accounts joined by the same display name",
 	jira_only: "Only the Jira account is known, so MRs by this person are not counted",
 	gitlab_only: "Only the GitLab user is known, so cards assigned to this person are not counted",
 };
+
+export function matchHint(person: BoardPerson, readOnly: boolean): string {
+	return readOnly && person.match === "self"
+		? "The Jira and GitLab accounts this page reads with"
+		: MATCH_HINT[person.match];
+}
 
 export type ViewAsState =
 	{ kind: "everyone" } | { kind: "person"; person: BoardPerson } | { kind: "unknown"; id: string; reason: string };

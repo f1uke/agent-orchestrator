@@ -13,11 +13,13 @@ import {
 	type Provenance,
 } from "../../lib/releases/sources";
 import { mineText } from "../../lib/releases/sprint";
+import { viewerLabel } from "../../lib/releases/who";
 import type { Board, BoardPerson, CardUnit, MineReason, Person } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Avatar } from "./Avatar";
 import { Unfold } from "./ReleaseMotion";
+import { useReleasesReadOnly } from "./ReleasesCapabilities";
 import type { PageActions } from "./ReleasesPage";
 import { SourceCell, SourceTag, SourceValue } from "./Sources";
 import { NoMrButton } from "./NoMr";
@@ -53,8 +55,10 @@ export function JiraKey({ k, url }: { k: string; url?: string }) {
 }
 
 export function MineFace({ face, mine }: { face: BoardPerson | null; mine?: readonly MineReason[] }) {
+	const readOnly = useReleasesReadOnly();
 	if (!face || !mine?.length) return <span />;
-	const why = `${face.self ? "Yours" : `${face.name}'s`}: ${mineText(mine)}`;
+	const who = viewerLabel(face, readOnly);
+	const why = `${who.self ? "Yours" : who.name}: ${mineText(mine, who)}`;
 	return (
 		<span className="mecell" title={why} aria-label={why} data-testid="mine-face">
 			<Avatar accountId={face.jiraAccountId} name={face.name} size={18} />

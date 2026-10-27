@@ -287,7 +287,7 @@ function AppRow({
 						width={tl.width}
 						height={llbH + L.lanesH + 8}
 						barOf={(t) => barSpot(L, tl, llbH, t)}
-						mine={lens.me}
+						scope={lens.scope}
 						actions={actions}
 					/>
 				)}
