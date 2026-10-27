@@ -26,3 +26,12 @@ if (result.error) {
 if (result.status !== 0) {
 	process.exit(result.status ?? 1);
 }
+
+// The team web's page ships beside the binary: `ao release-web serve` finds it at <exe dir>/release-web.
+const web = spawnSync("npx", ["vite", "build", "--config", "vite.release-web.config.ts"], {
+	cwd: frontendRoot,
+	stdio: "inherit",
+	env: { ...process.env, RELEASE_WEB_OUT_DIR: join(outDir, "release-web") },
+	shell: process.platform === "win32",
+});
+if (web.status !== 0) process.exit(web.status ?? 1);
