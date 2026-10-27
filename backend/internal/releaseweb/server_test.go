@@ -555,6 +555,8 @@ func TestSignInRefusesCrossSitePostsAndOversizedBodies(t *testing.T) {
 		{"null origin", []reqOpt{header("Origin", "null")}, http.StatusForbidden},
 		{"forwarded host from an internet peer", []reqOpt{header("Origin", "https://box.tail.ts.net"), header("X-Forwarded-Host", "box.tail.ts.net")}, http.StatusForbidden},
 		{"same origin", []reqOpt{header("Origin", "http://example.com"), header("Sec-Fetch-Site", "same-origin")}, http.StatusSeeOther},
+		{"browser form under no-referrer", []reqOpt{header("Origin", "null"), header("Sec-Fetch-Site", "same-origin")}, http.StatusSeeOther},
+		{"null origin from another site", []reqOpt{header("Origin", "null"), header("Sec-Fetch-Site", "cross-site")}, http.StatusForbidden},
 		{"funnel forwarded host", []reqOpt{from(loopbackPeer), header("Origin", "https://box.tail.ts.net"), header("X-Forwarded-Host", "box.tail.ts.net")}, http.StatusSeeOther},
 	}
 	for _, tc := range cases {

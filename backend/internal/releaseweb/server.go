@@ -206,11 +206,15 @@ func (s *Server) auth(w http.ResponseWriter, r *http.Request, c client, p string
 	s.signin(w, r, c)
 }
 
-// sameOrigin refuses a cross-site form post. Funnel may rewrite Host to the
-// loopback address, so a loopback peer's X-Forwarded-Host also counts.
+// sameOrigin refuses a cross-site form post. A browser's Sec-Fetch-Site
+// settles it: under Referrer-Policy no-referrer the same browser sends
+// "Origin: null" on its own form post. Without it, Funnel may rewrite Host to
+// the loopback address, so a loopback peer's X-Forwarded-Host also counts.
 func sameOrigin(r *http.Request, c client) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
-	case "", "same-origin", "none":
+	case "same-origin", "none":
+		return true
+	case "":
 	default:
 		return false
 	}
