@@ -135,3 +135,21 @@ func TestKeyNeverPrintsItsSecret(t *testing.T) {
 		}
 	}
 }
+
+func TestCopyKeyWritesTheRawKeyAndRefusesAMissingOne(t *testing.T) {
+	p := Paths{Dir: t.TempDir() + "/web"}
+	var none strings.Builder
+	if err := CopyKey(p, &none); !errors.Is(err, ErrNoKey) || none.Len() != 0 {
+		t.Fatalf("CopyKey without a key = %v, wrote %d bytes", err, none.Len())
+	}
+	if err := RotateKey(p); err != nil {
+		t.Fatal(err)
+	}
+	var got strings.Builder
+	if err := CopyKey(p, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != secretOf(t, p) {
+		t.Fatal("CopyKey did not write the key file's key")
+	}
+}
