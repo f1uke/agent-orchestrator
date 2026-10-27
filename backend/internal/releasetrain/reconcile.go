@@ -40,7 +40,7 @@ func Reconcile(in Inputs, env Env) Board {
 	b.mrs, b.moved = mrsByApp(in.Config, in.Snap), movedKeys(in.Snap)
 	b.Identity = identityOf(in.Snap)
 	b.People = buildPeople(seenOnBoard(&b, mrs, in.Snap, in.Config), in.Links, b.Identity, in.Snap)
-	b.Viewer = viewerOf(b.People, b.Identity, in.Viewer)
+	b.Viewer = ViewerOf(b.People, b.Identity, in.Viewer)
 	mine(&b, meOf(b.Viewer, in.Snap), mrs, in.Snap, in.Config)
 	b.Alerts = alerts(&b, in, rs)
 	b.Catalogue = catalogue(in.Human.RuleSettings)

@@ -26,6 +26,8 @@ const (
 	maxSigninBody = 4 << 10
 	// avatarCacheSeconds matches the daemon's avatar route.
 	avatarCacheSeconds = 24 * 60 * 60
+	// maxPersonBytes bounds the board's person query, as the daemon's board route does.
+	maxPersonBytes = 256
 )
 
 // BoardSource is what the release web reads the board from.
@@ -330,7 +332,12 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, c client, p string)
 }
 
 func (s *Server) serveBoard(w http.ResponseWriter, r *http.Request) {
-	body, etag, err := s.board.Board(r.Context(), r.Header.Get("If-None-Match"), r.URL.Query().Get("person"))
+	person := r.URL.Query().Get("person")
+	if len(person) > maxPersonBytes {
+		writeJSON(w, http.StatusBadRequest, errorBadRequest)
+		return
+	}
+	body, etag, err := s.board.Board(r.Context(), r.Header.Get("If-None-Match"), person)
 	switch {
 	case errors.Is(err, rtsvc.ErrNotModified):
 		w.Header().Set("ETag", etag)

@@ -310,6 +310,22 @@ func TestSignInGrantsTheBoardAndAssets(t *testing.T) {
 	}
 }
 
+func TestBoardRefusesAPersonLongerThan256Bytes(t *testing.T) {
+	h := newHarness(t)
+	c := h.session()
+	res := h.do(http.MethodGet, "/api/v1/release-trains/board?person="+strings.Repeat("a", maxPersonBytes), nil, withCookie(c))
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("a %d-byte person = %d, want 200", maxPersonBytes, res.StatusCode)
+	}
+	res = h.do(http.MethodGet, "/api/v1/release-trains/board?person="+strings.Repeat("a", maxPersonBytes+1), nil, withCookie(c))
+	if body := bodyOf(t, res); res.StatusCode != http.StatusBadRequest || body != errorBadRequest {
+		t.Errorf("a %d-byte person = %d %q, want 400 bad_request", maxPersonBytes+1, res.StatusCode, body)
+	}
+	if got := h.board.persons; len(got) != 1 {
+		t.Errorf("the board source was asked for %d persons, want only the one within the cap", len(got))
+	}
+}
+
 func TestSecureCookieAndHSTSOnlyForHTTPSFromTheLocalProxy(t *testing.T) {
 	cases := []struct {
 		name   string
