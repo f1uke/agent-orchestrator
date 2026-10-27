@@ -227,7 +227,7 @@ const KINDS: readonly [string, string, number][] = [
 	["jira.branch_cards", "sprint branch cards", 5],
 	["jira.cards", "fixVersion cards", 5],
 	["jira.llb_cards", "long-lived branch cards", 10],
-	["jira.my_subtasks", "my subtasks", 5],
+	["jira.card_subtasks", "card subtasks", 5],
 	["jira.myself", "my Jira account", 1440],
 	["jira.page_cards", "page cards (Jira)", 5],
 	["jira.relatedwork", "related work", 15],

@@ -40,7 +40,7 @@ func meOf(identity IdentityState, snap Snapshot) *me {
 		return nil
 	}
 	m := &me{id: known, subtasks: map[string][]string{}}
-	for _, st := range AllItems(snap, KindMySubtasks) {
+	for _, st := range AllItems(snap, KindCardSubtasks) {
 		if st.Parent != "" && st.Assignee != nil && st.Assignee.AccountID == known.JiraAccountID {
 			m.subtasks[st.Parent] = append(m.subtasks[st.Parent], st.Key)
 		}

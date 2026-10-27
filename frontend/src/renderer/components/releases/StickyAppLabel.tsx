@@ -68,10 +68,10 @@ const MERGED_P = derivedOf(
 const MINE_P = derivedOf(
 	"Mine",
 	[
-		{ kind: "gitlab.mrs", text: "release MR or card MRs you authored" },
-		{ kind: "jira.versions", text: "you are an approver" },
-		{ kind: "jira.cards", text: "cards assigned to you" },
-		{ kind: "jira.my_subtasks", text: "subtasks assigned to you" },
+		{ kind: "gitlab.mrs", text: "release MR or card MRs the person authored" },
+		{ kind: "jira.versions", text: "the person is an approver" },
+		{ kind: "jira.cards", text: "cards assigned to the person" },
+		{ kind: "jira.card_subtasks", text: "subtasks assigned to the person" },
 	],
 	undefined,
 	"Version.mine, cards[].mine",
