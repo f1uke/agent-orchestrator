@@ -167,13 +167,14 @@ test.describe("the View as picker", () => {
 	});
 
 	test("an id the Board does not list shows as is with the reason, and filters nothing", async ({ page }) => {
-		await open(page, "?person=zed&sheet=attention", "subjects");
+		await open(page, "?person=zed", "subjects");
 		const picker = page.getByTestId("view-as");
 		await expect(picker).toHaveAttribute("data-st", "unknown");
 		await expect(picker).toContainText("zed");
 		await expectFiltered(page, false);
 		await picker.hover();
 		await expect(page.getByRole("tooltip")).toContainText("zed");
+		await openAttention(page);
 		await expect.poll(() => shownHits(page)).toEqual(ALL);
 	});
 
