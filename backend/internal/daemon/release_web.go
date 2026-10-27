@@ -112,12 +112,8 @@ func RunReleaseWeb(ctx context.Context, o ReleaseWebOptions) error {
 // releaseWebBoard adapts the board service and avatar store to
 // releaseweb.BoardSource.
 type releaseWebBoard struct {
-	board   *rtsvc.BoardService
+	*rtsvc.BoardService
 	avatars *rtsvc.AvatarStore
-}
-
-func (b releaseWebBoard) Board(ctx context.Context, ifNoneMatch, _ string) ([]byte, string, error) {
-	return b.board.Board(ctx, ifNoneMatch)
 }
 
 func (b releaseWebBoard) Avatar(accountID string) ([]byte, error) { return b.avatars.Get(accountID) }
@@ -139,9 +135,10 @@ func startReleaseWebBoard(ctx context.Context, web *sqlite.Store, dataDir string
 		Logger: logger,
 	})
 	store := newReleaseWebStore(web, &appHumanState{path: filepath.Join(dataDir, "ao.db"), log: logger})
-	svc := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, Store: store, Fixes: web, Clock: clock})
+	people := rtsvc.NewPeopleLoader(filepath.Join(dataDir, rtsvc.PeopleFileName))
+	svc := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, People: people, Store: store, Fixes: web, Clock: clock})
 	done := observe.StartPollLoop(ctx, rtsvc.Tick, poller.Poll, logger, "release web", nil)
-	return releaseWebBoard{board: svc, avatars: avatars}, done
+	return releaseWebBoard{BoardService: svc, avatars: avatars}, done
 }
 
 // ErrReleaseWebReadOnly is what every write on the team web's store returns.
