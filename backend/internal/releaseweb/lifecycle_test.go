@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -190,10 +191,7 @@ func TestStartStopRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStopClearsAStaleRecordWithoutSignalling(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("a recycled pid is told apart by its start time, which Windows does not read")
-	}
+func TestStopClearsTheRecordOfADeadPid(t *testing.T) {
 	p := Paths{Dir: t.TempDir()}
 	if err := p.Ensure(); err != nil {
 		t.Fatal(err)
@@ -202,28 +200,89 @@ func TestStopClearsAStaleRecordWithoutSignalling(t *testing.T) {
 	if err := dead.Run(); err != nil {
 		t.Fatal(err)
 	}
-	// This process is alive but started before the record, like a recycled pid.
-	recycled := runInfo{PID: os.Getpid(), Port: 1, URL: "http://127.0.0.1:1/", StartedAt: time.Now().Add(-time.Hour)}
-	for name, info := range map[string]runInfo{
-		"dead pid":     {PID: dead.Process.Pid, Port: 1, StartedAt: time.Now()},
-		"recycled pid": recycled,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := writeJSONFile(p.RunFile(), info); err != nil {
-				t.Fatal(err)
-			}
-			if err := writeStatusFile(p, 3); err != nil {
-				t.Fatal(err)
-			}
-			if ReadStatus(p).Running {
-				t.Fatal("ReadStatus trusts a stale run.json")
-			}
-			if err := Stop(p); err != nil {
-				t.Fatal(err)
-			}
-			if exists(p.RunFile()) || exists(p.StatusFile()) {
-				t.Error("Stop kept the stale files")
-			}
-		})
+	if err := writeJSONFile(p.RunFile(), runInfo{PID: dead.Process.Pid, Port: 1, StartedAt: time.Now(), ProcessStart: time.Now()}); err != nil {
+		t.Fatal(err)
 	}
+	if err := writeStatusFile(p, 3); err != nil {
+		t.Fatal(err)
+	}
+	if ReadStatus(p).Running {
+		t.Fatal("ReadStatus trusts the record of a dead pid")
+	}
+	if err := Stop(p); err != nil {
+		t.Fatal(err)
+	}
+	if exists(p.RunFile()) || exists(p.StatusFile()) {
+		t.Error("Stop kept the stale files")
+	}
+}
+
+// bystander is a live process that is not the release web, standing in for
+// whatever holds the pid run.json names.
+// The returned channel closes once it exits.
+func bystander(t *testing.T) (int, <-chan struct{}) {
+	t.Helper()
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+	t.Cleanup(func() { _ = cmd.Process.Kill(); <-exited })
+	return cmd.Process.Pid, exited
+}
+
+// assertStopRefuses checks that Stop names pid, leaves it running and keeps
+// run.json for the human to check.
+func assertStopRefuses(t *testing.T, p Paths, pid int, exited <-chan struct{}) {
+	t.Helper()
+	err := Stop(p)
+	if err == nil || !strings.Contains(err.Error(), strconv.Itoa(pid)) {
+		t.Errorf("Stop = %v, want an error naming pid %d", err, pid)
+	}
+	select {
+	case <-exited:
+		t.Error("Stop signalled a process it could not verify as the release web")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if !exists(p.RunFile()) {
+		t.Error("Stop deleted run.json while the pid it names is alive")
+	}
+}
+
+func TestStopNeverSignalsOrForgetsALivePidWhoseStartTimeDiffers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sleep(1)")
+	}
+	p := Paths{Dir: t.TempDir()}
+	if err := p.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	pid, exited := bystander(t)
+	// A clock step, or a recycled pid: the record's times are an hour off the process's.
+	hourAgo := time.Now().Add(-time.Hour)
+	if err := writeJSONFile(p.RunFile(), runInfo{PID: pid, Port: 1, StartedAt: hourAgo, ProcessStart: hourAgo}); err != nil {
+		t.Fatal(err)
+	}
+	assertStopRefuses(t, p, pid, exited)
+}
+
+func TestStopNeverSignalsAPidWhoseStartTimeCannotBeRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sleep(1) and hides ps")
+	}
+	p := Paths{Dir: t.TempDir()}
+	if err := p.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	pid, exited := bystander(t)
+	started, err := processStartedAt(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONFile(p.RunFile(), runInfo{PID: pid, Port: 1, StartedAt: started, ProcessStart: started}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir()) // no ps to read the start time with
+	assertStopRefuses(t, p, pid, exited)
 }

@@ -58,6 +58,10 @@ type BoardDeps struct {
 	// Executors are the effect kinds that really apply; every other is a dry run.
 	Executors Executors
 	Clock     func() time.Time
+	// HideFileDetails leaves the config and people files' paths and messages
+	// out of the response, keeping their states, for viewers who must not
+	// learn the host's file system.
+	HideFileDetails bool
 }
 
 // BoardService reconciles the stored observations into the Board and caches
@@ -69,6 +73,10 @@ type BoardService struct {
 
 	mu     sync.Mutex
 	cached map[string]*cachedBoard
+	// unknown is the view of a person id that is not on the Board. Every such
+	// id shares it, so a stream of made-up ids costs no rebuild and no slot in
+	// cached: only the viewer differs between them, and it is set per request.
+	unknown *cachedBoard
 }
 
 type cachedBoard struct {
@@ -77,6 +85,10 @@ type cachedBoard struct {
 	board *rt.Board
 	body  []byte
 	etag  string
+}
+
+func (c *cachedBoard) fresh(key boardKey, now time.Time) bool {
+	return c != nil && c.key == key && now.Sub(c.at) < BoardTTL && !now.Before(c.at)
 }
 
 type boardKey struct {
@@ -127,28 +139,59 @@ func (s *BoardService) current(ctx context.Context, person string) (*cachedBoard
 	now := s.d.Clock()
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	c, ok := s.cached[person]
-	if !ok || c.key != key || now.Sub(c.at) >= BoardTTL || now.Before(c.at) {
-		board, body, err := s.build(ctx, cfg, people, human, person, now)
-		if err != nil {
-			return nil, err
-		}
-		if !ok && len(s.cached) >= MaxCachedBoards {
-			clear(s.cached)
-		}
-		sum := sha256.Sum256(body)
-		c = &cachedBoard{key: key, at: now, board: board, body: body, etag: `"` + hex.EncodeToString(sum[:12]) + `"`}
-		s.cached[person] = c
+	if c.fresh(key, now) {
+		s.mu.Unlock()
+		return c, nil
 	}
+	if u := s.unknown; person != "" && u.fresh(key, now) && !onBoard(u.board, person) {
+		s.mu.Unlock()
+		return s.viewOfUnknown(u, cfg, people, person)
+	}
+	defer s.mu.Unlock()
+	board, body, err := s.build(ctx, cfg, people, human, person, now)
+	if err != nil {
+		return nil, err
+	}
+	c = &cachedBoard{key: key, at: now, board: board, body: body, etag: etagOf(body)}
+	if person != "" && board != nil && !onBoard(board, person) {
+		delete(s.cached, person)
+		s.unknown = c
+		return c, nil
+	}
+	if !ok && len(s.cached) >= MaxCachedBoards {
+		clear(s.cached)
+	}
+	s.cached[person] = c
 	return c, nil
+}
+
+// onBoard reports whether id names a person on b.
+func onBoard(b *rt.Board, id string) bool {
+	_, ok := rt.ViewerOf(b.People, b.Identity, id).(rt.ViewerPerson)
+	return ok
+}
+
+// viewOfUnknown is u, the view of another id that is not on the Board, with
+// person as its viewer: every other part of the Board is the same for any
+// unknown viewer, since an unknown viewer's Mine is empty.
+func (s *BoardService) viewOfUnknown(u *cachedBoard, cfg ConfigStatus, people PeopleStatus, person string) (*cachedBoard, error) {
+	b := *u.board
+	b.Viewer = rt.ViewerOf(b.People, b.Identity, person)
+	resp := s.head(cfg, people)
+	resp.Board = &b
+	body, err := encodeBoard(resp)
+	if err != nil {
+		return nil, err
+	}
+	return &cachedBoard{key: u.key, at: u.at, board: &b, body: body, etag: etagOf(body)}, nil
 }
 
 func (s *BoardService) build(ctx context.Context, cfg ConfigStatus, people PeopleStatus, human rt.HumanState, person string, now time.Time) (*rt.Board, []byte, error) {
 	if s.onBuild != nil {
 		s.onBuild()
 	}
-	resp := BoardResponse{Config: ConfigReport{State: cfg.State, Message: cfg.Message, Path: cfg.Path}, People: people.PeopleReport}
+	resp := s.head(cfg, people)
 	if cfg.Config != nil {
 		snap, _, err := s.d.Store.LoadReleaseSnapshot(ctx)
 		if err != nil {
@@ -157,11 +200,32 @@ func (s *BoardService) build(ctx context.Context, cfg ConfigStatus, people Peopl
 		b := rt.Reconcile(rt.Inputs{Config: *cfg.Config, Snap: snap, Human: human, Links: people.Links, Viewer: person}, rt.Env{Now: now, Loc: cfg.Loc, AgeOut: cfg.Config.AgeOutDays})
 		resp.Board = &b
 	}
-	body, err := json.Marshal(resp)
+	body, err := encodeBoard(resp)
 	if err != nil {
-		return nil, nil, fmt.Errorf("release trains: encode board: %w", err)
+		return nil, nil, err
 	}
 	return resp.Board, body, nil
+}
+
+// head is the response without its Board.
+func (s *BoardService) head(cfg ConfigStatus, people PeopleStatus) BoardResponse {
+	if s.d.HideFileDetails {
+		return BoardResponse{Config: ConfigReport{State: cfg.State}, People: PeopleReport{State: people.State}}
+	}
+	return BoardResponse{Config: ConfigReport{State: cfg.State, Message: cfg.Message, Path: cfg.Path}, People: people.PeopleReport}
+}
+
+func encodeBoard(resp BoardResponse) ([]byte, error) {
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("release trains: encode board: %w", err)
+	}
+	return body, nil
+}
+
+func etagOf(body []byte) string {
+	sum := sha256.Sum256(body)
+	return `"` + hex.EncodeToString(sum[:12]) + `"`
 }
 
 func rowsFingerprint(rows []rt.Resource) string {

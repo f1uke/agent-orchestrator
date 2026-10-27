@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/fsatomic"
+	"github.com/aoagents/agent-orchestrator/backend/internal/process"
 	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
 )
 
@@ -27,6 +28,8 @@ const (
 	stopGrace      = 5 * time.Second
 	shutdownGrace  = 5 * time.Second
 	pollInterval   = 50 * time.Millisecond
+	// processStartTolerance absorbs ps reporting start times to whole seconds.
+	processStartTolerance = 2 * time.Second
 )
 
 // DefaultAddr is DefaultPort on loopback.
@@ -38,6 +41,10 @@ type runInfo struct {
 	Port      int       `json:"port"`
 	URL       string    `json:"url"`
 	StartedAt time.Time `json:"startedAt"`
+	// ProcessStart is the serving process's start time as the OS reports it,
+	// read at Serve. A fresh read from the same source tells the server from
+	// another process that got its pid.
+	ProcessStart time.Time `json:"processStart"`
 }
 
 // statusInfo is status.json.
@@ -73,12 +80,11 @@ func Serve(ctx context.Context, o Options) error {
 	if st := ReadStatus(o.Paths); st.Running {
 		return fmt.Errorf("release web: already running as pid %d at %s", st.PID, st.URL)
 	}
-	srv, err := NewServer(o)
+	pid := os.Getpid()
+	processStart, err := processStartedAt(pid)
 	if err != nil {
-		return err
+		return fmt.Errorf("release web: read this process's start time, which stop needs to tell it from another process: %w", err)
 	}
-	defer func() { _ = srv.Close() }()
-
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("release web: listen: %w", err)
@@ -88,7 +94,13 @@ func Serve(ctx context.Context, o Options) error {
 		_ = ln.Close()
 		return fmt.Errorf("release web: listener address %v is not TCP", ln.Addr())
 	}
-	pid := os.Getpid()
+	o.Addr = tcp.String() // the port a loopback Host must name, when addr asked for port 0
+	srv, err := NewServer(o)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	defer func() { _ = srv.Close() }()
 	defer removeRunFiles(o.Paths, pid)
 	sessions := srv.Sessions()
 	if err := writeStatusFile(o.Paths, sessions); err != nil {
@@ -96,10 +108,11 @@ func Serve(ctx context.Context, o Options) error {
 		return err
 	}
 	if err := writeJSONFile(o.Paths.RunFile(), runInfo{
-		PID:       pid,
-		Port:      tcp.Port,
-		URL:       fmt.Sprintf("http://127.0.0.1:%d/", tcp.Port),
-		StartedAt: time.Now().UTC(),
+		PID:          pid,
+		Port:         tcp.Port,
+		URL:          fmt.Sprintf("http://127.0.0.1:%d/", tcp.Port),
+		StartedAt:    time.Now().UTC(),
+		ProcessStart: processStart.UTC(),
 	}); err != nil {
 		_ = ln.Close()
 		return err
@@ -136,6 +149,7 @@ func Serve(ctx context.Context, o Options) error {
 		case <-tick.C:
 			sessions = srv.Sessions()
 			srv.writeStatus(o.Paths, sessions)
+			srv.access.flush(srv.now())
 		}
 	}
 }
@@ -177,17 +191,35 @@ func removeRunFiles(p Paths, pid int) {
 	_ = os.Remove(p.StatusFile())
 }
 
-// running reports whether run.json names a live process that wrote it: alive,
-// and started no later than run.json says, so a recycled pid does not count.
-func running(info runInfo) bool {
+// processIdentity is what the pid in run.json turns out to be.
+type processIdentity int
+
+const (
+	// processGone means no live process has the pid, so run.json is stale.
+	processGone processIdentity = iota
+	// processOurs means the pid is alive and started when run.json records.
+	processOurs
+	// processUnverified means the pid is alive but its start time cannot be
+	// read or does not match: another process may hold the pid now, or the
+	// server's start time reads differently after a clock step. Nothing may
+	// signal it or forget it.
+	processUnverified
+)
+
+// identify tells what run.json's pid is, and why when it is unverified.
+func identify(info runInfo) (processIdentity, error) {
 	if !processalive.Alive(info.PID) {
-		return false
+		return processGone, nil
 	}
 	started, err := processStartedAt(info.PID)
 	if err != nil {
-		return true // no start time to compare (Windows, or ps failed): trust the pid
+		return processUnverified, fmt.Errorf("its start time cannot be read: %w", err)
 	}
-	return !started.After(info.StartedAt.Add(time.Second)) // ps reports whole seconds
+	if d := started.Sub(info.ProcessStart).Abs(); d > processStartTolerance {
+		return processUnverified, fmt.Errorf("it started at %s, not at %s as run.json records",
+			started.UTC().Format(time.RFC3339), info.ProcessStart.UTC().Format(time.RFC3339))
+	}
+	return processOurs, nil
 }
 
 // ReadStatus reports whether a release web is serving, where, and with how
@@ -198,7 +230,10 @@ func ReadStatus(p Paths) Status {
 		st.KeyPresent, st.KeyGeneration = true, k.Generation
 	}
 	var info runInfo
-	if !readJSONFile(p.RunFile(), &info) || !running(info) {
+	if !readJSONFile(p.RunFile(), &info) {
+		return st
+	}
+	if id, _ := identify(info); id != processOurs {
 		return st
 	}
 	st.Running, st.PID, st.URL, st.Port, st.StartedAt = true, info.PID, info.URL, info.Port, info.StartedAt
@@ -229,7 +264,7 @@ func Start(p Paths, exe string, args []string) (Status, error) {
 	defer func() { _ = logf.Close() }()
 	cmd := exec.Command(exe, args...) //nolint:gosec // G204: exe is the caller's own binary
 	cmd.Stdout, cmd.Stderr = logf, logf
-	detach(cmd)
+	process.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return Status{}, fmt.Errorf("release web: start: %w", err)
 	}
@@ -260,11 +295,21 @@ func Start(p Paths, exe string, args []string) (Status, error) {
 }
 
 // Stop ends the server run.json names: SIGTERM, then SIGKILL after a grace
-// period. It signals only a pid that is alive and wrote run.json, removes
-// stale files, and does nothing when no server runs.
+// period. It signals only a pid it verifies as the server, removes the files
+// of a dead one, and does nothing when no server runs. A live pid it cannot
+// verify is an error that names it, and run.json stays for the human to check.
 func Stop(p Paths) error {
 	var info runInfo
-	if readJSONFile(p.RunFile(), &info) && running(info) {
+	if !readJSONFile(p.RunFile(), &info) {
+		removeRunFiles(p, 0)
+		return nil
+	}
+	switch id, why := identify(info); id {
+	case processGone:
+	case processUnverified:
+		return fmt.Errorf("release web: run.json names pid %d, which is alive but not verifiably the release web (%v); "+
+			"check it, stop it yourself if it is the web, then delete %s", info.PID, why, p.RunFile())
+	case processOurs:
 		if err := terminate(info.PID); err != nil && processalive.Alive(info.PID) {
 			return fmt.Errorf("release web: stop pid %d: %w", info.PID, err)
 		}

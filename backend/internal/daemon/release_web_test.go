@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 
 	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/releaseweb"
+	rtsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
@@ -246,6 +248,22 @@ func TestReleaseWebControlStartCreatesAKeyBeforeSpawning(t *testing.T) {
 	if !st.KeyPresent || st.KeyGeneration != 1 || st.Running {
 		t.Fatalf("status after a failed start = %+v", st)
 	}
+	if _, created, _ := c.StartReportingKey(context.Background()); created {
+		t.Error("a second start reported creating a key")
+	}
+	if st, _ := c.Status(context.Background()); st.KeyGeneration != 1 {
+		t.Errorf("a second start replaced the key: generation %d", st.KeyGeneration)
+	}
+
+	if err := os.WriteFile(c.Paths.KeyFile(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := c.StartReportingKey(context.Background()); err == nil || created {
+		t.Errorf("start with an unusable key file = created %v, err %v; want an error", created, err)
+	}
+	if b, _ := os.ReadFile(c.Paths.KeyFile()); string(b) != "{not json" {
+		t.Error("start overwrote an unusable key file")
+	}
 }
 
 func TestReleaseWebControlRotateAndStopWithoutAServer(t *testing.T) {
@@ -308,7 +326,7 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(assets, "index.html"), []byte("<!doctype html><title>board</title>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opts := ReleaseWebOptions{DataDir: dataDir, Port: freePort(t), AssetsDir: assets, Logger: quietLogger(nil)}
+	opts := ReleaseWebOptions{DataDir: dataDir, Port: freePort(t), AssetsDir: assets, AllowedHosts: []string{"board.example.org"}, Logger: quietLogger(nil)}
 
 	if err := RunReleaseWeb(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "rotate-key") {
 		t.Fatalf("RunReleaseWeb without a key = %v, want one that names rotate-key", err)
@@ -342,6 +360,22 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("GET the board without the key = %d, want 401", resp.StatusCode)
 	}
+	for hostName, want := range map[string]int{"board.example.org": http.StatusOK, "other.example.org": http.StatusMisdirectedRequest} {
+		req, err := http.NewRequest(http.MethodGet, st.URL+"robots.txt", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = hostName
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("GET with Host %s = %d, want %d", hostName, resp.StatusCode, want)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(paths.DBDir(), "ao.db")); err != nil {
 		t.Errorf("the web did not open its own database: %v", err)
 	}
@@ -357,5 +391,38 @@ func TestRunReleaseWebServesUntilCancelledAndNeedsAKey(t *testing.T) {
 	}
 	if releaseweb.ReadStatus(paths).Running {
 		t.Fatal("still running after cancel")
+	}
+}
+
+func TestReleaseWebBoardHidesTheHostsFilePathsAndFileErrors(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, rtsvc.PeopleFileName), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	web, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = web.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	board, done := startReleaseWebBoard(ctx, web, dataDir, releaseweb.Paths{Dir: t.TempDir()}, quietLogger(nil))
+	t.Cleanup(func() { cancel(); <-done })
+
+	body, _, err := board.Board(ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), dataDir) {
+		t.Errorf("the team web's board names the data dir: %s", body)
+	}
+	var r rtsvc.BoardResponse
+	if err := json.Unmarshal(body, &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.State != rtsvc.ConfigAbsent || r.Config.Path != "" || r.Config.Message != "" {
+		t.Errorf("config report = %+v, want the absent state with no path or message", r.Config)
+	}
+	if r.People.State != rtsvc.PeopleInvalid || r.People.Path != "" || r.People.Message != "" {
+		t.Errorf("people report = %+v, want the invalid state with no path or message", r.People)
 	}
 }

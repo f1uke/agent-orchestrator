@@ -116,10 +116,13 @@ func header(k, v string) reqOpt { return func(r *http.Request) { r.Header.Add(k,
 
 func withCookie(c *http.Cookie) reqOpt { return func(r *http.Request) { r.AddCookie(c) } }
 
+func host(h string) reqOpt { return func(r *http.Request) { r.Host = h } }
+
 func (h *harness) do(method, target string, body io.Reader, opts ...reqOpt) *http.Response {
 	h.t.Helper()
 	r := httptest.NewRequest(method, target, body)
 	r.RemoteAddr = internetPeer
+	r.Host = "127.0.0.1:7420"
 	for _, o := range opts {
 		o(r)
 	}
@@ -310,6 +313,22 @@ func TestSignInGrantsTheBoardAndAssets(t *testing.T) {
 	}
 }
 
+func TestBoardRefusesAPersonLongerThan256Bytes(t *testing.T) {
+	h := newHarness(t)
+	c := h.session()
+	res := h.do(http.MethodGet, "/api/v1/release-trains/board?person="+strings.Repeat("a", maxPersonBytes), nil, withCookie(c))
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("a %d-byte person = %d, want 200", maxPersonBytes, res.StatusCode)
+	}
+	res = h.do(http.MethodGet, "/api/v1/release-trains/board?person="+strings.Repeat("a", maxPersonBytes+1), nil, withCookie(c))
+	if body := bodyOf(t, res); res.StatusCode != http.StatusBadRequest || body != errorBadRequest {
+		t.Errorf("a %d-byte person = %d %q, want 400 bad_request", maxPersonBytes+1, res.StatusCode, body)
+	}
+	if got := h.board.persons; len(got) != 1 {
+		t.Errorf("the board source was asked for %d persons, want only the one within the cap", len(got))
+	}
+}
+
 func TestSecureCookieAndHSTSOnlyForHTTPSFromTheLocalProxy(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -458,6 +477,146 @@ func TestGlobalLockoutStopsNewSignInsButNotSessions(t *testing.T) {
 	}
 }
 
+// lockEveryone spreads failures over clients, each under its own limit, until
+// the global lock engages.
+func (h *harness) lockEveryone() {
+	h.t.Helper()
+	for i := range SigninGlobalFailures {
+		peer := "203.0.113." + strconv.Itoa(10+i/(SigninFailuresPerClient-1)) + ":1"
+		if res := h.signin("wrong", from(peer)); res.StatusCode != http.StatusUnauthorized {
+			h.t.Fatalf("failure %d = %d, want 401", i+1, res.StatusCode)
+		}
+	}
+}
+
+func TestGlobalLockoutLetsInAClientThatSignedInBefore(t *testing.T) {
+	h := newHarness(t)
+	teammate := from("192.0.2.1:1")
+	h.session(teammate)
+	h.clock.Advance(time.Hour)
+	h.lockEveryone()
+
+	if res := h.signin(h.secret(), from("192.0.2.200:1")); res.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("a client that never signed in, under the global lock = %d, want 429", res.StatusCode)
+	}
+	if res := h.signin(h.secret(), teammate); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("a client that signed in an hour ago, under the global lock = %d, want 303", res.StatusCode)
+	}
+
+	h.clock.Advance(SessionAbsoluteTTL)
+	h.lockEveryone()
+	if res := h.signin(h.secret(), teammate); res.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("a client whose last sign-in is older than %v, under the global lock = %d, want 429", SessionAbsoluteTTL, res.StatusCode)
+	}
+}
+
+func TestAnOfficeBehindOneAddressSurvivesNineTyposAndTheTenthLocksFiveMinutes(t *testing.T) {
+	h := newHarness(t)
+	for i := range 9 {
+		if res := h.signin("wrong"); res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("typo %d = %d, want 401", i+1, res.StatusCode)
+		}
+	}
+	if res := h.signin(h.secret()); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("right key after nine typos = %d, want 303", res.StatusCode)
+	}
+	for range 10 {
+		h.signin("wrong")
+	}
+	res := h.signin(h.secret())
+	if res.StatusCode != http.StatusTooManyRequests || retryAfterSeconds(t, res) != 5*60 {
+		t.Errorf("right key after ten typos = %d Retry-After %q, want 429 for 300 s", res.StatusCode, res.Header.Get("Retry-After"))
+	}
+}
+
+func TestSuccessfulSignInsAreLimitedPerClient(t *testing.T) {
+	h := newHarness(t)
+	for i := range 20 {
+		if res := h.signin(h.secret()); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("sign-in %d = %d, want 303", i+1, res.StatusCode)
+		}
+		h.clock.Advance(time.Second)
+	}
+	res := h.signin(h.secret())
+	if res.StatusCode != http.StatusTooManyRequests || len(res.Cookies()) != 0 || retryAfterSeconds(t, res) <= 0 {
+		t.Fatalf("21st sign-in within 15 minutes = %d with %d cookies, want 429 and none", res.StatusCode, len(res.Cookies()))
+	}
+	if res := h.signin(h.secret(), from("192.0.2.44:1")); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("another client = %d, want 303", res.StatusCode)
+	}
+	h.clock.Advance(15 * time.Minute)
+	if res := h.signin(h.secret()); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("after 15 minutes = %d, want 303", res.StatusCode)
+	}
+}
+
+func TestAFloodAgainstALockedSignInWritesOneLinePerClientPerMinute(t *testing.T) {
+	h := newHarness(t)
+	for range SigninFailuresPerClient {
+		h.signin("wrong")
+	}
+	for range 500 {
+		if res := h.signin(h.secret()); res.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("attempt while locked = %d, want 429", res.StatusCode)
+		}
+	}
+	count := func(ev accessEvent) (lines, total int) {
+		for _, l := range h.events() {
+			if l.IP == "198.51.100.7" && l.Event == ev {
+				lines++
+				total += max(l.Count, 1)
+			}
+		}
+		return lines, total
+	}
+	if lines, _ := count(eventSigninLocked); lines != 1 {
+		t.Fatalf("500 refused attempts in one minute wrote %d signin_locked lines, want 1", lines)
+	}
+
+	h.clock.Advance(LockedLogInterval)
+	h.signin(h.secret())
+	if lines, _ := count(eventSigninLocked); lines != 2 {
+		t.Errorf("a refused attempt a minute later wrote %d signin_locked lines in all, want 2", lines)
+	}
+	if _, total := count(eventSigninLockedRepeated); total != 499 {
+		t.Errorf("the repeats of the first minute count %d, want 499", total)
+	}
+
+	for range 7 {
+		h.signin(h.secret())
+	}
+	h.clock.Advance(LockedLogInterval)
+	h.srv.access.flush(h.clock.Now())
+	if _, total := count(eventSigninLockedRepeated); total != 499+7 {
+		t.Errorf("after the periodic flush the repeats count %d, want %d", total, 499+7)
+	}
+}
+
+func TestAccessLogRotatesAtItsCapAndKeepsOneOldFile(t *testing.T) {
+	h := newHarness(t)
+	const limit = 4 << 10
+	h.srv.access.limit = limit
+	for range 1000 {
+		h.do(http.MethodPost, "/auth/signout", nil)
+	}
+	for _, name := range []string{h.p.AccessLog(), h.p.AccessLog() + ".1"} {
+		st, err := os.Stat(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if st.Size() > limit || st.Mode().Perm() != 0o600 {
+			t.Errorf("%s is %d bytes mode %v, want at most %d and 0600", name, st.Size(), st.Mode().Perm(), limit)
+		}
+	}
+	if exists(h.p.AccessLog() + ".2") {
+		t.Error("rotation kept more than one old file")
+	}
+	h.signin("wrong")
+	if !h.hasEvent("198.51.100.7", eventSigninFailed) {
+		t.Error("the newest line is not in access.log")
+	}
+}
+
 func TestForwardedForCountsOnlyFromTheLocalProxy(t *testing.T) {
 	t.Run("internet peer cannot spread guesses over forged addresses", func(t *testing.T) {
 		h := newHarness(t)
@@ -584,6 +743,59 @@ func TestSignInRefusesCrossSitePostsAndOversizedBodies(t *testing.T) {
 	}
 }
 
+func TestOnlyLoopbackTailnetAndListedHostsAreServed(t *testing.T) {
+	h := newHarness(t)
+	c := h.session()
+	allowed := []string{"127.0.0.1:7420", "localhost:7420", "LocalHost:7420", "[::1]:7420", "box.tail1234.ts.net", "box.tail1234.ts.net:443", "BOX.TAIL1234.TS.NET."}
+	for _, hst := range allowed {
+		if res := h.do(http.MethodGet, "/api/v1/release-trains/board", nil, withCookie(c), host(hst)); res.StatusCode != http.StatusOK {
+			t.Errorf("Host %q = %d, want 200", hst, res.StatusCode)
+		}
+	}
+	refused := []string{"rebind.example:7420", "rebind.example", "127.0.0.1:7421", "localhost", "127.0.0.1", "ts.net", ".ts.net", "box.ts.net.evil.example", "evilts.net", ""}
+	for _, hst := range refused {
+		for _, target := range []string{"/", "/api/v1/release-trains/board", "/auth/signin"} {
+			res := h.do(http.MethodGet, target, nil, withCookie(c), host(hst))
+			if res.StatusCode != http.StatusMisdirectedRequest || strings.Contains(bodyOf(t, res), "trains") {
+				t.Errorf("GET %s with Host %q = %d, want 421", target, hst, res.StatusCode)
+			}
+		}
+	}
+	if res := h.signin(h.secret(), host("rebind.example:7420")); res.StatusCode != http.StatusMisdirectedRequest || len(res.Cookies()) != 0 {
+		t.Errorf("sign-in with a foreign Host = %d with %d cookies, want 421 and none", res.StatusCode, len(res.Cookies()))
+	}
+	if h.hasEvent("198.51.100.7", eventSigninFailed) || len(h.events()) != 1 {
+		t.Error("a misdirected request reached the sign-in logic")
+	}
+}
+
+func TestExtraAllowedHostsAreServed(t *testing.T) {
+	p := Paths{Dir: t.TempDir()}
+	if err := RotateKey(p); err != nil {
+		t.Fatal(err)
+	}
+	o := testOptions(p)
+	o.AllowedHosts = []string{"Board.Example.ORG"}
+	srv, err := NewServer(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	for hst, want := range map[string]int{"board.example.org": 200, "board.example.org:8443": 200, "other.example.org": 421} {
+		r := httptest.NewRequest(http.MethodGet, "/robots.txt", nil)
+		r.Host = hst
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Errorf("Host %q = %d, want %d", hst, w.Code, want)
+		}
+	}
+	o.AllowedHosts = []string{"https://board.example.org/"}
+	if _, err := NewServer(o); err == nil {
+		t.Error("NewServer accepted a URL as an allowed host")
+	}
+}
+
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	h := newHarness(t)
 	c := h.session(from("192.0.2.1:1"))
@@ -607,6 +819,7 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 		{"403", func() *http.Response { return h.do(http.MethodDelete, "/", nil) }, 403, false},
 		{"404", func() *http.Response { return h.do(http.MethodGet, "/api/x", nil, withCookie(c)) }, 404, false},
 		{"429", func() *http.Response { return h.signin("wrong", from("192.0.2.66:1")) }, 429, false},
+		{"421", func() *http.Response { return h.do(http.MethodGet, "/", nil, host("rebind.example:7420")) }, 421, false},
 		{"key page over https", func() *http.Response { return h.do(http.MethodGet, "/", nil, https...) }, 200, true},
 		{"401 over https", func() *http.Response {
 			return h.do(http.MethodGet, "/api/v1/release-trains/board", nil, https...)

@@ -26,6 +26,8 @@ const (
 	maxSigninBody = 4 << 10
 	// avatarCacheSeconds matches the daemon's avatar route.
 	avatarCacheSeconds = 24 * 60 * 60
+	// maxPersonBytes bounds the board's person query, as the daemon's board route does.
+	maxPersonBytes = 256
 )
 
 // BoardSource is what the release web reads the board from.
@@ -49,10 +51,14 @@ type Options struct {
 	Now func() time.Time
 	// Logger receives operational errors, never secrets; stderr when nil.
 	Logger *slog.Logger
+	// AllowedHosts are host names served besides loopback on Addr's port and
+	// any *.ts.net name; every other Host header gets 421.
+	AllowedHosts []string
 }
 
 // Server is the release web's HTTP handler.
 type Server struct {
+	hosts    hostAllowlist
 	board    BoardSource
 	assets   fs.FS
 	now      func() time.Time
@@ -71,10 +77,19 @@ func NewServer(o Options) (*Server, error) {
 	if o.Board == nil || o.Assets == nil {
 		return nil, errors.New("release web: Board and Assets are required")
 	}
+	addr := o.Addr
+	if addr == "" {
+		addr = DefaultAddr
+	}
+	hosts, err := newHostAllowlist(addr, o.AllowedHosts)
+	if err != nil {
+		return nil, err
+	}
 	if err := o.Paths.Ensure(); err != nil {
 		return nil, err
 	}
 	s := &Server{
+		hosts:    hosts,
 		board:    o.Board,
 		assets:   o.Assets,
 		now:      o.Now,
@@ -89,14 +104,13 @@ func NewServer(o Options) (*Server, error) {
 	if s.log == nil {
 		s.log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
-	keys, err := newKeyWatcher(o.Paths, s.log, func() {
+	s.keys, err = newKeyWatcher(o.Paths, s.log, func() {
 		s.sessions.rotate()
 		s.notifyChanged()
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.keys = keys
 	if s.access, err = openAccessLog(o.Paths.AccessLog()); err != nil {
 		return nil, err
 	}
@@ -123,6 +137,10 @@ func (s *Server) notifyChanged() {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c := clientOf(r)
 	setSecurityHeaders(w.Header(), c.https)
+	if !s.hosts.allows(r.Host) {
+		http.Error(w, "Misdirected Request", http.StatusMisdirectedRequest)
+		return
+	}
 	p := path.Clean("/" + r.URL.Path)
 	switch {
 	case p == "/robots.txt" && isRead(r):
@@ -174,7 +192,7 @@ func (s *Server) signedIn(w http.ResponseWriter, r *http.Request, c client) bool
 	key, ok := s.keys.current()
 	result := sessionMissing
 	if ok {
-		result = s.sessions.lookup(cookie.Value, key.Generation, s.now())
+		result = s.sessions.lookup(cookie.Value, key.id, s.now())
 	}
 	if result == sessionLive {
 		return true
@@ -252,7 +270,7 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request, c client) {
 	ok, retryAfter := s.limiter.attempt(c.bucket, now, func() bool { return key.Matches(submitted) })
 	switch {
 	case retryAfter > 0:
-		s.access.record(now, c.ip, eventSigninLocked)
+		s.access.recordLocked(now, c)
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
 		s.keyPage(w, http.StatusTooManyRequests, msgLocked)
 		return
@@ -261,7 +279,7 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request, c client) {
 		s.keyPage(w, http.StatusUnauthorized, msgWrongKey)
 		return
 	}
-	token, err := s.sessions.create(key.Generation, now)
+	token, err := s.sessions.create(key.id, c.bucket, now)
 	if err != nil {
 		s.log.Error("release web: create session", "err", err)
 		s.keyPage(w, http.StatusInternalServerError, msgBadRequest)
@@ -330,7 +348,12 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, c client, p string)
 }
 
 func (s *Server) serveBoard(w http.ResponseWriter, r *http.Request) {
-	body, etag, err := s.board.Board(r.Context(), r.Header.Get("If-None-Match"), r.URL.Query().Get("person"))
+	person := r.URL.Query().Get("person")
+	if len(person) > maxPersonBytes {
+		writeJSON(w, http.StatusBadRequest, errorBadRequest)
+		return
+	}
+	body, etag, err := s.board.Board(r.Context(), r.Header.Get("If-None-Match"), person)
 	switch {
 	case errors.Is(err, rtsvc.ErrNotModified):
 		w.Header().Set("ETag", etag)

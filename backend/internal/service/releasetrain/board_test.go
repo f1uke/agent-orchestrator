@@ -89,6 +89,7 @@ type viewed struct {
 	Board  struct {
 		Viewer struct {
 			Kind   string `json:"kind"`
+			ID     string `json:"id"`
 			Reason string `json:"reason"`
 			Person struct {
 				ID    string `json:"id"`
@@ -292,17 +293,92 @@ func TestBoardKeepsEachPersonsViewSeparateAndCached(t *testing.T) {
 	}
 }
 
+// seedHotfixAuthors adds a hotfix milestone whose MRs are written by n people,
+// so the Board's people list holds them.
+func (w *boardWorld) seedHotfixAuthors(n int) []string {
+	t := w.t
+	start, due := rt.Day{Y: 2026, M: 10, D: 12}, rt.Day{Y: 2026, M: 10, D: 19}
+	train, hotfix := 11, 12
+	w.write(rt.KindMilestones.Name, rt.ProjectScope(1001),
+		item(t, rt.KindMilestones, rt.MilestoneFact{Project: 1001, ID: train, Title: "Release 3.5.0", Description: "Release Train #21/2026", State: "active", Start: &start, Due: &due}),
+		item(t, rt.KindMilestones, rt.MilestoneFact{Project: 1001, ID: hotfix, Title: "Release 3.4.9", State: "active", Start: &start, Due: &due}))
+	mrs := []rt.Item{item(t, rt.KindMRs, rt.MRFact{
+		Project: 1001, IID: 301, Title: "Release 3.5.0", SourceBranch: "release/3.5.0", TargetBranch: "main", State: rt.MROpened,
+		Author: "Rae Example", AuthorUsername: "rae", CreatedOn: start, MilestoneID: &train})}
+	var ids []string
+	for i := range n {
+		id := fmt.Sprintf("dev-%02d", i)
+		ids = append(ids, id)
+		mrs = append(mrs, item(t, rt.KindMRs, rt.MRFact{
+			Project: 1001, IID: 400 + i, Title: "Fix " + id, SourceBranch: "fix/" + id, TargetBranch: "main", State: rt.MROpened,
+			Author: "Dev " + id, AuthorUsername: id, CreatedOn: start, MilestoneID: &hotfix}))
+	}
+	w.write(rt.KindMRs.Name, rt.ProjectScope(1001), mrs...)
+	return ids
+}
+
 func TestBoardForgetsOldViewsOnceTooManyPeopleAreAsked(t *testing.T) {
 	w := newBoardWorld(t)
 	w.seed()
-	for i := range MaxCachedBoards + 5 {
-		w.viewedBy(fmt.Sprintf("nobody-%d", i))
+	ids := w.seedHotfixAuthors(MaxCachedBoards + 5)
+	for _, id := range ids {
+		if v, _ := w.viewedBy(id); v.Board.Viewer.Person.ID != id {
+			t.Fatalf("%s's view = %+v, want that person", id, v.Board.Viewer)
+		}
 	}
 	if n := len(w.svc.cached); n > MaxCachedBoards {
 		t.Fatalf("%d views cached, want at most %d", n, MaxCachedBoards)
 	}
 	if v, _ := w.viewedBy("rae"); v.Board.Viewer.Person.ID != "rae" {
 		t.Fatalf("a view built after the cache started over is wrong: %+v", v.Board.Viewer)
+	}
+}
+
+func TestBoardServesPeopleNotOnTheBoardWithoutARebuildOrACacheSlot(t *testing.T) {
+	w := newBoardWorld(t)
+	w.seed()
+	w.viewedBy("rae")
+	builds, cached := w.builds, len(w.svc.cached)
+
+	n := 2*MaxCachedBoards + 7
+	tags := map[string]string{}
+	for i := range n {
+		id := fmt.Sprintf("nobody-%d", i)
+		v, tag := w.viewedBy(id)
+		if v.Board.Viewer.Kind != "unknown" || v.Board.Viewer.ID != id || !strings.Contains(v.Board.Viewer.Reason, id) {
+			t.Fatalf("%s's viewer = %+v, want unknown naming the id", id, v.Board.Viewer)
+		}
+		if len(w.svc.cached) > cached+1 {
+			t.Fatalf("unknown people took %d cache slots", len(w.svc.cached)-cached)
+		}
+		tags[tag] = id
+	}
+	if len(tags) != n {
+		t.Errorf("%d ETags for %d different unknown people; a 304 would show one the other's viewer", len(tags), n)
+	}
+	if extra := w.builds - builds; extra > 2 {
+		t.Errorf("%d unknown people cost %d rebuilds, want at most the person-less view and one shared unknown view", n, extra)
+	}
+	if _, tag := w.viewedBy("rae"); w.builds-builds > 2 || tag == "" {
+		t.Errorf("unknown people evicted rae's view (builds %d)", w.builds-builds)
+	}
+
+	// The cheap path must answer exactly what a full reconcile for that id does.
+	cfg, people := w.svc.d.Config.Load(), w.svc.d.People.Load()
+	human, err := w.store.LoadReleaseHumanState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, want, err := w.svc.build(context.Background(), cfg, people, human, "nobody-7", w.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, tag, err := w.svc.Board(context.Background(), "", "nobody-7")
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("unknown person's board differs from a full reconcile (err %v):\n got %s\nwant %s", err, got, want)
+	}
+	if _, _, err := w.svc.Board(context.Background(), tag, "nobody-7"); !errors.Is(err, ErrNotModified) {
+		t.Errorf("If-None-Match for an unknown person = %v, want ErrNotModified", err)
 	}
 }
 

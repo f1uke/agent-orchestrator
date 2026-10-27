@@ -57,7 +57,7 @@ func (w *keyWatcher) current() (Key, bool) {
 		}
 		return Key{}, false
 	}
-	if !w.ok || k.Generation != w.key.Generation || !k.sameSecret(w.key) {
+	if !w.ok || k.Generation != w.key.Generation || k.id != w.key.id {
 		w.key, w.ok = k, true
 		w.onChange()
 	}

@@ -39,7 +39,9 @@ type ReleaseWebOptions struct {
 	Port int
 	// AssetsDir is the web bundle; see ResolveReleaseWebAssets.
 	AssetsDir string
-	Logger    *slog.Logger
+	// AllowedHosts are extra Host names the web answers; see releaseweb.Options.
+	AllowedHosts []string
+	Logger       *slog.Logger
 }
 
 // ResolveReleaseWebAssets picks the web bundle: the flag, else
@@ -98,11 +100,12 @@ func RunReleaseWeb(ctx context.Context, o ReleaseWebOptions) error {
 		port = releaseweb.DefaultPort
 	}
 	err = releaseweb.Serve(runCtx, releaseweb.Options{
-		Paths:  paths,
-		Board:  board,
-		Assets: os.DirFS(o.AssetsDir),
-		Addr:   net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
-		Logger: logger,
+		Paths:        paths,
+		Board:        board,
+		Assets:       os.DirFS(o.AssetsDir),
+		Addr:         net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+		Logger:       logger,
+		AllowedHosts: o.AllowedHosts,
 	})
 	cancel()
 	<-loopDone
@@ -136,7 +139,7 @@ func startReleaseWebBoard(ctx context.Context, web *sqlite.Store, dataDir string
 	})
 	store := newReleaseWebStore(web, &appHumanState{path: filepath.Join(dataDir, "ao.db"), log: logger})
 	people := rtsvc.NewPeopleLoader(filepath.Join(dataDir, rtsvc.PeopleFileName))
-	svc := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, People: people, Store: store, Fixes: web, Clock: clock})
+	svc := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, People: people, Store: store, Fixes: web, Clock: clock, HideFileDetails: true})
 	done := observe.StartPollLoop(ctx, rtsvc.Tick, poller.Poll, logger, "release web", nil)
 	return releaseWebBoard{BoardService: svc, avatars: avatars}, done
 }

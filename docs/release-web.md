@@ -15,14 +15,14 @@ AO never exposes it to the internet. Putting it behind a public address is your 
 
 Run these with the `ao` binary.
 
-| Command                     | What it does                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------------ |
-| `ao release-web start`      | Starts the web in the background. Creates a key first if there is none. Prints the status.       |
-| `ao release-web stop`       | Stops the web.                                                                                   |
-| `ao release-web status`     | Shows whether it runs, its address, signed-in sessions and key generation. `--json` for scripts. |
-| `ao release-web rotate-key` | Makes a new key. Everyone is signed out. Prints the generation and the key file path.            |
-| `ao release-web copy-key`   | Puts the key on the clipboard without printing it. On macOS it uses `pbcopy`.                    |
-| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420) and `--assets DIR`.                |
+| Command                     | What it does                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ao release-web start`      | Starts the web in the background. Creates a key first if there is none. Prints the status.             |
+| `ao release-web stop`       | Stops the web. Signals only a process it verifies as the web; see [Stopping safely](#stopping-safely). |
+| `ao release-web status`     | Shows whether it runs, its address, signed-in sessions and key generation. `--json` for scripts.       |
+| `ao release-web rotate-key` | Makes a new key. Everyone is signed out. Prints the generation and the key file path.                  |
+| `ao release-web copy-key`   | Puts the key on the clipboard without printing it. On macOS it uses `pbcopy`.                          |
+| `ao release-web serve`      | Runs the web in the foreground. Takes `--port` (default 7420), `--assets DIR` and `--host NAME`.       |
 
 No command prints the key. On a machine without `pbcopy`, read the key from `key.json`.
 
@@ -32,19 +32,29 @@ The daemon exposes the controls as `GET /api/v1/release-web` and `POST /api/v1/r
 
 The web outlives the daemon. Restarting the app does not stop it.
 
+### Stopping safely
+
+`run.json` records the web's pid and the start time the OS reports for that process. `stop` reads the start time of the pid again and compares the two, within 2 seconds.
+
+- The pid is gone. `stop` deletes `run.json` and `status.json`.
+- The pid is alive and the start times match. `stop` sends SIGTERM, then SIGKILL after 5 seconds.
+- The pid is alive, but its start time does not match or cannot be read. Another process can have the pid now, or a clock step can change the start time that `ps` reports. `stop` signals nothing, keeps `run.json`, and fails with an error that names the pid. Check that process yourself. If it is not the web, delete `run.json`.
+
+`status` shows such a pid as stopped, so `start` starts a new web. The new web fails to listen if the old one still holds the port.
+
 ## Files
 
 All files live in `~/.ao/release-web`. The directory is mode 0700.
 
-| File          | Content                                                                    |
-| ------------- | -------------------------------------------------------------------------- |
-| `key.json`    | The shared key, its generation and its creation time. Mode 0600.           |
-| `access.log`  | One JSON line per sign-in, failed sign-in, lockout, sign-out and rotation. |
-| `run.json`    | The pid, port and start time while the web runs.                           |
-| `status.json` | The signed-in session count while the web runs.                            |
-| `web.log`     | Output of a web started with `start`.                                      |
-| `db/`         | The web's own SQLite database.                                             |
-| `avatars/`    | Jira avatars the web downloaded.                                           |
+| File          | Content                                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `key.json`    | The shared key, its generation and its creation time. Mode 0600.                                                     |
+| `access.log`  | One JSON line per sign-in, failed sign-in, lockout, sign-out and rotation. `access.log.1` holds the previous 10 MiB. |
+| `run.json`    | The pid, port, start time and the process start time the OS reports, while the web runs.                             |
+| `status.json` | The signed-in session count while the web runs.                                                                      |
+| `web.log`     | Output of a web started with `start`.                                                                                |
+| `db/`         | The web's own SQLite database.                                                                                       |
+| `avatars/`    | Jira avatars the web downloaded.                                                                                     |
 
 Set `AO_RELEASE_WEB_DIR` to use another directory. Without it, the directory sits beside the AO data dir. A sandbox daemon with its own `AO_DATA_DIR` gets its own release web.
 
@@ -84,14 +94,20 @@ The web is written as if the internet reaches it.
 - A correct key creates a session. The session token is random. The server keeps only its SHA-256 and only in memory. A restart signs everyone out.
 - The session cookie is `httpOnly`, `SameSite=Strict` and, over HTTPS, `Secure`.
 - A session ends after 12 hours without a request, or 7 days after sign-in.
-- Failed sign-ins are limited. Five failures from one client within 15 minutes lock that client out for 15 minutes. Each repeat doubles the lockout, up to 24 hours. Thirty failures from all clients within 15 minutes lock sign-in for everyone for 15 minutes. Existing sessions keep working. A client is an IP address, or the /64 for IPv6.
-- Rotating the key signs out every session.
+- Sign-ins are limited per client. A client is an IP address, or the /64 for IPv6.
+  - Ten failures from one client within 15 minutes lock that client out for 5 minutes. Each repeat doubles the lockout, up to 24 hours. An office behind one address can make nine typos and still sign in.
+  - Twenty successful sign-ins from one client within 15 minutes refuse the next one until the oldest is 15 minutes old. When the session store is full, a sign-in drops the least recently used session of its own client first. So one person with the key cannot sign everyone else out by signing in over and over.
+- Thirty failures from all clients within 15 minutes lock sign-in for 15 minutes. Existing sessions keep working. The lock does not apply to a known client: one that signed in successfully within the last 7 days. The server remembers up to 1000 known clients and forgets the least recent first. A guesser without the key never becomes known, so he cannot lock your team out.
+- Trade-off: a teammate who never signed in from his current address cannot sign in while the global lock lasts. He waits up to 15 minutes, or signs in from an address he used before.
+- Rotating the key signs out every session. A session belongs to the key that signed it in, not to the generation number, which starts over at 1 when `key.json` was deleted.
 - The server trusts `X-Forwarded-For` and `X-Forwarded-Proto` only when the TCP peer is loopback. It uses the last `X-Forwarded-For` value, the one the local proxy wrote.
 - Every response carries a content security policy, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` and a `noindex` header.
 - Sign-in and sign-out reject cross-site posts.
 - The API is read-only. It serves the board and avatars. Any other method answers 403.
+- The board leaves out the paths of your config and people files and their error messages. It keeps their state: absent, invalid or fine.
 - `access.log` records the time, the client address and the event. It never records the key, a token, a form body or a query string.
-- The server refuses to listen on any address except `127.0.0.1`.
+- `access.log` stays small under a flood. At 10 MiB it moves to `access.log.1`, which replaces the old one. While a client is locked out, the log writes its first refused attempt once per minute. A `signin_locked_repeated` line with a `count` stands for the rest.
+- The server refuses to listen on any address except `127.0.0.1`. It answers only known `Host` names. See [Host names the server answers](#host-names-the-server-answers).
 
 ## Cost of two pollers
 
@@ -109,7 +125,26 @@ To do it:
 
 1. Run `ao release-web start`.
 2. Run `ao release-web copy-key` and share the key with your team over a private channel.
-3. Point Funnel at port 7420 with the `tailscale funnel` command. Check the Tailscale documentation for the syntax of your version.
+3. Run `tailscale funnel 7420`. Check the Tailscale documentation for the exact syntax of your version.
 4. Stop Funnel when you want the address closed. The Team web switch in Settings does not control Funnel.
 
-Funnel terminates TLS and proxies to the loopback port. The server then sees the real client address in `X-Forwarded-For`.
+### Use the HTTPS proxy mode only
+
+Use `tailscale funnel <port>`, the HTTPS proxy mode. Do not use `--tcp` or `--tls-terminated-tcp`.
+
+In HTTPS proxy mode, Funnel terminates TLS and proxies HTTP to the loopback port. It adds `X-Forwarded-For` with the real client address and `X-Forwarded-Proto: https`. The server depends on both:
+
+- The sign-in limits count each client by its `X-Forwarded-For` address.
+- The session cookie gets `Secure`, and responses get HSTS, only when `X-Forwarded-Proto` is `https`.
+
+The TCP modes pass raw bytes and add no headers. Every visitor then looks like `127.0.0.1`. So one guesser's failures lock out everyone, the per-client limits stop working, and the cookie loses `Secure`.
+
+### Host names the server answers
+
+The server answers only these `Host` headers:
+
+- `127.0.0.1:<port>`, `localhost:<port>` and `[::1]:<port>`, where the port is the one it listens on.
+- Any name that ends in `.ts.net`, the names Funnel serves.
+- Each name you give with `--host` on `ao release-web serve`, for example a custom domain in front of the web. Repeat the flag for more names. `start` and the Settings switch do not pass `--host`.
+
+Any other `Host` gets `421 Misdirected Request` before the server looks at keys or sessions. This stops DNS rebinding: a web page on another name that resolves to `127.0.0.1` cannot use your browser to reach the web.

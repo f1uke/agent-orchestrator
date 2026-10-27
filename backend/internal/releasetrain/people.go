@@ -270,8 +270,8 @@ func buildPeople(seen peopleSeen, links []PersonLink, identity IdentityState, sn
 	return people
 }
 
-// viewerOf is the person id names; an empty id names the monitor's own person.
-func viewerOf(people []BoardPerson, identity IdentityState, id string) ViewerState {
+// ViewerOf is the person id names; an empty id names the monitor's own person.
+func ViewerOf(people []BoardPerson, identity IdentityState, id string) ViewerState {
 	for _, p := range people {
 		if (id == "" && p.Self) || p.is(id) {
 			return ViewerPerson{Person: p}
