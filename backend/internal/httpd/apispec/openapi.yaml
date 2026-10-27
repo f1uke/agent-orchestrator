@@ -13472,6 +13472,10 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainMismatch'
           type: array
+        people:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainBoardPerson'
+          type: array
         sources:
           items:
             $ref: '#/components/schemas/ReleaseTrainSourceFreshness'
@@ -13486,6 +13490,8 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainTrain'
           type: array
+        viewer:
+          $ref: '#/components/schemas/ReleaseTrainViewer'
       required:
       - today
       - apps
@@ -13498,6 +13504,8 @@ components:
       - sprints
       - cutover
       - identity
+      - people
+      - viewer
       - alerts
       - catalogue
       type: object
@@ -13529,6 +13537,25 @@ components:
       - id
       - key
       - ownsSprintBranch
+      type: object
+    ReleaseTrainBoardPerson:
+      properties:
+        gitlabUsername:
+          type: string
+        id:
+          type: string
+        jiraAccountId:
+          type: string
+        match:
+          $ref: '#/components/schemas/ReleaseTrainPersonMatch'
+        name:
+          type: string
+        self:
+          type: boolean
+      required:
+      - id
+      - name
+      - match
       type: object
     ReleaseTrainBoardResponse:
       properties:
@@ -15207,6 +15234,14 @@ components:
       - accountId
       - name
       type: object
+    ReleaseTrainPersonMatch:
+      enum:
+      - linked
+      - self
+      - name
+      - jira_only
+      - gitlab_only
+      type: string
     ReleaseTrainPipelineFact:
       properties:
         durationSeconds:
@@ -16086,6 +16121,37 @@ components:
           type: boolean
       required:
       - released
+      type: object
+    ReleaseTrainViewer:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainViewerPerson'
+      - $ref: '#/components/schemas/ReleaseTrainViewerUnknown'
+      type: object
+    ReleaseTrainViewerPerson:
+      properties:
+        kind:
+          const: person
+          type: string
+        person:
+          $ref: '#/components/schemas/ReleaseTrainBoardPerson'
+      required:
+      - kind
+      - person
+      type: object
+    ReleaseTrainViewerUnknown:
+      properties:
+        id:
+          description: The person id the request named; absent when the monitor's
+            own identity is unknown.
+          type: string
+        kind:
+          const: unknown
+          type: string
+        reason:
+          type: string
+      required:
+      - kind
+      - reason
       type: object
     RemoveProjectResult:
       properties:

@@ -4736,10 +4736,12 @@ export interface components {
             kinds: components["schemas"]["ReleaseTrainKindFreshness"][];
             llbs: components["schemas"]["ReleaseTrainLLBGroup"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
+            people: components["schemas"]["ReleaseTrainBoardPerson"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
             sprints: components["schemas"]["ReleaseTrainSprintRow"][];
             today: components["schemas"]["ReleaseTrainDay"];
             trains: components["schemas"]["ReleaseTrainTrain"][];
+            viewer: components["schemas"]["ReleaseTrainViewer"];
         };
         ReleaseTrainBoardApp: {
             family: string;
@@ -4751,6 +4753,14 @@ export interface components {
             id: number;
             key: string;
             ownsSprintBranch: boolean;
+        };
+        ReleaseTrainBoardPerson: {
+            gitlabUsername?: string;
+            id: string;
+            jiraAccountId?: string;
+            match: components["schemas"]["ReleaseTrainPersonMatch"];
+            name: string;
+            self?: boolean;
         };
         ReleaseTrainBoardResponse: {
             board?: components["schemas"]["ReleaseTrainBoard"];
@@ -5406,6 +5416,8 @@ export interface components {
             accountId: string;
             name: string;
         };
+        /** @enum {string} */
+        ReleaseTrainPersonMatch: "linked" | "self" | "name" | "jira_only" | "gitlab_only";
         ReleaseTrainPipelineFact: {
             durationSeconds?: null | number;
             id: number;
@@ -5734,6 +5746,19 @@ export interface components {
         ReleaseTrainVersionFields: {
             releaseDate?: components["schemas"]["ReleaseTrainDay"];
             released: boolean;
+        };
+        ReleaseTrainViewer: components["schemas"]["ReleaseTrainViewerPerson"] | components["schemas"]["ReleaseTrainViewerUnknown"];
+        ReleaseTrainViewerPerson: {
+            /** @constant */
+            kind: "person";
+            person: components["schemas"]["ReleaseTrainBoardPerson"];
+        };
+        ReleaseTrainViewerUnknown: {
+            /** @description The person id the request named; absent when the monitor's own identity is unknown. */
+            id?: string;
+            /** @constant */
+            kind: "unknown";
+            reason: string;
         };
         RemoveProjectResult: {
             projectId: string;

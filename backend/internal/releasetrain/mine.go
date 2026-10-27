@@ -29,30 +29,34 @@ type MineReason struct {
 	Ref string  `json:"ref,omitempty"`
 }
 
+// me is the viewer as the Mine rules see him: either account may be unknown, and an empty id never matches.
 type me struct {
-	id       IdentityKnown
+	jira     string
+	gitlab   string
 	subtasks map[string][]string
 }
 
-func meOf(identity IdentityState, snap Snapshot) *me {
-	known, ok := identity.(IdentityKnown)
+func meOf(viewer ViewerState, snap Snapshot) *me {
+	v, ok := viewer.(ViewerPerson)
 	if !ok {
 		return nil
 	}
-	m := &me{id: known, subtasks: map[string][]string{}}
+	m := &me{jira: v.Person.JiraAccountID, gitlab: v.Person.GitLabUsername, subtasks: map[string][]string{}}
 	for _, st := range AllItems(snap, KindCardSubtasks) {
-		if st.Parent != "" && st.Assignee != nil && st.Assignee.AccountID == known.JiraAccountID {
+		if st.Parent != "" && m.assigned(st.Assignee) {
 			m.subtasks[st.Parent] = append(m.subtasks[st.Parent], st.Key)
 		}
 	}
 	return m
 }
 
-func (m *me) authored(mr MRFact) bool {
-	return mr.AuthorUsername != "" && mr.AuthorUsername == m.id.GitLabUsername
-}
+func (m *me) authored(mr MRFact) bool { return m.writes(mr.AuthorUsername) }
 
-func (m *me) assigned(p *Person) bool { return p != nil && p.AccountID == m.id.JiraAccountID }
+func (m *me) writes(username string) bool { return username != "" && username == m.gitlab }
+
+func (m *me) assigned(p *Person) bool { return p != nil && m.isJira(p.AccountID) }
+
+func (m *me) isJira(account string) bool { return account != "" && account == m.jira }
 
 func mrRef(mr MRFact) string { return "!" + strconv.Itoa(mr.IID) }
 
@@ -138,7 +142,7 @@ func (m *me) sprintCard(c *SprintCard) []MineReason {
 		}
 	}
 	for _, mr := range c.MRs {
-		if mr.username != "" && mr.username == m.id.GitLabUsername {
+		if m.writes(mr.username) {
 			out = append(out, MineReason{Why: MineMRAuthor, Ref: mrRef(MRFact{IID: mr.IID})})
 		}
 	}
@@ -158,7 +162,7 @@ func (m *me) version(v *AppVersion) []MineReason {
 	}
 	if v.Jira != nil {
 		for _, a := range v.Jira.Approvers {
-			if a.AccountID == m.id.JiraAccountID {
+			if m.isJira(a.AccountID) {
 				out = append(out, MineReason{Why: MineApprover})
 			}
 		}
