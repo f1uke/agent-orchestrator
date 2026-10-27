@@ -41,8 +41,20 @@ type keyFile struct {
 // Key is the loaded shared key. It holds only the SHA-256 of the secret, and
 // every way of printing it redacts.
 type Key struct {
-	digest     [sha256.Size]byte
+	digest [sha256.Size]byte
+	// id names this secret without revealing it. Sessions are bound to it, not
+	// to Generation, which starts over at 1 once key.json is lost.
+	id         keyID
 	Generation int
+}
+
+// keyID is a non-secret name for one secret: a domain-separated SHA-256
+// prefix, so it shares nothing with the digest Matches compares.
+type keyID [16]byte
+
+func idOf(secret string) keyID {
+	sum := sha256.Sum256([]byte("release web key id\x00" + secret))
+	return keyID(sum[:16])
 }
 
 // Matches compares a submitted key in constant time over SHA-256 digests, so
@@ -50,10 +62,6 @@ type Key struct {
 func (k Key) Matches(submitted string) bool {
 	d := sha256.Sum256([]byte(submitted))
 	return subtle.ConstantTimeCompare(d[:], k.digest[:]) == 1
-}
-
-func (k Key) sameSecret(o Key) bool {
-	return subtle.ConstantTimeCompare(k.digest[:], o.digest[:]) == 1
 }
 
 // String redacts the secret.
@@ -79,7 +87,7 @@ func ReadKey(p Paths) (Key, error) {
 	if err != nil {
 		return Key{}, err
 	}
-	return Key{digest: sha256.Sum256([]byte(f.Key)), Generation: f.Generation}, nil
+	return Key{digest: sha256.Sum256([]byte(f.Key)), id: idOf(f.Key), Generation: f.Generation}, nil
 }
 
 // CopyKey writes the raw key to w with no newline, so a caller can hand it to

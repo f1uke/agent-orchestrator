@@ -176,7 +176,7 @@ func (s *Server) signedIn(w http.ResponseWriter, r *http.Request, c client) bool
 	key, ok := s.keys.current()
 	result := sessionMissing
 	if ok {
-		result = s.sessions.lookup(cookie.Value, key.Generation, s.now())
+		result = s.sessions.lookup(cookie.Value, key.id, s.now())
 	}
 	if result == sessionLive {
 		return true
@@ -263,7 +263,7 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request, c client) {
 		s.keyPage(w, http.StatusUnauthorized, msgWrongKey)
 		return
 	}
-	token, err := s.sessions.create(key.Generation, now)
+	token, err := s.sessions.create(key.id, now)
 	if err != nil {
 		s.log.Error("release web: create session", "err", err)
 		s.keyPage(w, http.StatusInternalServerError, msgBadRequest)

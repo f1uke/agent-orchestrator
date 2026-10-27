@@ -22,9 +22,9 @@ type tokenHash [sha256.Size]byte
 func hashToken(token string) tokenHash { return sha256.Sum256([]byte(token)) }
 
 type session struct {
-	keyGeneration int
-	createdAt     time.Time
-	lastSeen      time.Time
+	key       keyID
+	createdAt time.Time
+	lastSeen  time.Time
 }
 
 func (s *session) expired(now time.Time) bool {
@@ -55,7 +55,7 @@ func newSessionStore() *sessionStore {
 	return &sessionStore{sessions: map[tokenHash]*session{}, rotated: map[tokenHash]struct{}{}}
 }
 
-func (s *sessionStore) create(keyGeneration int, now time.Time) (string, error) {
+func (s *sessionStore) create(key keyID, now time.Time) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -67,13 +67,13 @@ func (s *sessionStore) create(keyGeneration int, now time.Time) (string, error) 
 	if len(s.sessions) >= MaxSessions {
 		s.evictLeastRecentLocked()
 	}
-	s.sessions[hashToken(token)] = &session{keyGeneration: keyGeneration, createdAt: now, lastSeen: now}
+	s.sessions[hashToken(token)] = &session{key: key, createdAt: now, lastSeen: now}
 	return token, nil
 }
 
 // lookup refreshes a live session's lastSeen. A session minted under another
-// key generation is dropped: it can only exist when a sign-in raced a rotation.
-func (s *sessionStore) lookup(token string, keyGeneration int, now time.Time) lookupResult {
+// key is dropped: it can only exist when a sign-in raced a rotation.
+func (s *sessionStore) lookup(token string, key keyID, now time.Time) lookupResult {
 	h := hashToken(token)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,7 +85,7 @@ func (s *sessionStore) lookup(token string, keyGeneration int, now time.Time) lo
 		}
 		return sessionMissing
 	}
-	if sess.keyGeneration != keyGeneration {
+	if sess.key != key {
 		delete(s.sessions, h)
 		return sessionRotated
 	}
