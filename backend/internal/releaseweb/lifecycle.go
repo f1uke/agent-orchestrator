@@ -43,7 +43,7 @@ type runInfo struct {
 	StartedAt time.Time `json:"startedAt"`
 	// ProcessStart is the serving process's start time as the OS reports it,
 	// read at Serve. A fresh read from the same source tells the server from
-	// another process that got its pid, whatever the wall clock did since.
+	// another process that got its pid.
 	ProcessStart time.Time `json:"processStart"`
 }
 
