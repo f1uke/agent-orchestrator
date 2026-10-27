@@ -37,7 +37,7 @@ func (p Paths) Ensure() error {
 	if err := os.MkdirAll(p.Dir, 0o700); err != nil {
 		return fmt.Errorf("release web: create %s: %w", p.Dir, err)
 	}
-	if err := os.Chmod(p.Dir, 0o700); err != nil {
+	if err := os.Chmod(p.Dir, 0o700); err != nil { //nolint:gosec // G302: a directory needs its x bit; 0700 is owner-only
 		return fmt.Errorf("release web: chmod %s: %w", p.Dir, err)
 	}
 	return nil

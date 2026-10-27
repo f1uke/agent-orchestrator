@@ -121,11 +121,11 @@ func TestKeyNeverPrintsItsSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	for format, out := range map[string]string{
-		"%v":   fmt.Sprintf("%v", k),
-		"%+v":  fmt.Sprintf("%+v", k),
-		"%#v":  fmt.Sprintf("%#v", k),
-		"%s":   fmt.Sprintf("%s", k),
-		"json": string(js),
+		"%v":     fmt.Sprintf("%v", k),
+		"%+v":    fmt.Sprintf("%+v", k),
+		"%#v":    fmt.Sprintf("%#v", k),
+		"String": k.String(),
+		"json":   string(js),
 	} {
 		if strings.Contains(out, secret) {
 			t.Errorf("%s output contains the secret", format)
