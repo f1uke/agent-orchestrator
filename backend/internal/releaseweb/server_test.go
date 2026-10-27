@@ -474,6 +474,79 @@ func TestGlobalLockoutStopsNewSignInsButNotSessions(t *testing.T) {
 	}
 }
 
+// lockEveryone spreads failures over clients, each under its own limit, until
+// the global lock engages.
+func (h *harness) lockEveryone() {
+	h.t.Helper()
+	for i := range SigninGlobalFailures {
+		peer := "203.0.113." + strconv.Itoa(10+i/(SigninFailuresPerClient-1)) + ":1"
+		if res := h.signin("wrong", from(peer)); res.StatusCode != http.StatusUnauthorized {
+			h.t.Fatalf("failure %d = %d, want 401", i+1, res.StatusCode)
+		}
+	}
+}
+
+func TestGlobalLockoutLetsInAClientThatSignedInBefore(t *testing.T) {
+	h := newHarness(t)
+	teammate := from("192.0.2.1:1")
+	h.session(teammate)
+	h.clock.Advance(time.Hour)
+	h.lockEveryone()
+
+	if res := h.signin(h.secret(), from("192.0.2.200:1")); res.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("a client that never signed in, under the global lock = %d, want 429", res.StatusCode)
+	}
+	if res := h.signin(h.secret(), teammate); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("a client that signed in an hour ago, under the global lock = %d, want 303", res.StatusCode)
+	}
+
+	h.clock.Advance(SessionAbsoluteTTL)
+	h.lockEveryone()
+	if res := h.signin(h.secret(), teammate); res.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("a client whose last sign-in is older than %v, under the global lock = %d, want 429", SessionAbsoluteTTL, res.StatusCode)
+	}
+}
+
+func TestAnOfficeBehindOneAddressSurvivesNineTyposAndTheTenthLocksFiveMinutes(t *testing.T) {
+	h := newHarness(t)
+	for i := range 9 {
+		if res := h.signin("wrong"); res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("typo %d = %d, want 401", i+1, res.StatusCode)
+		}
+	}
+	if res := h.signin(h.secret()); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("right key after nine typos = %d, want 303", res.StatusCode)
+	}
+	for range 10 {
+		h.signin("wrong")
+	}
+	res := h.signin(h.secret())
+	if res.StatusCode != http.StatusTooManyRequests || retryAfterSeconds(t, res) != 5*60 {
+		t.Errorf("right key after ten typos = %d Retry-After %q, want 429 for 300 s", res.StatusCode, res.Header.Get("Retry-After"))
+	}
+}
+
+func TestSuccessfulSignInsAreLimitedPerClient(t *testing.T) {
+	h := newHarness(t)
+	for i := range 20 {
+		if res := h.signin(h.secret()); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("sign-in %d = %d, want 303", i+1, res.StatusCode)
+		}
+		h.clock.Advance(time.Second)
+	}
+	res := h.signin(h.secret())
+	if res.StatusCode != http.StatusTooManyRequests || len(res.Cookies()) != 0 || retryAfterSeconds(t, res) <= 0 {
+		t.Fatalf("21st sign-in within 15 minutes = %d with %d cookies, want 429 and none", res.StatusCode, len(res.Cookies()))
+	}
+	if res := h.signin(h.secret(), from("192.0.2.44:1")); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("another client = %d, want 303", res.StatusCode)
+	}
+	h.clock.Advance(15 * time.Minute)
+	if res := h.signin(h.secret()); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("after 15 minutes = %d, want 303", res.StatusCode)
+	}
+}
+
 func TestForwardedForCountsOnlyFromTheLocalProxy(t *testing.T) {
 	t.Run("internet peer cannot spread guesses over forged addresses", func(t *testing.T) {
 		h := newHarness(t)

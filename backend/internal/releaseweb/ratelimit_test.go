@@ -1,6 +1,7 @@
 package releaseweb
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -18,7 +19,9 @@ func TestClientLockoutDoublesUpToTheCap(t *testing.T) {
 	l := newSigninLimiter()
 	now := t0
 	var got []time.Duration
-	for range 9 {
+	want := []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 40 * time.Minute, 80 * time.Minute,
+		160 * time.Minute, 320 * time.Minute, 640 * time.Minute, 1280 * time.Minute, 24 * time.Hour, 24 * time.Hour}
+	for range want {
 		for range SigninFailuresPerClient {
 			fail(l, "203.0.113.9", now)
 		}
@@ -27,7 +30,6 @@ func TestClientLockoutDoublesUpToTheCap(t *testing.T) {
 		now = now.Add(wait)
 		l.globalLockedUntil = time.Time{} // isolate the per-client doubling
 	}
-	want := []time.Duration{15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 8 * time.Hour, 16 * time.Hour, 24 * time.Hour, 24 * time.Hour}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("lockout %d = %v, want %v", i+1, got[i], want[i])
@@ -58,5 +60,23 @@ func TestClientTableIsBounded(t *testing.T) {
 	}
 	if lockedFor(l, locked, t0.Add(time.Minute)) == 0 {
 		t.Error("eviction dropped a locked-out client while unlocked ones were available")
+	}
+}
+
+func TestKnownClientsAreBoundedAndForgetTheOldestFirst(t *testing.T) {
+	l := newSigninLimiter()
+	for i := range maxKnownClients + 1 {
+		l.attempt(fmt.Sprintf("client-%d", i), t0.Add(time.Duration(i)*time.Second), func() bool { return true })
+	}
+	if n := len(l.known); n > maxKnownClients {
+		t.Fatalf("known set holds %d clients, cap %d", n, maxKnownClients)
+	}
+	now := t0.Add(time.Hour)
+	l.globalLockedUntil = now.Add(time.Minute)
+	if lockedFor(l, "client-0", now) == 0 {
+		t.Error("the least recently signed-in client is still exempt from the global lock")
+	}
+	if lockedFor(l, fmt.Sprintf("client-%d", maxKnownClients), now) != 0 {
+		t.Error("the latest known client is held by the global lock")
 	}
 }

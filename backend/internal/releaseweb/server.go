@@ -263,7 +263,7 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request, c client) {
 		s.keyPage(w, http.StatusUnauthorized, msgWrongKey)
 		return
 	}
-	token, err := s.sessions.create(key.id, now)
+	token, err := s.sessions.create(key.id, c.bucket, now)
 	if err != nil {
 		s.log.Error("release web: create session", "err", err)
 		s.keyPage(w, http.StatusInternalServerError, msgBadRequest)

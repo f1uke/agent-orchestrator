@@ -13,7 +13,8 @@ const (
 	SessionIdleTTL = 12 * time.Hour
 	// SessionAbsoluteTTL signs a browser out this long after sign-in, however active.
 	SessionAbsoluteTTL = 7 * 24 * time.Hour
-	// MaxSessions bounds the store; the least recently seen session goes first.
+	// MaxSessions bounds the store. A full store drops the least recently seen
+	// session of the client signing in, else the least recently seen of all.
 	MaxSessions = 1000
 )
 
@@ -22,7 +23,10 @@ type tokenHash [sha256.Size]byte
 func hashToken(token string) tokenHash { return sha256.Sum256([]byte(token)) }
 
 type session struct {
-	key       keyID
+	key keyID
+	// client is the rate-limit bucket that signed in, so one key holder signing
+	// in over and over evicts his own sessions before anyone else's.
+	client    string
 	createdAt time.Time
 	lastSeen  time.Time
 }
@@ -55,7 +59,7 @@ func newSessionStore() *sessionStore {
 	return &sessionStore{sessions: map[tokenHash]*session{}, rotated: map[tokenHash]struct{}{}}
 }
 
-func (s *sessionStore) create(key keyID, now time.Time) (string, error) {
+func (s *sessionStore) create(key keyID, client string, now time.Time) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -65,9 +69,9 @@ func (s *sessionStore) create(key keyID, now time.Time) (string, error) {
 	defer s.mu.Unlock()
 	s.purgeLocked(now)
 	if len(s.sessions) >= MaxSessions {
-		s.evictLeastRecentLocked()
+		s.evictLeastRecentLocked(client)
 	}
-	s.sessions[hashToken(token)] = &session{key: key, createdAt: now, lastSeen: now}
+	s.sessions[hashToken(token)] = &session{key: key, client: client, createdAt: now, lastSeen: now}
 	return token, nil
 }
 
@@ -129,13 +133,17 @@ func (s *sessionStore) purgeLocked(now time.Time) {
 	}
 }
 
-func (s *sessionStore) evictLeastRecentLocked() {
+// evictLeastRecentLocked drops client's least recently seen session, or the
+// least recently seen of all when client has none.
+func (s *sessionStore) evictLeastRecentLocked(client string) {
 	var oldest tokenHash
 	var oldestSeen time.Time
-	first := true
+	oldestOwn, first := false, true
 	for h, sess := range s.sessions {
-		if first || sess.lastSeen.Before(oldestSeen) {
-			oldest, oldestSeen, first = h, sess.lastSeen, false
+		own := sess.client == client
+		better := first || (own && !oldestOwn) || (own == oldestOwn && sess.lastSeen.Before(oldestSeen))
+		if better {
+			oldest, oldestSeen, oldestOwn, first = h, sess.lastSeen, own, false
 		}
 	}
 	delete(s.sessions, oldest)

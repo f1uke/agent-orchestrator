@@ -84,7 +84,11 @@ The web is written as if the internet reaches it.
 - A correct key creates a session. The session token is random. The server keeps only its SHA-256 and only in memory. A restart signs everyone out.
 - The session cookie is `httpOnly`, `SameSite=Strict` and, over HTTPS, `Secure`.
 - A session ends after 12 hours without a request, or 7 days after sign-in.
-- Failed sign-ins are limited. Five failures from one client within 15 minutes lock that client out for 15 minutes. Each repeat doubles the lockout, up to 24 hours. Thirty failures from all clients within 15 minutes lock sign-in for everyone for 15 minutes. Existing sessions keep working. A client is an IP address, or the /64 for IPv6.
+- Sign-ins are limited per client. A client is an IP address, or the /64 for IPv6.
+  - Ten failures from one client within 15 minutes lock that client out for 5 minutes. Each repeat doubles the lockout, up to 24 hours. An office behind one address can make nine typos and still sign in.
+  - Twenty successful sign-ins from one client within 15 minutes refuse the next one until the oldest is 15 minutes old. When the session store is full, a sign-in drops the least recently used session of its own client first. So one person with the key cannot sign everyone else out by signing in over and over.
+- Thirty failures from all clients within 15 minutes lock sign-in for 15 minutes. Existing sessions keep working. The lock does not apply to a known client: one that signed in successfully within the last 7 days. The server remembers up to 1000 known clients and forgets the least recent first. A guesser without the key never becomes known, so he cannot lock your team out.
+- Trade-off: a teammate who never signed in from his current address cannot sign in while the global lock lasts. He waits up to 15 minutes, or signs in from an address he used before.
 - Rotating the key signs out every session. A session belongs to the key that signed it in, not to the generation number, which starts over at 1 when `key.json` was deleted.
 - The server trusts `X-Forwarded-For` and `X-Forwarded-Proto` only when the TCP peer is loopback. It uses the last `X-Forwarded-For` value, the one the local proxy wrote.
 - Every response carries a content security policy, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` and a `noindex` header.
