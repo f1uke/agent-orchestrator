@@ -54,6 +54,7 @@ func TestHooks_StopRefusesAGatedCheckInWithoutSetUp(t *testing.T) {
 func TestHooks_StopIsNeverRefusedWithoutTheFlag(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "ao-7")
 	t.Setenv("AO_SESSION_KIND", "worker")
+	t.Setenv(envCheckInSetup, "")
 	cfg := setConfigEnv(t)
 	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
 	writeRunFileFor(t, cfg, srv)
@@ -102,6 +103,7 @@ func TestHooks_PreToolUseRefusesAGatedPROpenBeforePreShip(t *testing.T) {
 func TestHooks_PROpenIsNeverRefusedWithoutTheFlag(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "ao-7")
 	t.Setenv("AO_SESSION_KIND", "worker")
+	t.Setenv(envPROpenGate, "")
 	cfg := setConfigEnv(t)
 	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
 	writeRunFileFor(t, cfg, srv)
