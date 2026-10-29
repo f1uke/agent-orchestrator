@@ -34,10 +34,6 @@ type Due struct {
 	Missed bool `json:"missed,omitempty"`
 }
 
-func dueOn(today, on Day, event DueEvent) *Due {
-	return &Due{On: on, Event: event, WorkDays: workDaysTo(today, on)}
-}
-
 // workDaysTo counts the working days from today to end, negative when end is past.
 func workDaysTo(today, end Day) int {
 	if end.Before(today) {
@@ -53,10 +49,6 @@ type Action struct {
 	Fix     bool   `json:"fix,omitempty"`
 	Details bool   `json:"details,omitempty"`
 }
-
-func linkAction(l Link) *Action { return &Action{Label: l.Label, URL: l.URL} }
-
-func fixAction(label string) *Action { return &Action{Label: label, Fix: true} }
 
 // plural writes n and noun, adding "s" (or "es" after ch, sh, s or x) unless n is 1.
 func plural(n int, noun string) string {
@@ -114,21 +106,21 @@ func (h *Hit) open(links ...Link) *Hit {
 
 // promote makes links[i] the hit's primary action and leaves the other links secondary.
 func (h *Hit) promote(links []Link, i int) *Hit {
-	h.Primary = linkAction(links[i])
+	h.Primary = &Action{Label: links[i].Label, URL: links[i].URL}
 	h.Links = append(append([]Link{}, links[:i]...), links[i+1:]...)
 	return h
 }
 
 // fix makes the rule's fix the hit's primary action; links stay secondary.
 func (h *Hit) fix(label string, links ...Link) *Hit {
-	h.Primary, h.Links = fixAction(label), links
+	h.Primary, h.Links = &Action{Label: label, Fix: true}, links
 	return h
 }
 
 // dueAt sets the hit's deadline chip; an unknown date leaves it off.
 func (h *Hit) dueAt(today Day, on *Day, event DueEvent) *Hit {
 	if on != nil {
-		h.Due = dueOn(today, *on, event)
+		h.Due = &Due{On: *on, Event: event, WorkDays: workDaysTo(today, *on)}
 	}
 	return h
 }
