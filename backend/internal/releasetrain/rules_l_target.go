@@ -82,7 +82,7 @@ func (a aim) hit(subject Subject, text string, links ...Link) Hit {
 	return Hit{
 		Subject: subject, Train: &train, App: a.branch.App,
 		Evidence: Evidence{"group": a.group.ID, "branch": a.branch.Branch, "train": a.train.ID, "freeze": a.freeze},
-		Text:     text, Links: append([]Link{}, links...), cards: a.branch.cardKeys(),
+		Text:     text, Links: append([]Link{}, links...), Cards: a.branch.cardKeys(),
 	}
 }
 
@@ -161,7 +161,7 @@ var ruleL11 = rule{
 				h := a.hit(SubjCardOnTrain{Train: a.train.ID, App: a.branch.App, Key: key},
 					fmt.Sprintf("%s rides %s in %s but is on neither its train page nor its fixVersion", key, a.train.ID, a.branch.Branch), links...)
 				h.Evidence["card"] = key
-				h.Severity, h.cards = severityIn(a.window), []string{key}
+				h.Severity, h.Cards = severityIn(a.window), []string{key}
 				out = append(out, h)
 			}
 		}

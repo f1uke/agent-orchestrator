@@ -13435,6 +13435,17 @@ components:
       required:
       - released
       type: object
+    ReleaseTrainAction:
+      properties:
+        fix:
+          type: boolean
+        label:
+          type: string
+        url:
+          type: string
+      required:
+      - label
+      type: object
     ReleaseTrainActiveWhy:
       enum:
       - new this sprint
@@ -13452,8 +13463,16 @@ components:
           type: string
         bucket:
           $ref: '#/components/schemas/ReleaseTrainBucket'
+        cards:
+          items:
+            type: string
+          type: array
         changedSinceHidden:
           type: boolean
+        copy:
+          $ref: '#/components/schemas/ReleaseTrainCopy'
+        due:
+          $ref: '#/components/schemas/ReleaseTrainDue'
         evidence:
           $ref: '#/components/schemas/ReleaseTrainEvidence'
         fix:
@@ -13470,6 +13489,8 @@ components:
           type: array
         openFix:
           $ref: '#/components/schemas/ReleaseTrainFixRef'
+        primary:
+          $ref: '#/components/schemas/ReleaseTrainAction'
         rule:
           type: string
         severity:
@@ -13488,8 +13509,10 @@ components:
       - severity
       - evidence
       - text
+      - copy
       - links
       - asOf
+      - cards
       - bucket
       type: object
     ReleaseTrainAlerts:
@@ -13910,6 +13933,16 @@ components:
       - state
       - path
       type: object
+    ReleaseTrainCopy:
+      properties:
+        do:
+          type: string
+        what:
+          type: string
+      required:
+      - what
+      - do
+      type: object
     ReleaseTrainDay:
       format: date
       type: string
@@ -14003,6 +14036,27 @@ components:
       - kind
       - train
       type: object
+    ReleaseTrainDue:
+      properties:
+        event:
+          $ref: '#/components/schemas/ReleaseTrainDueEvent'
+        missed:
+          type: boolean
+        "on":
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        workDays:
+          type: integer
+      required:
+      - "on"
+      - event
+      - workDays
+      type: object
+    ReleaseTrainDueEvent:
+      enum:
+      - freeze
+      - publish
+      - sprintEnd
+      type: string
     ReleaseTrainEffAOPlanTarget:
       properties:
         after:

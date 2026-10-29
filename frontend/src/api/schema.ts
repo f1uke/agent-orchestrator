@@ -4753,6 +4753,11 @@ export interface components {
             /** @description True when the caller's lease was dropped. */
             released: boolean;
         };
+        ReleaseTrainAction: {
+            fix?: boolean;
+            label: string;
+            url?: string;
+        };
         /** @enum {string} */
         ReleaseTrainActiveWhy: "new this sprint" | "MR this sprint" | "mobile subtask open";
         ReleaseTrainAlertHit: {
@@ -4761,13 +4766,17 @@ export interface components {
             /** Format: date-time */
             asOf: string;
             bucket: components["schemas"]["ReleaseTrainBucket"];
+            cards: string[];
             changedSinceHidden?: boolean;
+            copy: components["schemas"]["ReleaseTrainCopy"];
+            due?: components["schemas"]["ReleaseTrainDue"];
             evidence: components["schemas"]["ReleaseTrainEvidence"];
             fix?: components["schemas"]["ReleaseTrainFixKind"];
             id: string;
             links: components["schemas"]["ReleaseTrainLink"][];
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             openFix?: components["schemas"]["ReleaseTrainFixRef"];
+            primary?: components["schemas"]["ReleaseTrainAction"];
             rule: string;
             severity: components["schemas"]["ReleaseTrainSeverity"];
             subject: components["schemas"]["ReleaseTrainSubject"];
@@ -4925,6 +4934,10 @@ export interface components {
             /** @enum {string} */
             state: "absent" | "invalid" | "ok";
         };
+        ReleaseTrainCopy: {
+            do: string;
+            what: string;
+        };
         /** Format: date */
         ReleaseTrainDay: string;
         ReleaseTrainDest: components["schemas"]["ReleaseTrainDestToTrain"] | components["schemas"]["ReleaseTrainDestToLLB"] | components["schemas"]["ReleaseTrainDestBefore"] | components["schemas"]["ReleaseTrainDestOff"] | components["schemas"]["ReleaseTrainDestNone"] | components["schemas"]["ReleaseTrainDestNoMR"];
@@ -4962,6 +4975,14 @@ export interface components {
             /** @description Train key, "21-2026" or "20-1-2026". */
             train: string;
         };
+        ReleaseTrainDue: {
+            event: components["schemas"]["ReleaseTrainDueEvent"];
+            missed?: boolean;
+            on: components["schemas"]["ReleaseTrainDay"];
+            workDays: number;
+        };
+        /** @enum {string} */
+        ReleaseTrainDueEvent: "freeze" | "publish" | "sprintEnd";
         ReleaseTrainEffAOPlanTarget: {
             after: components["schemas"]["ReleaseTrainLLBTargetInput"];
             before: components["schemas"]["ReleaseTrainLLBTargetInput"];

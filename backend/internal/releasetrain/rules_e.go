@@ -61,7 +61,7 @@ var ruleE2 = rule{
 			}
 			h := versionHit(t, v, fmt.Sprintf("%d card(s) not Done: %s", len(left), joinNames(left)),
 				Evidence{"cards": left}, jiraLink(v.Jira))
-			h.cards = keys
+			h.Cards = keys
 			return h
 		})
 	},

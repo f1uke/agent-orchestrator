@@ -52,7 +52,7 @@ var ruleB3 = rule{
 			h := versionHit(t, v,
 				fmt.Sprintf("%d card(s) still %s: %s", len(keys), strings.Join(sortedKeys(statuses), " / "), joinNames(keys)),
 				Evidence{"cards": keys}, jiraLink(v.Jira))
-			h.cards = keys
+			h.Cards = keys
 			return h
 		})
 	},

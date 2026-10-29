@@ -34,7 +34,7 @@ func cardHit(row *SprintRow, c *SprintCard, text string, ev Evidence, mrs ...Spr
 	for _, m := range mrs {
 		links = append(links, Link{Label: fmt.Sprintf("Open !%d", m.IID), URL: m.URL})
 	}
-	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Text: text, Links: links, cards: []string{c.Key}}
+	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Text: text, Links: links, Cards: []string{c.Key}}
 }
 
 func mrList(mrs []SprintMR, short func(AppID) string) string {
@@ -231,7 +231,7 @@ var ruleG5 = rule{
 						Evidence: Evidence{"page": pg.ID, "cards": keys, "bucket": bucket.name},
 						Text:     fmt.Sprintf("%d card(s) not on %q: %s", len(keys), pg.Title, joinNames(keys)),
 						Links:    []Link{{Label: "Open page", URL: pg.URL}},
-						cards:    keys,
+						Cards:    keys,
 					})
 				}
 			}
@@ -276,7 +276,7 @@ var ruleL8 = rule{
 					Evidence: Evidence{"card": c.Key, "target": m.Target, "state": m.State, "board": row.Board.Key},
 					Text:     fmt.Sprintf("%s !%d %s; it should go to the sprint branch", b.appName(m.App), m.IID, what),
 					Links:    []Link{{Label: "Open MR", URL: m.URL}},
-					cards:    []string{c.Key},
+					Cards:    []string{c.Key},
 				})
 			}
 			return out
@@ -445,7 +445,7 @@ var ruleG9 = rule{
 					Text:     text, Links: links,
 				}
 				if keys := mrKeys(mr); len(keys) > 0 {
-					h.Evidence["card"], h.cards = keys[0], keys[:1]
+					h.Evidence["card"], h.Cards = keys[0], keys[:1]
 				}
 				var freeze *Day
 				if t != nil {
