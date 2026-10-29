@@ -12,6 +12,7 @@ import { appMark } from "../../lib/releases/appMark";
 import { AppMark } from "./AppMark";
 import { useLabelStagger } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
+import { plural } from "../../lib/releases/plural";
 
 export function Stepper({ stages, big = false }: { stages: Stage[]; big?: boolean }) {
 	return (
@@ -104,7 +105,7 @@ export function StickyAppLabel({
 				<span
 					className="flag"
 					data-st={SEVERITY_META[top.severity].tone}
-					title={`${hits.length} alert(s) on ${app.name} in ${t?.label}`}
+					title={`${plural(hits.length, "alert")} on ${app.name} in ${t?.label}`}
 				>
 					{hits.length}
 				</span>

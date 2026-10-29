@@ -1,6 +1,7 @@
 import { fixFailure } from "./fix";
 import { targetAfterPlan } from "./plan";
 import type { AlertHit, Board, Fix, FixEvent, FixPlan, FixStep } from "./types";
+import { plural } from "./plural";
 
 /** A fake of the daemon's fix routes over the fictional Board, for the browser preview and Playwright. */
 
@@ -151,7 +152,7 @@ function planG5(b: Board, h: AlertHit): Draft {
 	if (!pg) return blocked("Add the cards to the page", "The release train page is no longer on the Board.");
 	const text = keys.join("\n");
 	return {
-		title: `Add ${keys.length} card(s) to ${pg.title}`,
+		title: `Add ${plural(keys.length, "card")} to ${pg.title}`,
 		mode: "copy",
 		note: "Release train pages are edited by people, so this copies the keys to paste into the page's card table.",
 		steps: [

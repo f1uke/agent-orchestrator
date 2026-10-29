@@ -1175,12 +1175,13 @@
 	}
 	.rel-sheet .al .l1 {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		flex-wrap: wrap;
 		gap: 2px 6px;
 	}
 	.rel-sheet .al .subj {
-		min-width: 0;
+		flex: 1 1 0;
+		min-width: 12ch;
 		font-size: 13px;
 		font-weight: 500;
 		color: var(--fg);
