@@ -17,8 +17,9 @@ var ruleL1 = rule{
 	Title:    "Long-lived branch has an open MR into develop or main after cutover",
 	Hint:     "Catches the wrong landing before it merges; it should go into the sprint branch.",
 	Check: func(b *Board) []Hit {
-		var out []Hit
-		for _, t := range openTrunkMRs(b) {
+		trunk := openTrunkMRs(b)
+		out := make([]Hit, 0, len(trunk))
+		for _, t := range trunk {
 			do := fmt.Sprintf("Retarget it to the sprint branch. %s takes no feature work after the cutover.", upperFirst(t.mr.TargetBranch))
 			if planned, ok := t.group.Target.(LLBPlanned); ok {
 				do += fmt.Sprintf(" This also puts it in sprint %d.", planned.Train.Number-1)

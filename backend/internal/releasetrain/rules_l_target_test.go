@@ -43,9 +43,9 @@ func TestL10PlanTargetsATrainAndNoAppHasAnMRIntoItsSprintBranch(t *testing.T) {
 		t.Fatalf("L10 hits = %v, want one per app %v", got, want)
 	}
 	h := firedHits(b, "L10")[0]
-	copy := Copy{What: "feature/demo-wallet is not in sprint 21 yet", Do: "Open an MR into the sprint branch before freeze Fri 30 Oct."}
-	if h.Severity != SevInfo || h.Train == nil || *h.Train != train22 || h.Evidence["group"] != PlanID("demo-wallet") || h.Copy != copy {
-		t.Fatalf("L10 hit = %+v; want info on train 22, group demo-wallet, copy %+v", h, copy)
+	wantCopy := Copy{What: "feature/demo-wallet is not in sprint 21 yet", Do: "Open an MR into the sprint branch before freeze Fri 30 Oct."}
+	if h.Severity != SevInfo || h.Train == nil || *h.Train != train22 || h.Evidence["group"] != PlanID("demo-wallet") || h.Copy != wantCopy {
+		t.Fatalf("L10 hit = %+v; want info on train 22, group demo-wallet, copy %+v", h, wantCopy)
 	}
 	if h.Due == nil || h.Due.Event != DueFreeze || h.Due.WorkDays != 4 || h.Due.Missed {
 		t.Fatalf("L10 due = %+v; want freeze in 4 working days", h.Due)

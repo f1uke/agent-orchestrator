@@ -127,13 +127,14 @@ var ruleC7 = rule{
 				return nil
 			}
 			n := len(v.Tag.MergesAfter)
-			titles := make([]string, 0, n)
+			titles, branches := make([]string, 0, n), make([]string, 0, n)
 			for _, c := range v.Tag.MergesAfter {
 				titles = append(titles, c.Title)
+				branches = append(branches, mergedBranch(c.Title))
 			}
 			return versionHit(t, v, Copy{
 				What: fmt.Sprintf("%s merged into main after tag %s", plural(n, "branch"), v.Tag.Name),
-				Do:   fmt.Sprintf("Tag a new version, or confirm %s can wait for the next train.", itThem(n)),
+				Do:   fmt.Sprintf("Tag a new version, or confirm %s can wait for the next train.", joinNames(branches)),
 			}, Evidence{"tag": v.Tag.Name, "merges": titles}).open(Link{Label: "Compare", URL: v.Tag.CompareURL})
 		})
 	},

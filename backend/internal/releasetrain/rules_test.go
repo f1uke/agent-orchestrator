@@ -192,7 +192,7 @@ func ruleCases() []ruleCase {
 				{Title: "Merge branch 'fix/crash' into 'main'", CreatedOn: day(f.t, "2026-10-10")},
 			}
 			f.tags = append(f.tags, &TagFact{Project: 1001, Name: "3.4.1-rc1", CommitOn: day(f.t, "2026-10-11")})
-		}, []string{"C7~v/20-2026/di"}, "1 branch merged into main after tag 3.4.0"},
+		}, []string{"C7~v/20-2026/di"}, "1 branch merged into main after tag 3.4.0 Tag a new version, or confirm fix/crash can wait for the next train."},
 
 		{"D1 quiet on freeze plus two", "D1", "2026-10-11", func(f *fixture) {
 			healthy(f).approvers()
