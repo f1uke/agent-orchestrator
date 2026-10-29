@@ -9,7 +9,8 @@ const hit = (rule: string, subject: AlertHit["subject"], evidence: AlertHit["evi
 	evidence,
 	severity: "risk",
 	bucket: "badge",
-	text: "",
+	copy: { what: "", do: "" },
+	cards: [],
 	links: [],
 	asOf: "2026-10-14T03:00:00Z",
 });

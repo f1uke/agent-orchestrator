@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cardHits, llbHits, splitKeys, versionHits } from "./hitScope";
+import { cardHits, cardLine, llbHits, versionHits } from "./hitScope";
+import { demoBoard } from "./fixture";
 import { board } from "./testkit";
 import type { AlertHit, BoardApp, LLBGroup } from "./types";
 
@@ -10,7 +11,8 @@ function hit(id: string, over: Partial<AlertHit> = {}): AlertHit {
 		subject: { kind: "version", train: "21-2026", app: "di" },
 		severity: "risk",
 		bucket: "badge",
-		text: "",
+		copy: { what: "", do: "" },
+		cards: [],
 		evidence: {},
 		links: [],
 		asOf: "2026-10-15T00:00:00Z",
@@ -118,21 +120,50 @@ describe("hits about a long-lived branch group", () => {
 	});
 });
 
-describe("card keys in alert text", () => {
-	it("splits out each named key and leaves the rest as text", () => {
-		expect(splitKeys('2 card(s) not on "Train #21": DEMO-7, DEMO-11', ["DEMO-11", "DEMO-7"])).toEqual([
-			{ text: '2 card(s) not on "Train #21": ' },
-			{ key: "DEMO-7" },
-			{ text: ", " },
-			{ key: "DEMO-11" },
-		]);
+describe("the cards line of an alert", () => {
+	const b = demoBoard("2026-10-14");
+	const listed = (cards: string[], what: string, over: Partial<AlertHit> = {}) =>
+		hit("G5~pf/21-2026/demo/open", { cards, copy: { what, do: "" }, ...over });
+
+	it("lists the cards that line 1 does not name", () => {
+		const h = listed(["DEMO-101", "DEMO-102"], "2 cards are late");
+		expect(cardLine(h, b, false, h.copy.what)).toEqual({ keys: ["DEMO-101", "DEMO-102"], more: 0 });
+		const named = listed(["DEMO-101", "DEMO-102"], "DEMO-101 is late");
+		expect(cardLine(named, b, false, named.copy.what)).toEqual({ keys: ["DEMO-102"], more: 0 });
 	});
 
-	it("does not cut a longer key that starts with a named one", () => {
-		expect(splitKeys("DEMO-110, DEMO-11", ["DEMO-11"])).toEqual([{ text: "DEMO-110, " }, { key: "DEMO-11" }]);
+	it("shows the card's Jira summary when line 1 names the only card", () => {
+		const h = listed(["DEMO-101"], "DEMO-101 has no MR yet");
+		expect(cardLine(h, b, false, h.copy.what)).toEqual({ summary: "Sign-in with a passkey" });
 	});
 
-	it("keeps text without keys whole", () => {
-		expect(splitKeys("Jira says Done", [])).toEqual([{ text: "Jira says Done" }]);
+	it("shows nothing when line 1 names the only card and the board has no summary for it", () => {
+		const h = listed(["NOPE-9"], "NOPE-9 has no MR yet");
+		expect(cardLine(h, b, false, h.copy.what)).toBeNull();
+	});
+
+	it("does not mistake a longer key for the one line 1 names", () => {
+		const h = listed(["DEMO-10"], "DEMO-101 is late");
+		expect(cardLine(h, b, false, h.copy.what)).toEqual({ keys: ["DEMO-10"], more: 0 });
+	});
+
+	it("shows five keys, then how many more", () => {
+		const keys = ["A-1", "A-2", "A-3", "A-4", "A-5", "A-6", "A-7"];
+		const h = listed(keys, "7 cards are late");
+		expect(cardLine(h, b, false, h.copy.what)).toEqual({ keys: keys.slice(0, 5), more: 2 });
+	});
+
+	it("shows nothing for a hit with no cards", () => {
+		const h = listed([], "Train 21 has no release MR yet");
+		expect(cardLine(h, b, false, h.copy.what)).toBeNull();
+	});
+
+	it("narrows a page hit to the person's own cards under Only me", () => {
+		const h = listed(["A-1", "A-2", "A-3"], "3 cards are not on the page", {
+			subject: { kind: "pageFamily", train: "21-2026", family: "demo", bucket: "merged", keys: ["A-1", "A-2", "A-3"] },
+			mine: [{ why: "card", ref: "A-3" }],
+		});
+		expect(cardLine(h, b, true, h.copy.what)).toEqual({ keys: ["A-3"], more: 0 });
+		expect(cardLine(h, b, false, h.copy.what)).toEqual({ keys: ["A-1", "A-2", "A-3"], more: 0 });
 	});
 });

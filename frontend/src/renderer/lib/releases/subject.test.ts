@@ -166,7 +166,7 @@ describe("subjectLabel", () => {
 		const d = demoBoard("2026-10-14");
 		const lines = d.alerts.hits.map((h) => {
 			const l = subjectLabel(h.subject, d);
-			return `${l.app ?? ""} ${l.text} ${h.text}`;
+			return `${l.app ?? ""} ${l.text} ${h.copy.what}`;
 		});
 		expect(new Set(lines).size).toBe(lines.length);
 	});

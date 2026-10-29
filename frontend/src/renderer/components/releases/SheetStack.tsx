@@ -20,19 +20,13 @@ import {
 import { derivedOf, readOf, releasePage, stageOf, type Provenance } from "../../lib/releases/sources";
 import type { AppVersion, Board, FixState, RuleOutcome, Stage } from "../../lib/releases/types";
 import type { ReleasesSearch, SheetEntry } from "../../lib/releases/url";
-import {
-	RULE_GROUPS,
-	SEVERITY_META,
-	SEVERITY_ORDER,
-	STAGE_META,
-	STATUS_TEXT,
-	stageTone,
-} from "../../lib/releases/vocab";
+import { RULE_GROUPS, SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Switch } from "../ui/switch";
 import { appMarkOf } from "../../lib/releases/appMark";
 import { versionHits } from "../../lib/releases/hitScope";
-import { AlertList, AlertRow, Ext, HitLinks, HitWho, Sec } from "./Alerts";
+import { plural } from "../../lib/releases/plural";
+import { AlertList, AlertRow, Ext, HitLinks, HitWho, Sec, SeverityGroups } from "./Alerts";
 import { AppMark } from "./AppMark";
 import { Avatar } from "./Avatar";
 import { cardSheet, sprintSheet } from "./CardSheets";
@@ -561,7 +555,7 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 				<span>Train</span>
 				<span>{h.train ? (c.board.trains.find((t) => t.id === h.train)?.label ?? h.train) : "none"}</span>
 				<span>Problem</span>
-				<span>{h.text}</span>
+				<span>{h.copy.what}</span>
 				{m?.milestone && (
 					<>
 						<span>Milestone</span>
@@ -638,9 +632,6 @@ function UnknownCells({ rules, c }: { rules: RuleOutcome[]; c: Ctx }) {
 function AttentionBody({ c }: { c: Ctx }) {
 	const clear = useClearStaleHides();
 	const readOnly = useReleasesReadOnly();
-	const groups = SEVERITY_ORDER.map((s) => [s, c.lens.attention.filter((h) => h.severity === s)] as const).filter(
-		([, l]) => l.length,
-	);
 	const shownApps = new Set(c.lens.apps.map((a) => a.id));
 	const unknown = c.board.alerts.rules.filter(
 		(r) => r.on && r.outcome.kind === "unknown" && (!r.app || shownApps.has(r.app)),
@@ -651,20 +642,10 @@ function AttentionBody({ c }: { c: Ctx }) {
 			<div className="passive mt-2.5 text-[11.5px]">
 				Following the app filter:{" "}
 				{c.lens.apps.length === c.board.apps.length ? "all apps" : c.lens.apps.map((a) => a.name).join(", ") || "none"}.{" "}
-				{c.board.catalogue.filter((r) => !r.on).length} rule(s) off.
+				{plural(c.board.catalogue.filter((r) => !r.on).length, "rule")} off.
 			</div>
-			{groups.length ? (
-				groups.map(([s, list]) => (
-					<div key={s}>
-						<div className="grp" data-st={SEVERITY_META[s].tone}>
-							{SEVERITY_META[s].label}
-							<span className="n">{list.length}</span>
-						</div>
-						{list.map((h) => (
-							<AlertRow key={h.id} h={h} c={c} />
-						))}
-					</div>
-				))
+			{c.lens.attention.length ? (
+				<SeverityGroups hits={c.lens.attention} c={c} />
 			) : (
 				<div className="sec empty">Nothing needs attention{unknown.length ? " that the monitor can see." : "."}</div>
 			)}
@@ -677,7 +658,7 @@ function AttentionBody({ c }: { c: Ctx }) {
 				</Fold>
 			)}
 			{stale.length > 0 && (
-				<Fold label={`${stale.length} hide(s) no longer matching`} testid="stale-fold">
+				<Fold label={`${plural(stale.length, "hide")} no longer matching`} testid="stale-fold">
 					{stale.map((s) => (
 						<div key={s.id} className="al dim">
 							<div>

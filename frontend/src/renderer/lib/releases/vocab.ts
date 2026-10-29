@@ -43,12 +43,12 @@ export function stageTone(s: StageStatus): Tone {
 	return s === "not_observable" ? "passive" : s;
 }
 
-export const SEVERITY_META: Readonly<Record<Severity, { label: string; tone: Tone; rank: number }>> = {
-	block: { label: "Block", tone: "failed", rank: 0 },
-	data: { label: "Data", tone: "failed", rank: 1 },
-	risk: { label: "Risk", tone: "waiting", rank: 2 },
-	hygiene: { label: "Cleanup", tone: "todo", rank: 3 },
-	info: { label: "Info", tone: "running", rank: 4 },
+export const SEVERITY_META: Readonly<Record<Severity, { label: string; header: string; tone: Tone; rank: number }>> = {
+	block: { label: "Block", header: "Blocks the release", tone: "failed", rank: 0 },
+	data: { label: "Data", header: "Systems disagree", tone: "failed", rank: 1 },
+	risk: { label: "Risk", header: "At risk", tone: "waiting", rank: 2 },
+	hygiene: { label: "Cleanup", header: "Clean up", tone: "todo", rank: 3 },
+	info: { label: "Info", header: "For your info", tone: "running", rank: 4 },
 };
 
 export const SEVERITY_ORDER: readonly Severity[] = ["block", "data", "risk", "hygiene", "info"];
