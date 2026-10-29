@@ -73,11 +73,10 @@ type Board struct {
 	// People is everyone the Board mentions, sorted by name; the monitor's own person is always there once Identity is known.
 	People []BoardPerson `json:"people"`
 	// Viewer is whose Mine the Board carries: the person Inputs.Viewer names, else the monitor's own.
-	Viewer    ViewerState `json:"viewer"`
-	Alerts    Alerts      `json:"alerts"`
-	Catalogue []RuleInfo  `json:"catalogue"`
-	fix       fixContext
-	// familyLabels names each family the way people say it, for alert copy.
+	Viewer       ViewerState `json:"viewer"`
+	Alerts       Alerts      `json:"alerts"`
+	Catalogue    []RuleInfo  `json:"catalogue"`
+	fix          fixContext
 	familyLabels map[FamilyID]string
 	mrs          map[AppID][]MRFact
 	moved        map[string]string

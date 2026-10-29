@@ -45,8 +45,6 @@ type trunkMR struct {
 	cutover Day
 }
 
-// openTrunkMRs is every open MR of a long-lived branch into develop or main after the app's cutover,
-// except those the plan accepted. L1 flags them and L10 stays quiet for the same branch.
 func openTrunkMRs(b *Board) []trunkMR {
 	var out []trunkMR
 	for gi := range b.LLBs {
@@ -118,7 +116,7 @@ var ruleL3 = rule{
 						Evidence: Evidence{"card": c.Key, "train": t.ID, "group": g.ID, "branch": parked.Branch, "target": targetText(g.Target)},
 						Copy: Copy{
 							What: fmt.Sprintf("%s is on train %s, but its code is parked in %s", c.Key, t.ID.short(), parked.Branch),
-							Do:   fmt.Sprintf("Set %s to target train %s, or take the card off the train. %s", parked.Branch, t.ID.short(), targetNow(g.Target)),
+							Do:   fmt.Sprintf("Set %s to target train %s, or take the card off the train. %s", parked.Branch, t.ID.short(), targetSentence(g.Target)),
 						},
 						Cards: []string{c.Key},
 					}
@@ -214,8 +212,7 @@ func aimedTrain(t LLBTarget) (TrainID, bool) {
 	return TrainID{}, false
 }
 
-// targetNow says in prose what a long-lived branch's plan targets today.
-func targetNow(t LLBTarget) string {
+func targetSentence(t LLBTarget) string {
 	switch t := t.(type) {
 	case LLBPlanned:
 		return fmt.Sprintf("It targets train %s now.", t.Train.short())

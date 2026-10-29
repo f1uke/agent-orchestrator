@@ -14,7 +14,6 @@ type copyCase struct {
 	setup func(f *fixture)
 }
 
-// chipRules are the rules whose card counts down to a date, with the date's event.
 var chipRules = map[RuleID]DueEvent{
 	"B1": DueFreeze, "B3": DuePublish, "C1": DuePublish, "C5": DuePublish, "C6": DuePublish,
 	"D1": DuePublish, "D2": DuePublish, "D3": DuePublish,
@@ -99,8 +98,6 @@ func copyCases() []copyCase {
 
 const walletProject = "https://gitlab.example.com/demo/"
 
-// sprintBranchWithProjectURL gives each wallet app a closed MR into train 22's sprint branch,
-// whose URL names the project: the two facts a New MR link needs.
 func sprintBranchWithProjectURL(f *fixture) {
 	for _, app := range []AppID{"di", "da"} {
 		mr := f.mr(app, "unrelated", "feat/other", "feature/sprint-21-2026", MRClosed, "2026-10-20", "")

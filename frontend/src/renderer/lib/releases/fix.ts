@@ -30,10 +30,6 @@ export type PrimaryAction =
 	| { kind: "state"; ref: FixRef }
 	| { kind: "link"; label: string; url: string };
 
-/**
- * An action does one thing: open a link, open the Fix, or open the hit's details sheet.
- * A fix primary falls back to the hit's first link where the Fix is unavailable.
- */
 export function primaryAction(h: AlertHit, hidden: boolean, readOnly: boolean): PrimaryAction | null {
 	const p = h.primary;
 	if (!p) return null;

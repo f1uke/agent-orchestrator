@@ -99,8 +99,6 @@ func severityIn(w trainWindow) Severity {
 	return SevInfo
 }
 
-// newMRURL is the GitLab form that opens an MR from the branch into the sprint branch of its train.
-// It is empty when either name is unknown: the sprint branch is never guessed from a pattern.
 func (b *Board) newMRURL(a aim) string {
 	app := a.branch.App
 	into, web := b.fix.sprintBranchFor(app, a.train.ID), b.projectWebURL(app)
@@ -111,7 +109,6 @@ func (b *Board) newMRURL(a aim) string {
 		web, url.QueryEscape(a.branch.Branch), url.QueryEscape(into))
 }
 
-// projectWebURL is the app's GitLab project page, read off an MR the app has: the config holds only the host.
 func (b *Board) projectWebURL(app AppID) string {
 	for _, mr := range b.mrs[app] {
 		if web, _, ok := strings.Cut(mr.URL, "/-/merge_requests/"); ok && web != "" {

@@ -312,7 +312,6 @@ func routeMR(mrs []SprintMR, r Route) *SprintMR {
 	return nil
 }
 
-// routePhrase says where a route's code is, to follow "is" or an app name.
 func routePhrase(r Route) string {
 	switch to := r.To.(type) {
 	case ToLLB:

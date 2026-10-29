@@ -169,7 +169,6 @@ func detectLLBs(cfg Config, snap Snapshot) ([]LongLivedBranch, map[AppID]Day) {
 	return out, cutover
 }
 
-// cardKeys names each card once; a card with several MRs has one row per MR.
 func (br LongLivedBranch) cardKeys() []string {
 	out := make([]string, 0, len(br.Cards))
 	for _, c := range br.Cards {

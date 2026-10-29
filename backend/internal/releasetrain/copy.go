@@ -34,7 +34,6 @@ type Due struct {
 	Missed bool `json:"missed,omitempty"`
 }
 
-// workDaysTo counts the working days from today to end, negative when end is past.
 func workDaysTo(today, end Day) int {
 	if end.Before(today) {
 		return -workDaysLeft(end, today)
@@ -50,7 +49,6 @@ type Action struct {
 	Details bool   `json:"details,omitempty"`
 }
 
-// plural writes n and noun, adding "s" (or "es" after ch, sh, s or x) unless n is 1.
 func plural(n int, noun string) string {
 	switch {
 	case n == 1:
@@ -82,10 +80,8 @@ func itThem(n int) string {
 	return "them"
 }
 
-// short is the train's number as people say it: "22", or "20-1" for an irregular train.
 func (t TrainID) short() string { return strings.TrimPrefix(t.String(), "#") }
 
-// before writes "before <event> <date>", or just "before <event>" when the date is unknown.
 func before(event string, on *Day) string {
 	if on == nil {
 		return "before " + event
@@ -93,7 +89,6 @@ func before(event string, on *Day) string {
 	return "before " + event + " " + on.label()
 }
 
-// open makes the first link with a URL the hit's primary action and the rest its secondary links.
 func (h *Hit) open(links ...Link) *Hit {
 	for i, l := range links {
 		if l.URL != "" {
@@ -104,20 +99,17 @@ func (h *Hit) open(links ...Link) *Hit {
 	return h
 }
 
-// promote makes links[i] the hit's primary action and leaves the other links secondary.
 func (h *Hit) promote(links []Link, i int) *Hit {
 	h.Primary = &Action{Label: links[i].Label, URL: links[i].URL}
 	h.Links = append(append([]Link{}, links[:i]...), links[i+1:]...)
 	return h
 }
 
-// fix makes the rule's fix the hit's primary action; links stay secondary.
 func (h *Hit) fix(label string, links ...Link) *Hit {
 	h.Primary, h.Links = &Action{Label: label, Fix: true}, links
 	return h
 }
 
-// dueAt sets the hit's deadline chip; an unknown date leaves it off.
 func (h *Hit) dueAt(today Day, on *Day, event DueEvent) *Hit {
 	if on != nil {
 		h.Due = &Due{On: *on, Event: event, WorkDays: workDaysTo(today, *on)}
