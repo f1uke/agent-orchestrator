@@ -137,7 +137,28 @@ function CardsLine({ h, c, what }: { h: AlertHit; c: AlertCtx; what: string }) {
 	);
 }
 
-function PrimaryButton({ a, h, c }: { a: PrimaryAction; h: AlertHit; c: AlertCtx }) {
+function PrimaryButton({
+	a,
+	h,
+	c,
+	details,
+}: {
+	a: PrimaryAction;
+	h: AlertHit;
+	c: AlertCtx;
+	details: SheetEntry | null;
+}) {
+	if (a.kind === "details")
+		return details ? (
+			<button
+				type="button"
+				className="prim"
+				data-testid="hit-primary"
+				onClick={() => c.actions.openPart(details, sheetPart(h))}
+			>
+				{a.label}
+			</button>
+		) : null;
 	if (a.kind === "link")
 		return (
 			<a className="prim" data-testid="hit-primary" href={a.url} target="_blank" rel="noreferrer">
@@ -214,7 +235,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 				</div>
 				<CardsLine h={h} c={c} what={copy.what} />
 				<div className="acts">
-					{primary && <PrimaryButton a={primary} h={h} c={c} />}
+					{primary && <PrimaryButton a={primary} h={h} c={c} details={open} />}
 					{links.map((l) => (
 						<Ext key={l.url} url={l.url}>
 							{l.label}

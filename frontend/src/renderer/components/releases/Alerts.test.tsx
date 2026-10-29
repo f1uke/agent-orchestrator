@@ -190,6 +190,31 @@ describe("the actions of an alert", () => {
 		expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["Open release MR", "Open pipeline"]);
 	});
 
+	it("opens the hit's details sheet from a details primary, also on a read-only page", () => {
+		const h = hit({
+			id: "L13~llb/22-2026/di/feature/demo-wallet",
+			rule: "L13",
+			subject: { kind: "llbBranch", train: "22-2026", app: "di", branch: "feature/demo-wallet", group: "demo-wallet" },
+			fix: undefined,
+			primary: { label: "Retarget plan", details: true } as AlertHit["primary"],
+			links: [],
+		});
+		for (const readOnly of [false, true]) {
+			const c = ctx();
+			const { unmount } = renderIn(<AlertRow h={h} c={c} />, readOnly);
+			const primary = screen.getByTestId("hit-primary");
+			expect(primary.tagName).toBe("BUTTON");
+			fireEvent.click(primary);
+			expect(c.actions.openPart).toHaveBeenCalledWith({ kind: "llb", id: "demo-wallet" }, null);
+			unmount();
+		}
+	});
+
+	it("draws no primary button for a hit without one", () => {
+		renderIn(<AlertRow h={hit({ primary: undefined, links: [] })} c={ctx()} />);
+		expect(screen.queryByTestId("hit-primary")).toBeNull();
+	});
+
 	it("hides the alert from the X button", () => {
 		renderIn(<AlertRow h={hit()} c={ctx()} />);
 		expect(screen.getByRole("button", { name: "Hide E1~v/20-2026/di" })).toBeTruthy();

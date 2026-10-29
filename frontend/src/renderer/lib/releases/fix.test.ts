@@ -139,6 +139,14 @@ describe("the primary action of a hit", () => {
 		expect(primaryAction(h, false, true)).toEqual(link);
 	});
 
+	it("opens the details sheet for a details primary, on every page and for a hit with a fix", () => {
+		const h = fixable({ primary: { label: "Retarget plan", details: true } as AlertHit["primary"] });
+		const details = { kind: "details", label: "Retarget plan" };
+		expect(primaryAction(h, false, false)).toEqual(details);
+		expect(primaryAction(h, false, true)).toEqual(details);
+		expect(primaryAction(h, true, false)).toEqual(details);
+	});
+
 	it("has none when the hit names none", () => {
 		expect(primaryAction(hit("F1~tt/21-2026/22-2026"), false, false)).toBeNull();
 	});
