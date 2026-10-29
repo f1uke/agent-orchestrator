@@ -10,7 +10,7 @@ type gCase struct {
 	name  string
 	today string
 	setup func(f *fixture) []string
-	text  string
+	copy  Copy
 }
 
 func runG(t *testing.T, rule RuleID, cases []gCase) {
@@ -27,8 +27,8 @@ func runG(t *testing.T, rule RuleID, cases []gCase) {
 			if got := firedIDs(b, rule); !reflect.DeepEqual(got, want) {
 				t.Fatalf("%s hits = %v, want %v", rule, got, want)
 			}
-			if tc.text != "" && firedHits(b, rule)[0].Text != tc.text {
-				t.Fatalf("%s text = %q, want %q", rule, firedHits(b, rule)[0].Text, tc.text)
+			if tc.copy != (Copy{}) && firedHits(b, rule)[0].Copy != tc.copy {
+				t.Fatalf("%s copy = %+v, want %+v", rule, firedHits(b, rule)[0].Copy, tc.copy)
 			}
 		})
 	}
@@ -40,22 +40,22 @@ func TestG1MergedCodeWhileJiraSaysInDevelopment(t *testing.T) {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")
 			return []string{"G1~c/DEMO-1"}
-		}, "Jira says In Progress, all 1 MR(s) merged (Demo iOS !102)"},
+		}, Copy{"DEMO-1 is merged, but Jira still says In Progress", "Move the card to Ready for QA."}},
 		{"one MR still open", "", func(f *fixture) []string {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")
 			f.mr("da", "DEMO-1 b", "feat/DEMO-1", "feature/sprint-7-2026", MROpened, "2026-10-07", "")
 			return nil
-		}, ""},
+		}, Copy{}},
 		{"Jira moved on", "", func(f *fixture) []string {
 			f.sprintCard(demoSprint(f), "DEMO-1", "Ready for QA", true)
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")
 			return nil
-		}, ""},
+		}, Copy{}},
 		{"no MR", "", func(f *fixture) []string {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			return nil
-		}, ""},
+		}, Copy{}},
 	})
 }
 
@@ -64,15 +64,15 @@ func TestG2NoMRWithinThreeWorkingDaysOfTheSprintEnd(t *testing.T) {
 		{"Thursday before a Tuesday end: 3 working days", "2026-10-15", func(f *fixture) []string {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			return []string{"G2~c/DEMO-1"}
-		}, "No MR yet, DEMO 7 ends Tue 20 Oct (3 working days left) · Jira In Progress"},
+		}, Copy{"DEMO-1 has no MR yet", "Open one before sprint 7 ends Tue 20 Oct, or mark it No MR needed."}},
 		{"Wednesday before a Tuesday end: 4 working days", "2026-10-14", func(f *fixture) []string {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			return nil
-		}, ""},
+		}, Copy{}},
 		{"Sunday before a Monday end: 1 working day", "2026-10-18", func(f *fixture) []string {
 			f.sprintCard(f.sprint(42, 7, "2026-10-06", "2026-10-19"), "DEMO-1", "In Progress", true)
 			return []string{"G2~c/DEMO-1"}
-		}, "No MR yet, DEMO 7 ends Mon 19 Oct (1 working day left) · Jira In Progress"},
+		}, Copy{"DEMO-1 has no MR yet", "Open one before sprint 7 ends Mon 19 Oct, or mark it No MR needed."}},
 		{"carried over, abandoned or with an MR stay quiet", "2026-10-15", func(f *fixture) []string {
 			s := demoSprint(f)
 			f.sprintCard(s, "DEMO-1", "Done", false)
@@ -80,7 +80,7 @@ func TestG2NoMRWithinThreeWorkingDaysOfTheSprintEnd(t *testing.T) {
 			f.sprintCard(s, "DEMO-3", "In Progress", true)
 			f.mr("di", "DEMO-3", "feat/DEMO-3", "feature/sprint-7-2026", MROpened, "2026-10-07", "")
 			return nil
-		}, ""},
+		}, Copy{}},
 	})
 }
 
@@ -96,28 +96,28 @@ func TestG3CodeGoesToAnotherTrainThanThePageOrFixVersion(t *testing.T) {
 		{"fixVersion says 7, code in sprint 7's branch rides 8", "", func(f *fixture) []string {
 			routedToNext(f)
 			return []string{"G3~c/DEMO-1"}
-		}, "Page or fixVersion says #7, code goes to #8 (Demo iOS)"},
+		}, Copy{"DEMO-1: its Demo iOS code is in train 8, but its page or fixVersion says train 7", "Move the code to the train 7 sprint branch, or update the page and the fixVersion."}},
 		{"fixVersion agrees", "", func(f *fixture) []string {
 			v := f.version("di", "8", "3.6.0", "2026-10-26", "2026-11-02")
 			v.issue("DEMO-1", "In Progress", "indeterminate")
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")
 			return nil
-		}, ""},
+		}, Copy{}},
 		{"parked in a long-lived branch with no target", "", func(f *fixture) []string {
 			v := f.version("di", "7", "3.5.0", "2026-10-12", "2026-10-19")
 			v.issue("DEMO-1", "In Progress", "indeterminate")
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/demo-chat", MRMerged, "2026-09-07", "2026-09-08")
 			return []string{"G3~c/DEMO-1"}
-		}, "Page or fixVersion says #7, code goes to feature/demo-chat (Demo iOS)"},
+		}, Copy{"DEMO-1: its Demo iOS code is in feature/demo-chat, but its page or fixVersion says train 7", "Move the code to the train 7 sprint branch, or update the page and the fixVersion."}},
 		{"carried over cards are not checked", "", func(f *fixture) []string {
 			v := f.version("di", "7", "3.5.0", "2026-10-12", "2026-10-19")
 			v.issue("DEMO-1", "In Progress", "indeterminate")
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", false)
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/demo-chat", MRMerged, "2026-09-07", "2026-09-08")
 			return nil
-		}, ""},
+		}, Copy{}},
 	})
 }
 
@@ -128,13 +128,13 @@ func TestG4AppsGoToDifferentPlaces(t *testing.T) {
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")
 			f.mr("da", "DEMO-1 b", "feat/DEMO-1", "develop", MROpened, "2026-10-07", "")
 			return []string{"G4~c/DEMO-1"}
-		}, "Demo iOS → #8, Demo Android → off flow"},
+		}, Copy{"DEMO-1 goes to different places: Demo iOS in train 8, Demo Android off the sprint flow", "Check that the split is planned."}},
 		{"both apps in the sprint branch", "", func(f *fixture) []string {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "feature/sprint-7-2026", MRMerged, "2026-10-07", "2026-10-08")
 			f.mr("da", "DEMO-1 b", "feat/DEMO-1", "feature/sprint-2026-7", MROpened, "2026-10-07", "")
 			return nil
-		}, ""},
+		}, Copy{}},
 	})
 }
 
@@ -154,23 +154,23 @@ func TestG5CardShipsButIsNotOnThePage(t *testing.T) {
 		{"merged and open cards missing from the page", "", func(f *fixture) []string {
 			pagedTrain(f, "2026-10-19")
 			return []string{"G5~pf/21-2026/demo/merged", "G5~pf/21-2026/demo/open"}
-		}, ""},
+		}, Copy{}},
 		{"listed cards and cards with no code stay quiet", "", func(f *fixture) []string {
 			p := pagedTrain(f, "2026-10-19")
 			f.card(p, "DEMO-1")
 			f.card(p, "DEMO-2")
 			return nil
-		}, ""},
+		}, Copy{}},
 		{"a published train is not checked", "2026-10-27", func(f *fixture) []string {
 			pagedTrain(f, "2026-10-19")
 			return nil
-		}, ""},
+		}, Copy{}},
 		{"no page, no hit", "", func(f *fixture) []string {
 			v := f.version("di", "21", "3.5.0", "2026-10-19", "2026-10-26")
 			v.issue("DEMO-1", "In Progress", "indeterminate")
 			f.mr("di", "DEMO-1 a", "feat/DEMO-1", "develop", MRMerged, "2026-10-01", "2026-10-02")
 			return nil
-		}, ""},
+		}, Copy{}},
 	})
 	for _, tc := range []struct {
 		freeze string
@@ -198,12 +198,12 @@ func TestL8CardMRIntoDevelopAfterCutover(t *testing.T) {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			iid := f.mr("di", "DEMO-1 a", "feat/DEMO-1", "develop", MRMerged, "2026-10-07", "2026-10-08").IID
 			return []string{"L8~mr/di/" + strconv.Itoa(iid)}
-		}, ""},
+		}, Copy{}},
 		{"open into develop is caught before it merges", "", func(f *fixture) []string {
 			f.sprintCard(demoSprint(f), "DEMO-1", "In Progress", true)
 			iid := f.mr("da", "DEMO-1 b", "feat/DEMO-1", "develop", MROpened, "2026-10-07", "").IID
 			return []string{"L8~mr/da/" + strconv.Itoa(iid)}
-		}, ""},
+		}, Copy{}},
 		{"into develop before cutover, or into the sprint branch, is fine", "", func(f *fixture) []string {
 			f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-7-2026", MRMerged, "2026-10-09", "2026-10-09")
 			s := demoSprint(f)
@@ -212,7 +212,7 @@ func TestL8CardMRIntoDevelopAfterCutover(t *testing.T) {
 			f.sprintCard(s, "DEMO-2", "In Progress", true)
 			f.mr("di", "DEMO-2 a", "feat/DEMO-2", "feature/sprint-7-2026", MROpened, "2026-10-09", "")
 			return nil
-		}, ""},
+		}, Copy{}},
 	})
 }
 

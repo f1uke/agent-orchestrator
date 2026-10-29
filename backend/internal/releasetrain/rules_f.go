@@ -29,8 +29,11 @@ var ruleF1 = rule{
 			out = append(out, Hit{
 				Subject: SubjTrainPair{A: x.ID, B: y.ID}, Train: &train, AgesOn: y.Publish,
 				Evidence: Evidence{"freeze": *y.Freeze, "publish": *x.Publish},
-				Text:     fmt.Sprintf("%s freezes %s, before %s publishes %s", y.ID, y.Freeze.label(), x.ID, x.Publish.label()),
-				Links:    []Link{},
+				Copy: Copy{
+					What: fmt.Sprintf("Train %s freezes %s, before train %s publishes %s", y.ID.short(), y.Freeze.label(), x.ID.short(), x.Publish.label()),
+					Do:   "Move a date if the overlap is not planned.",
+				},
+				Links: []Link{},
 			})
 		}
 		return out
@@ -56,13 +59,16 @@ var ruleF2 = rule{
 					continue
 				}
 				train := t.ID
-				out = append(out, Hit{
+				hit := Hit{
 					Subject: SubjHotfixTrain{App: h.App, Version: h.Version, Train: t.ID}, Train: &train, App: h.App, AgesOn: due,
 					Evidence: Evidence{"start": *start, "due": *due, "freeze": *t.Freeze, "publish": *t.Publish},
-					Text: fmt.Sprintf("Hotfix %s runs %s to %s, inside train %s (%s to %s)",
-						h.Version, start.label(), due.label(), t.ID, t.Freeze.label(), t.Publish.label()),
-					Links: hotfixLinks(h, t),
-				})
+					Copy: Copy{
+						What: fmt.Sprintf("Hotfix %s (%s to %s) overlaps train %s (%s to %s)",
+							h.Version, start.label(), due.label(), t.ID.short(), t.Freeze.label(), t.Publish.label()),
+						Do: "Agree which ships first, or move the hotfix dates.",
+					},
+				}
+				out = append(out, *hit.open(hotfixLinks(h, t)...))
 			}
 		}
 		return out
@@ -73,7 +79,7 @@ func hotfixLinks(h Hotfix, t *Train) []Link {
 	links := []Link{{Label: "Open hotfix", URL: h.Milestone.URL}}
 	for _, v := range t.Versions {
 		if v.App == h.App {
-			links = append(links, Link{Label: "Open " + t.ID.String() + " milestone", URL: v.Milestone.URL})
+			links = append(links, Link{Label: "Open train " + t.ID.short() + " milestone", URL: v.Milestone.URL})
 		}
 	}
 	return links

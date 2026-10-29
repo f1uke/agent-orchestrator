@@ -18,28 +18,60 @@ var ruleL1 = rule{
 	Hint:     "Catches the wrong landing before it merges; it should go into the sprint branch.",
 	Check: func(b *Board) []Hit {
 		var out []Hit
-		for _, g := range b.LLBs {
-			for _, br := range g.Branches {
-				cutover, ok := b.Cutover[br.App]
-				if !ok || !b.Today.After(cutover) {
-					continue
-				}
-				for _, mr := range br.outs {
-					if mr.State != MROpened || !trunkRE.MatchString(mr.TargetBranch) || accepted(g.Plan, br.App, mr.IID) {
-						continue
-					}
-					out = append(out, Hit{
-						Subject: SubjMR{App: br.App, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: br.App,
-						Evidence: Evidence{"group": g.ID, "branch": br.Branch, "mr": mr.IID, "target": mr.TargetBranch, "cutover": cutover},
-						Text:     fmt.Sprintf("!%d %s → %s is open; land it in the sprint branch instead", mr.IID, br.Branch, mr.TargetBranch),
-						Links:    []Link{{Label: "Open MR", URL: mr.URL}},
-						Cards:    br.cardKeys(),
-					})
-				}
+		for _, t := range openTrunkMRs(b) {
+			do := fmt.Sprintf("Retarget it to the sprint branch. %s takes no feature work after the cutover.", upperFirst(t.mr.TargetBranch))
+			if planned, ok := t.group.Target.(LLBPlanned); ok {
+				do += fmt.Sprintf(" This also puts it in sprint %d.", planned.Train.Number-1)
 			}
+			h := Hit{
+				Subject: SubjMR{App: t.branch.App, IID: t.mr.IID, Source: t.mr.SourceBranch, Target: t.mr.TargetBranch}, App: t.branch.App,
+				Evidence: Evidence{"group": t.group.ID, "branch": t.branch.Branch, "mr": t.mr.IID, "target": t.mr.TargetBranch, "cutover": t.cutover},
+				Copy: Copy{
+					What: fmt.Sprintf("MR !%d takes %s into %s", t.mr.IID, t.branch.Branch, t.mr.TargetBranch),
+					Do:   do,
+				},
+				Cards: t.branch.cardKeys(),
+			}
+			out = append(out, *h.fix("Retarget MR", Link{Label: "Open MR", URL: t.mr.URL}))
 		}
 		return out
 	},
+}
+
+type trunkMR struct {
+	group   *LLBGroup
+	branch  *LongLivedBranch
+	mr      MRFact
+	cutover Day
+}
+
+// openTrunkMRs is every open MR of a long-lived branch into develop or main after the app's cutover,
+// except those the plan accepted. L1 flags them and L10 stays quiet for the same branch.
+func openTrunkMRs(b *Board) []trunkMR {
+	var out []trunkMR
+	for gi := range b.LLBs {
+		g := &b.LLBs[gi]
+		for bi := range g.Branches {
+			br := &g.Branches[bi]
+			cutover, ok := b.Cutover[br.App]
+			if !ok || !b.Today.After(cutover) {
+				continue
+			}
+			for _, mr := range br.outs {
+				if mr.State == MROpened && trunkRE.MatchString(mr.TargetBranch) && !accepted(g.Plan, br.App, mr.IID) {
+					out = append(out, trunkMR{group: g, branch: br, mr: mr, cutover: cutover})
+				}
+			}
+		}
+	}
+	return out
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func accepted(p *LlbPlan, app AppID, iid int) bool {
@@ -81,13 +113,16 @@ var ruleL3 = rule{
 						continue
 					}
 					train := t.ID
-					out = append(out, Hit{
+					h := Hit{
 						Subject: SubjCardOnTrain{Train: t.ID, App: v.App, Key: c.Key}, Train: &train, App: v.App, AgesOn: dueOf(t, v),
 						Evidence: Evidence{"card": c.Key, "train": t.ID, "group": g.ID, "branch": parked.Branch, "target": targetText(g.Target)},
-						Text:     fmt.Sprintf("%s is on train %s, but its code sits in %s (%s)", c.Key, t.ID, parked.Branch, targetText(g.Target)),
-						Links:    []Link{{Label: "Open card", URL: c.URL}},
-						Cards:    []string{c.Key},
-					})
+						Copy: Copy{
+							What: fmt.Sprintf("%s is on train %s, but its code is parked in %s", c.Key, t.ID.short(), parked.Branch),
+							Do:   fmt.Sprintf("Set %s to target train %s, or take the card off the train. %s", parked.Branch, t.ID.short(), targetNow(g.Target)),
+						},
+						Cards: []string{c.Key},
+					}
+					out = append(out, *h.fix("Set target train", Link{Label: "Open card", URL: c.URL}).dueAt(b.Today, freezeOf(t, v), DueFreeze))
 				}
 			}
 		}
@@ -122,17 +157,23 @@ var ruleL9 = rule{
 					mr.State == MRMerged && landed[mr.TargetBranch]:
 					continue
 				}
-				why := "open into a branch no train takes"
-				if mr.State == MRMerged {
-					why = fmt.Sprintf("merged, but %s has not landed in a sprint branch or develop", mr.TargetBranch)
+				c := Copy{
+					What: fmt.Sprintf("MR !%d goes into %s, which no train takes", mr.IID, mr.TargetBranch),
+					Do:   "Retarget it to the sprint branch or a long-lived branch.",
 				}
-				out = append(out, Hit{
+				if mr.State == MRMerged {
+					c = Copy{
+						What: fmt.Sprintf("MR !%d is merged into %s, which never reached a sprint branch", mr.IID, mr.TargetBranch),
+						Do:   fmt.Sprintf("Merge %s into the sprint branch, or move the change.", mr.TargetBranch),
+					}
+				}
+				h := Hit{
 					Subject: SubjMR{App: app.ID, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: app.ID,
 					Evidence: Evidence{"mr": mr.IID, "source": mr.SourceBranch, "target": mr.TargetBranch, "state": mr.State},
-					Text:     fmt.Sprintf("!%d %s → %s: %s", mr.IID, mr.SourceBranch, mr.TargetBranch, why),
-					Links:    []Link{{Label: "Open MR", URL: mr.URL}},
+					Copy:     c,
 					Cards:    mrKeys(mr),
-				})
+				}
+				out = append(out, *h.open(Link{Label: "Open MR", URL: mr.URL}))
 			}
 		}
 		return out
@@ -171,6 +212,21 @@ func aimedTrain(t LLBTarget) (TrainID, bool) {
 		return t.Train, true
 	}
 	return TrainID{}, false
+}
+
+// targetNow says in prose what a long-lived branch's plan targets today.
+func targetNow(t LLBTarget) string {
+	switch t := t.(type) {
+	case LLBPlanned:
+		return fmt.Sprintf("It targets train %s now.", t.Train.short())
+	case LLBFromEpic:
+		return fmt.Sprintf("An epic suggests train %s for it.", t.Train.short())
+	case LLBLandedIn:
+		return fmt.Sprintf("It already landed for train %s.", t.Train.short())
+	case LLBDropped:
+		return "Its plan was dropped."
+	}
+	return "It has no target train now."
 }
 
 func targetText(t LLBTarget) string {

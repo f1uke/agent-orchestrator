@@ -27,22 +27,14 @@ func forEachSprintCard(b *Board, fn func(row *SprintRow, c *SprintCard) []Hit) [
 	return out
 }
 
-func cardHit(row *SprintRow, c *SprintCard, text string, ev Evidence, mrs ...SprintMR) Hit {
+func cardHit(row *SprintRow, c *SprintCard, copy Copy, ev Evidence, mrs ...SprintMR) Hit {
 	ev["board"], ev["sprint"] = row.Board.Key, row.Number
 	links := make([]Link, 0, 1+len(mrs))
 	links = append(links, Link{Label: "Open card", URL: c.URL})
 	for _, m := range mrs {
 		links = append(links, Link{Label: fmt.Sprintf("Open !%d", m.IID), URL: m.URL})
 	}
-	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Text: text, Links: links, Cards: []string{c.Key}}
-}
-
-func mrList(mrs []SprintMR, short func(AppID) string) string {
-	parts := make([]string, len(mrs))
-	for i, m := range mrs {
-		parts[i] = fmt.Sprintf("%s !%d", short(m.App), m.IID)
-	}
-	return strings.Join(parts, ", ")
+	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Copy: copy, Links: links, Cards: []string{c.Key}}
 }
 
 func (b *Board) appName(id AppID) string {
@@ -71,8 +63,11 @@ var ruleG1 = rule{
 					return nil
 				}
 			}
-			return []Hit{cardHit(row, c, fmt.Sprintf("Jira says %s, all %d MR(s) merged (%s)", c.Status, len(c.MRs), mrList(c.MRs, b.appName)),
-				Evidence{"status": c.Status, "mrs": len(c.MRs)}, c.MRs...)}
+			h := cardHit(row, c, Copy{
+				What: fmt.Sprintf("%s is merged, but Jira still says %s", c.Key, c.Status),
+				Do:   "Move the card to Ready for QA.",
+			}, Evidence{"status": c.Status, "mrs": len(c.MRs)}, c.MRs...)
+			return []Hit{*h.fix("Move to Ready for QA", h.Links...)}
 		})
 	},
 }
@@ -104,12 +99,11 @@ var ruleG2 = rule{
 			if left > 3 {
 				return nil
 			}
-			plural := "s"
-			if left == 1 {
-				plural = ""
-			}
-			return []Hit{cardHit(row, c, fmt.Sprintf("No MR yet, %s %d ends %s (%d working day%s left) · Jira %s",
-				row.Board.Key, row.Number, row.Sprint.End.label(), left, plural, c.Status), Evidence{"end": *row.Sprint.End, "status": c.Status})}
+			h := cardHit(row, c, Copy{
+				What: c.Key + " has no MR yet",
+				Do:   fmt.Sprintf("Open one before sprint %d ends %s, or mark it No MR needed.", row.Number, row.Sprint.End.label()),
+			}, Evidence{"end": *row.Sprint.End, "status": c.Status})
+			return []Hit{*h.open(h.Links...).dueAt(b.Today, row.Sprint.End, DueSprintEnd)}
 		})
 	},
 }
@@ -129,16 +123,15 @@ var ruleG3 = rule{
 				if !r.Mismatch {
 					continue
 				}
-				goes := routeName(r)
-				if to, ok := r.To.(ToLLB); ok {
-					goes = to.Branch
-				}
 				var by []SprintMR
 				if m := routeMR(c.MRs, r); m != nil {
 					by = append(by, *m)
 				}
-				return []Hit{cardHit(row, c, fmt.Sprintf("Page or fixVersion says %s, code goes to %s (%s)", r.Plan, goes, b.appName(r.App)),
-					Evidence{"app": r.App, "plan": *r.Plan, "to": r.To.destKey()}, by...)}
+				h := cardHit(row, c, Copy{
+					What: fmt.Sprintf("%s: its %s code is %s, but its page or fixVersion says train %s", c.Key, b.appName(r.App), routePhrase(r), r.Plan.short()),
+					Do:   fmt.Sprintf("Move the code to the train %s sprint branch, or update the page and the fixVersion.", r.Plan.short()),
+				}, Evidence{"app": r.App, "plan": *r.Plan, "to": r.To.destKey()}, by...)
+				return []Hit{*h.promote(h.Links, len(h.Links)-1)}
 			}
 			return nil
 		})
@@ -158,9 +151,13 @@ var ruleG4 = rule{
 			}
 			tos := map[string]bool{}
 			parts := make([]string, 0, len(c.Routes))
+			allTrains := true
 			for _, r := range c.Routes {
 				tos[r.To.destKey()] = true
-				parts = append(parts, fmt.Sprintf("%s → %s", b.appName(r.App), routeName(r)))
+				parts = append(parts, fmt.Sprintf("%s %s", b.appName(r.App), routePhrase(r)))
+				if _, ok := r.To.(ToTrain); !ok {
+					allTrains = false
+				}
 			}
 			if len(tos) < 2 {
 				return nil
@@ -170,7 +167,15 @@ var ruleG4 = rule{
 				keys = append(keys, k)
 			}
 			sort.Strings(keys)
-			return []Hit{cardHit(row, c, strings.Join(parts, ", "), Evidence{"to": keys})}
+			what := fmt.Sprintf("%s goes to different places: %s", c.Key, strings.Join(parts, ", "))
+			if allTrains && len(tos) == 2 {
+				what = fmt.Sprintf("%s ships in two trains: %s", c.Key, strings.Join(parts, ", "))
+			}
+			h := cardHit(row, c, Copy{
+				What: what,
+				Do:   "Check that the split is planned.",
+			}, Evidence{"to": keys})
+			return []Hit{*h.open(h.Links...)}
 		})
 	},
 }
@@ -225,14 +230,21 @@ var ruleG5 = rule{
 					keys := sortedKeys(bucket.keys)
 					sort.Slice(keys, func(a, c int) bool { return keyLess(keys[a], keys[c]) })
 					train := t.ID
-					out = append(out, Hit{
+					what := fmt.Sprintf("%s in train %s %s not on its %s page", plural(len(keys), "merged card"), t.ID.short(), isAre(len(keys)), b.familyLabel(pg.Family))
+					if bucket.name == "open" {
+						what = fmt.Sprintf("%s with an open MR for train %s %s not on its %s page", plural(len(keys), "card"), t.ID.short(), isAre(len(keys)), b.familyLabel(pg.Family))
+					}
+					h := Hit{
 						Subject: SubjPageFamily{Train: t.ID, Family: pg.Family, Bucket: bucket.name, Keys: keys}, Train: &train,
 						Severity: bucket.sev,
 						Evidence: Evidence{"page": pg.ID, "cards": keys, "bucket": bucket.name},
-						Text:     fmt.Sprintf("%d card(s) not on %q: %s", len(keys), pg.Title, joinNames(keys)),
-						Links:    []Link{{Label: "Open page", URL: pg.URL}},
-						Cards:    keys,
-					})
+						Copy: Copy{
+							What: what,
+							Do:   fmt.Sprintf("Add %s to the page %s.", itThem(len(keys)), before("freeze", t.Freeze)),
+						},
+						Cards: keys,
+					}
+					out = append(out, *h.fix("Copy rows", Link{Label: "Open page", URL: pg.URL}).dueAt(b.Today, t.Freeze, DueFreeze))
 				}
 			}
 		}
@@ -267,17 +279,24 @@ var ruleL8 = rule{
 				if m == nil {
 					continue
 				}
-				what := "is open into develop"
-				if m.State == MRMerged && m.Merged != nil {
-					what = "merged into develop on " + m.Merged.label()
-				}
-				out = append(out, Hit{
+				h := Hit{
 					Subject: SubjMR{App: m.App, IID: m.IID, Source: m.Source, Target: m.Target}, App: m.App,
 					Evidence: Evidence{"card": c.Key, "target": m.Target, "state": m.State, "board": row.Board.Key},
-					Text:     fmt.Sprintf("%s !%d %s; it should go to the sprint branch", b.appName(m.App), m.IID, what),
-					Links:    []Link{{Label: "Open MR", URL: m.URL}},
 					Cards:    []string{c.Key},
-				})
+				}
+				link := Link{Label: "Open MR", URL: m.URL}
+				if m.State == MRMerged {
+					merged := "was merged into develop"
+					if m.Merged != nil {
+						merged += " on " + m.Merged.label()
+					}
+					h.Copy = Copy{What: fmt.Sprintf("MR !%d for %s %s", m.IID, c.Key, merged), Do: "Bring the change into the sprint branch too."}
+					h.open(link)
+				} else {
+					h.Copy = Copy{What: fmt.Sprintf("MR !%d for %s goes into develop", m.IID, c.Key), Do: "Retarget it to the sprint branch."}
+					h.fix("Retarget MR", link)
+				}
+				out = append(out, h)
 			}
 			return out
 		})
@@ -293,16 +312,17 @@ func routeMR(mrs []SprintMR, r Route) *SprintMR {
 	return nil
 }
 
-func routeName(r Route) string {
+// routePhrase says where a route's code is, to follow "is" or an app name.
+func routePhrase(r Route) string {
 	switch to := r.To.(type) {
 	case ToLLB:
-		return strings.TrimPrefix(to.Branch, "feature/")
+		return "in " + to.Branch
 	case ToTrain:
-		return to.Train.String()
+		return "in train " + to.Train.short()
 	case BeforeFirstTrain:
-		return "<" + to.Train.String()
+		return "before train " + to.Train.short()
 	}
-	return "off flow"
+	return "off the sprint flow"
 }
 
 var ruleG6 = rule{
@@ -319,21 +339,24 @@ var ruleG6 = rule{
 				if mr.State == MRClosed {
 					continue
 				}
-				var moves []string
+				var moves, from, to []string
 				for _, k := range mrKeys(mr) {
-					if to := b.moved[k]; to != "" {
-						moves = append(moves, k+" → "+to)
+					if next := b.moved[k]; next != "" {
+						moves, from, to = append(moves, k+" → "+next), append(from, k), append(to, next)
 					}
 				}
 				if len(moves) == 0 {
 					continue
 				}
-				out = append(out, Hit{
+				h := Hit{
 					Subject: SubjMR{App: app.ID, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: app.ID,
 					Evidence: Evidence{"mr": mr.IID, "moved": moves},
-					Text:     fmt.Sprintf("!%d uses a card key that Jira moved: %s; fix the MR title", mr.IID, strings.Join(moves, ", ")),
-					Links:    []Link{{Label: "Open MR", URL: mr.URL}},
-				})
+					Copy: Copy{
+						What: fmt.Sprintf("MR !%d names %s, which Jira moved to %s", mr.IID, strings.Join(from, " and "), strings.Join(to, " and ")),
+						Do:   fmt.Sprintf("Put %s in the MR title.", strings.Join(to, " and ")),
+					},
+				}
+				out = append(out, *h.open(Link{Label: "Open MR", URL: mr.URL}))
 			}
 		}
 		return out
@@ -356,7 +379,7 @@ func (b *Board) milestoneOwners() map[AppID]map[int]milestoneOwner {
 	for i := range b.Trains {
 		t := &b.Trains[i]
 		for _, v := range t.Versions {
-			put(v.App, v.Milestone.ID, milestoneOwner{train: &t.ID, name: t.ID.String()})
+			put(v.App, v.Milestone.ID, milestoneOwner{train: &t.ID, name: "train " + t.ID.short()})
 		}
 	}
 	for _, h := range b.Hotfixes {
@@ -424,26 +447,28 @@ var ruleG9 = rule{
 				if t != nil {
 					rides = t.ID
 				}
-				var text string
-				links := []Link{{Label: "Open MR", URL: mr.URL}}
+				var what string
 				if mr.MilestoneID == nil {
-					text = fmt.Sprintf("!%d has no milestone; it rides %s", mr.IID, rides)
-					if v != nil {
-						text += ", set " + v.Milestone.Title
-						links = append(links, Link{Label: "Open milestone", URL: v.Milestone.URL})
-					}
+					what = fmt.Sprintf("MR !%d has no milestone", mr.IID)
 				} else {
 					o, known := owners[app.ID][*mr.MilestoneID]
 					if !known || o.train != nil && o.train.Number == feeds.Number && o.train.Year == feeds.Year {
 						continue
 					}
-					text = fmt.Sprintf("!%d milestone says %s, code goes to %s", mr.IID, o.name, rides)
+					what = fmt.Sprintf("MR !%d has the %s milestone, but ships in train %s", mr.IID, o.name, rides.short())
+				}
+				links := []Link{{Label: "Open MR", URL: mr.URL}}
+				do := fmt.Sprintf("Set the train %s milestone once it exists.", rides.short())
+				if v != nil {
+					do = fmt.Sprintf("Set milestone %s. It ships in train %s.", v.Milestone.Title, rides.short())
+					links = append(links, Link{Label: "Open milestone", URL: v.Milestone.URL})
 				}
 				h := Hit{
 					Subject: SubjMR{App: app.ID, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, App: app.ID, Train: &rides,
 					Evidence: Evidence{"mr": mr.IID, "target": mr.TargetBranch, "milestone": mr.MilestoneID},
-					Text:     text, Links: links,
+					Copy:     Copy{What: what, Do: do},
 				}
+				h.open(links...)
 				if keys := mrKeys(mr); len(keys) > 0 {
 					h.Evidence["card"], h.Cards = keys[0], keys[:1]
 				}
@@ -456,6 +481,7 @@ var ruleG9 = rule{
 				}
 				if freeze != nil && workDaysLeft(b.Today, *freeze) <= nearFreezeWorkDays {
 					h.Severity = SevRisk
+					h.dueAt(b.Today, freeze, DueFreeze)
 				}
 				out = append(out, h)
 			}

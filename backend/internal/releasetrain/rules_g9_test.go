@@ -12,9 +12,9 @@ func TestG9MergedCardMRIntoASprintBranchWithoutAMilestone(t *testing.T) {
 
 	hits := firedHits(f.reconcile(), "G9")
 
-	want := "!" + strconv.Itoa(iid) + " has no milestone; it rides #22, set Release 3.6.0"
-	if len(hits) != 1 || hits[0].Text != want {
-		t.Fatalf("G9 = %+v; want one hit %q", hits, want)
+	want := Copy{What: "MR !" + strconv.Itoa(iid) + " has no milestone", Do: "Set milestone Release 3.6.0. It ships in train 22."}
+	if len(hits) != 1 || hits[0].Copy != want {
+		t.Fatalf("G9 = %+v; want one hit %+v", hits, want)
 	}
 	h := hits[0]
 	if h.Subject != (SubjMR{App: "di", IID: iid, Source: "feat/DEMO-31", Target: "feature/sprint-2026-21"}) || h.Severity != SevHygiene {
@@ -42,9 +42,9 @@ func TestG9MilestoneOfAnotherTrain(t *testing.T) {
 
 	hits := firedHits(f.reconcile(), "G9")
 
-	want := "!" + strconv.Itoa(iid) + " milestone says #23, code goes to #22"
-	if len(hits) != 1 || hits[0].Text != want || *hits[0].Train != (TrainID{Number: 22, Year: 2026}) {
-		t.Fatalf("G9 = %+v; want one hit %q on #22", hits, want)
+	want := "MR !" + strconv.Itoa(iid) + " has the train 23 milestone, but ships in train 22"
+	if len(hits) != 1 || hits[0].Copy.What != want || *hits[0].Train != (TrainID{Number: 22, Year: 2026}) {
+		t.Fatalf("G9 = %+v; want one hit %q on train 22", hits, want)
 	}
 }
 
@@ -54,8 +54,8 @@ func TestG9HotfixMilestoneOnASprintMR(t *testing.T) {
 	hf := f.milestone("di", "Hotfix 3.5.1", "", "2026-10-13", "2026-10-15")
 	iid := v.cardMRWith(hf, "DEMO-31 limit", "feat/DEMO-31", "feature/sprint-2026-21", MRMerged)
 
-	want := "!" + strconv.Itoa(iid) + " milestone says Hotfix 3.5.1, code goes to #22"
-	if hits := firedHits(f.reconcile(), "G9"); len(hits) != 1 || hits[0].Text != want {
+	want := "MR !" + strconv.Itoa(iid) + " has the Hotfix 3.5.1 milestone, but ships in train 22"
+	if hits := firedHits(f.reconcile(), "G9"); len(hits) != 1 || hits[0].Copy.What != want {
 		t.Fatalf("G9 = %+v; want one hit %q", hits, want)
 	}
 }
@@ -130,8 +130,8 @@ func TestG9UnknownTrainAheadOfTheBoardStillNamesIt(t *testing.T) {
 	f.version("di", "22", "3.6.0", "2026-10-30", "2026-11-06")
 	iid := f.mr("di", "DEMO-31 limit", "feat/DEMO-31", "feature/sprint-2026-24", MROpened, "2026-10-12", "").IID
 
-	want := "!" + strconv.Itoa(iid) + " has no milestone; it rides #25"
-	if hits := firedHits(f.reconcile(), "G9"); len(hits) != 1 || hits[0].Text != want || hits[0].Severity != SevHygiene {
-		t.Fatalf("G9 = %+v; want one hygiene hit %q", hits, want)
+	want := Copy{What: "MR !" + strconv.Itoa(iid) + " has no milestone", Do: "Set the train 25 milestone once it exists."}
+	if hits := firedHits(f.reconcile(), "G9"); len(hits) != 1 || hits[0].Copy != want || hits[0].Severity != SevHygiene {
+		t.Fatalf("G9 = %+v; want one hygiene hit %+v", hits, want)
 	}
 }

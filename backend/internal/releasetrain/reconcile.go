@@ -42,10 +42,19 @@ func Reconcile(in Inputs, env Env) Board {
 	b.People = buildPeople(seenOnBoard(&b, mrs, in.Snap, in.Config), in.Links, b.Identity, in.Snap)
 	b.Viewer = ViewerOf(b.People, b.Identity, in.Viewer)
 	mine(&b, meOf(b.Viewer, in.Snap), mrs, in.Snap, in.Config)
+	b.fix = newFixContext(in.Config, in.Snap)
+	b.familyLabels = familyLabels(in.Config)
 	b.Alerts = alerts(&b, in, rs)
 	b.Catalogue = catalogue(in.Human.RuleSettings)
-	b.fix = newFixContext(in.Config, in.Snap)
 	return b
+}
+
+func familyLabels(cfg Config) map[FamilyID]string {
+	out := make(map[FamilyID]string, len(cfg.Families))
+	for _, f := range cfg.Families {
+		out[f.ID] = f.Label
+	}
+	return out
 }
 
 func joinTrains(b *Board, cfg Config, snap Snapshot) {
