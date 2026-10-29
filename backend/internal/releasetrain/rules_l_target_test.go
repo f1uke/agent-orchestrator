@@ -15,6 +15,10 @@ var train22 = TrainID{Number: 22, Year: fixtureYear}
 
 func walletPlan(t *testing.T, today, freeze string, target TargetKind) (*fixture, map[AppID]*fv) {
 	f := newFixture(t, today)
+	return f, fillWallet(f, freeze, target)
+}
+
+func fillWallet(f *fixture, freeze string, target TargetKind) map[AppID]*fv {
 	versions := map[AppID]*fv{}
 	for _, app := range []AppID{"di", "da"} {
 		versions[app] = f.version(app, "22", "3.6.0", freeze, targetDue)
@@ -28,7 +32,7 @@ func walletPlan(t *testing.T, today, freeze string, target TargetKind) (*fixture
 		p.TargetTrain = &tr
 	}
 	f.human.Plans = []LlbPlan{p}
-	return f, versions
+	return versions
 }
 
 func TestL10PlanTargetsATrainAndNoAppHasAnMRIntoItsSprintBranch(t *testing.T) {

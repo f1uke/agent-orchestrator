@@ -99,17 +99,16 @@ func severityIn(w trainWindow) Severity {
 	return SevInfo
 }
 
-// newMRLink is the GitLab form that opens an MR from the branch into the sprint branch of its train.
-// It is nil when either name is unknown: the sprint branch is never guessed from a pattern.
-func (b *Board) newMRLink(a aim) *string {
+// newMRURL is the GitLab form that opens an MR from the branch into the sprint branch of its train.
+// It is empty when either name is unknown: the sprint branch is never guessed from a pattern.
+func (b *Board) newMRURL(a aim) string {
 	app := a.branch.App
 	into, web := b.fix.sprintBranchFor(app, a.train.ID), b.projectWebURL(app)
 	if into == "" || web == "" {
-		return nil
+		return ""
 	}
-	u := fmt.Sprintf("%s/-/merge_requests/new?merge_request[source_branch]=%s&merge_request[target_branch]=%s",
+	return fmt.Sprintf("%s/-/merge_requests/new?merge_request[source_branch]=%s&merge_request[target_branch]=%s",
 		web, url.QueryEscape(a.branch.Branch), url.QueryEscape(into))
-	return &u
 }
 
 // projectWebURL is the app's GitLab project page, read off an MR the app has: the config holds only the host.
@@ -151,8 +150,8 @@ var ruleL10 = rule{
 				Do:   "Open an MR into the sprint branch " + before("freeze", a.freeze) + ".",
 			})
 			h.Severity = severityIn(a.window)
-			if link := b.newMRLink(a); link != nil {
-				h.Primary = &Action{Label: "New MR", URL: *link}
+			if newMR := b.newMRURL(a); newMR != "" {
+				h.Primary = &Action{Label: "New MR", URL: newMR}
 			}
 			out = append(out, *h.dueAt(b.Today, a.freeze, DueFreeze))
 		}

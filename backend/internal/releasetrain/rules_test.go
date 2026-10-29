@@ -60,15 +60,17 @@ func TestRuleTableHasExactlyTheBuiltIDs(t *testing.T) {
 	}
 }
 
-func TestEveryRuleFiresAndStaysQuiet(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		rule  RuleID
-		today string
-		setup func(f *fixture)
-		want  []string
-		text  string
-	}{
+type ruleCase struct {
+	name  string
+	rule  RuleID
+	today string
+	setup func(f *fixture)
+	want  []string
+	text  string
+}
+
+func ruleCases() []ruleCase {
+	return []ruleCase{
 		{"A1 quiet", "A1", today, func(f *fixture) { healthy(f) }, nil, ""},
 		{"A1 milestone and Jira disagree", "A1", today, func(f *fixture) {
 			healthy(f).jira.Name = "iOS 3.5.1"
@@ -256,7 +258,11 @@ func TestEveryRuleFiresAndStaysQuiet(t *testing.T) {
 			healthy(f)
 			f.milestone("di", "Hotfix 3.4.1", "crash", "2026-10-10", "2026-10-13")
 		}, []string{"F2~ht/di/3.4.1/21-2026"}, "overlaps train 21"},
-	} {
+	}
+}
+
+func TestEveryRuleFiresAndStaysQuiet(t *testing.T) {
+	for _, tc := range ruleCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, tc.today)
 			tc.setup(f)

@@ -27,14 +27,14 @@ func forEachSprintCard(b *Board, fn func(row *SprintRow, c *SprintCard) []Hit) [
 	return out
 }
 
-func cardHit(row *SprintRow, c *SprintCard, copy Copy, ev Evidence, mrs ...SprintMR) Hit {
+func cardHit(row *SprintRow, c *SprintCard, say Copy, ev Evidence, mrs ...SprintMR) Hit {
 	ev["board"], ev["sprint"] = row.Board.Key, row.Number
 	links := make([]Link, 0, 1+len(mrs))
 	links = append(links, Link{Label: "Open card", URL: c.URL})
 	for _, m := range mrs {
 		links = append(links, Link{Label: fmt.Sprintf("Open !%d", m.IID), URL: m.URL})
 	}
-	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Copy: copy, Links: links, Cards: []string{c.Key}}
+	return Hit{Subject: SubjCard{Key: c.Key, Board: row.Board.Key}, Evidence: ev, Copy: say, Links: links, Cards: []string{c.Key}}
 }
 
 func (b *Board) appName(id AppID) string {
