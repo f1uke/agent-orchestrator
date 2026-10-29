@@ -21,9 +21,9 @@ func TestASprintBranchMRWithAMovedKeyGivesItsTrainOnlyTheValidCard(t *testing.T)
 		t.Fatalf("train 21 cards %v; want DEMO-31 and neither the moved key nor the card it now names", cardKeysOn(b, "di"))
 	}
 	hits := firedHits(b, "G6")
-	want := "!" + strconv.Itoa(iid) + " uses a card key that Jira moved: OLD-1 → NEW-9; fix the MR title"
-	if len(hits) != 1 || hits[0].Text != want || hits[0].Subject != (SubjMR{App: "di", IID: iid, Source: "feat/OLD-1", Target: "feature/sprint-20-2026"}) {
-		t.Fatalf("G6 = %+v; want one hit on the MR: %q", hits, want)
+	want := Copy{What: "MR !" + strconv.Itoa(iid) + " names OLD-1, which Jira moved to NEW-9", Do: "Put NEW-9 in the MR title."}
+	if len(hits) != 1 || hits[0].Copy != want || hits[0].Subject != (SubjMR{App: "di", IID: iid, Source: "feat/OLD-1", Target: "feature/sprint-20-2026"}) {
+		t.Fatalf("G6 = %+v; want one hit on the MR: %+v", hits, want)
 	}
 }
 

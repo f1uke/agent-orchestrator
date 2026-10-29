@@ -170,9 +170,11 @@ func detectLLBs(cfg Config, snap Snapshot) ([]LongLivedBranch, map[AppID]Day) {
 }
 
 func (br LongLivedBranch) cardKeys() []string {
-	out := make([]string, len(br.Cards))
-	for i, c := range br.Cards {
-		out[i] = c.Key
+	out := make([]string, 0, len(br.Cards))
+	for _, c := range br.Cards {
+		if !slices.Contains(out, c.Key) {
+			out = append(out, c.Key)
+		}
 	}
 	return out
 }

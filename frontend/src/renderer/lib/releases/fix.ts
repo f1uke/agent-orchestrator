@@ -24,6 +24,23 @@ export function fixAction(h: AlertHit, hidden: boolean): FixAction | null {
 	return h.fix ? { kind: "fix" } : null;
 }
 
+export type PrimaryAction =
+	| { kind: "details"; label: string }
+	| { kind: "fix"; label: string }
+	| { kind: "state"; ref: FixRef }
+	| { kind: "link"; label: string; url: string };
+
+export function primaryAction(h: AlertHit, hidden: boolean, readOnly: boolean): PrimaryAction | null {
+	const p = h.primary;
+	if (!p) return null;
+	if (p.details) return { kind: "details", label: p.label };
+	if (!p.fix) return p.url ? { kind: "link", label: p.label, url: p.url } : null;
+	const a = readOnly ? null : fixAction(h, hidden);
+	if (a) return a.kind === "fix" ? { kind: "fix", label: p.label } : { kind: "state", ref: a.ref };
+	const first = h.links.find((l) => l.url);
+	return first?.url ? { kind: "link", label: first.label, url: first.url } : null;
+}
+
 export function requestText(r: ShownRequest): string {
 	const head = `${r.method} ${r.url}`;
 	if (r.body === undefined || r.body === null) return head;

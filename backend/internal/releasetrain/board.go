@@ -73,12 +73,13 @@ type Board struct {
 	// People is everyone the Board mentions, sorted by name; the monitor's own person is always there once Identity is known.
 	People []BoardPerson `json:"people"`
 	// Viewer is whose Mine the Board carries: the person Inputs.Viewer names, else the monitor's own.
-	Viewer    ViewerState `json:"viewer"`
-	Alerts    Alerts      `json:"alerts"`
-	Catalogue []RuleInfo  `json:"catalogue"`
-	fix       fixContext
-	mrs       map[AppID][]MRFact
-	moved     map[string]string
+	Viewer       ViewerState `json:"viewer"`
+	Alerts       Alerts      `json:"alerts"`
+	Catalogue    []RuleInfo  `json:"catalogue"`
+	fix          fixContext
+	familyLabels map[FamilyID]string
+	mrs          map[AppID][]MRFact
+	moved        map[string]string
 }
 
 // BoardApp is one configured app as every surface names it.
@@ -321,6 +322,13 @@ func goneCompares(llbs []LLBGroup, cfg Config) map[resKey]bool {
 		}
 	}
 	return out
+}
+
+func (b *Board) familyLabel(id FamilyID) string {
+	if l := b.familyLabels[id]; l != "" {
+		return l
+	}
+	return string(id)
 }
 
 func (b *Board) familyOf(app AppID) FamilyID {

@@ -104,7 +104,7 @@ func TestG2SkipsAMarkedCardAndStillFiresForItsTwin(t *testing.T) {
 			f.sprintCard(s, "DEMO-2", "Ready for UAT", true)
 			f.markNoMR("DEMO-1")
 			return []string{"G2~c/DEMO-2"}
-		}, ""},
+		}, Copy{}},
 	})
 }
 
@@ -114,7 +114,7 @@ func TestG5SkipsAMarkedCardAsItSkipsOneWithNoCode(t *testing.T) {
 			pagedTrain(f, "2026-10-19")
 			f.markNoMR("DEMO-3")
 			return []string{"G5~pf/21-2026/demo/merged", "G5~pf/21-2026/demo/open"}
-		}, ""},
+		}, Copy{}},
 	})
 	f := newFixture(t, today)
 	pagedTrain(f, "2026-10-19")

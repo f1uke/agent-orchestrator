@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { subjectsBoard } from "./fixture";
-import { alertText, mineWhy, minePolicyOf, onlyMeSubject } from "./mineWhy";
-import type { AlertHit, MineReason, RuleInfo, Subject } from "./types";
+import { alertCopy, mineWhy, onlyMeSubject } from "./mineWhy";
+import type { AlertHit, MineReason, Subject } from "./types";
 import type { Who } from "./who";
 
 const ME: Who = { self: true, name: "Ada Example" };
@@ -13,7 +13,8 @@ const hit = (rule: string, subject: Subject, mine?: MineReason[]): AlertHit => (
 	subject,
 	severity: "risk",
 	bucket: "badge",
-	text: "",
+	copy: { what: "", do: "" },
+	cards: [],
 	evidence: {},
 	links: [],
 	asOf: "2026-10-19T02:00:00Z",
@@ -110,14 +111,6 @@ describe("mineWhy", () => {
 	});
 });
 
-describe("minePolicyOf", () => {
-	it("reads the rule's policy from the catalogue", () => {
-		const catalogue = [{ id: "D3", minePolicy: "pending_approver" }] as RuleInfo[];
-		expect(minePolicyOf(catalogue, "D3")).toBe("pending_approver");
-		expect(minePolicyOf(catalogue, "Z9")).toBeNull();
-	});
-});
-
 describe("onlyMeSubject", () => {
 	const g5: Subject = {
 		kind: "pageFamily",
@@ -139,19 +132,35 @@ describe("onlyMeSubject", () => {
 	});
 });
 
-describe("alertText", () => {
-	const d3 = hit("D3", version, [{ why: "approver" }]);
-	d3.text = "2 of 3 not approved: Ann, Bob";
-	d3.evidence = { pending: ["Ann", "Bob"], total: 3 };
+describe("alertCopy", () => {
+	const d3 = {
+		...hit("D3", version, [{ why: "approver" }]),
+		copy: {
+			what: "2 of 3 approvers have not approved train 22",
+			do: "Ask Ann, Bob to approve before publish Tue 3 Nov.",
+		},
+		due: { on: "2026-11-03", event: "publish" as const, workDays: 4 },
+	};
 
-	it("drops the other approvers' names from D3 under Only me", () => {
-		expect(alertText(d3, true)).toBe("2 of 3 not approved");
+	it("tells the approver on D3 that they have not approved, without the other approvers' names", () => {
+		expect(alertCopy(d3, true, "#22")).toEqual({
+			what: "You have not approved train 22",
+			do: "Approve the Jira release before publish Tue 3 Nov.",
+		});
 	});
 
-	it("keeps the rule's text with Only me off and on every other rule", () => {
-		expect(alertText(d3, false)).toBe("2 of 3 not approved: Ann, Bob");
-		const c1 = { ...hit("C1", version), text: "!77 failed: build" };
-		expect(alertText(c1, true)).toBe("!77 failed: build");
+	it("drops the date when the hit has no deadline, and the train when the board has no label", () => {
+		expect(alertCopy({ ...d3, due: undefined }, true, "#22").do).toBe("Approve the Jira release before publish.");
+		expect(alertCopy(d3, true).what).toBe("You have not approved this train");
+	});
+
+	it("keeps the rule's copy with Only me off and on every other rule", () => {
+		expect(alertCopy(d3, false, "#22")).toBe(d3.copy);
+		const c1 = {
+			...hit("C1", version),
+			copy: { what: "Train 22 release pipeline failed: build", do: "Retry the job." },
+		};
+		expect(alertCopy(c1, true, "#22")).toBe(c1.copy);
 	});
 });
 

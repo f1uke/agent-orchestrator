@@ -102,11 +102,11 @@ func forEachVersion(b *Board, fn func(t *Train, v *AppVersion) *Hit) []Hit {
 	return out
 }
 
-func versionHit(t *Train, v *AppVersion, text string, ev Evidence, links ...Link) *Hit {
+func versionHit(t *Train, v *AppVersion, c Copy, ev Evidence) *Hit {
 	train := t.ID
 	return &Hit{
 		Subject: SubjVersion{Train: t.ID, App: v.App}, Train: &train, App: v.App,
-		AgesOn: dueOf(t, v), Evidence: ev, Text: text, Links: links,
+		AgesOn: dueOf(t, v), Evidence: ev, Copy: c,
 	}
 }
 
@@ -147,6 +147,9 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 			hits[i].ID = hitID(r.ID, hits[i].Subject)
 			if hits[i].Links == nil {
 				hits[i].Links = []Link{}
+			}
+			if hits[i].Cards == nil {
+				hits[i].Cards = []string{}
 			}
 			if hits[i].Severity == 0 {
 				hits[i].Severity = r.Severity

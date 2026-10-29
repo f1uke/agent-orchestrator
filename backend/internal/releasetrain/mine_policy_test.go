@@ -76,7 +76,7 @@ func TestEveryHitOfAListedCardsRuleListsItsCards(t *testing.T) {
 		policy[r.ID] = r.Mine
 	}
 	for _, h := range Reconcile(in, f.env()).Alerts.Hits {
-		if policy[h.Rule] == MineListedCards && len(h.cards) == 0 {
+		if policy[h.Rule] == MineListedCards && len(h.Cards) == 0 {
 			t.Errorf("%s lists no cards, so no card of mine can make it mine", h.ID)
 		}
 	}

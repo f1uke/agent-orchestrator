@@ -1133,14 +1133,17 @@
 		color: var(--c);
 		font-weight: 600;
 	}
+	.rel-sheet .sec .grp {
+		margin-top: 10px;
+	}
 	.rel-sheet .grp .n {
 		color: var(--fg-passive);
 	}
 	.rel-sheet .al {
 		display: grid;
-		grid-template-columns: 1fr auto;
+		grid-template-columns: minmax(0, 1fr) auto auto;
 		gap: 10px;
-		padding: 9px 0;
+		padding: 10px 0 11px;
 		border-bottom: 1px solid var(--border);
 	}
 	.rel-sheet .al .sev {
@@ -1170,61 +1173,98 @@
 		font: 10.5px var(--font-mono);
 		color: var(--fg-passive);
 	}
-	.rel-sheet .al .subj {
+	.rel-sheet .al .l1 {
 		display: flex;
-		align-items: center;
-		gap: 6px;
-		margin-top: 3px;
-		max-width: 100%;
-		font-size: 12.5px;
+		align-items: flex-start;
+		flex-wrap: wrap;
+		gap: 2px 6px;
+	}
+	.rel-sheet .al .subj {
+		flex: 1 1 0;
+		min-width: 12ch;
+		font-size: 13px;
 		font-weight: 500;
 		color: var(--fg);
 		text-align: left;
 		overflow-wrap: anywhere;
 	}
-	.rel-sheet .al .subj > span:not(.appmark) {
-		min-width: 0;
-	}
-	.rel-sheet .al button.subj:hover > span:not(.appmark) {
+	.rel-sheet .al button.subj:hover {
 		text-decoration: underline;
 		text-underline-offset: 2px;
 	}
-	.rel-sheet .al .subj > svg {
-		flex: none;
-		color: var(--fg-passive);
-	}
+	.rel-sheet .al .do,
 	.rel-sheet .al .tx {
 		font-size: 12.5px;
 		color: var(--fg-muted);
 		margin-top: 2px;
 		overflow-wrap: anywhere;
 	}
-	.rel-sheet .al .tx .key {
+	.rel-sheet .al .cards {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 2px 10px;
+		margin-top: 3px;
+		font-size: 12px;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.rel-sheet .al .cards .key {
 		color: var(--accent);
 		font-family: var(--font-mono);
 		font-size: 11.5px;
 	}
-	.rel-sheet .al .tx .key:hover {
+	.rel-sheet .al .cards .key:hover {
 		text-decoration: underline;
 		text-underline-offset: 2px;
 	}
-	.rel-sheet .al .mine {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		margin-top: 2px;
-		font-size: 11.5px;
-		color: var(--accent);
-		overflow-wrap: anywhere;
+	.rel-sheet .al .cards .more {
+		color: var(--fg-passive);
+	}
+	.rel-sheet .al .due {
+		grid-column: 2;
+		align-self: start;
+		margin-top: 1px;
+		padding: 2px 8px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 600;
+		white-space: nowrap;
+		color: var(--c);
+		background: color-mix(in srgb, var(--c) 14%, transparent);
+	}
+	.rel-sheet .al > .x {
+		grid-column: 3;
 	}
 	.rel-sheet .al .acts {
 		display: flex;
-		gap: 12px;
-		margin-top: 4px;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 4px 12px;
+		margin-top: 7px;
 		font-size: 12px;
 	}
-	.rel-sheet .al .acts button {
+	.rel-sheet .al .acts button,
+	.rel-sheet .al .acts a {
+		color: var(--fg-muted);
+	}
+	.rel-sheet .al .acts button:hover,
+	.rel-sheet .al .acts a:hover {
 		color: var(--accent);
+	}
+	.rel-sheet .al .acts .prim {
+		display: inline-flex;
+		align-items: center;
+		height: 22px;
+		padding: 0 9px;
+		border-radius: 4px;
+		background: var(--accent-weak);
+		color: var(--accent);
+		font-weight: 500;
+	}
+	.rel-sheet .al .acts .prim:hover {
+		color: var(--accent);
+		filter: brightness(1.15);
 	}
 	.rel-sheet .al .where {
 		margin-top: 2px;
@@ -2380,11 +2420,8 @@
 		color: var(--fg-passive);
 	}
 
-	.rel-sheet .al .acts .fixb {
-		color: var(--amber);
-		font-weight: 500;
-	}
 	.rel-sheet .al .acts .fixq {
+		height: 22px;
 		font-size: 11px;
 		color: var(--c);
 		border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);

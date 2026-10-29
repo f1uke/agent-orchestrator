@@ -7,7 +7,7 @@ import (
 
 const slowPipelineMinutes = 60
 
-var semgrepNotPassed = map[string]bool{"missing": true, "failed": true, "canceled": true, "skipped": true}
+var semgrepNotPassed = map[string]string{"missing": "is missing", "failed": "failed", "canceled": "was canceled", "skipped": "was skipped"}
 
 var ruleC1 = rule{
 	ID: "C1", Group: "C", Severity: SevBlock, DefaultOn: true, Scope: scopePerApp, Reads: readsReleaseJobs,
@@ -20,8 +20,10 @@ var ruleC1 = rule{
 			if len(failed) == 0 {
 				return nil
 			}
-			return versionHit(t, v, fmt.Sprintf("!%d failed: %s", r.MR.IID, joinNames(failed)),
-				Evidence{"mr": r.MR.IID, "jobs": failed}, pipelineLink(r))
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s release pipeline failed: %s", t.ID.short(), joinNames(failed)),
+				Do:   failedJobsDo(len(failed)),
+			}, Evidence{"mr": r.MR.IID, "jobs": failed}).fix("Retry job", pipelineLink(r)).dueAt(b.Today, dueOf(t, v), DuePublish)
 		})
 	},
 }
@@ -37,8 +39,10 @@ var ruleC2 = rule{
 			if len(allowed) == 0 {
 				return nil
 			}
-			return versionHit(t, v, fmt.Sprintf("!%d allowed failures: %s", r.MR.IID, joinNames(allowed)),
-				Evidence{"mr": r.MR.IID, "jobs": allowed}, pipelineLink(r))
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s release pipeline: %s failed, allowed to fail", t.ID.short(), joinNames(allowed)),
+				Do:   "Nothing to do unless that job matters for this release.",
+			}, Evidence{"mr": r.MR.IID, "jobs": allowed}).open(pipelineLink(r))
 		})
 	},
 }
@@ -58,8 +62,10 @@ var ruleC3 = rule{
 			if minutes <= slowPipelineMinutes {
 				return nil
 			}
-			return versionHit(t, v, fmt.Sprintf("!%d pipeline took %d min", r.MR.IID, minutes),
-				Evidence{"mr": r.MR.IID, "minutes": minutes}, pipelineLink(r))
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s release pipeline took %s", t.ID.short(), plural(minutes, "minute")),
+				Do:   "Nothing to do now. Look for a slow job if it happens again.",
+			}, Evidence{"mr": r.MR.IID, "minutes": minutes}).open(pipelineLink(r))
 		})
 	},
 }
@@ -74,8 +80,10 @@ var ruleC5 = rule{
 			if r.Detail == nil || !r.Detail.Conflicts {
 				return nil
 			}
-			return versionHit(t, v, fmt.Sprintf("!%d has merge conflicts", r.MR.IID),
-				Evidence{"mr": r.MR.IID}, Link{Label: "Open release MR", URL: r.MR.URL})
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s release MR !%d has merge conflicts", t.ID.short(), r.MR.IID),
+				Do:   "Resolve the conflicts on the release branch.",
+			}, Evidence{"mr": r.MR.IID}).open(Link{Label: "Open release MR", URL: r.MR.URL}).dueAt(b.Today, dueOf(t, v), DuePublish)
 		})
 	},
 }
@@ -96,11 +104,13 @@ var ruleC6 = rule{
 					state = j.Status
 				}
 			}
-			if !semgrepNotPassed[state] {
+			if semgrepNotPassed[state] == "" {
 				return nil
 			}
-			return versionHit(t, v, fmt.Sprintf("semgrep-sast is %s on !%d", state, r.MR.IID),
-				Evidence{"mr": r.MR.IID, "semgrep": state}, pipelineLink(r))
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s release pipeline: semgrep-sast %s", t.ID.short(), semgrepNotPassed[state]),
+				Do:   "Make it run and pass. It is skipped when the build fails first, so retry the build.",
+			}, Evidence{"mr": r.MR.IID, "semgrep": state}).fix("Retry build", pipelineLink(r)).dueAt(b.Today, dueOf(t, v), DuePublish)
 		})
 	},
 }
@@ -116,16 +126,25 @@ var ruleC7 = rule{
 			if v.Tag == nil || !v.Tag.Newest || len(v.Tag.MergesAfter) == 0 {
 				return nil
 			}
-			parts := make([]string, 0, len(v.Tag.MergesAfter))
-			titles := make([]string, 0, len(v.Tag.MergesAfter))
+			n := len(v.Tag.MergesAfter)
+			titles, branches := make([]string, 0, n), make([]string, 0, n)
 			for _, c := range v.Tag.MergesAfter {
-				parts = append(parts, fmt.Sprintf("%s (%s)", mergedBranch(c.Title), c.CreatedOn.label()))
 				titles = append(titles, c.Title)
+				branches = append(branches, mergedBranch(c.Title))
 			}
-			return versionHit(t, v, fmt.Sprintf("After tag %s: %s", v.Tag.Name, joinNames(parts)),
-				Evidence{"tag": v.Tag.Name, "merges": titles}, Link{Label: "Compare", URL: v.Tag.CompareURL})
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("%s merged into main after tag %s", plural(n, "branch"), v.Tag.Name),
+				Do:   fmt.Sprintf("Tag a new version, or confirm %s can wait for the next train.", joinNames(branches)),
+			}, Evidence{"tag": v.Tag.Name, "merges": titles}).open(Link{Label: "Compare", URL: v.Tag.CompareURL})
 		})
 	},
+}
+
+func failedJobsDo(n int) string {
+	if n == 1 {
+		return "Fix the job, or retry it once if it looks flaky."
+	}
+	return "Fix the jobs, or retry them once if they look flaky."
 }
 
 func mergedBranch(title string) string {

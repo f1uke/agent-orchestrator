@@ -255,8 +255,8 @@ DEMO-9  app         2026-10-16  -
 
 func TestTrainAlertsHiddenShowsChangedAndStaleHides(t *testing.T) {
 	body := strings.Replace(trainBoardJSON,
-		`"text": "1 card(s) not Done", "bucket": "hidden"}`,
-		`"text": "1 card(s) not Done", "bucket": "hidden", "changedSinceHidden": true}`, 1)
+		`"copy": {"what": "1 card in train 20 is not Done after publish", "do": "Move it to Done."}, "bucket": "hidden"}`,
+		`"copy": {"what": "1 card in train 20 is not Done after publish", "do": "Move it to Done."}, "bucket": "hidden", "changedSinceHidden": true}`, 1)
 	body = strings.Replace(body, `"rules": [`, `"staleHides": [{"id": "D3~v/20-2026/di", "reason": "waiting on approver", "hiddenAt": "2026-10-10T03:00:00Z"}], "rules": [`, 1)
 	out, err := runTrain(t, body, "alerts", "--hidden")
 	if err != nil {

@@ -28,8 +28,10 @@ type movedBoard struct {
 		} `json:"llbs"`
 		Alerts struct {
 			Hits []struct {
-				Rule    string `json:"rule"`
-				Text    string `json:"text"`
+				Rule string `json:"rule"`
+				Copy struct {
+					What string `json:"what"`
+				} `json:"copy"`
 				Subject struct {
 					Kind string `json:"kind"`
 					IID  int    `json:"iid"`
@@ -88,7 +90,7 @@ func (b movedBoard) hits(rule string) []string {
 	var out []string
 	for _, h := range b.Board.Alerts.Hits {
 		if h.Rule == rule {
-			out = append(out, h.Subject.Kind+":"+h.Text)
+			out = append(out, h.Subject.Kind+":"+h.Copy.What)
 		}
 	}
 	return out
@@ -112,7 +114,7 @@ func TestAKeyJiraMovedIsNoCardOfTheLongLivedBranchButAnMRHygieneHit(t *testing.T
 		t.Errorf("wallet moved = %v, want %v", moved, want)
 	}
 	hits := b.hits("G6")
-	if len(hits) != 1 || !strings.HasPrefix(hits[0], "mr:!303 ") || !strings.Contains(hits[0], "NEW-9") {
+	if len(hits) != 1 || !strings.HasPrefix(hits[0], "mr:MR !303 ") || !strings.Contains(hits[0], "NEW-9") {
 		t.Errorf("G6 hits = %q; want one hit on !303 naming NEW-9", hits)
 	}
 }

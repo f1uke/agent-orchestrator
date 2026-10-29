@@ -166,6 +166,10 @@ func (rtLLBTarget) JSONSchemaOneOf() []interface{} {
 func init() {
 	for name, clean := range map[string]string{
 		"ReleasetrainAlertHit":                       "ReleaseTrainAlertHit",
+		"ReleasetrainCopy":                           "ReleaseTrainCopy",
+		"ReleasetrainDue":                            "ReleaseTrainDue",
+		"ReleasetrainDueEvent":                       "ReleaseTrainDueEvent",
+		"ReleasetrainAction":                         "ReleaseTrainAction",
 		"ReleasetrainAlerts":                         "ReleaseTrainAlerts",
 		"ReleasetrainAppVersion":                     "ReleaseTrainAppVersion",
 		"ReleasetrainApprover":                       "ReleaseTrainApprover",

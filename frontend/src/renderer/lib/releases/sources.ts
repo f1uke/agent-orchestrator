@@ -3,7 +3,6 @@ import type {
 	Board,
 	CardUnit,
 	LLBGroup,
-	MinePolicy,
 	NoMRMark,
 	RuleInfo,
 	SprintCard,
@@ -197,24 +196,6 @@ export function stageOf(s: Stage): Provenance {
 		lines: [...s.reads.map((kind) => ({ kind })), ...(conv ? [{ kind: "ao.convention", text: conv }] : [])],
 		note: conv ? "Its date is an AO convention, not one a system records." : undefined,
 		field: "Stage.reads",
-	};
-}
-
-const POLICY_TEXT: Readonly<Record<MinePolicy, string>> = {
-	never: "never mine: nobody owns a data check",
-	owner: "mine when the person owns it: the release MR, the release ticket or a hotfix MR",
-	pending_approver: "mine while the person's approval is pending",
-	listed_cards: "mine through the cards it lists that are the person's",
-	mr: "mine when the person wrote the MR or owns its card",
-};
-
-export function mineWhyOf(rule: string, policy: MinePolicy): Provenance {
-	return {
-		title: "Why it is in Mine",
-		how: "derived",
-		lines: [{ kind: "ao.mine_policy", text: `${rule}: ${POLICY_TEXT[policy]}` }],
-		note: "AO derives it from the rule's mine policy and the reasons the hit is the person's.",
-		field: "RuleInfo.minePolicy, Hit.mine",
 	};
 }
 

@@ -24,14 +24,14 @@ func (r rule) mineOf(b *Board, myCards map[string]bool, h Hit) []MineReason {
 	case MinePendingApprover:
 		return b.pendingApproverMine(h.Subject)
 	case MineListedCards:
-		return cardsMine(myCards, h.cards)
+		return cardsMine(myCards, h.Cards)
 	case MineMR:
 		if s, ok := h.Subject.(SubjMR); ok {
 			if why := b.authoredMine(s); why != nil {
 				return why
 			}
 		}
-		return cardsMine(myCards, h.cards)
+		return cardsMine(myCards, h.Cards)
 	}
 	return nil
 }

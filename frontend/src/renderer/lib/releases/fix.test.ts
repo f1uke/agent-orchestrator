@@ -7,6 +7,7 @@ import {
 	fixStateText,
 	newestFirst,
 	planView,
+	primaryAction,
 	requestText,
 	stepNote,
 	undoVerb,
@@ -20,7 +21,8 @@ function hit(id: string, over: Partial<AlertHit> = {}): AlertHit {
 		subject: { kind: "version", train: "21-2026", app: "di" },
 		severity: "risk",
 		bucket: "badge",
-		text: "",
+		copy: { what: "", do: "" },
+		cards: [],
 		evidence: {},
 		links: [],
 		asOf: "2026-10-15T00:00:00Z",
@@ -93,6 +95,60 @@ describe("which hits get a Fix button", () => {
 
 	it("a hidden hit gets no button", () => {
 		expect(fixAction(hit("E1~v/20-2026/di", { fix: "queue" }), true)).toBeNull();
+	});
+});
+
+describe("the primary action of a hit", () => {
+	const fixable = (over: Partial<AlertHit> = {}) =>
+		hit("E1~v/20-2026/di", {
+			fix: "queue",
+			primary: { label: "Mark released", fix: true },
+			links: [
+				{ label: "Open Jira release", url: "https://demo.example.com/versions/2" },
+				{ label: "Open tag", url: "https://gitlab.example.com/demo/-/tags/2.3.0" },
+			],
+			...over,
+		});
+
+	it("opens the Fix for a fix primary", () => {
+		expect(primaryAction(fixable(), false, false)).toEqual({ kind: "fix", label: "Mark released" });
+	});
+
+	it("shows the state of a fix that is already queued or applied in place of the button", () => {
+		const ref = { id: "fx-1", state: "applied" as const };
+		expect(primaryAction(fixable({ openFix: ref }), false, false)).toEqual({ kind: "state", ref });
+	});
+
+	it("falls back to the first link for a fix primary on a read-only page or a hidden hit", () => {
+		const first = { kind: "link", label: "Open Jira release", url: "https://demo.example.com/versions/2" };
+		expect(primaryAction(fixable(), false, true)).toEqual(first);
+		expect(primaryAction(fixable(), true, false)).toEqual(first);
+		expect(primaryAction(fixable({ openFix: { id: "fx-1", state: "applied" } }), false, true)).toEqual(first);
+	});
+
+	it("has no primary when a fix primary has no link to fall back to", () => {
+		expect(primaryAction(fixable({ links: [] }), false, true)).toBeNull();
+	});
+
+	it("keeps a link primary whatever the page can do", () => {
+		const h = hit("C5~v/21-2026/di", {
+			primary: { label: "Open release MR", url: "https://gitlab.example.com/demo/-/merge_requests/77" },
+		});
+		const link = { kind: "link", label: "Open release MR", url: "https://gitlab.example.com/demo/-/merge_requests/77" };
+		expect(primaryAction(h, false, false)).toEqual(link);
+		expect(primaryAction(h, false, true)).toEqual(link);
+	});
+
+	it("opens the details sheet for a details primary, on every page and for a hit with a fix", () => {
+		const h = fixable({ primary: { label: "Retarget plan", details: true } as AlertHit["primary"] });
+		const details = { kind: "details", label: "Retarget plan" };
+		expect(primaryAction(h, false, false)).toEqual(details);
+		expect(primaryAction(h, false, true)).toEqual(details);
+		expect(primaryAction(h, true, false)).toEqual(details);
+	});
+
+	it("has none when the hit names none", () => {
+		expect(primaryAction(hit("F1~tt/21-2026/22-2026"), false, false)).toBeNull();
 	});
 });
 

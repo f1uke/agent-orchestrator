@@ -83,19 +83,23 @@ type Link struct {
 
 // Hit is one rule finding about one subject.
 type Hit struct {
-	ID       HitID        `json:"id"`
-	Rule     RuleID       `json:"rule"`
-	Subject  Subject      `json:"subject"`
-	Severity Severity     `json:"severity"`
-	Train    *TrainID     `json:"train,omitempty"`
-	App      AppID        `json:"app,omitempty"`
-	AgesOn   *Day         `json:"agesOn,omitempty"`
-	Evidence Evidence     `json:"evidence"`
-	Text     string       `json:"text"`
-	Links    []Link       `json:"links"`
-	AsOf     time.Time    `json:"asOf"`
-	Mine     []MineReason `json:"mine,omitempty"`
-	cards    []string
+	ID       HitID    `json:"id"`
+	Rule     RuleID   `json:"rule"`
+	Subject  Subject  `json:"subject"`
+	Severity Severity `json:"severity"`
+	Train    *TrainID `json:"train,omitempty"`
+	App      AppID    `json:"app,omitempty"`
+	AgesOn   *Day     `json:"agesOn,omitempty"`
+	Evidence Evidence `json:"evidence"`
+	Copy     Copy     `json:"copy"`
+	Due      *Due     `json:"due,omitempty"`
+	Primary  *Action  `json:"primary,omitempty"`
+	// Links are the card's secondary actions; Primary is never repeated here.
+	Links []Link       `json:"links"`
+	AsOf  time.Time    `json:"asOf"`
+	Mine  []MineReason `json:"mine,omitempty"`
+	// Cards are the Jira cards the hit is about, for the card's third line and the mine lens.
+	Cards []string `json:"cards"`
 }
 
 // Fingerprint hashes the evidence, so a hide can tell when the facts behind a hit changed.

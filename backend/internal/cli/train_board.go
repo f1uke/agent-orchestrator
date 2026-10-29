@@ -99,15 +99,18 @@ type trainIdentity struct {
 }
 
 type trainHit struct {
-	Mine               trainMine `json:"mine"`
-	ID                 string    `json:"id"`
-	Rule               string    `json:"rule"`
-	Severity           string    `json:"severity"`
-	Train              string    `json:"train"`
-	App                string    `json:"app"`
-	Text               string    `json:"text"`
-	Bucket             string    `json:"bucket"`
-	ChangedSinceHidden bool      `json:"changedSinceHidden,omitempty"`
+	Mine     trainMine `json:"mine"`
+	ID       string    `json:"id"`
+	Rule     string    `json:"rule"`
+	Severity string    `json:"severity"`
+	Train    string    `json:"train"`
+	App      string    `json:"app"`
+	Copy     struct {
+		What string `json:"what"`
+		Do   string `json:"do"`
+	} `json:"copy"`
+	Bucket             string `json:"bucket"`
+	ChangedSinceHidden bool   `json:"changedSinceHidden,omitempty"`
 }
 
 type trainRule struct {
@@ -560,7 +563,7 @@ func writeStaleHides(w io.Writer, b *trainBoard) error {
 func writeTrainHitRows(s *strings.Builder, b *trainBoard, hits []trainHit, withBucket bool, indent string) error {
 	tw := tabwriter.NewWriter(s, 0, 4, 2, ' ', 0)
 	for _, h := range hits {
-		row := fmt.Sprintf("%s%s\t%s\t%s\t%s\t%s", indent, severityLabel(h.Severity), h.Rule, b.subject(h), h.Text, h.ID)
+		row := fmt.Sprintf("%s%s\t%s\t%s\t%s\t%s", indent, severityLabel(h.Severity), h.Rule, b.subject(h), h.Copy.What+" · "+h.Copy.Do, h.ID)
 		if withBucket {
 			row += "\t" + h.Bucket
 			if h.ChangedSinceHidden {

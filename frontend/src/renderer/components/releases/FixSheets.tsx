@@ -127,7 +127,7 @@ function FixBody({ hitId, choice, c }: { hitId: string; choice?: string; c: Ctx 
 					<span className="who">
 						<HitWho board={c.board} train={hit.train} app={hit.app} />
 					</span>{" "}
-					· {subjectLabel(hit.subject, c.board).text} · {hit.text}
+					· {subjectLabel(hit.subject, c.board).text} · {hit.copy.what}
 				</div>
 			)}
 			{p.mode !== "blocked" && (

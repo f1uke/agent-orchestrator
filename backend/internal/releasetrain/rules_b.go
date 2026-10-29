@@ -3,7 +3,6 @@ package releasetrain
 import (
 	"fmt"
 	"sort"
-	"strings"
 )
 
 var ruleB1 = rule{
@@ -18,8 +17,14 @@ var ruleB1 = rule{
 			if s.Status != StatusLate && s.Status != StatusWaiting {
 				return nil
 			}
-			return versionHit(t, v, s.Detail, Evidence{"freeze": s.Date, "status": s.Status},
-				milestoneLink(&v.Milestone))
+			freeze := "Freeze was " + s.Date.label() + "."
+			if *s.Date == b.Today {
+				freeze = "Freeze is today."
+			}
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s has no release MR yet", t.ID.short()),
+				Do:   "Open the release MR. " + freeze,
+			}, Evidence{"freeze": s.Date, "status": s.Status}).open(milestoneLink(&v.Milestone)).dueAt(b.Today, s.Date, DueFreeze)
 		})
 	},
 }
@@ -49,10 +54,11 @@ var ruleB3 = rule{
 			if len(keys) == 0 {
 				return nil
 			}
-			h := versionHit(t, v,
-				fmt.Sprintf("%d card(s) still %s: %s", len(keys), strings.Join(sortedKeys(statuses), " / "), joinNames(keys)),
-				Evidence{"cards": keys}, jiraLink(v.Jira))
-			h.cards = keys
+			h := versionHit(t, v, Copy{
+				What: fmt.Sprintf("%s in train %s %s still in development", plural(len(keys), "card"), t.ID.short(), isAre(len(keys))),
+				Do:   fmt.Sprintf("Finish %s or take %s out of the train %s.", itThem(len(keys)), itThem(len(keys)), before("publish", dueOf(t, v))),
+			}, Evidence{"cards": keys}).open(jiraLink(v.Jira)).dueAt(b.Today, dueOf(t, v), DuePublish)
+			h.Cards = keys
 			return h
 		})
 	},

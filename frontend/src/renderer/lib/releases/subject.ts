@@ -11,7 +11,7 @@ function versionText(b: Board, train: string, app: AppId): string {
 	return v ? `${v.version} · ${trainLabel(b, train)}` : trainLabel(b, train);
 }
 
-function cardSummary(b: Board, key: string): string | undefined {
+export function cardSummary(b: Board, key: string): string | undefined {
 	for (const row of b.sprints) for (const c of row.cards) if (c.key === key) return c.summary;
 	for (const t of b.trains) for (const v of t.versions) for (const u of v.cards) if (u.key === key) return u.summary;
 	for (const g of b.llbs) for (const br of g.branches) for (const c of br.cards) if (c.key === key) return c.summary;
