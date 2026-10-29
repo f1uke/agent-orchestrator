@@ -126,6 +126,7 @@ func TestEveryRuleSaysWhatIsWrongAndWhatToDoInPlainWords(t *testing.T) {
 				checkCopy(t, b, h)
 				checkDue(t, b, h)
 				checkPrimary(t, h)
+				checkCards(t, h)
 			}
 		})
 	}
@@ -375,4 +376,25 @@ func btoi(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func checkCards(t *testing.T, h Hit) {
+	t.Helper()
+	if h.Cards == nil {
+		t.Errorf("%s cards is nil; the wire promises a list", h.ID)
+	}
+	seen := map[string]bool{}
+	for _, k := range h.Cards {
+		if seen[k] {
+			t.Errorf("%s lists card %s twice: %v", h.ID, k, h.Cards)
+		}
+		seen[k] = true
+	}
+}
+
+func TestBranchCardKeysNameACardOnceThoughItHasSeveralMRs(t *testing.T) {
+	br := LongLivedBranch{Cards: []LLBCard{{Key: "DEMO-1"}, {Key: "DEMO-2"}, {Key: "DEMO-1"}}}
+	if got := br.cardKeys(); !slices.Equal(got, []string{"DEMO-1", "DEMO-2"}) {
+		t.Fatalf("cardKeys = %v, want each card once in first-seen order", got)
+	}
 }

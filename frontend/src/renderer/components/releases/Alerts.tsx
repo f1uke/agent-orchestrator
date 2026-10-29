@@ -200,7 +200,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	const subject = onlyMeSubject(h, c.lens.me);
 	const where = c.actions.whereIs(subject);
 	const primary = primaryAction(h, hidden, readOnly);
-	const chip = h.due ? dueChip(h.due) : null;
+	const chip = h.due && h.bucket !== "history" ? dueChip(h.due) : null;
 	const links = h.links.filter((l) => l.url && !(primary?.kind === "link" && primary.url === l.url));
 	const tip = tooltipOf(h, c, open !== null);
 	return (

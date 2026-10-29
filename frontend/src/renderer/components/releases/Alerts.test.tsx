@@ -95,6 +95,11 @@ describe("the time-left chip on an alert", () => {
 		renderIn(<AlertRow h={hit()} c={ctx()} />);
 		expect(screen.queryByTestId("hit-due")).toBeNull();
 	});
+
+	it("draws no chip on an alert in the History fold, whose deadline is long gone", () => {
+		renderIn(<AlertRow h={hit({ bucket: "history", due: due(-122) })} c={ctx()} />);
+		expect(screen.queryByTestId("hit-due")).toBeNull();
+	});
 });
 
 describe("the lines of an alert", () => {

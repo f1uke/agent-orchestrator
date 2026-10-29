@@ -148,6 +148,9 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 			if hits[i].Links == nil {
 				hits[i].Links = []Link{}
 			}
+			if hits[i].Cards == nil {
+				hits[i].Cards = []string{}
+			}
 			if hits[i].Severity == 0 {
 				hits[i].Severity = r.Severity
 			}
