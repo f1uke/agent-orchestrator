@@ -4780,7 +4780,6 @@ export interface components {
             rule: string;
             severity: components["schemas"]["ReleaseTrainSeverity"];
             subject: components["schemas"]["ReleaseTrainSubject"];
-            text: string;
             /** @description Train key, "21-2026" or "20-1-2026". */
             train?: string;
         };

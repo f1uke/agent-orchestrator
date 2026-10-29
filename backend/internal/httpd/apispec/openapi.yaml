@@ -13497,8 +13497,6 @@ components:
           $ref: '#/components/schemas/ReleaseTrainSeverity'
         subject:
           $ref: '#/components/schemas/ReleaseTrainSubject'
-        text:
-          type: string
         train:
           description: Train key, "21-2026" or "20-1-2026".
           type: string
@@ -13508,7 +13506,6 @@ components:
       - subject
       - severity
       - evidence
-      - text
       - copy
       - links
       - asOf
