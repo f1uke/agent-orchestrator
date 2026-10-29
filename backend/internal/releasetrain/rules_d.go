@@ -16,8 +16,10 @@ var ruleD1 = rule{
 			if v.Jira == nil || len(v.Jira.Approvers) > 0 || freeze == nil || !b.Today.After(freeze.Add(2)) {
 				return nil
 			}
-			return versionHit(t, v, "The bot did not set approvers on this Jira release",
-				Evidence{"jira": v.Jira.ID}, jiraLink(v.Jira))
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s Jira release has no approvers", t.ID.short()),
+				Do:   "Add the approvers. The bot did not set them.",
+			}, Evidence{"jira": v.Jira.ID}).fix("Add approvers", jiraLink(v.Jira)).dueAt(b.Today, dueOf(t, v), DuePublish)
 		})
 	},
 }
@@ -48,8 +50,10 @@ var ruleD2 = rule{
 			if len(missing) == 0 {
 				return nil
 			}
-			return versionHit(t, v, "Missing on the Jira release: "+strings.Join(missing, " and "),
-				Evidence{"missing": missing}, jiraLink(v.Jira))
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s Jira release has no %s", t.ID.short(), strings.Join(missing, " and ")),
+				Do:   fmt.Sprintf("Attach %s to the Jira release %s.", itThem(len(missing)), before("publish", dueOf(t, v))),
+			}, Evidence{"missing": missing}).fix("Attach links", jiraLink(v.Jira)).dueAt(b.Today, dueOf(t, v), DuePublish)
 		})
 	},
 }
@@ -72,9 +76,10 @@ var ruleD3 = rule{
 			if len(pending) == 0 {
 				return nil
 			}
-			return versionHit(t, v,
-				fmt.Sprintf("%d of %d not approved: %s", len(pending), len(v.Jira.Approvers), joinNames(pending)),
-				Evidence{"pending": pending, "total": len(v.Jira.Approvers)}, jiraLink(v.Jira))
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("%d of %s %s not approved train %s", len(pending), plural(len(v.Jira.Approvers), "approver"), hasHave(len(pending)), t.ID.short()),
+				Do:   fmt.Sprintf("Ask %s to approve %s.", joinNames(pending), before("publish", due)),
+			}, Evidence{"pending": pending, "total": len(v.Jira.Approvers)}).open(jiraLink(v.Jira)).dueAt(b.Today, due, DuePublish)
 		})
 	},
 }

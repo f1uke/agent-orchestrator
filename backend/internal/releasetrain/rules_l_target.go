@@ -2,7 +2,9 @@ package releasetrain
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 )
 
 type trainWindow int
@@ -77,24 +79,17 @@ func windowOf(freeze *Day, v *AppVersion, today Day) trainWindow {
 	return windowEarly
 }
 
-func (a aim) hit(subject Subject, text string, links ...Link) Hit {
+func (a aim) hit(subject Subject, c Copy) Hit {
 	train := a.train.ID
 	return Hit{
 		Subject: subject, Train: &train, App: a.branch.App,
 		Evidence: Evidence{"group": a.group.ID, "branch": a.branch.Branch, "train": a.train.ID, "freeze": a.freeze},
-		Text:     text, Links: append([]Link{}, links...), Cards: a.branch.cardKeys(),
+		Copy:     c, Cards: a.branch.cardKeys(),
 	}
 }
 
 func (a aim) branchSubject() SubjLLBBranch {
 	return SubjLLBBranch{Train: a.train.ID, App: a.branch.App, Branch: a.branch.Branch, Group: a.group.ID}
-}
-
-func (a aim) freezeText(today Day) string {
-	if a.freeze == nil {
-		return "no freeze date yet"
-	}
-	return fmt.Sprintf("freeze is %s, %d working day(s) left", a.freeze.label(), workDaysLeft(today, *a.freeze))
 }
 
 func severityIn(w trainWindow) Severity {
@@ -104,7 +99,34 @@ func severityIn(w trainWindow) Severity {
 	return SevInfo
 }
 
+// newMRURL is the GitLab form that opens an MR from the branch into the sprint branch of its train.
+// It is empty when either name is unknown: the sprint branch is never guessed from a pattern.
+func (b *Board) newMRURL(a aim) string {
+	app := a.branch.App
+	into, web := b.fix.sprintBranchFor(app, a.train.ID), b.projectWebURL(app)
+	if into == "" || web == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/-/merge_requests/new?merge_request[source_branch]=%s&merge_request[target_branch]=%s",
+		web, url.QueryEscape(a.branch.Branch), url.QueryEscape(into))
+}
+
+// projectWebURL is the app's GitLab project page, read off an MR the app has: the config holds only the host.
+func (b *Board) projectWebURL(app AppID) string {
+	for _, mr := range b.mrs[app] {
+		if web, _, ok := strings.Cut(mr.URL, "/-/merge_requests/"); ok && web != "" {
+			return web
+		}
+	}
+	return ""
+}
+
 var readsAim = []KindName{KindMilestones.Name, KindMRs.Name}
+
+type trunkKey struct {
+	app    AppID
+	branch string
+}
 
 var ruleL10 = rule{
 	ID: "L10", Group: "G", Severity: SevInfo, DefaultOn: true, Scope: scopePerApp,
@@ -115,14 +137,23 @@ var ruleL10 = rule{
 	Hint:     "Per app in the group. Info until 3 working days before freeze, then risk. After the freeze it is L13.",
 	Check: func(b *Board) []Hit {
 		var out []Hit
+		onTrunk := map[trunkKey]bool{}
+		for _, t := range openTrunkMRs(b) {
+			onTrunk[trunkKey{t.branch.App, t.branch.Branch}] = true
+		}
 		for _, a := range aims(b) {
-			if a.window == windowMissed || len(a.openIntoSprint) > 0 {
+			if a.window == windowMissed || len(a.openIntoSprint) > 0 || onTrunk[trunkKey{a.branch.App, a.branch.Branch}] {
 				continue
 			}
-			h := a.hit(a.branchSubject(), fmt.Sprintf("%s has no MR into the sprint %d branch for %s; %s",
-				a.branch.Branch, a.train.ID.Number-1, a.train.ID, a.freezeText(b.Today)))
+			h := a.hit(a.branchSubject(), Copy{
+				What: fmt.Sprintf("%s is not in sprint %d yet", a.branch.Branch, a.train.ID.Number-1),
+				Do:   "Open an MR into the sprint branch " + before("freeze", a.freeze) + ".",
+			})
 			h.Severity = severityIn(a.window)
-			out = append(out, h)
+			if newMR := b.newMRURL(a); newMR != "" {
+				h.Primary = &Action{Label: "New MR", URL: newMR}
+			}
+			out = append(out, *h.dueAt(b.Today, a.freeze, DueFreeze))
 		}
 		return out
 	},
@@ -158,11 +189,13 @@ var ruleL11 = rule{
 					continue
 				}
 				seen[key] = true
-				h := a.hit(SubjCardOnTrain{Train: a.train.ID, App: a.branch.App, Key: key},
-					fmt.Sprintf("%s rides %s in %s but is on neither its train page nor its fixVersion", key, a.train.ID, a.branch.Branch), links...)
+				h := a.hit(SubjCardOnTrain{Train: a.train.ID, App: a.branch.App, Key: key}, Copy{
+					What: fmt.Sprintf("%s is missing from the train %s page and fixVersion", key, a.train.ID.short()),
+					Do:   fmt.Sprintf("Add it to both %s. Its code ships in %s.", before("freeze", a.freeze), a.branch.Branch),
+				})
 				h.Evidence["card"] = key
 				h.Severity, h.Cards = severityIn(a.window), []string{key}
-				out = append(out, h)
+				out = append(out, *h.open(links...).dueAt(b.Today, a.freeze, DueFreeze))
 			}
 		}
 		sort.SliceStable(out, func(i, j int) bool { return out[i].Subject.subjectKey() < out[j].Subject.subjectKey() })
@@ -184,11 +217,12 @@ var ruleL12 = rule{
 				continue
 			}
 			for _, mr := range a.openIntoSprint {
-				h := a.hit(SubjMR{App: a.branch.App, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch},
-					fmt.Sprintf("!%d %s → %s is still open for %s; %s", mr.IID, mr.SourceBranch, mr.TargetBranch, a.train.ID, a.freezeText(b.Today)),
-					Link{Label: "Open MR", URL: mr.URL})
+				h := a.hit(SubjMR{App: a.branch.App, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, Copy{
+					What: fmt.Sprintf("MR !%d from %s into the sprint branch is still open", mr.IID, a.branch.Branch),
+					Do:   "Merge it " + before("freeze", a.freeze) + ".",
+				})
 				h.Evidence["mr"] = mr.IID
-				out = append(out, h)
+				out = append(out, *h.open(Link{Label: "Open MR", URL: mr.URL}).dueAt(b.Today, a.freeze, DueFreeze))
 			}
 		}
 		return out
@@ -208,12 +242,17 @@ var ruleL13 = rule{
 			if a.window != windowMissed {
 				continue
 			}
-			why := "the release MR is open"
-			if a.freeze != nil && b.Today.After(*a.freeze) {
-				why = "freeze was " + a.freeze.label()
+			next := TrainID{Number: a.train.ID.Number + 1, Year: a.train.ID.Year}
+			h := a.hit(a.branchSubject(), Copy{
+				What: fmt.Sprintf("%s missed train %s", a.branch.Branch, a.train.ID.short()),
+				Do:   fmt.Sprintf("Retarget its plan to train %s. It never merged into the sprint %d branch.", next.short(), a.train.ID.Number-1),
+			})
+			h.Primary = &Action{Label: "Retarget plan"}
+			h.dueAt(b.Today, a.freeze, DueFreeze)
+			if h.Due != nil {
+				h.Due.Missed = true
 			}
-			out = append(out, a.hit(a.branchSubject(), fmt.Sprintf("%s missed %s (%s) without merging into the sprint %d branch; retarget the plan",
-				a.branch.Branch, a.train.ID, why, a.train.ID.Number-1)))
+			out = append(out, h)
 		}
 		return out
 	},

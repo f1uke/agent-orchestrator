@@ -50,7 +50,7 @@ func TestApproverNamesComeFromJiraUsers(t *testing.T) {
 	b := Reconcile(Inputs{Config: f.cfg, Snap: snap, Human: f.human}, f.env())
 
 	hits := activeHits(b)
-	if len(hits) != 1 || hits[0].Text != "Tag 3.4.0 and due Mon 12 Oct passed, Jira release still unreleased; 2 of 3 approvers pending: Dee Example, acc-3" {
+	if len(hits) != 1 || hits[0].Copy.Do != "Mark the Jira release released. 2 approvers have not approved yet: Dee Example, acc-3." {
 		t.Fatalf("hits = %+v", hits)
 	}
 	if name := Items(snap, KindJiraVersions, "project")[0].Approvers[1].Name; name != "" {

@@ -146,8 +146,8 @@ func TestHitIDIgnoresEvidenceText(t *testing.T) {
 	if a.ID != b.ID {
 		t.Fatalf("id changed with the text: %q vs %q", a.ID, b.ID)
 	}
-	if a.Text == b.Text || a.Fingerprint() == b.Fingerprint() {
-		t.Fatalf("text and fingerprint should differ: %q / %q", a.Text, b.Text)
+	if a.Copy == b.Copy || a.Fingerprint() == b.Fingerprint() {
+		t.Fatalf("copy and fingerprint should differ: %q / %q", a.Copy.What, b.Copy.What)
 	}
 }
 

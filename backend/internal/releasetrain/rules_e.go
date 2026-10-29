@@ -16,21 +16,29 @@ var ruleE1 = rule{
 				return nil
 			}
 			pending := pendingApprovers(v.Jira)
-			text := fmt.Sprintf("Tag %s and due %s passed, Jira release still unreleased", v.Tag.Name, dueOf(t, v).label())
+			do := "Mark the Jira release released."
 			if len(pending) > 0 {
-				text += fmt.Sprintf("; %d of %d approvers pending: %s", len(pending), len(v.Jira.Approvers), joinNames(pending))
+				do += fmt.Sprintf(" %s %s not approved yet: %s.", plural(len(pending), "approver"), hasHave(len(pending)), joinNames(pending))
 			}
-			return versionHit(t, v, text, Evidence{"tag": v.Tag.Name, "pending": pending}, jiraLink(v.Jira), Link{Label: "Open tag", URL: v.Tag.URL})
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Train %s shipped, but its Jira release is not marked released", t.ID.short()),
+				Do:   do,
+			}, Evidence{"tag": v.Tag.Name, "pending": pending}).fix("Mark released", jiraLink(v.Jira), Link{Label: "Open tag", URL: v.Tag.URL})
 		})
 		for _, h := range b.Hotfixes {
 			due := h.Milestone.Due
 			if h.Jira == nil || h.Jira.Released || due == nil || !due.Before(b.Today) {
 				continue
 			}
-			hits = append(hits, Hit{
+			hit := Hit{
 				Subject: SubjHotfix{App: h.App, Version: h.Version}, App: h.App, AgesOn: due,
-				Evidence: Evidence{"hotfix": h.Version}, Text: "Hotfix shipped, Jira release still unreleased", Links: []Link{jiraLink(h.Jira), {Label: "Open hotfix", URL: h.Milestone.URL}},
-			})
+				Evidence: Evidence{"hotfix": h.Version},
+				Copy: Copy{
+					What: fmt.Sprintf("Hotfix %s shipped, but its Jira release is not marked released", h.Version),
+					Do:   "Mark the Jira release released.",
+				},
+			}
+			hits = append(hits, *hit.fix("Mark released", jiraLink(h.Jira), Link{Label: "Open hotfix", URL: h.Milestone.URL}))
 		}
 		return hits
 	},
@@ -59,8 +67,10 @@ var ruleE2 = rule{
 			if len(left) == 0 {
 				return nil
 			}
-			h := versionHit(t, v, fmt.Sprintf("%d card(s) not Done: %s", len(left), joinNames(left)),
-				Evidence{"cards": left}, jiraLink(v.Jira))
+			h := versionHit(t, v, Copy{
+				What: fmt.Sprintf("%s in train %s %s not Done after publish", plural(len(left), "card"), t.ID.short(), isAre(len(left))),
+				Do:   fmt.Sprintf("Move %s to Done.", itThem(len(left))),
+			}, Evidence{"cards": left}).open(jiraLink(v.Jira))
 			h.Cards = keys
 			return h
 		})
@@ -79,8 +89,10 @@ var ruleE4 = rule{
 			if fu == nil || fu.StatusCategory == StatusCategoryDone || fu.Due == nil || !fu.Due.Before(b.Today) {
 				return nil
 			}
-			return versionHit(t, v, fmt.Sprintf("%s still %s, due %s", fu.Key, fu.Status, fu.Due.label()),
-				Evidence{"ticket": fu.Key, "status": fu.Status, "due": *fu.Due}, Link{Label: "Open " + fu.Key, URL: fu.URL})
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Force-update ticket %s is past its due date (%s)", fu.Key, fu.Status),
+				Do:   fmt.Sprintf("Close it, or move its due date. It was due %s.", fu.Due.label()),
+			}, Evidence{"ticket": fu.Key, "status": fu.Status, "due": *fu.Due}).open(Link{Label: "Open " + fu.Key, URL: fu.URL})
 		})
 	},
 }
@@ -97,7 +109,10 @@ var ruleE5 = rule{
 			if fu == nil || fu.Due != nil {
 				return nil
 			}
-			return versionHit(t, v, fu.Key+" has no due date", Evidence{"ticket": fu.Key}, Link{Label: "Open " + fu.Key, URL: fu.URL})
+			return versionHit(t, v, Copy{
+				What: fmt.Sprintf("Force-update ticket %s has no due date", fu.Key),
+				Do:   "Set its due date.",
+			}, Evidence{"ticket": fu.Key}).open(Link{Label: "Open " + fu.Key, URL: fu.URL})
 		})
 	},
 }

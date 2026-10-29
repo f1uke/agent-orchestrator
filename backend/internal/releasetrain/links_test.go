@@ -1,6 +1,7 @@
 package releasetrain
 
 import (
+	"slices"
 	"strconv"
 	"testing"
 )
@@ -85,12 +86,16 @@ func TestEachMismatchHitOpensBothSources(t *testing.T) {
 			if !ok {
 				t.Fatalf("no hit %s", tc.id)
 			}
-			if len(h.Links) != len(want) {
-				t.Fatalf("links = %+v, want %+v", h.Links, want)
+			got := h.Links
+			if h.Primary != nil && !h.Primary.Fix {
+				got = append([]Link{{Label: h.Primary.Label, URL: h.Primary.URL}}, got...)
 			}
-			for i := range want {
-				if h.Links[i] != want[i] {
-					t.Fatalf("link %d = %+v, want %+v", i, h.Links[i], want[i])
+			if len(got) != len(want) {
+				t.Fatalf("primary %+v and links %+v, want the links %+v", h.Primary, h.Links, want)
+			}
+			for _, w := range want {
+				if !slices.Contains(got, w) {
+					t.Fatalf("links %+v miss %+v", got, w)
 				}
 			}
 		})

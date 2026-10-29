@@ -70,10 +70,20 @@ func TestL1EvidenceAndText(t *testing.T) {
 		t.Fatalf("L1 hits = %v", hits)
 	}
 	h := hits[0]
-	want := "!" + strconv.Itoa(mr.IID) + " feature/demo-wallet → develop is open; land it in the sprint branch instead"
-	if h.Text != want || h.Severity != SevBlock || h.App != "di" || h.Train != nil || h.AgesOn != nil || len(h.Links) != 1 || h.Links[0].URL != mr.URL {
-		t.Fatalf("L1 hit = %+v, want text %q, block, app di, no train, never ages, the MR link", h, want)
+	want := Copy{
+		What: "MR !" + strconv.Itoa(mr.IID) + " takes feature/demo-wallet into develop",
+		Do:   "Retarget it to the sprint branch. Develop takes no feature work after the cutover.",
 	}
+	if h.Copy != want || h.Severity != SevBlock || h.App != "di" || h.Train != nil || h.AgesOn != nil || h.Due != nil {
+		t.Fatalf("L1 hit = %+v, want copy %+v, block, app di, no train, never ages, no chip", h, want)
+	}
+	if h.Primary == nil || !h.Primary.Fix || h.Primary.Label != "Retarget MR" || len(h.Links) != 1 || h.Links[0].URL != mr.URL {
+		t.Fatalf("L1 primary %+v links %+v, want the Retarget MR fix and the MR link", h.Primary, h.Links)
+	}
+}
+
+func l3Do(now string) string {
+	return "Set feature/demo-wallet to target train 21, or take the card off the train. " + now
 }
 
 func TestL3CardOnATrainParkedInALongLivedBranchThatDoesNotTargetIt(t *testing.T) {
@@ -83,15 +93,15 @@ func TestL3CardOnATrainParkedInALongLivedBranchThatDoesNotTargetIt(t *testing.T)
 		plan *LlbPlan
 		why  string
 		want []string
-		text string
+		do   string
 	}{
-		{"no plan", nil, "page", []string{"L3~ct/21-2026/di/DEMO-7"}, "DEMO-7 is on train #21, but its code sits in feature/demo-wallet (no target train)"},
+		{"no plan", nil, "page", []string{"L3~ct/21-2026/di/DEMO-7"}, l3Do("It has no target train now.")},
 		{"planned for another train", &LlbPlan{TargetKind: TargetTrain, TargetTrain: train22}, "page", []string{"L3~ct/21-2026/di/DEMO-7"},
-			"DEMO-7 is on train #21, but its code sits in feature/demo-wallet (targets #22)"},
+			l3Do("It targets train 22 now.")},
 		{"dropped", &LlbPlan{TargetKind: TargetDropped}, "page", []string{"L3~ct/21-2026/di/DEMO-7"},
-			"DEMO-7 is on train #21, but its code sits in feature/demo-wallet (dropped)"},
+			l3Do("Its plan was dropped.")},
 		{"planned for this train", &LlbPlan{TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 21, Year: fixtureYear}}, "page", nil, ""},
-		{"by fixVersion only", nil, "fixVersion", []string{"L3~ct/21-2026/di/DEMO-7"}, "DEMO-7 is on train #21, but its code sits in feature/demo-wallet (no target train)"},
+		{"by fixVersion only", nil, "fixVersion", []string{"L3~ct/21-2026/di/DEMO-7"}, l3Do("It has no target train now.")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, today)
@@ -114,15 +124,19 @@ func TestL3CardOnATrainParkedInALongLivedBranchThatDoesNotTargetIt(t *testing.T)
 			if got := firedIDs(b, "L3"); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("L3 hits = %v, want %v", got, tc.want)
 			}
-			if tc.text == "" {
+			if tc.do == "" {
 				return
 			}
 			if links := firedHits(b, "L3")[0].Links; len(links) != 1 || links[0].URL != "https://jira.example.com/browse/DEMO-7" {
 				t.Fatalf("L3 links = %+v, want the card's browse URL", links)
 			}
 			h := firedHits(b, "L3")[0]
-			if h.Text != tc.text || h.Evidence["train"] != (TrainID{Number: 21, Year: fixtureYear}) || h.Evidence["group"] != PlanID("demo-wallet") || h.AgesOn == nil {
-				t.Fatalf("L3 hit = %+v; want text %q, evidence naming train #21 and group demo-wallet, ageing with the version", h, tc.text)
+			want := Copy{What: "DEMO-7 is on train 21, but its code is parked in feature/demo-wallet", Do: tc.do}
+			if h.Copy != want || h.Evidence["train"] != (TrainID{Number: 21, Year: fixtureYear}) || h.Evidence["group"] != PlanID("demo-wallet") || h.AgesOn == nil {
+				t.Fatalf("L3 hit = %+v; want copy %+v, evidence naming train 21 and group demo-wallet, ageing with the version", h, want)
+			}
+			if h.Primary == nil || !h.Primary.Fix || h.Primary.Label != "Set target train" || h.Due == nil || h.Due.Event != DueFreeze {
+				t.Fatalf("L3 primary %+v due %+v; want the Set target train fix and a freeze chip", h.Primary, h.Due)
 			}
 		})
 	}
@@ -133,11 +147,10 @@ func TestL3FollowsAnEpicTarget(t *testing.T) {
 		name   string
 		epicOn string
 		want   []string
-		text   string
+		do     string
 	}{
 		{"the epic's page is the card's train", "21", nil, ""},
-		{"the epic's page is another train", "22", []string{"L3~ct/21-2026/di/DEMO-7"},
-			"DEMO-7 is on train #21, but its code sits in feature/demo-wallet (targets #22 from epic DEMO-500, 2 of 2 cards)"},
+		{"the epic's page is another train", "22", []string{"L3~ct/21-2026/di/DEMO-7"}, l3Do("An epic suggests train 22 for it.")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, today)
@@ -160,8 +173,8 @@ func TestL3FollowsAnEpicTarget(t *testing.T) {
 			if got := firedIDs(b, "L3"); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("L3 hits = %v, want %v", got, tc.want)
 			}
-			if tc.text != "" && firedHits(b, "L3")[0].Text != tc.text {
-				t.Fatalf("L3 text = %q, want %q", firedHits(b, "L3")[0].Text, tc.text)
+			if tc.do != "" && firedHits(b, "L3")[0].Copy.Do != tc.do {
+				t.Fatalf("L3 do = %q, want %q", firedHits(b, "L3")[0].Copy.Do, tc.do)
 			}
 		})
 	}
@@ -306,9 +319,12 @@ func TestL9EvidenceAndText(t *testing.T) {
 		t.Fatalf("L9 hits = %v", hits)
 	}
 	h := hits[0]
-	want := "!" + strconv.Itoa(mr.IID) + " feat/DEMO-2 → feat/DEMO-1-base: open into a branch no train takes"
-	if h.Text != want || h.Severity != SevRisk || h.App != "di" || h.Train != nil || h.AgesOn != nil || len(h.Links) != 1 || h.Links[0].URL != mr.URL {
-		t.Fatalf("L9 hit = %+v, want text %q, risk, app di, no train, never ages, the MR link", h, want)
+	want := Copy{
+		What: "MR !" + strconv.Itoa(mr.IID) + " goes into feat/DEMO-1-base, which no train takes",
+		Do:   "Retarget it to the sprint branch or a long-lived branch.",
+	}
+	if h.Copy != want || h.Severity != SevRisk || h.App != "di" || h.Train != nil || h.AgesOn != nil || h.Primary == nil || h.Primary.URL != mr.URL || len(h.Links) != 0 {
+		t.Fatalf("L9 hit = %+v, want copy %+v, risk, app di, no train, never ages, the MR as the primary action", h, want)
 	}
 	if h.Evidence["source"] != "feat/DEMO-2" || h.Evidence["target"] != "feat/DEMO-1-base" || h.Evidence["state"] != MROpened {
 		t.Fatalf("L9 evidence = %v, want source, target and state", h.Evidence)

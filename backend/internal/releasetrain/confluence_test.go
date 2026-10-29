@@ -253,15 +253,15 @@ func TestA6(t *testing.T) {
 		{"no page", func(*fixture) {}, nil, nil},
 		{"page agrees", func(f *fixture) { f.page("demo", "21", "2026-09-20", liveFreeze, liveDue) }, nil, nil},
 		{"freeze differs", func(f *fixture) { f.page("demo", "21", "2026-09-20", "2026-10-08", liveDue) },
-			[]string{"A6~vd/21-2026/di/freeze"}, []string{"Page says freeze Thu 8 Oct, milestone starts Fri 9 Oct"}},
+			[]string{"A6~vd/21-2026/di/freeze"}, []string{"Train 21 freeze dates differ: page Thu 8 Oct, milestone Fri 9 Oct"}},
 		{"publish differs", func(f *fixture) { f.page("demo", "21", "2026-09-20", liveFreeze, "2026-10-19") },
-			[]string{"A6~vd/21-2026/di/publish"}, []string{"Page says publish Mon 19 Oct, milestone due Fri 16 Oct"}},
+			[]string{"A6~vd/21-2026/di/publish"}, []string{"Train 21 publish dates differ: page Mon 19 Oct, milestone Fri 16 Oct"}},
 		{"both differ", func(f *fixture) { f.page("demo", "21", "2026-09-20", "2026-10-08", "2026-10-19") },
 			[]string{"A6~vd/21-2026/di/freeze", "A6~vd/21-2026/di/publish"}, nil},
 		{"page date missing is quiet", func(f *fixture) { f.page("demo", "21", "2026-09-20", "", "") }, nil, nil},
 		{"unreadable page", func(f *fixture) {
 			f.page("demo", "21", "2026-09-20", "", "").ParseError = `no "Code freeze" cell in the page table`
-		}, []string{"A6~vd/21-2026/di/page"}, []string{`Page unreadable: no "Code freeze" cell in the page table`}},
+		}, []string{"A6~vd/21-2026/di/page"}, []string{"The train 21 page cannot be read"}},
 		{"another family's page", func(f *fixture) { f.page("pilot", "21", "2026-09-20", "2026-10-08", "2026-10-19") }, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,8 +272,8 @@ func TestA6(t *testing.T) {
 				t.Fatalf("A6 = %v, want %v", got, tc.want)
 			}
 			for i, text := range tc.text {
-				if h := firedHits(b, "A6")[i]; h.Text != text || len(h.Links) == 0 || h.Links[0].URL == "" {
-					t.Fatalf("hit %d = %q (%v), want %q and the page link", i, h.Text, h.Links, text)
+				if h := firedHits(b, "A6")[i]; h.Copy.What != text || h.Primary == nil || h.Primary.Label != "Open page" || h.Primary.URL == "" {
+					t.Fatalf("hit %d = %q (%+v), want %q and the page as the primary action", i, h.Copy.What, h.Primary, text)
 				}
 			}
 			if _, clean := outcomeOf(b, "A6", "di").(Clean); len(tc.want) == 0 && !clean {

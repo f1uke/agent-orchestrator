@@ -15,6 +15,10 @@ var train22 = TrainID{Number: 22, Year: fixtureYear}
 
 func walletPlan(t *testing.T, today, freeze string, target TargetKind) (*fixture, map[AppID]*fv) {
 	f := newFixture(t, today)
+	return f, fillWallet(f, freeze, target)
+}
+
+func fillWallet(f *fixture, freeze string, target TargetKind) map[AppID]*fv {
 	versions := map[AppID]*fv{}
 	for _, app := range []AppID{"di", "da"} {
 		versions[app] = f.version(app, "22", "3.6.0", freeze, targetDue)
@@ -28,7 +32,7 @@ func walletPlan(t *testing.T, today, freeze string, target TargetKind) (*fixture
 		p.TargetTrain = &tr
 	}
 	f.human.Plans = []LlbPlan{p}
-	return f, versions
+	return versions
 }
 
 func TestL10PlanTargetsATrainAndNoAppHasAnMRIntoItsSprintBranch(t *testing.T) {
@@ -39,9 +43,12 @@ func TestL10PlanTargetsATrainAndNoAppHasAnMRIntoItsSprintBranch(t *testing.T) {
 		t.Fatalf("L10 hits = %v, want one per app %v", got, want)
 	}
 	h := firedHits(b, "L10")[0]
-	text := "feature/demo-wallet has no MR into the sprint 21 branch for #22; freeze is Fri 30 Oct, 4 working day(s) left"
-	if h.Severity != SevInfo || h.Train == nil || *h.Train != train22 || h.Evidence["group"] != PlanID("demo-wallet") || h.Text != text {
-		t.Fatalf("L10 hit = %+v; want info on train #22, group demo-wallet, text %q", h, text)
+	copy := Copy{What: "feature/demo-wallet is not in sprint 21 yet", Do: "Open an MR into the sprint branch before freeze Fri 30 Oct."}
+	if h.Severity != SevInfo || h.Train == nil || *h.Train != train22 || h.Evidence["group"] != PlanID("demo-wallet") || h.Copy != copy {
+		t.Fatalf("L10 hit = %+v; want info on train 22, group demo-wallet, copy %+v", h, copy)
+	}
+	if h.Due == nil || h.Due.Event != DueFreeze || h.Due.WorkDays != 4 || h.Due.Missed {
+		t.Fatalf("L10 due = %+v; want freeze in 4 working days", h.Due)
 	}
 }
 

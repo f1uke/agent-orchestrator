@@ -77,8 +77,10 @@ type Board struct {
 	Alerts    Alerts      `json:"alerts"`
 	Catalogue []RuleInfo  `json:"catalogue"`
 	fix       fixContext
-	mrs       map[AppID][]MRFact
-	moved     map[string]string
+	// familyLabels names each family the way people say it, for alert copy.
+	familyLabels map[FamilyID]string
+	mrs          map[AppID][]MRFact
+	moved        map[string]string
 }
 
 // BoardApp is one configured app as every surface names it.
@@ -321,6 +323,13 @@ func goneCompares(llbs []LLBGroup, cfg Config) map[resKey]bool {
 		}
 	}
 	return out
+}
+
+func (b *Board) familyLabel(id FamilyID) string {
+	if l := b.familyLabels[id]; l != "" {
+		return l
+	}
+	return string(id)
 }
 
 func (b *Board) familyOf(app AppID) FamilyID {

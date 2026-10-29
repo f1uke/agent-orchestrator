@@ -91,7 +91,6 @@ type Hit struct {
 	App      AppID    `json:"app,omitempty"`
 	AgesOn   *Day     `json:"agesOn,omitempty"`
 	Evidence Evidence `json:"evidence"`
-	Text     string   `json:"-"`
 	Copy     Copy     `json:"copy"`
 	Due      *Due     `json:"due,omitempty"`
 	Primary  *Action  `json:"primary,omitempty"`

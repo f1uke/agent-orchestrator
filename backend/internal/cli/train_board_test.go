@@ -57,11 +57,11 @@ const trainBoardJSON = `{
     "alerts": {
       "badge": {"count": 3, "worst": "block", "unknown": 2},
       "hits": [
-        {"id": "C1~v/21-2026/di", "rule": "C1", "severity": "block", "train": "21-2026", "app": "di", "text": "!77 failed: build_test", "bucket": "badge"},
-        {"id": "B1~v/21-2026/da", "rule": "B1", "severity": "risk", "train": "21-2026", "app": "da", "text": "Freeze was 2 day(s) ago", "bucket": "badge"},
-        {"id": "A3~m/da/9", "rule": "A3", "severity": "data", "app": "da", "text": "Milestone has no Jira release", "bucket": "badge"},
-        {"id": "E1~v/20-2026/di", "rule": "E1", "severity": "hygiene", "train": "20-2026", "app": "di", "text": "Jira release still unreleased", "bucket": "history"},
-        {"id": "E2~v/20-2026/di", "rule": "E2", "severity": "hygiene", "train": "20-2026", "app": "di", "text": "1 card(s) not Done", "bucket": "hidden"}
+        {"id": "C1~v/21-2026/di", "rule": "C1", "severity": "block", "train": "21-2026", "app": "di", "copy": {"what": "Train 21 release pipeline failed: build_test", "do": "Retry the job."}, "bucket": "badge"},
+        {"id": "B1~v/21-2026/da", "rule": "B1", "severity": "risk", "train": "21-2026", "app": "da", "copy": {"what": "Train 21 has no release MR yet", "do": "Open the release MR."}, "bucket": "badge"},
+        {"id": "A3~m/da/9", "rule": "A3", "severity": "data", "app": "da", "copy": {"what": "Milestone has no Jira release for train 21", "do": "Create the Jira release."}, "bucket": "badge"},
+        {"id": "E1~v/20-2026/di", "rule": "E1", "severity": "hygiene", "train": "20-2026", "app": "di", "copy": {"what": "Train 20 shipped, Jira release not marked released", "do": "Mark it released."}, "bucket": "history"},
+        {"id": "E2~v/20-2026/di", "rule": "E2", "severity": "hygiene", "train": "20-2026", "app": "di", "copy": {"what": "1 card in train 20 is not Done after publish", "do": "Move it to Done."}, "bucket": "hidden"}
       ],
       "rules": [
         {"rule": "C5", "app": "da", "on": true, "outcome": {"kind": "unknown", "missing": [{"kind": "gitlab.mr_detail", "scope": "p:1002!41"}]}},
@@ -100,7 +100,7 @@ Sources  gitlab 1m · jira 20m, 1 of 6 not fresh: jira.versions rate_limited
   Demo Android  2.4.0  freeze  late    -                   0/0 merged  approvals -
 
 Needs attention  1 block · 1 data · 1 risk   (1 in history, 1 hidden)
-  BLOCK  C1  #21 Demo iOS 2.4.0  !77 failed: build_test  C1~v/21-2026/di
+  BLOCK  C1  #21 Demo iOS 2.4.0  Train 21 release pipeline failed: build_test · Retry the job.  C1~v/21-2026/di
 Unknown  C5 Demo Android · D1 Demo iOS
 `
 	if out != want {
@@ -180,9 +180,9 @@ func TestTrainAlertsListsActiveHitsAndOnRequestHistoryAndHidden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `BLOCK  C1  #21 Demo iOS 2.4.0      !77 failed: build_test         C1~v/21-2026/di
-DATA   A3  Demo Android            Milestone has no Jira release  A3~m/da/9
-RISK   B1  #21 Demo Android 2.4.0  Freeze was 2 day(s) ago        B1~v/21-2026/da
+	want := `BLOCK  C1  #21 Demo iOS 2.4.0      Train 21 release pipeline failed: build_test · Retry the job.          C1~v/21-2026/di
+DATA   A3  Demo Android            Milestone has no Jira release for train 21 · Create the Jira release.  A3~m/da/9
+RISK   B1  #21 Demo Android 2.4.0  Train 21 has no release MR yet · Open the release MR.                  B1~v/21-2026/da
 `
 	if out != want {
 		t.Fatalf("alerts =\n%s\nwant\n%s", out, want)
@@ -220,7 +220,7 @@ func TestTrainWithoutConfigSaysHowToCreateOneAndExitsZero(t *testing.T) {
 func TestTrainMeKeepsOnlyWhatConcernsMe(t *testing.T) {
 	body := strings.Replace(trainBoardJSON, `"mismatches": [],`, `"mismatches": [], "identity": {"kind": "known", "jiraAccountId": "acc-ex", "gitlabUsername": "ex", "displayName": "Example Person"},`, 1)
 	body = strings.Replace(body, `"releaseMr": {"mr": {"iid": 77, "author": "Example Person"}},`, `"releaseMr": {"mr": {"iid": 77, "author": "Example Person"}}, "mine": [{"why": "release_mr_author", "ref": "!77"}],`, 1)
-	body = strings.Replace(body, `"text": "!77 failed: build_test", "bucket": "badge"`, `"text": "!77 failed: build_test", "bucket": "badge", "mine": [{"why": "release_mr_author", "ref": "!77"}]`, 1)
+	body = strings.Replace(body, `"copy": {"what": "Train 21 release pipeline failed: build_test", "do": "Retry the job."}, "bucket": "badge"`, `"copy": {"what": "Train 21 release pipeline failed: build_test", "do": "Retry the job."}, "bucket": "badge", "mine": [{"why": "release_mr_author", "ref": "!77"}]`, 1)
 
 	out, err := runTrain(t, body, "--me")
 	if err != nil {
@@ -237,7 +237,7 @@ func TestTrainMeKeepsOnlyWhatConcernsMe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "BLOCK  C1  #21 Demo iOS 2.4.0  !77 failed: build_test  C1~v/21-2026/di\n" {
+	if out != "BLOCK  C1  #21 Demo iOS 2.4.0  Train 21 release pipeline failed: build_test · Retry the job.  C1~v/21-2026/di\n" {
 		t.Fatalf("alerts --me =\n%s", out)
 	}
 
