@@ -58,16 +58,19 @@ export function Sec({
 	);
 }
 
+export function hitLinks(h: AlertHit): { label: string; url: string }[] {
+	const all = [...(h.primary?.url ? [{ label: h.primary.label, url: h.primary.url }] : []), ...h.links];
+	return all.flatMap((l) => (l.url ? [{ label: l.label, url: l.url }] : []));
+}
+
 export function HitLinks({ h }: { h: AlertHit }) {
 	return (
 		<>
-			{h.links
-				.filter((l) => l.url)
-				.map((l) => (
-					<Ext key={l.url} url={l.url}>
-						{l.label}
-					</Ext>
-				))}
+			{hitLinks(h).map((l) => (
+				<Ext key={l.url} url={l.url}>
+					{l.label}
+				</Ext>
+			))}
 		</>
 	);
 }
@@ -94,12 +97,13 @@ function sheetFor(h: AlertHit): SheetEntry | null {
 
 function tooltipOf(h: AlertHit, c: AlertCtx, canOpen: boolean): string {
 	const title = c.board.catalogue.find((r) => r.id === h.rule)?.title;
-	const why = c.lens.scope ? mineWhy(h, c.lens.scope) : "";
+	const scope = c.lens.scope;
+	const why = scope ? mineWhy(h, scope) : "";
 	return [
 		h.rule,
 		title,
 		canOpen ? "click for details" : null,
-		why ? `Shown for ${c.lens.scope?.self ? "you" : c.lens.scope?.name}: ${why}` : null,
+		scope && why ? `Shown for ${scope.self ? "you" : scope.name}: ${why}` : null,
 	]
 		.filter(Boolean)
 		.join(" · ");

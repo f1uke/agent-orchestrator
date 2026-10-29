@@ -26,7 +26,7 @@ import { Switch } from "../ui/switch";
 import { appMarkOf } from "../../lib/releases/appMark";
 import { versionHits } from "../../lib/releases/hitScope";
 import { plural } from "../../lib/releases/plural";
-import { AlertList, AlertRow, Ext, HitLinks, HitWho, Sec, SeverityGroups } from "./Alerts";
+import { AlertList, AlertRow, Ext, HitLinks, hitLinks, HitWho, Sec, SeverityGroups } from "./Alerts";
 import { AppMark } from "./AppMark";
 import { Avatar } from "./Avatar";
 import { cardSheet, sprintSheet } from "./CardSheets";
@@ -572,7 +572,7 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 						</span>
 					</>
 				)}
-				{h.links.some((l) => l.url) && (
+				{hitLinks(h).length > 0 && (
 					<>
 						<span>Open</span>
 						<span className="links">
