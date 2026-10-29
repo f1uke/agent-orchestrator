@@ -202,7 +202,8 @@ test.describe("releases page", () => {
 		expect(await stripes()).toEqual([]);
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="C5~v/21-2026/di"]');
-		await expect(hit.locator(".sev")).toHaveText("Block");
+		await expect(page.getByTestId("sev-header").first()).toHaveText(/^Blocks the release/);
+		await expect(hit.locator(".sev")).toHaveCount(0);
 		expect(await stripes()).toEqual([]);
 	});
 
@@ -544,7 +545,7 @@ test.describe("releases page", () => {
 		await open(page, "?sheet=llb:demo-wallet");
 		const sheet = page.locator(".rel-sheet");
 		await expect(sheet.locator('.al[data-hit="L10~llb/22-2026/di/feature/demo-wallet"]')).toContainText(
-			"feature/demo-wallet has no MR into the sprint 21 branch for #22",
+			"feature/demo-wallet is not in sprint 21 yet",
 		);
 		await expect(sheet.locator(".al[data-hit]")).toHaveCount(1);
 	});
@@ -878,24 +879,24 @@ test.describe("releases page", () => {
 				const mark = subj?.querySelector("[role=img]")?.getAttribute("aria-label") ?? "";
 				return {
 					subject: subj?.innerText.trim() ?? "",
-					line: `${mark} ${subj?.innerText} ${el.querySelector(".tx")?.textContent}`,
+					line: `${mark} ${subj?.innerText} ${el.querySelector("[data-testid=hit-do]")?.textContent}`,
 				};
 			}),
 		);
 		expect(lines.filter((l) => !l.subject)).toEqual([]);
 		expect(new Set(lines.map((l) => l.line)).size).toBe(lines.length);
-		await expect(
-			page.locator('.al[data-hit="L9~mr/da/415"] [data-testid=hit-subject] > span:not(.appmark)'),
-		).toHaveText("!415 feat/DEMO-203 → feat/DEMO-201-base");
-		await expect(
-			page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"] [data-testid=hit-subject] > span:not(.appmark)'),
-		).toHaveText("2.4.0 · #21 · freeze date");
+		await expect(page.locator('.al[data-hit="L9~mr/da/415"] [data-testid=hit-subject]')).toHaveText(
+			"MR !415 goes into feat/DEMO-201-base, which no train takes",
+		);
+		await expect(page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"] [data-testid=hit-subject]')).toHaveText(
+			/^Train 21 freeze dates differ: page \w{3} \d{1,2} \w{3}, milestone \w{3} \d{1,2} \w{3}$/,
+		);
 	});
 
 	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="L9~mr/da/415"]');
-		await expect(hit).toContainText("!415 feat/DEMO-203 → feat/DEMO-201-base: open into a branch no train takes");
+		await expect(hit).toContainText("MR !415 goes into feat/DEMO-201-base, which no train takes");
 		await expect(hit.getByLabel("Demo Android")).toBeVisible();
 		await expect(hit.getByRole("link", { name: "Open MR" })).toHaveAttribute(
 			"href",
@@ -905,6 +906,35 @@ test.describe("releases page", () => {
 		await expect(page.locator('.rule[data-rule="L9"]')).toContainText(
 			"Code stranded in a branch that is not a sprint branch, a long-lived branch or develop",
 		);
+	});
+
+	test("the Alerts sheet groups by severity, and each card reads what is wrong, what to do, which cards and the time left", async ({
+		page,
+	}) => {
+		await open(page, "?sheet=attention");
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		const heads = sheet.getByTestId("sev-header");
+		await expect(heads.first()).toHaveText(/^Blocks the release/);
+		await expect(sheet.locator(".al .sev")).toHaveCount(0);
+		await expect(sheet.locator(".al .rid")).toHaveCount(0);
+
+		const c1 = sheet.locator('.al[data-hit="C1~v/21-2026/di"]');
+		await expect(c1.getByTestId("hit-subject")).toHaveText("Train 21 release pipeline failed: build_test");
+		await expect(c1.getByTestId("hit-do")).toHaveText("Fix the job, or retry it once if it looks flaky.");
+		await expect(c1.getByTestId("hit-due")).toHaveText("1 day left");
+		await expect(c1.getByTestId("hit-due")).toHaveAttribute("data-st", "failed");
+		await expect(c1.getByTestId("hit-primary")).toHaveText("Retry job");
+
+		const l10 = sheet.locator('.al[data-hit="L10~llb/22-2026/di/feature/demo-wallet"]');
+		await expect(l10.getByTestId("hit-due")).toHaveText("6 days left");
+		await expect(l10.getByTestId("hit-due")).toHaveAttribute("data-st", "unknown");
+		await expect(l10.getByTestId("hit-primary")).toHaveText("New MR");
+		await expect(l10.getByTestId("hit-key")).toHaveText(["DEMO-104", "DEMO-107", "DEMO-108"]);
+
+		const c5 = sheet.locator('.al[data-hit="C5~v/21-2026/di"]');
+		await expect(c5.getByTestId("hit-due")).toHaveText("3 days left");
+		await expect(c5.getByTestId("hit-due")).toHaveAttribute("data-st", "waiting");
+		await expect(sheet.locator('.al[data-hit="A7~v/21-2026/pa"]').getByTestId("hit-due")).toHaveCount(0);
 	});
 
 	test("every place that names an app uses the family short name and a platform glyph", async ({ page }) => {
@@ -939,10 +969,10 @@ test.describe("releases page", () => {
 			await expect(marks(chip)).toHaveCount(1);
 			await noLongName(chip);
 		}
-		await noLongName(sheet.locator(".al .who").first());
+		await noLongName(sheet.locator(".al .l1").first());
 
 		await open(page, "?sheet=attention");
-		const who = page.locator(".rel-sheet .al .who");
+		const who = page.locator(".rel-sheet .al .l1");
 		for (const w of await who.all()) await noLongName(w);
 		await expect(marks(page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"]'))).toHaveCount(1);
 
@@ -966,7 +996,7 @@ test.describe("releases page", () => {
 		};
 		await open(page, "?sheet=attention");
 		const hit = page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"]');
-		await expect(hit).toContainText("Page says freeze");
+		await expect(hit).toContainText("freeze dates differ");
 		await expectBoth(hit);
 		await hit.getByTestId("hit-subject").click();
 		await expect(page).toHaveURL(/sheet=version/);
@@ -1024,7 +1054,7 @@ test.describe("release fixes", () => {
 		page,
 	}) => {
 		await open(page, "?sheet=attention", "fixes");
-		await alertRow(page, "E1~v/20-2026/di").getByRole("button", { name: "Fix ›" }).click();
+		await alertRow(page, "E1~v/20-2026/di").getByRole("button", { name: "Mark released" }).click();
 		const s = sheet(page);
 		await expect(s.getByTestId("fix-title")).toHaveText("Mark di 2.3.0 released");
 		await expect(s.getByTestId("fix-mode")).toContainText("Nothing is sent to Jira, GitLab or Confluence");
@@ -1048,7 +1078,7 @@ test.describe("release fixes", () => {
 		await row.getByRole("button", { name: "Withdraw" }).click();
 		await expect(row.getByTestId("fix-state")).toHaveText("withdrawn");
 		await s.getByRole("tab", { name: "Alerts" }).click();
-		await expect(alertRow(page, "E1~v/20-2026/di").getByRole("button", { name: "Fix ›" })).toBeVisible();
+		await expect(alertRow(page, "E1~v/20-2026/di").getByRole("button", { name: "Mark released" })).toBeVisible();
 	});
 
 	test("A5 shows two choices, neither picked, and picking one replans", async ({ page }) => {
@@ -1107,7 +1137,9 @@ test.describe("release fixes", () => {
 		await row.getByRole("button", { name: "Undo" }).click();
 		await expect(row.getByTestId("fix-state")).toHaveText("undone");
 		await s.getByRole("tab", { name: "Alerts" }).click();
-		await expect(alertRow(page, "L3~ct/21-2026/di/DEMO-110").getByRole("button", { name: "Fix ›" })).toBeVisible();
+		await expect(
+			alertRow(page, "L3~ct/21-2026/di/DEMO-110").getByRole("button", { name: "Set target train" }),
+		).toBeVisible();
 	});
 
 	test("an L3 undo refused because the plan moved on keeps the fix applied", async ({ page }) => {
@@ -1172,14 +1204,14 @@ test.describe("release fixes", () => {
 		await open(page, "?sheet=card:DEMO-110", "fixes");
 		const row = alertRow(page, "L3~ct/21-2026/di/DEMO-110");
 		await expect(row).toBeVisible();
-		await row.getByRole("button", { name: "Fix ›" }).click();
+		await row.getByRole("button", { name: "Set target train" }).click();
 		await expect(sheet(page).getByTestId("fix-blocked")).toBeVisible();
 	});
 
 	test("the version sheet's alerts carry the Fix button", async ({ page }) => {
 		await open(page, "?sheet=version:21-2026:di", "fixes");
-		await expect(alertRow(page, "C1~v/21-2026/di").getByRole("button", { name: "Fix ›" })).toBeVisible();
-		await expect(alertRow(page, "C5~v/21-2026/di").getByRole("button", { name: "Fix ›" })).toHaveCount(0);
+		await expect(alertRow(page, "C1~v/21-2026/di").getByRole("button", { name: "Retry job" })).toBeVisible();
+		await expect(alertRow(page, "C5~v/21-2026/di").locator("button[data-testid=hit-primary]")).toHaveCount(0);
 	});
 
 	test("a release lists its train page's missing cards, each opens a card that lists the same alert until it is hidden", async ({

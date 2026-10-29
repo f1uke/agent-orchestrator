@@ -31,11 +31,14 @@ for (const viewport of VIEWPORTS)
 	test.describe(`View as a person at ${viewport.width}x${viewport.height}`, () => {
 		test.use({ viewport });
 
-		test("lists exactly the alerts I own or must act on, each saying why", async ({ page }) => {
+		test("lists exactly the alerts I own or must act on, each saying why in its tooltip", async ({ page }) => {
 			await open(page, "?sheet=attention&person=ada", "subjects");
 			await expect.poll(() => shownHits(page)).toEqual(Object.keys(MINE).sort());
 			for (const [hit, why] of Object.entries(MINE))
-				await expect(row(page, hit).getByTestId("hit-mine")).toHaveText(why);
+				await expect(row(page, hit).getByTestId("hit-subject")).toHaveAttribute(
+					"title",
+					new RegExp(`Shown for you: ${why}$`),
+				);
 			await expect(page.getByTestId("attention-count")).toHaveText(String(Object.keys(MINE).length));
 			if (SHOTS) await page.screenshot({ path: `${SHOTS}/onlyme-attention-${viewport.width}.png` });
 		});
@@ -45,11 +48,14 @@ test.describe("View as", () => {
 	test("D3 says I have not approved and names nobody else", async ({ page }) => {
 		await open(page, "?sheet=attention&person=ada", "subjects");
 		const d3 = row(page, "D3~v/21-2026/da");
-		await expect(d3.locator(".tx")).toHaveText("9 of 9 not approved");
+		await expect(d3.getByTestId("hit-subject")).toHaveText("You have not approved train 21");
+		await expect(d3.getByTestId("hit-do")).toHaveText(
+			/^Approve the Jira release before publish \w{3} \d{1,2} \w{3}\.$/,
+		);
 		await expect(d3).not.toContainText("Ben Sample");
 		await expect(d3).not.toContainText("Ada Example");
 		const label = page.getByTestId("label-da").getByTestId("label-blocker");
-		await expect(label).toContainText("9 of 9 not approved");
+		await expect(label).toContainText("You have not approved train 21");
 		await expect(label).not.toContainText("Ben Sample");
 	});
 
@@ -76,30 +82,34 @@ test.describe("View as", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/onlyme-g5-show.png` });
 	});
 
-	test("viewing everyone changes nothing: every alert, the rule's own text, no why line", async ({ page }) => {
+	test("viewing everyone changes nothing: every alert, the rule's own copy, no why in the tooltip", async ({
+		page,
+	}) => {
 		await open(page, "?sheet=attention", "subjects");
 		await expect.poll(() => shownHits(page)).toEqual(ALL);
-		await expect(sheet(page).getByTestId("hit-mine")).toHaveCount(0);
-		await expect(row(page, "D3~v/21-2026/da").locator(".tx")).toContainText("Ben Sample");
-		await expect(page.getByTestId("label-da").getByTestId("label-blocker")).toContainText("Ben Sample");
+		for (const tip of await sheet(page)
+			.getByTestId("hit-subject")
+			.evaluateAll((els) => els.map((e) => e.getAttribute("title") ?? "")))
+			expect(tip).not.toContain("Shown for");
+		await expect(row(page, "D3~v/21-2026/da").getByTestId("hit-do")).toContainText("Ben Sample");
+		await expect(page.getByTestId("label-da").getByTestId("label-blocker")).toContainText(
+			"9 of 9 approvers have not approved train 21",
+		);
 	});
 
 	test("another person's why lines name them, never you", async ({ page }) => {
 		await open(page, "?sheet=attention&person=bsample", "subjects");
-		await expect(row(page, "D3~v/21-2026/da").getByTestId("hit-mine")).toHaveText("Ben Sample has not approved");
-		const lines = await sheet(page).getByTestId("hit-mine").allTextContents();
-		expect(lines.length).toBeGreaterThan(0);
-		for (const line of lines) expect(line).not.toMatch(/\byou(r)?\b/i);
-	});
-
-	test("Sources names the mine policy behind the why line", async ({ page }) => {
-		await open(page, "?sheet=attention&person=ada&layers=src", "subjects");
-		const tag = row(page, "D3~v/21-2026/da").getByTestId("hit-mine").getByTestId("source-tag");
-		await expect(tag).toHaveText("AO");
-		await tag.click();
-		const card = page.getByTestId("source-card");
-		await expect(card).toContainText("D3: mine while the person's approval is pending");
-		await expect(card).toContainText("ao.mine_policy");
+		await expect(row(page, "D3~v/21-2026/da").getByTestId("hit-subject")).toHaveAttribute(
+			"title",
+			/Shown for Ben Sample: Ben Sample has not approved$/,
+		);
+		const tips = (
+			await sheet(page)
+				.getByTestId("hit-subject")
+				.evaluateAll((els) => els.map((e) => e.getAttribute("title") ?? ""))
+		).filter((t) => t.includes("Shown for"));
+		expect(tips.length).toBeGreaterThan(0);
+		for (const tip of tips) expect(tip).not.toMatch(/\byou(r)?\b/i);
 	});
 });
 

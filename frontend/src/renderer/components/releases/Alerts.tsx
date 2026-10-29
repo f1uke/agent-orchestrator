@@ -1,21 +1,23 @@
-import { ChevronRight, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useHideHit, useUnhideHit } from "../../hooks/useReleaseBoard";
-import { FIX_STATE_META, fixAction } from "../../lib/releases/fix";
+import { dueChip } from "../../lib/releases/dueChip";
+import { FIX_STATE_META, primaryAction, type PrimaryAction } from "../../lib/releases/fix";
+import { cardLine } from "../../lib/releases/hitScope";
 import type { Lens } from "../../lib/releases/lens";
-import { alertText, mineWhy, minePolicyOf, onlyMeSubject } from "../../lib/releases/mineWhy";
+import { alertCopy, mineWhy, onlyMeSubject } from "../../lib/releases/mineWhy";
 import type { AlertHit, Board } from "../../lib/releases/types";
 import type { SheetEntry } from "../../lib/releases/url";
 import { appMarkOf } from "../../lib/releases/appMark";
-import { splitKeys } from "../../lib/releases/hitScope";
+import { trainLabel } from "../../lib/releases/llb";
 import { sheetPart } from "../../lib/releases/sheetPart";
-import { subjectLabel, subjectSheet } from "../../lib/releases/subject";
-import { SEVERITY_META } from "../../lib/releases/vocab";
+import { subjectSheet } from "../../lib/releases/subject";
+import { SEVERITY_META, SEVERITY_ORDER } from "../../lib/releases/vocab";
 import { AppMark } from "./AppMark";
 import { NoMrButton } from "./NoMr";
 import type { PageActions } from "./ReleasesPage";
 import { useReleasesReadOnly } from "./ReleasesCapabilities";
-import { mineWhyOf, ruleTagOf, type Provenance } from "../../lib/releases/sources";
+import { ruleTagOf, type Provenance } from "../../lib/releases/sources";
 import { SourceTag, useSources } from "./Sources";
 
 export type AlertCtx = { board: Board; lens: Lens; actions: PageActions };
@@ -56,16 +58,19 @@ export function Sec({
 	);
 }
 
+export function hitLinks(h: AlertHit): { label: string; url: string }[] {
+	const all = [...(h.primary?.url ? [{ label: h.primary.label, url: h.primary.url }] : []), ...h.links];
+	return all.flatMap((l) => (l.url ? [{ label: l.label, url: l.url }] : []));
+}
+
 export function HitLinks({ h }: { h: AlertHit }) {
 	return (
 		<>
-			{h.links
-				.filter((l) => l.url)
-				.map((l) => (
-					<Ext key={l.url} url={l.url}>
-						{l.label}
-					</Ext>
-				))}
+			{hitLinks(h).map((l) => (
+				<Ext key={l.url} url={l.url}>
+					{l.label}
+				</Ext>
+			))}
 		</>
 	);
 }
@@ -80,9 +85,9 @@ export function Ext({ url, children }: { url?: string; children: ReactNode }) {
 	);
 }
 
-function RuleId({ board, rule }: { board: Board; rule: string }) {
+function RuleSource({ board, rule }: { board: Board; rule: string }) {
 	const p = ruleTagOf(board.catalogue, rule);
-	return useSources() && p ? <SourceTag p={p} wide /> : <span className="rid">{rule}</span>;
+	return useSources() && p ? <SourceTag p={p} wide /> : null;
 }
 
 function sheetFor(h: AlertHit): SheetEntry | null {
@@ -90,76 +95,85 @@ function sheetFor(h: AlertHit): SheetEntry | null {
 	return subjectSheet(h.subject, h.id);
 }
 
-function SubjectLine({ h, c, open }: { h: AlertHit; c: AlertCtx; open: SheetEntry | null }) {
-	const l = subjectLabel(h.subject, c.board);
-	const body = (
-		<>
-			{l.app && <AppMark mark={appMarkOf(c.board.apps, l.app)} size="sm" />}
-			<span>{l.text}</span>
-		</>
-	);
-	return open ? (
-		<button
-			type="button"
-			className="subj"
-			data-testid="hit-subject"
-			title="Open its details"
-			onClick={() => c.actions.openPart(open, sheetPart(h))}
-		>
-			{body}
-			<ChevronRight className="size-3" aria-hidden="true" />
-		</button>
-	) : (
-		<div className="subj" data-testid="hit-subject">
-			{body}
-		</div>
-	);
+function tooltipOf(h: AlertHit, c: AlertCtx, canOpen: boolean): string {
+	const title = c.board.catalogue.find((r) => r.id === h.rule)?.title;
+	const scope = c.lens.scope;
+	const why = scope ? mineWhy(h, scope) : "";
+	return [
+		h.rule,
+		title,
+		canOpen ? "click for details" : null,
+		scope && why ? `Shown for ${scope.self ? "you" : scope.name}: ${why}` : null,
+	]
+		.filter(Boolean)
+		.join(" · ");
 }
 
-function HitText({ h, c }: { h: AlertHit; c: AlertCtx }) {
-	const keys = h.subject.kind === "pageFamily" ? h.subject.keys : [];
+function CardsLine({ h, c, what }: { h: AlertHit; c: AlertCtx; what: string }) {
+	const line = cardLine(h, c.board, c.lens.me, what);
+	if (!line) return null;
+	if ("summary" in line)
+		return (
+			<div className="cards sum" data-testid="hit-cards">
+				{line.summary}
+			</div>
+		);
 	return (
-		<div className="tx">
-			{splitKeys(alertText(h, c.lens.me), keys).map((p, i) =>
-				"key" in p ? (
-					<button
-						key={i}
-						type="button"
-						className="key"
-						data-testid="hit-key"
-						title="Open this card"
-						onClick={() => c.actions.openSheet({ kind: "card", key: p.key }, "push")}
-					>
-						{p.key}
-					</button>
-				) : (
-					p.text
-				),
-			)}
+		<div className="cards" data-testid="hit-cards">
+			{line.keys.map((k) => (
+				<button
+					key={k}
+					type="button"
+					className="key"
+					data-testid="hit-key"
+					title="Open this card"
+					onClick={() => c.actions.openSheet({ kind: "card", key: k }, "push")}
+				>
+					{k}
+				</button>
+			))}
+			{line.more > 0 && <span className="more">+{line.more} more</span>}
 		</div>
 	);
 }
 
-function MineLine({ h, c }: { h: AlertHit; c: AlertCtx }) {
-	const why = c.lens.scope ? mineWhy(h, c.lens.scope) : "";
-	const policy = minePolicyOf(c.board.catalogue, h.rule);
-	if (!why) return null;
-	return (
-		<div className="mine" data-testid="hit-mine">
-			{why}
-			{policy && <SourceTag p={mineWhyOf(h.rule, policy)} />}
-		</div>
-	);
-}
-
-function FixButton({ h, hidden, c }: { h: AlertHit; hidden: boolean; c: AlertCtx }) {
-	const readOnly = useReleasesReadOnly();
-	const a = fixAction(h, hidden);
-	if (!a || readOnly) return null;
+function PrimaryButton({
+	a,
+	h,
+	c,
+	details,
+}: {
+	a: PrimaryAction;
+	h: AlertHit;
+	c: AlertCtx;
+	details: SheetEntry | null;
+}) {
+	if (a.kind === "details")
+		return details ? (
+			<button
+				type="button"
+				className="prim"
+				data-testid="hit-primary"
+				onClick={() => c.actions.openPart(details, sheetPart(h))}
+			>
+				{a.label}
+			</button>
+		) : null;
+	if (a.kind === "link")
+		return (
+			<a className="prim" data-testid="hit-primary" href={a.url} target="_blank" rel="noreferrer">
+				{a.label}
+			</a>
+		);
 	if (a.kind === "fix")
 		return (
-			<button type="button" className="fixb" onClick={() => c.actions.openSheet({ kind: "fix", hit: h.id }, "push")}>
-				Fix ›
+			<button
+				type="button"
+				className="prim"
+				data-testid="hit-primary"
+				onClick={() => c.actions.openSheet({ kind: "fix", hit: h.id }, "push")}
+			>
+				{a.label}
 			</button>
 		);
 	const meta = FIX_STATE_META[a.ref.state];
@@ -181,25 +195,55 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	const hide = useHideHit();
 	const unhide = useUnhideHit();
 	const readOnly = useReleasesReadOnly();
-	const target = sheetFor(h);
+	const open = hidden ? null : sheetFor(h);
+	const copy = alertCopy(h, c.lens.me, h.train ? trainLabel(c.board, h.train) : undefined);
 	const subject = onlyMeSubject(h, c.lens.me);
 	const where = c.actions.whereIs(subject);
+	const primary = primaryAction(h, hidden, readOnly);
+	const chip = h.due ? dueChip(h.due) : null;
+	const links = h.links.filter((l) => l.url && !(primary?.kind === "link" && primary.url === l.url));
+	const tip = tooltipOf(h, c, open !== null);
 	return (
-		<div className={`al${hidden ? " dim" : ""}`} data-st={SEVERITY_META[h.severity].tone} data-hit={h.id}>
-			<div>
-				<div className="who">
-					<span className="sev">{SEVERITY_META[h.severity].label}</span>
-					<RuleId board={c.board} rule={h.rule} />
+		<div className={`al${hidden ? " dim" : ""}`} data-hit={h.id}>
+			<div className="main">
+				<div className="l1">
+					{h.app && <AppMark mark={appMarkOf(c.board.apps, h.app)} size="sm" />}
+					{open ? (
+						<button
+							type="button"
+							className="subj"
+							data-testid="hit-subject"
+							title={tip}
+							onClick={() => c.actions.openPart(open, sheetPart(h))}
+						>
+							{copy.what}
+						</button>
+					) : (
+						<span className="subj" data-testid="hit-subject" title={tip}>
+							{copy.what}
+						</span>
+					)}
+					<RuleSource board={c.board} rule={h.rule} />
 					{h.changedSinceHidden && (
 						<span className="spill" data-st="waiting">
 							changed since hidden
 						</span>
 					)}
 				</div>
-				<SubjectLine h={h} c={c} open={hidden ? null : target} />
-				<HitText h={h} c={c} />
-				<MineLine h={h} c={c} />
+				<div className="do" data-testid="hit-do">
+					{copy.do}
+				</div>
+				<CardsLine h={h} c={c} what={copy.what} />
 				<div className="acts">
+					{primary && <PrimaryButton a={primary} h={h} c={c} details={open} />}
+					{links.map((l) => (
+						<Ext key={l.url} url={l.url}>
+							{l.label}
+						</Ext>
+					))}
+					{h.rule === "G2" && h.subject.kind === "card" && !hidden && (
+						<NoMrButton board={c.board} k={h.subject.key} variant="link" />
+					)}
 					<button
 						type="button"
 						data-testid="hit-show"
@@ -208,11 +252,6 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 					>
 						Show
 					</button>
-					<HitLinks h={h} />
-					<FixButton h={h} hidden={hidden} c={c} />
-					{h.rule === "G2" && h.subject.kind === "card" && !hidden && (
-						<NoMrButton board={c.board} k={h.subject.key} variant="link" />
-					)}
 					{hidden && !readOnly && (
 						<button type="button" onClick={() => unhide.mutate(h.id)}>
 							Restore
@@ -225,9 +264,12 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 					</div>
 				)}
 			</div>
-			{hidden || readOnly ? (
-				<span />
-			) : (
+			{chip && (
+				<span className="due" data-st={chip.tone} data-testid="hit-due">
+					{chip.text}
+				</span>
+			)}
+			{!hidden && !readOnly && (
 				<button
 					type="button"
 					className="x"
@@ -242,20 +284,40 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	);
 }
 
+export function SeverityGroups({ hits, c }: { hits: AlertHit[]; c: AlertCtx }) {
+	return (
+		<>
+			{SEVERITY_ORDER.map((s) => {
+				const list = hits.filter((h) => h.severity === s);
+				return list.length ? (
+					<div key={s} data-testid="sev-group">
+						<div className="grp" data-st={SEVERITY_META[s].tone} data-testid="sev-header">
+							{SEVERITY_META[s].header}
+							<span className="n">{list.length}</span>
+						</div>
+						{list.map((h) => (
+							<AlertRow key={h.id} h={h} c={c} />
+						))}
+					</div>
+				) : null;
+			})}
+		</>
+	);
+}
+
 export function AlertList({ title, hits, c }: { title: string; hits: AlertHit[]; c: AlertCtx }) {
-	if (!hits.length) return null;
+	const worst = SEVERITY_ORDER.find((s) => hits.some((h) => h.severity === s));
+	if (!worst) return null;
 	return (
 		<Sec
 			title={title}
 			extra={
-				<span className="badge" data-st={SEVERITY_META[hits[0].severity].tone}>
+				<span className="badge" data-st={SEVERITY_META[worst].tone}>
 					{hits.length}
 				</span>
 			}
 		>
-			{hits.map((h) => (
-				<AlertRow key={h.id} h={h} c={c} />
-			))}
+			<SeverityGroups hits={hits} c={c} />
 		</Sec>
 	);
 }

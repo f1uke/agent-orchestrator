@@ -1,5 +1,6 @@
 import { addDays, dayLabel } from "./day";
 import type {
+	AlertCopy,
 	AlertHit,
 	AppVersion,
 	Board,
@@ -447,7 +448,7 @@ function baseBoard(today: string): Board {
 		id: string,
 		rule: string,
 		severity: Severity,
-		text: string,
+		copy: AlertCopy,
 		subject: Subject,
 		over: Partial<AlertHit> = {},
 	): AlertHit => ({
@@ -456,9 +457,11 @@ function baseBoard(today: string): Board {
 		subject,
 		severity,
 		bucket: "badge",
-		text,
+		copy,
+		cards: [],
 		evidence: {},
-		links: [{ label: "Open", url: `${HOST}/x` }],
+		primary: { label: "Open", url: `${HOST}/x` },
+		links: [],
 		asOf: `${today}T02:00:00Z`,
 		...over,
 	});
@@ -467,125 +470,176 @@ function baseBoard(today: string): Board {
 			"C5~v/21-2026/di",
 			"C5",
 			"block",
-			"!77 has merge conflicts",
+			{ what: "Train 21 release MR !77 has merge conflicts", do: "Resolve the conflicts on the release branch." },
 			{ kind: "version", train: "21-2026", app: "di" },
-			{ app: "di", train: "21-2026" },
+			{
+				app: "di",
+				train: "21-2026",
+				primary: { label: "Open release MR", url: `${HOST}/merge_requests/77` },
+				due: { on: p21, event: "publish", workDays: 3 },
+			},
 		),
 		hit(
 			"C1~v/21-2026/di",
 			"C1",
 			"block",
-			"!77 failed: build_test",
+			{ what: "Train 21 release pipeline failed: build_test", do: "Fix the job, or retry it once if it looks flaky." },
 			{ kind: "version", train: "21-2026", app: "di" },
-			{ app: "di", train: "21-2026", fix: "queue" },
+			{
+				app: "di",
+				train: "21-2026",
+				fix: "queue",
+				primary: { label: "Retry job", fix: true },
+				links: [{ label: "Open pipeline", url: `${HOST}/pipelines/77` }],
+				due: { on: p21, event: "publish", workDays: 1 },
+			},
 		),
 		hit(
 			"A7~v/21-2026/pa",
 			"A7",
 			"data",
-			`Milestone ${dayLabel(addDays(f21, 2))} → ${dayLabel(addDays(p21, 2))}, the rest of #21 runs ${dayLabel(f21)} → ${dayLabel(p21)}. Give it its own train or move the milestone`,
+			{
+				what: `Train 21 dates differ here: ${dayLabel(addDays(f21, 2))} → ${dayLabel(addDays(p21, 2))}, the other apps run ${dayLabel(f21)} → ${dayLabel(p21)}`,
+				do: "Move this milestone, or give it its own train.",
+			},
 			{ kind: "version", train: "21-2026", app: "pa" },
-			{ app: "pa", train: "21-2026" },
+			{
+				app: "pa",
+				train: "21-2026",
+				primary: { label: "Open milestone", url: `${HOST}/milestones/1` },
+			},
 		),
 		hit(
 			"A1~v/21-2026/pi",
 			"A1",
 			"data",
-			"Milestone says 1.0.1, Jira release says 1.0.2",
+			{
+				what: "Train 21: milestone is 1.0.1, Jira release is 1.0.2",
+				do: "Rename one so both name the same version.",
+			},
 			{ kind: "version", train: "21-2026", app: "pi" },
 			{
 				app: "pi",
 				train: "21-2026",
 				evidence: { kind: "version", version: "1.0.2", milestone: "v 1.0.1", jira: "pi 1.0.2" },
-				links: [
-					{ label: "Open Jira release", url: `${JIRA}/versions/1` },
-					{ label: "Open milestone", url: `${HOST}/milestones/1` },
-				],
+				primary: { label: "Open Jira release", url: `${JIRA}/versions/1` },
+				links: [{ label: "Open milestone", url: `${HOST}/milestones/1` }],
 			},
 		),
 		hit(
 			"A6~vd/21-2026/di/freeze",
 			"A6",
 			"data",
-			`Page says freeze ${dayLabel(addDays(f21, 1))}, milestone starts ${dayLabel(f21)}`,
+			{
+				what: `Train 21 freeze dates differ: page ${dayLabel(addDays(f21, 1))}, milestone ${dayLabel(f21)}`,
+				do: "Correct the page or the milestone.",
+			},
 			{ kind: "versionDate", train: "21-2026", app: "di", field: "freeze" },
 			{
 				app: "di",
 				train: "21-2026",
 				evidence: { page: addDays(f21, 1), milestone: f21 },
-				links: [
-					{ label: "Open page", url: "https://wiki.example.com/pages/21-demo" },
-					{ label: "Open milestone", url: `${HOST}/milestones/1` },
-				],
+				primary: { label: "Open page", url: "https://wiki.example.com/pages/21-demo" },
+				links: [{ label: "Open milestone", url: `${HOST}/milestones/1` }],
 			},
 		),
 		hit(
 			"D3~v/21-2026/da",
 			"D3",
 			"risk",
-			`9 of 9 not approved: ${PEOPLE.map(([, name]) => name).join(", ")}`,
+			{
+				what: "9 of 9 approvers have not approved train 21",
+				do: `Ask ${PEOPLE.map(([, name]) => name).join(", ")} to approve before publish ${dayLabel(p21)}.`,
+			},
 			{ kind: "version", train: "21-2026", app: "da" },
 			{
 				app: "da",
 				train: "21-2026",
 				evidence: { pending: PEOPLE.map(([, name]) => name), total: PEOPLE.length },
+				primary: { label: "Open Jira release", url: `${JIRA}/versions/3` },
+				due: { on: p21, event: "publish", workDays: 8 },
 			},
 		),
 		hit(
 			"F1~tt/21-2026/22-2026",
 			"F1",
 			"info",
-			"#22 freezes before #21 publishes",
+			{
+				what: `Train 22 freezes ${dayLabel(f22)}, before train 21 publishes ${dayLabel(p21)}`,
+				do: "Move a date if the overlap is not planned.",
+			},
 			{ kind: "trainPair", a: "21-2026", b: "22-2026" },
-			{ train: "22-2026" },
+			{ train: "22-2026", primary: undefined },
 		),
 		hit(
 			"L9~mr/da/415",
 			"L9",
 			"risk",
-			"!415 feat/DEMO-203 → feat/DEMO-201-base: open into a branch no train takes",
+			{
+				what: "MR !415 goes into feat/DEMO-201-base, which no train takes",
+				do: "Retarget it to the sprint branch or a long-lived branch.",
+			},
 			{ kind: "mr", app: "da", iid: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base" },
 			{
 				app: "da",
 				evidence: { mr: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base", state: "opened" },
-				links: [{ label: "Open MR", url: `${HOST}/merge_requests/415` }],
+				primary: { label: "Open MR", url: `${HOST}/merge_requests/415` },
 			},
 		),
 		hit(
 			"L10~llb/22-2026/di/feature/demo-wallet",
 			"L10",
 			"info",
-			"feature/demo-wallet has no MR into the sprint 21 branch for #22; freeze is in 6 working day(s)",
+			{
+				what: "feature/demo-wallet is not in sprint 21 yet",
+				do: `Open an MR into the sprint branch before freeze ${dayLabel(f22)}.`,
+			},
 			{ kind: "llbBranch", train: "22-2026", app: "di", branch: "feature/demo-wallet", group: "demo-wallet" },
 			{
 				app: "di",
 				train: "22-2026",
 				evidence: { group: "demo-wallet", branch: "feature/demo-wallet", train: "22-2026" },
+				cards: ["DEMO-104", "DEMO-107", "DEMO-108"],
+				primary: {
+					label: "New MR",
+					url: `${HOST}/merge_requests/new?merge_request[source_branch]=feature/demo-wallet&merge_request[target_branch]=sprint-21`,
+				},
+				due: { on: f22, event: "freeze", workDays: 6 },
 			},
 		),
 		hit(
 			"E1~v/20-2026/di",
 			"E1",
 			"hygiene",
-			"Published but the Jira release is not marked released",
+			{
+				what: "Train 20 shipped, but its Jira release is not marked released",
+				do: "Mark the Jira release released.",
+			},
 			{ kind: "version", train: "20-2026", app: "di" },
 			{
 				app: "di",
 				train: "20-2026",
 				bucket: "history",
 				fix: "queue",
+				primary: { label: "Mark released", fix: true },
+				links: [{ label: "Open Jira release", url: `${JIRA}/versions/2` }],
 			},
 		),
 		hit(
 			"D1~v/22-2026/da",
 			"D1",
 			"risk",
-			"No approvers set on the Jira release",
+			{
+				what: "Train 22 Jira release has no approvers",
+				do: "Add the approvers. The bot did not set them.",
+			},
 			{ kind: "version", train: "22-2026", app: "da" },
 			{
 				app: "da",
 				train: "22-2026",
 				bucket: "hidden",
+				primary: { label: "Add approvers", fix: true },
+				links: [{ label: "Open Jira release", url: `${JIRA}/versions/4` }],
 			},
 		),
 	];
@@ -1554,7 +1608,7 @@ export function fixesBoard(today: string): Board {
 	const fixable = (
 		id: string,
 		severity: Severity,
-		text: string,
+		copy: AlertCopy,
 		subject: Subject,
 		over: Partial<AlertHit>,
 	): AlertHit => ({
@@ -1563,9 +1617,11 @@ export function fixesBoard(today: string): Board {
 		rule: id.slice(0, id.indexOf("~")),
 		severity,
 		bucket: "badge",
-		text,
+		copy,
+		cards: [],
 		evidence: {},
-		links: [{ label: "Open", url: `${HOST}/x` }],
+		primary: { label: "Open", url: `${HOST}/x` },
+		links: [],
 		asOf: at,
 		fix: FIX_KINDS[id.slice(0, id.indexOf("~"))],
 		...over,
@@ -1574,33 +1630,50 @@ export function fixesBoard(today: string): Board {
 		fixable(
 			"A5~v/21-2026/da",
 			"data",
-			"Jira release date is 2 days after the milestone due date",
+			{
+				what: "Train 21 release dates differ: the Jira release is 2 days after the milestone",
+				do: "Pick the right date. The fix sets it on the other one.",
+			},
 			{ kind: "version", train: "21-2026", app: "da" },
 			{
 				app: "da",
 				train: "21-2026",
+				primary: { label: "Fix the date", fix: true },
+				links: [{ label: "Open Jira release", url: `${JIRA}/versions/3` }],
 			},
 		),
 		fixable(
 			"L3~ct/21-2026/di/DEMO-110",
 			"risk",
-			"DEMO-110 is on train 21-2026, but its code sits in feature/demo-chat (no target train)",
+			{
+				what: "DEMO-110 is on train 21, but its code is parked in feature/demo-chat",
+				do: "Set feature/demo-chat to target train 21, or take the card off the train.",
+			},
 			{ kind: "cardOnTrain", train: "21-2026", app: "di", key: "DEMO-110" },
 			{
 				app: "di",
 				train: "21-2026",
 				evidence: { card: "DEMO-110", group: "demo-chat", branch: "feature/demo-chat" },
+				cards: ["DEMO-110"],
+				primary: { label: "Set target train", fix: true },
 				links: [{ label: "Open card", url: `${JIRA}/browse/DEMO-110` }],
+				due: { on: addDays(today, 2), event: "freeze", workDays: 2 },
 			},
 		),
 		fixable(
 			"G5~pf/21-2026/demo/merged",
 			"risk",
-			"2 card(s) ship with #21 but are not on Release Train #21 Demo: DEMO-103, DEMO-106",
+			{
+				what: "2 merged cards in train 21 are not on its Demo page",
+				do: "Add them to the page before freeze.",
+			},
 			{ kind: "pageFamily", train: "21-2026", family: "demo", bucket: "merged", keys: ["DEMO-103", "DEMO-106"] },
 			{
 				train: "21-2026",
 				evidence: { page: "page-21-demo", cards: ["DEMO-103", "DEMO-106"], bucket: "merged" },
+				cards: ["DEMO-103", "DEMO-106"],
+				primary: { label: "Copy rows", fix: true },
+				links: [{ label: "Open page", url: "https://wiki.example.com/pages/21-demo" }],
 			},
 		),
 	];
@@ -1636,11 +1709,14 @@ export function fixesBoard(today: string): Board {
 	return markHitMine(b);
 }
 
-const SUBJECT_HITS: [string, Severity, string, Subject][] = [
+const subjectHits = (today: string): [string, Severity, AlertCopy, Subject, Partial<AlertHit>?][] => [
 	[
 		"A2~jv/7001",
 		"data",
-		"Jira release Android 2.5.0 says train #22, but no milestone has that label",
+		{
+			what: "Jira release Android 2.5.0 is in train 22, but no milestone is",
+			do: "Add the train 22 label to its milestone, or fix the label on the Jira release.",
+		},
 		{
 			kind: "jiraVersion",
 			id: "7001",
@@ -1651,7 +1727,10 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 	[
 		"A3~m/pi/9001",
 		"data",
-		"Milestone Release 1.0.2 has no Jira release with the train #21 label",
+		{
+			what: "Milestone Release 1.0.2 has no Jira release for train 21",
+			do: "Create the Jira release, or add the train 21 label to it.",
+		},
 		{
 			kind: "milestone",
 			app: "pi",
@@ -1662,7 +1741,10 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 	[
 		"E1~h/da/2.3.1",
 		"hygiene",
-		"Hotfix shipped, Jira release still unreleased",
+		{
+			what: "Hotfix 2.3.1 shipped, but its Jira release is not marked released",
+			do: "Mark the Jira release released.",
+		},
 		{
 			kind: "hotfix",
 			app: "da",
@@ -1672,7 +1754,10 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 	[
 		"F2~ht/da/2.3.1/21-2026",
 		"risk",
-		"Hotfix 2.3.1 runs inside train #21",
+		{
+			what: "Hotfix 2.3.1 overlaps train 21",
+			do: "Agree which ships first, or move the hotfix dates.",
+		},
 		{
 			kind: "hotfixTrain",
 			app: "da",
@@ -1683,34 +1768,49 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 	[
 		"L3~ct/21-2026/di/DEMO-109",
 		"risk",
-		"DEMO-109 is on train #21, but its code sits in feature/demo-search",
+		{
+			what: "DEMO-109 is on train 21, but its code is parked in feature/demo-search",
+			do: "Set feature/demo-search to target train 21, or take the card off the train.",
+		},
 		{
 			kind: "cardOnTrain",
 			train: "21-2026",
 			app: "di",
 			key: "DEMO-109",
 		},
+		{ cards: ["DEMO-109"] },
 	],
 	[
 		"G2~c/DEMO-304",
 		"risk",
-		"No MR yet, DEMO 20 ends soon · Jira To Do",
+		{
+			what: "DEMO-304 has no MR yet",
+			do: "Open one before sprint 20 ends, or mark it No MR needed.",
+		},
 		{ kind: "card", key: "DEMO-304", board: "DEMO" },
+		{ cards: ["DEMO-304"], due: { on: addDays(today, 2), event: "sprintEnd", workDays: 2 } },
 	],
 	[
 		"G2~c/PIL-12",
 		"risk",
-		"No MR yet, PILOT 20 ends soon · Jira Pull Request",
+		{
+			what: "PIL-12 has no MR yet",
+			do: "Open one before sprint 20 ends, or mark it No MR needed.",
+		},
 		{
 			kind: "card",
 			key: "PIL-12",
 			board: "PILOT",
 		},
+		{ cards: ["PIL-12"], due: { on: addDays(today, 2), event: "sprintEnd", workDays: 2 } },
 	],
 	[
 		"L1~mr/di/330",
 		"block",
-		"!330 feature/demo-wallet → develop is open; land it in the sprint branch instead",
+		{
+			what: "MR !330 takes feature/demo-wallet into develop",
+			do: "Retarget it to the sprint branch. Develop takes no feature work after the cutover.",
+		},
 		{
 			kind: "mr",
 			app: "di",
@@ -1722,7 +1822,10 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 	[
 		"L8~mr/pi/405",
 		"risk",
-		"Pilot iOS !405 merged into develop; it should go to the sprint branch",
+		{
+			what: "MR !405 for DEMO-303 was merged into develop",
+			do: "Bring the change into the sprint branch too.",
+		},
 		{
 			kind: "mr",
 			app: "pi",
@@ -1730,11 +1833,15 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 			source: "feat/DEMO-303",
 			target: "develop",
 		},
+		{ cards: ["DEMO-303"] },
 	],
 	[
 		"G5~pf/21-2026/demo/open",
 		"info",
-		"4 card(s) not on the #21 Demo page: DEMO-103, DEMO-104, DEMO-105, DEMO-106",
+		{
+			what: "4 cards with an open MR for train 21 are not on its Demo page",
+			do: "Add them to the page before freeze.",
+		},
 		{
 			kind: "pageFamily",
 			train: "21-2026",
@@ -1742,6 +1849,7 @@ const SUBJECT_HITS: [string, Severity, string, Subject][] = [
 			bucket: "open",
 			keys: ["DEMO-103", "DEMO-104", "DEMO-105", "DEMO-106"],
 		},
+		{ cards: ["DEMO-103", "DEMO-104", "DEMO-105", "DEMO-106"] },
 	],
 ];
 
@@ -1751,18 +1859,21 @@ export function subjectsBoard(today: string): Board {
 	const at = `${today}T02:00:00Z`;
 	const f1 = b.alerts.hits.find((h) => h.rule === "F1");
 	if (f1) f1.bucket = "badge";
-	for (const [id, severity, text, subject] of SUBJECT_HITS)
+	for (const [id, severity, copy, subject, over] of subjectHits(today))
 		b.alerts.hits.push({
 			id,
 			rule: id.slice(0, id.indexOf("~")),
 			subject,
 			severity,
 			bucket: "badge",
-			text,
+			copy,
+			cards: [],
 			evidence: {},
-			links: [{ label: "Open", url: `${HOST}/x` }],
+			primary: { label: "Open", url: `${HOST}/x` },
+			links: [],
 			asOf: at,
 			...("app" in subject ? { app: subject.app } : {}),
+			...over,
 		});
 	for (const r of b.catalogue) r.on = true;
 	for (const v of b.trains.find((t) => t.id === "21-2026")?.versions ?? [])

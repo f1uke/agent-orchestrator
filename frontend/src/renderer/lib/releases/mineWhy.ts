@@ -1,5 +1,6 @@
+import { dayLabel } from "./day";
 import { their, type Who } from "./who";
-import type { AlertHit, MinePolicy, MineReason, RuleInfo, Subject } from "./types";
+import type { AlertCopy, AlertHit, MineReason, Subject } from "./types";
 
 type Why = MineReason["why"];
 
@@ -36,20 +37,17 @@ export function mineWhy(h: AlertHit, who: Who): string {
 		.join(" · ");
 }
 
-export function minePolicyOf(catalogue: readonly RuleInfo[], rule: string): MinePolicy | null {
-	return catalogue.find((r) => r.id === rule)?.minePolicy ?? null;
-}
-
 export function onlyMeSubject(h: AlertHit, me: boolean): Subject {
 	if (!me || h.subject.kind !== "pageFamily") return h.subject;
 	const keys = refs(h.mine ?? [], "card");
 	return keys.length ? { ...h.subject, keys } : h.subject;
 }
 
-export function alertText(h: AlertHit, me: boolean): string {
-	if (!me || h.rule !== "D3") return h.text;
-	const { pending, total } = h.evidence;
-	return Array.isArray(pending) && typeof total === "number"
-		? `${pending.length} of ${total} not approved`
-		: "Not every approver approved";
+export function alertCopy(h: AlertHit, me: boolean, trainLabel?: string): AlertCopy {
+	if (!me || h.rule !== "D3") return h.copy;
+	const train = trainLabel ? `train ${trainLabel.replace(/^#/, "")}` : "this train";
+	return {
+		what: `You have not approved ${train}`,
+		do: `Approve the Jira release before publish${h.due ? ` ${dayLabel(h.due.on)}` : ""}.`,
+	};
 }

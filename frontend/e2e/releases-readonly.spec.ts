@@ -19,7 +19,8 @@ test.describe("a read-only Releases page", () => {
 		await open(page, "?sheet=attention&readonly", "fixes");
 		await expect(sheet(page).locator(".al[data-hit]").first()).toBeVisible();
 		await expect(sheet(page).getByRole("button", { name: /^Hide / })).toHaveCount(0);
-		await expect(sheet(page).getByRole("button", { name: /Fix ›/ })).toHaveCount(0);
+		await expect(sheet(page).locator("button[data-testid=hit-primary]")).toHaveCount(0);
+		await expect(sheet(page).locator("a[data-testid=hit-primary]").first()).toBeVisible();
 		await expect(sheet(page).getByTestId("hit-fix-state")).toHaveCount(0);
 		await expect(sheet(page).getByTestId("no-mr-toggle")).toHaveCount(0);
 		await expect(page.getByTestId("no-mr-toggle")).toHaveCount(0);
@@ -53,11 +54,14 @@ test.describe("a read-only Releases page", () => {
 
 	test("words the host's own person's Mine with the name, never you", async ({ page }) => {
 		await open(page, "?sheet=attention&person=ada&readonly", "subjects");
-		const mine = sheet(page).getByTestId("hit-mine");
-		await expect(mine.first()).toBeVisible();
-		for (const line of await mine.allTextContents()) expect(line).not.toMatch(/\byou(r)?\b/i);
-		await expect(sheet(page).locator('.al[data-hit="D3~v/21-2026/da"]').getByTestId("hit-mine")).toHaveText(
-			"Ada Example has not approved",
+		const subjects = sheet(page).getByTestId("hit-subject");
+		await expect(subjects.first()).toBeVisible();
+		const tips = await subjects.evaluateAll((els) => els.map((e) => e.getAttribute("title") ?? ""));
+		expect(tips.some((t) => t.includes("Shown for"))).toBe(true);
+		for (const tip of tips) expect(tip).not.toMatch(/\byou(r)?\b/i);
+		await expect(sheet(page).locator('.al[data-hit="D3~v/21-2026/da"]').getByTestId("hit-subject")).toHaveAttribute(
+			"title",
+			/Shown for Ada Example: Ada Example has not approved$/,
 		);
 	});
 
