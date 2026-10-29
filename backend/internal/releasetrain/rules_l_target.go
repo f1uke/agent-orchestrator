@@ -247,7 +247,7 @@ var ruleL13 = rule{
 				What: fmt.Sprintf("%s missed train %s", a.branch.Branch, a.train.ID.short()),
 				Do:   fmt.Sprintf("Retarget its plan to train %s. It never merged into the sprint %d branch.", next.short(), a.train.ID.Number-1),
 			})
-			h.Primary = &Action{Label: "Retarget plan"}
+			h.Primary = &Action{Label: "Retarget plan", Details: true}
 			h.dueAt(b.Today, a.freeze, DueFreeze)
 			if h.Due != nil {
 				h.Due.Missed = true

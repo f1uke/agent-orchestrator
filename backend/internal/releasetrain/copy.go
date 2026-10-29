@@ -46,11 +46,12 @@ func workDaysTo(today, end Day) int {
 	return workDaysLeft(today, end)
 }
 
-// Action is the one thing a hit's card asks for. A Fix action opens the rule's fix; any other opens URL.
+// Action is the one thing a hit's card asks for: open URL, open the rule's Fix, or open the hit's Details sheet.
 type Action struct {
-	Label string `json:"label"`
-	URL   string `json:"url,omitempty"`
-	Fix   bool   `json:"fix,omitempty"`
+	Label   string `json:"label"`
+	URL     string `json:"url,omitempty"`
+	Fix     bool   `json:"fix,omitempty"`
+	Details bool   `json:"details,omitempty"`
 }
 
 func linkAction(l Link) *Action { return &Action{Label: l.Label, URL: l.URL} }
@@ -100,12 +101,15 @@ func before(event string, on *Day) string {
 	return "before " + event + " " + on.label()
 }
 
-// open makes the first link the hit's primary action and the rest its secondary links.
+// open makes the first link with a URL the hit's primary action and the rest its secondary links.
 func (h *Hit) open(links ...Link) *Hit {
-	if len(links) == 0 {
-		return h
+	for i, l := range links {
+		if l.URL != "" {
+			return h.promote(links, i)
+		}
 	}
-	return h.promote(links, 0)
+	h.Links = links
+	return h
 }
 
 // promote makes links[i] the hit's primary action and leaves the other links secondary.

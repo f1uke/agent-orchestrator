@@ -13437,6 +13437,8 @@ components:
       type: object
     ReleaseTrainAction:
       properties:
+        details:
+          type: boolean
         fix:
           type: boolean
         label:

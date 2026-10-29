@@ -4754,6 +4754,7 @@ export interface components {
             released: boolean;
         };
         ReleaseTrainAction: {
+            details?: boolean;
             fix?: boolean;
             label: string;
             url?: string;

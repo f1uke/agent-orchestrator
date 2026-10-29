@@ -182,13 +182,16 @@ func checkDue(t *testing.T, b Board, h Hit) {
 func checkPrimary(t *testing.T, h Hit) {
 	t.Helper()
 	if h.Primary == nil {
-		if h.Rule != "F1" {
+		if h.Rule != "F1" && slices.ContainsFunc(h.Links, func(l Link) bool { return l.URL != "" }) {
 			t.Errorf("%s has no primary action", h.ID)
 		}
 		return
 	}
 	if h.Rule == "F1" {
 		t.Errorf("F1 has primary %+v, want Show only", h.Primary)
+	}
+	if n := btoi(h.Primary.URL != "") + btoi(h.Primary.Fix) + btoi(h.Primary.Details); n != 1 {
+		t.Errorf("%s primary %+v must do exactly one thing: open a URL, the Fix or the details", h.ID, h.Primary)
 	}
 	for _, l := range h.Links {
 		if l.Label == h.Primary.Label || (h.Primary.URL != "" && l.URL == h.Primary.URL) {
@@ -365,4 +368,11 @@ func TestL8RetargetsAnOpenMRAndOnlyOpensAMergedOne(t *testing.T) {
 			}
 		})
 	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
