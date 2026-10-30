@@ -302,7 +302,7 @@ const distanceFromEnd = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el
 
 const GLIDE_MS = 320;
 
-const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function isEditable(target: EventTarget): boolean {
 	return (
