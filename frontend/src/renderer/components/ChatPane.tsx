@@ -365,14 +365,11 @@ function ChatStream({
 	// A session opens unseen and shows itself once its newest row is laid out at the end, so a switch
 	// never paints the list growing or settling into place.
 	const [revealed, setRevealed] = useState(false);
-	const reveal = useCallback(() => {
+	useLayoutEffect(() => {
 		const el = scrollRef.current;
-		if (!el || replaying) return;
+		if (revealed || !el || replaying) return;
 		const last = virtualizer.getVirtualItems().at(-1);
 		if (rows.length === 0 || (last?.index === rows.length - 1 && distanceFromEnd(el) <= AT_END_PX)) setRevealed(true);
-	}, [replaying, rows.length, virtualizer]);
-	useLayoutEffect(() => {
-		if (!revealed) reveal();
 	});
 
 	// Opening a row is reading it: the stream stops pinning the end, so the row
