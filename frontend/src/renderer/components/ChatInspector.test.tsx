@@ -25,7 +25,7 @@ describe("ChatInspector", () => {
 		expect(
 			section("Subagents & background").getByText("No subagents or background commands in this session."),
 		).toBeInTheDocument();
-		expect(section("Context").getByText("Known after the first turn completes.")).toBeInTheDocument();
+		expect(section("Context").getByText("Known after Claude's first response.")).toBeInTheDocument();
 		expect(section("Cost & usage").getByText("Known after the first turn completes.")).toBeInTheDocument();
 		expect(section("Permissions").getByText("unknown")).toBeInTheDocument();
 		expect(section("Permissions").getByText("No rules added through Always allow.")).toBeInTheDocument();
@@ -56,6 +56,7 @@ describe("ChatInspector", () => {
 		expect(activity.getByText("Bash · background").closest("[data-state]")).toHaveAttribute("data-state", "running");
 		expect(activity.getByText("go test -run TestDeliver -count=50 ./internal/webhook")).toBeInTheDocument();
 		expect(activity.getByText("Explore").closest("[data-state]")).toHaveTextContent("done · 3 tools");
+		expect(activity.getByText("1 done")).toBeInTheDocument();
 
 		expect(section("Context").getByText("124k / 200k")).toBeInTheDocument();
 		expect(screen.getByRole("meter", { name: "Context used" })).toHaveAttribute("aria-valuenow", "62");
@@ -137,5 +138,45 @@ describe("ChatInspector", () => {
 		expect(permissions.queryByText("No rules added through Always allow.")).toBeNull();
 		expect(section("Context").getByText("24k tokens")).toBeInTheDocument();
 		expect(screen.queryByRole("meter")).toBeNull();
+	});
+});
+
+describe("ChatInspector on the recorded long session", () => {
+	const entries = loadFixture("long_session.jsonl");
+
+	it("lists running work, folds finished work into one count, and never shows a raw task type", () => {
+		const running = foldEntries(entries.filter((e) => e.seq <= 25));
+		const { unmount } = render(<ChatInspector onJump={() => undefined} transcript={running} />);
+		const live = section("Subagents & background");
+		expect(live.getByText("1 running")).toBeInTheDocument();
+		expect(live.getByText("Explore").closest("[data-state]")).toHaveAttribute("data-state", "running");
+		expect(live.getByText("1 done")).toBeInTheDocument();
+		unmount();
+
+		render(<ChatInspector onJump={() => undefined} transcript={foldEntries(entries)} />);
+		const done = section("Subagents & background");
+		const fold = done.getByText("2 done").closest("details")!;
+		expect(fold).not.toHaveAttribute("open");
+		expect(within(fold).getAllByText(/Bash · background|Explore/)).toHaveLength(2);
+		expect(document.body).not.toHaveTextContent("local_bash");
+		expect(document.body).not.toHaveTextContent("local_agent");
+	});
+
+	it("reads the todo list written with TaskCreate and TaskUpdate", () => {
+		render(<ChatInspector onJump={() => undefined} transcript={foldEntries(entries)} />);
+		const todo = section("Todo");
+		expect(todo.getByText("3 / 3")).toBeInTheDocument();
+		expect(todo.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+			"Find failing tests",
+			"Fix the cause",
+			"Verify and review results",
+		]);
+	});
+
+	it("shows the context before the first turn has ended", () => {
+		const early = foldEntries(entries.filter((e) => e.seq < 99));
+		render(<ChatInspector onJump={() => undefined} transcript={early} />);
+		expect(section("Context").queryByText(/Known after/)).toBeNull();
+		expect(section("Context").getByText(/tokens$/)).toBeInTheDocument();
 	});
 });

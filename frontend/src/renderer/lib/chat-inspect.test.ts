@@ -76,8 +76,15 @@ describe("usage and context from the fixtures' results", () => {
 		expect(contextUsage(throughInterrupt)?.tokens).toBe(2 + 23628 + 107);
 	});
 
-	it("shows no window it cannot name, and nothing before the first result", () => {
-		expect(contextUsage(foldEntries(first.filter((e) => e.seq < 19)))).toBeUndefined();
+	it("knows the context from the first response, before any result, though not its window", () => {
+		const early = foldEntries(first.filter((e) => e.seq < 19));
+		expect(early.items.some((i) => i.kind === "turn_end")).toBe(false);
+		expect(contextUsage(early)?.tokens).toBeGreaterThan(0);
+		expect(contextUsage(early)?.window).toBeUndefined();
+		expect(contextUsage(foldEntries([]))).toBeUndefined();
+	});
+
+	it("shows no window it cannot name", () => {
 		expect(usageSummary(foldEntries(first.filter((e) => e.seq < 19)))).toBeUndefined();
 		seq = 0;
 		const result = (modelUsage: object) =>
@@ -238,7 +245,7 @@ describe("subagents and background", () => {
 			task("task_updated", { task_id: "wf_9", patch: { status: "killed" } }),
 		]);
 		expect(sessionActivity(settled)).toEqual([
-			{ key: "wf_9", kind: "task", title: "local_workflow", detail: "nightly sweep", state: "stopped", tools: 0 },
+			{ key: "wf_9", kind: "task", title: "Task", detail: "nightly sweep", state: "stopped", tools: 0 },
 			{ key: "b1", kind: "background", title: "Bash · background", detail: "npm test", state: "done", tools: 0 },
 		]);
 		const exited = foldEntries([...entries, at("host", { kind: "exit", code: null })]);
@@ -285,4 +292,76 @@ it("gives the dev:web stub's session a todo list, running background work and a 
 	]);
 	expect(contextUsage(tr)).toEqual({ tokens: 124_000, window: 200_000 });
 	expect(usageSummary(tr)).toMatchObject({ costUsd: 1.84, outputTokens: 31_212, cacheReadTokens: 1_899_000 });
+});
+
+describe("todos from TaskCreate and TaskUpdate", () => {
+	const created = (id: string, subject: string, n: number) => [
+		toolUse(id, "TaskCreate", { subject, description: "d" }),
+		toolResult(id, `Task #${n} created successfully: ${subject}`),
+	];
+
+	it("builds the list from creates and applies updates by task id", () => {
+		seq = 0;
+		const tr = foldEntries([
+			...created("c1", "Find failing tests", 1),
+			...created("c2", "Fix the cause", 2),
+			toolUse("u1", "TaskUpdate", { taskId: "1", status: "completed" }),
+			toolResult("u1", "Updated task #1 status"),
+			toolUse("u2", "TaskUpdate", { taskId: "2", status: "in_progress", subject: "Fix the real cause" }),
+		]);
+		expect(latestTodos(tr)).toEqual([
+			{ content: "Find failing tests", activeForm: "Find failing tests", status: "completed" },
+			{ content: "Fix the real cause", activeForm: "Fix the cause", status: "in_progress" },
+		]);
+	});
+
+	it("drops a deleted task and ignores a refused call or a subagent's", () => {
+		seq = 0;
+		const tr = foldEntries([
+			...created("c1", "One", 1),
+			...created("c2", "Two", 2),
+			toolUse("u1", "TaskUpdate", { taskId: "1", status: "deleted" }),
+			toolUse("u2", "TaskUpdate", { taskId: "2", status: "completed" }),
+			toolResult("u2", "denied", true),
+			toolUse("agent", "Agent", { description: "x" }),
+			toolUse("u3", "TaskUpdate", { taskId: "2", status: "completed" }, "agent"),
+		]);
+		expect(latestTodos(tr)?.map((t) => [t.content, t.status])).toEqual([["Two", "pending"]]);
+	});
+
+	it("reads the todo list out of the recorded long session", () => {
+		const tr = foldEntries(loadFixture("long_session.jsonl"));
+		expect(latestTodos(tr)?.map((t) => [t.content, t.status])).toEqual([
+			["Find failing tests", "completed"],
+			["Fix the cause", "completed"],
+			["Verify and review results", "completed"],
+		]);
+	});
+
+	it("lets a later TodoWrite replace the list", () => {
+		seq = 0;
+		const tr = foldEntries([
+			...created("c1", "Old", 1),
+			toolUse("w1", "TodoWrite", { todos: [{ content: "New", status: "pending", activeForm: "News" }] }),
+			toolResult("w1", "ok"),
+		]);
+		expect(latestTodos(tr)?.map((t) => t.content)).toEqual(["New"]);
+	});
+});
+
+describe("the recorded long session", () => {
+	const tr = foldEntries(loadFixture("long_session.jsonl"));
+	const activity = sessionActivity(tr);
+
+	it("lists neither a foreground Bash task nor a raw task type", () => {
+		expect(activity.filter((a) => a.kind === "task")).toEqual([]);
+		expect(activity.map((a) => a.title)).toEqual(expect.arrayContaining(["Bash · background", "Explore"]));
+		expect(activity).toHaveLength(2);
+		expect(JSON.stringify(activity)).not.toContain("local_bash");
+	});
+
+	it("takes the agent's tool count and state from its linked task", () => {
+		const agent = activity.find((a) => a.kind === "agent");
+		expect(agent).toMatchObject({ state: "done", tools: 2 });
+	});
 });

@@ -1,6 +1,6 @@
 import { isObject, type TaskState, unfinished } from "./chat-event";
 import type { ToolCallItem, Transcript, TurnEndItem } from "./chat-fold";
-import { ruleLabel } from "./chat-tools";
+import { resultText, ruleLabel, taskLabel } from "./chat-tools";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -44,19 +44,56 @@ function turnEnds(tr: Transcript): TurnEndItem[] {
 	return tr.items.filter((i): i is TurnEndItem => i.kind === "turn_end");
 }
 
-export function latestTodos(tr: Transcript): Todo[] | undefined {
-	for (let i = tr.items.length - 1; i >= 0; i--) {
-		const item = tr.items[i];
-		if (item.kind !== "tool_call" || item.name !== "TodoWrite" || item.parentToolUseId !== "") continue;
-		if (item.result?.isError) continue;
-		const todos = isObject(item.input) && Array.isArray(item.input.todos) ? item.input.todos : [];
-		return todos.filter(isObject).map((t) => ({
+type TodoEntry = { id: string; todo: Todo };
+
+const asStatus = (value: unknown): TodoStatus | undefined =>
+	typeof value === "string" && TODO_STATUSES.has(value) ? (value as TodoStatus) : undefined;
+
+function todoWrite(input: Record<string, unknown>): TodoEntry[] {
+	const todos = Array.isArray(input.todos) ? input.todos : [];
+	return todos.filter(isObject).map((t, i) => ({
+		id: `w${i}`,
+		todo: {
 			content: str(t.content),
 			activeForm: str(t.activeForm),
-			status: TODO_STATUSES.has(str(t.status)) ? (t.status as TodoStatus) : "pending",
-		}));
+			status: asStatus(t.status) ?? "pending",
+		},
+	}));
+}
+
+// claude names a created task in the result: "Task #1 created successfully: ...".
+function createdId(call: ToolCallItem, list: readonly TodoEntry[]): string {
+	return /#(\d+)/.exec(resultText(call.result))?.[1] ?? String(list.length + 1);
+}
+
+function taskUpdate(list: readonly TodoEntry[], input: Record<string, unknown>): TodoEntry[] {
+	const id = str(input.taskId);
+	if (str(input.status) === "deleted") return list.filter((e) => e.id !== id);
+	return list.map((entry) => {
+		if (entry.id !== id) return entry;
+		const status = asStatus(input.status) ?? entry.todo.status;
+		const subject = str(input.subject);
+		return { id, todo: { ...entry.todo, status, content: subject || entry.todo.content } };
+	});
+}
+
+/** The todo list as the latest TodoWrite, or the TaskCreate and TaskUpdate calls since, leave it. */
+export function latestTodos(tr: Transcript): Todo[] | undefined {
+	let list: TodoEntry[] | undefined;
+	for (const item of tr.items) {
+		if (item.kind !== "tool_call" || item.parentToolUseId !== "" || item.result?.isError) continue;
+		const input = isObject(item.input) ? item.input : {};
+		if (item.name === "TodoWrite") {
+			list = todoWrite(input);
+		} else if (item.name === "TaskCreate" && item.result) {
+			const subject = str(input.subject);
+			const todo: Todo = { content: subject, activeForm: str(input.activeForm) || subject, status: "pending" };
+			list = [...(list ?? []), { id: createdId(item, list ?? []), todo }];
+		} else if (item.name === "TaskUpdate" && list) {
+			list = taskUpdate(list, input);
+		}
 	}
-	return undefined;
+	return list?.map((entry) => entry.todo);
 }
 
 function callState(call: ToolCallItem, processEnded: boolean): TaskState {
@@ -90,7 +127,7 @@ export function sessionActivity(tr: Transcript): Activity[] {
 			detail = str(input.description);
 		} else if (item.name === "Bash" && input.run_in_background === true && (task || !item.result)) {
 			kind = "background";
-			title = "Bash · background";
+			title = taskLabel("local_bash");
 			detail = str(input.command);
 		} else {
 			return;
@@ -102,15 +139,15 @@ export function sessionActivity(tr: Transcript): Activity[] {
 			title,
 			detail,
 			state: task?.state ?? callState(item, i < lastBoundary),
-			tools: subagentTools.get(item.id) ?? 0,
+			tools: Math.max(subagentTools.get(item.id) ?? 0, task?.usage?.toolUses ?? 0),
 		});
 	});
 	for (const task of tr.tasks) {
-		if (linked.has(task.id)) continue;
+		if (linked.has(task.id) || task.background === false) continue;
 		out.push({
 			key: task.id,
 			kind: "task",
-			title: task.taskType || "Task",
+			title: taskLabel(task.taskType),
 			detail: task.description || task.id,
 			state: task.state,
 			tools: 0,
@@ -134,12 +171,11 @@ export function usageSummary(tr: Transcript): UsageSummary | undefined {
 }
 
 export function contextUsage(tr: Transcript): ContextUsage | undefined {
-	const last = turnEnds(tr)
-		.filter((e) => e.contextTokens !== undefined)
-		.at(-1);
-	if (last?.contextTokens === undefined) return undefined;
-	const window = last.contextWindows[tr.model];
-	return window === undefined ? { tokens: last.contextTokens } : { tokens: last.contextTokens, window };
+	const ends = turnEnds(tr);
+	const tokens = tr.contextTokens ?? ends.filter((e) => e.contextTokens !== undefined).at(-1)?.contextTokens;
+	if (tokens === undefined) return undefined;
+	const window = ends.filter((e) => e.contextWindows[tr.model] !== undefined).at(-1)?.contextWindows[tr.model];
+	return window === undefined ? { tokens } : { tokens, window };
 }
 
 export function addedRules(tr: Transcript): AddedRule[] {
