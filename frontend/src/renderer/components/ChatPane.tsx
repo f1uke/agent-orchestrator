@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
+import { ArrowDown, Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
@@ -266,13 +266,57 @@ type StreamProps = {
 	onJumped?: () => void;
 };
 
+// Within this many pixels of the end the user has reached the latest row.
+const AT_END_PX = 2;
+
+const SCROLL_UP_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
+
+/**
+ * Whether the stream pins itself to the newest row. Only the user leaves the
+ * end, by scrolling up or opening a row; the stream's own scroll writes and
+ * layout settling never do. `seenTail` is the {@link tailOf} the rows had when
+ * the user left, so anything new below shows as a different tail.
+ */
+type Follow = { mode: "follow" } | { mode: "free"; seenTail: string | undefined };
+
+/** The newest row, and how much of it has streamed in so far. */
+function tailOf(rows: readonly ChatRow[]): string | undefined {
+	const last = rows.at(-1);
+	return last?.kind === "streaming" ? `${last.key}:${last.block.text.length}` : last?.key;
+}
+
+const distanceFromEnd = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
+
+function isEditable(target: EventTarget): boolean {
+	return (
+		target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select") !== null)
+	);
+}
+
 function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, jumpTo, onJumped }: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
-	const atBottomRef = useRef(true);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
 	const sessionNames = useSessionNames();
 	const answers = useMemo(() => ({ requests, disabled, onAnswer }), [requests, disabled, onAnswer]);
+
+	const [follow, setFollowState] = useState<Follow>({ mode: "follow" });
+	const followingRef = useRef(true);
+	const draggingRef = useRef(false);
+	const tail = tailOf(rows);
+	const tailRef = useRef(tail);
+	tailRef.current = tail;
+
+	const setFollowing = useCallback((following: boolean) => {
+		if (followingRef.current === following) return;
+		followingRef.current = following;
+		setFollowState(following ? { mode: "follow" } : { mode: "free", seenTail: tailRef.current });
+	}, []);
+
+	const pinToEnd = useCallback(() => {
+		const el = scrollRef.current;
+		if (followingRef.current && el && distanceFromEnd(el) > AT_END_PX) el.scrollTop = el.scrollHeight;
+	}, []);
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
@@ -284,68 +328,120 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 		// Rows measure themselves from a ref callback, inside React's commit; a
 		// synchronous flush from there is refused with a console error mid-scroll.
 		useFlushSync: false,
+		// The column height and row positions change in the same task as the
+		// measurement, so no frame paints rows at stale offsets and pinToEnd
+		// never writes against a stale height.
+		directDomUpdates: true,
+		onChange: pinToEnd,
 	});
 
-	const toggleRow = useCallback<ToggleRow>((key, open) => {
-		setOpenRows((prev) => ({ ...prev, [key]: open }));
-	}, []);
+	useLayoutEffect(pinToEnd);
 
-	useLayoutEffect(() => {
-		if (rows.length > 0 && atBottomRef.current) virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
-	}, [rows, virtualizer]);
+	// Opening a row is reading it: the stream stops pinning the end, so the row
+	// the user clicked stays where it was while it grows.
+	const toggleRow = useCallback<ToggleRow>(
+		(key, open) => {
+			setFollowing(false);
+			setOpenRows((prev) => ({ ...prev, [key]: open }));
+		},
+		[setFollowing],
+	);
+
+	// The one way to show a given row: it stops following and brings the row to the top.
+	const scrollToRow = useCallback(
+		(key: string) => {
+			const index = rows.findIndex((row) => row.key === key);
+			if (index < 0) return;
+			setFollowing(false);
+			virtualizer.scrollToIndex(index, { align: "start" });
+		},
+		[rows, setFollowing, virtualizer],
+	);
+
+	const jumpToLatest = useCallback(() => {
+		setFollowing(true);
+		pinToEnd();
+	}, [pinToEnd, setFollowing]);
 
 	useLayoutEffect(() => {
 		if (!jumpTo) return;
 		const index = rowIndexOfItem(rows, jumpTo.itemIndex);
-		if (index < 0) return;
-		atBottomRef.current = false;
-		virtualizer.scrollToIndex(index, { align: "start" });
+		if (index >= 0) scrollToRow(rows[index].key);
 		onJumped?.();
-	}, [jumpTo, onJumped, rows, virtualizer]);
+	}, [jumpTo, onJumped, rows, scrollToRow]);
 
-	const onScroll = useCallback(() => {
-		const el = scrollRef.current;
-		if (!el) return;
-		atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_PX;
-	}, []);
+	const leaveEnd = (el: HTMLElement) => {
+		if (el.scrollTop > 0) setFollowing(false);
+	};
 
-	if (rows.length === 0) {
-		return (
-			<div className="chat-scroll">
-				<div className="chat-empty">Nothing in this session's log yet.</div>
-			</div>
-		);
-	}
+	const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+		const el = e.currentTarget;
+		if (distanceFromEnd(el) <= AT_END_PX) setFollowing(true);
+		else if (draggingRef.current) setFollowing(false);
+	};
+
+	const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (e.target !== e.currentTarget) return;
+		draggingRef.current = true;
+		window.addEventListener("pointerup", () => (draggingRef.current = false), { once: true });
+	};
+
+	const newBelow = follow.mode === "free" && tail !== follow.seenTail;
 
 	return (
-		<div className="chat-scroll" data-testid="chat-stream" onScroll={onScroll} ref={scrollRef}>
-			<div className="chat-col" style={{ height: virtualizer.getTotalSize() }}>
-				{virtualizer.getVirtualItems().map((v) => {
-					const row = rows[v.index];
-					return (
-						<div
-							className="chat-row"
-							data-index={v.index}
-							data-key={v.key}
-							data-row={row.kind === "item" ? row.item.kind : row.kind}
-							key={v.key}
-							ref={virtualizer.measureElement}
-							style={{ transform: `translateY(${v.start}px)` }}
-						>
-							<ChatRowView
-								answers={answers}
-								openRows={openRows}
-								pendingByRequest={pendingByRequest}
-								root={root}
-								row={row}
-								sessionNames={sessionNames}
-								theme={theme}
-								toggleRow={toggleRow}
-							/>
-						</div>
-					);
-				})}
+		<div className="chat-stream-wrap">
+			<div
+				className="chat-scroll"
+				data-testid="chat-stream"
+				onKeyDown={(e) => {
+					if (SCROLL_UP_KEYS.has(e.key) && !isEditable(e.target)) leaveEnd(e.currentTarget);
+				}}
+				onPointerDown={onPointerDown}
+				onScroll={onScroll}
+				onWheel={(e) => {
+					if (e.deltaY < 0) leaveEnd(e.currentTarget);
+				}}
+				ref={scrollRef}
+			>
+				{rows.length === 0 ? <div className="chat-empty">Nothing in this session's log yet.</div> : null}
+				<div className="chat-col" ref={virtualizer.containerRef}>
+					{virtualizer.getVirtualItems().map((v) => {
+						const row = rows[v.index];
+						return (
+							<div
+								className="chat-row"
+								data-index={v.index}
+								data-key={v.key}
+								data-row={row.kind === "item" ? row.item.kind : row.kind}
+								key={v.key}
+								ref={virtualizer.measureElement}
+							>
+								<ChatRowView
+									answers={answers}
+									openRows={openRows}
+									pendingByRequest={pendingByRequest}
+									root={root}
+									row={row}
+									sessionNames={sessionNames}
+									theme={theme}
+									toggleRow={toggleRow}
+								/>
+							</div>
+						);
+					})}
+				</div>
 			</div>
+			{newBelow ? (
+				<button
+					aria-label="Jump to latest"
+					className="chat-jump"
+					onClick={jumpToLatest}
+					title="Jump to latest"
+					type="button"
+				>
+					<ArrowDown className="chat-icon" aria-hidden="true" />
+				</button>
+			) : null}
 		</div>
 	);
 }
