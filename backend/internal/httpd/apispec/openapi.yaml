@@ -3730,6 +3730,63 @@ paths:
       summary: Change the permission mode of a chat session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/model:
+    put:
+      operationId: setChatModel
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersSetChatModelRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Switch the model of a chat session's agent
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/children:
     get:
       operationId: listChildren
@@ -11736,6 +11793,16 @@ components:
       - status
       - prs
       - transport
+      type: object
+    ControllersSetChatModelRequest:
+      properties:
+        model:
+          description: 'A value from the models the session''s initialize response
+            lists, such as sonnet, or a full model id. The agent checks it: a model
+            it does not know is a 409 CHAT_REQUEST_REJECTED.'
+          type: string
+      required:
+      - model
       type: object
     ControllersSetSessionBranchRequest:
       properties:

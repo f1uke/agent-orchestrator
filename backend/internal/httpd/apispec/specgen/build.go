@@ -2641,6 +2641,20 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/model", id: "setChatModel", tag: "sessions",
+			summary:    "Switch the model of a chat session's agent",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetChatModelRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ChatAckResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/comment-dispatch", id: "sessionDispatchComment", tag: "sessions",
 			summary:    "Dispatch a review-thread comment (plus an optional extra prompt) to the session's worker",
 			pathParams: []any{controllers.SessionIDParam{}},

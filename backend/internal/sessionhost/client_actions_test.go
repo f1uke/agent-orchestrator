@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 )
@@ -138,6 +139,63 @@ func TestClientSetModeRefusal(t *testing.T) {
 	}
 }
 
+func TestClientSetModel(t *testing.T) {
+	dir := shortDir(t)
+	recorded := loadEntries(t, fixturePath(t, "set_model.jsonl"))
+	var lines []fixtureLine
+	for _, e := range recorded {
+		lines = append(lines, fixtureLine{e.Dir, string(e.Payload)})
+	}
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir, lines...))
+	startHost(t, cfg)
+	c := NewClient(cfg.SocketPath)
+	ctx := context.Background()
+
+	if err := c.SetModel(ctx, "sonnet"); err != nil {
+		t.Fatalf("SetModel(sonnet) = %v, want claude's success", err)
+	}
+	got := loggedInputs(t, cfg.LogPath, "control_request/set_model")
+	if len(got) != 1 || !strings.Contains(got[0], `"model":"sonnet"`) {
+		t.Errorf("logged model changes = %v, want one to sonnet", got)
+	}
+
+	err := c.SetModel(ctx, "not-a-model")
+	var refused *RefusedError
+	if !errors.As(err, &refused) || refused.Reason != "Model 'not-a-model' not found" {
+		t.Fatalf("SetModel(not-a-model) err = %v, want claude's refusal as the reason", err)
+	}
+}
+
+func TestClientSetModelGivesUpWhenClaudeIsSilent(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir,
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.SetModel{RequestID: "m", Model: "haiku"})},
+	))
+	cfg.controlTimeout = 50 * time.Millisecond
+	startHost(t, cfg)
+
+	err := NewClient(cfg.SocketPath).SetModel(context.Background(), "haiku")
+	var refused *RefusedError
+	if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "did not answer set_model") {
+		t.Fatalf("err = %v, want a refusal saying claude did not answer", err)
+	}
+}
+
+func TestClientSetModelEndsWhenClaudeExits(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir,
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.SetModel{RequestID: "m", Model: "haiku"})},
+		fixtureLine{chatproto.DirHost, `{"kind":"exit","code":0}`},
+	))
+	startHost(t, cfg)
+
+	err := NewClient(cfg.SocketPath).SetModel(context.Background(), "haiku")
+	var refused *RefusedError
+	if !errors.As(err, &refused) || refused.Reason != errNotRunning.Error() {
+		t.Fatalf("err = %v, want a refusal saying claude is not running", err)
+	}
+}
+
 func TestClientWithNoHostIsNotReachable(t *testing.T) {
 	c := NewClient(filepath.Join(shortDir(t), "none.sock"))
 	ctx := context.Background()
@@ -147,6 +205,7 @@ func TestClientWithNoHostIsNotReachable(t *testing.T) {
 		"Answer":    c.Answer(ctx, "r", chatproto.Allow{}),
 		"Interrupt": c.Interrupt(ctx),
 		"SetMode":   c.SetMode(ctx, chatproto.ModePlan),
+		"SetModel":  c.SetModel(ctx, "haiku"),
 	} {
 		if !errors.Is(err, ErrNotReachable) {
 			t.Errorf("%s err = %v, want ErrNotReachable", name, err)

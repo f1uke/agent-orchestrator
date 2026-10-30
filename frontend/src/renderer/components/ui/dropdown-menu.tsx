@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import { cn } from "../../lib/utils";
 import { useOverlayDismissFocus } from "../../lib/overlay-focus";
@@ -15,6 +15,7 @@ export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 export const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
 export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
+export const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 
 export function DropdownMenuContent({
 	className,
@@ -137,4 +138,45 @@ export function DropdownMenuSeparator({
 
 export function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
 	return <span className={cn("ml-auto font-mono text-[10px] tracking-[0.08em] text-passive", className)} {...props} />;
+}
+
+export function DropdownMenuSubTrigger({
+	className,
+	children,
+	...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger>) {
+	return (
+		<DropdownMenuPrimitive.SubTrigger
+			className={cn(
+				"flex cursor-default select-none items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] outline-none transition-colors",
+				"text-muted-foreground focus:bg-surface focus:text-foreground data-[state=open]:bg-surface data-[state=open]:text-foreground",
+				"[&_svg]:size-[15px] [&_svg]:shrink-0",
+				className,
+			)}
+			{...props}
+		>
+			{children}
+			<ChevronRight className="ml-auto text-passive" aria-hidden="true" />
+		</DropdownMenuPrimitive.SubTrigger>
+	);
+}
+
+export function DropdownMenuSubContent({
+	className,
+	sideOffset = 6,
+	...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
+	return (
+		<DropdownMenuPrimitive.Portal>
+			<DropdownMenuPrimitive.SubContent
+				sideOffset={sideOffset}
+				className={cn(
+					"z-50 min-w-[10rem] overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow)]",
+					"data-[state=open]:animate-overlay-in",
+					className,
+				)}
+				{...props}
+			/>
+		</DropdownMenuPrimitive.Portal>
+	);
 }

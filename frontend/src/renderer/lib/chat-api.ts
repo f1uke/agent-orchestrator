@@ -16,6 +16,7 @@ export type ChatApi = {
 	answer: (sessionId: string, body: AnswerBody) => Promise<ChatResult>;
 	interrupt: (sessionId: string) => Promise<ChatResult>;
 	setMode: (sessionId: string, mode: PermissionMode) => Promise<ChatResult>;
+	setModel: (sessionId: string, model: string) => Promise<ChatResult>;
 };
 
 const KIND_BY_CODE: Record<string, ChatErrorKind> = {
@@ -58,4 +59,6 @@ export const httpChatApi: ChatApi = {
 	interrupt: (sessionId) => settle(apiClient.POST("/api/v1/sessions/{sessionId}/chat/interrupt", path(sessionId))),
 	setMode: (sessionId, mode) =>
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/mode", { ...path(sessionId), body: { mode } })),
+	setModel: (sessionId, model) =>
+		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/model", { ...path(sessionId), body: { model } })),
 };

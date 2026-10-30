@@ -9,6 +9,7 @@ export type ChatActions = {
 	answer: (body: AnswerBody) => Promise<ChatResult>;
 	interrupt: () => Promise<ChatResult>;
 	setMode: (mode: PermissionMode) => Promise<ChatResult>;
+	setModel: (model: string) => Promise<ChatResult>;
 	hostDown: boolean;
 };
 
@@ -33,6 +34,7 @@ export function useChatActions(sessionId: string, connection: ChatConnection, ap
 			answer: (body) => run(api.answer(sessionId, body)),
 			interrupt: () => run(api.interrupt(sessionId)),
 			setMode: (mode) => run(api.setMode(sessionId, mode)),
+			setModel: (model) => run(api.setModel(sessionId, model)),
 			hostDown,
 		}),
 		[api, hostDown, run, sessionId],

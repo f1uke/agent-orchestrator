@@ -2411,6 +2411,11 @@ type SetChatModeRequest struct {
 	Mode string `json:"mode" enum:"default,acceptEdits,plan,bypassPermissions,auto,dontAsk"`
 }
 
+// SetChatModelRequest is the body of PUT /api/v1/sessions/{sessionId}/chat/model.
+type SetChatModelRequest struct {
+	Model string `json:"model" description:"A value from the models the session's initialize response lists, such as sonnet, or a full model id. The agent checks it: a model it does not know is a 409 CHAT_REQUEST_REJECTED."`
+}
+
 // ChatAckResponse is the body of the chat endpoints that return nothing else.
 type ChatAckResponse struct {
 	OK bool `json:"ok"`

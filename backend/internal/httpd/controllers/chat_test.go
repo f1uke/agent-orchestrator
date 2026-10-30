@@ -28,6 +28,7 @@ type chatCall struct {
 	requestID string
 	decision  chatproto.Decision
 	mode      chatproto.PermissionMode
+	model     string
 }
 
 type fakeChatService struct {
@@ -56,6 +57,11 @@ func (f *fakeChatService) SetMode(_ context.Context, id domain.SessionID, mode c
 	return f.err
 }
 
+func (f *fakeChatService) SetModel(_ context.Context, id domain.SessionID, model string) error {
+	f.calls = append(f.calls, chatCall{op: "set_model", id: id, model: model})
+	return f.err
+}
+
 func newChatTestServer(t *testing.T, svc controllers.ChatService) *httptest.Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -73,6 +79,7 @@ var chatRoutes = []chatRoute{
 	{"answer", "POST", "/api/v1/sessions/s-1/chat/answers", `{"requestId":"r-1","behavior":"allow"}`},
 	{"interrupt", "POST", "/api/v1/sessions/s-1/chat/interrupt", ``},
 	{"mode", "PUT", "/api/v1/sessions/s-1/chat/mode", `{"mode":"plan"}`},
+	{"model", "PUT", "/api/v1/sessions/s-1/chat/model", `{"model":"haiku"}`},
 }
 
 func TestChatSend(t *testing.T) {
@@ -133,7 +140,14 @@ func TestChatInterruptAndMode(t *testing.T) {
 	if body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/s-1/chat/mode", `{"mode":"acceptEdits"}`); status != http.StatusOK {
 		t.Fatalf("mode status = %d, body=%s", status, body)
 	}
-	want := []chatCall{{op: "interrupt", id: "s-1"}, {op: "set_mode", id: "s-1", mode: chatproto.ModeAcceptEdits}}
+	if body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/s-1/chat/model", `{"model":" claude-opus-4-8 "}`); status != http.StatusOK {
+		t.Fatalf("model status = %d, body=%s", status, body)
+	}
+	want := []chatCall{
+		{op: "interrupt", id: "s-1"},
+		{op: "set_mode", id: "s-1", mode: chatproto.ModeAcceptEdits},
+		{op: "set_model", id: "s-1", model: "claude-opus-4-8"},
+	}
 	if !reflect.DeepEqual(svc.calls, want) {
 		t.Errorf("service got %+v, want %+v", svc.calls, want)
 	}
@@ -155,6 +169,9 @@ func TestChatBadRequestsNeverReachTheService(t *testing.T) {
 		{"mode: not JSON", "PUT", "mode", `{`, "INVALID_JSON"},
 		{"mode: empty", "PUT", "mode", `{}`, "INVALID_MODE"},
 		{"mode: unknown", "PUT", "mode", `{"mode":"yolo"}`, "INVALID_MODE"},
+		{"model: not JSON", "PUT", "model", `{`, "INVALID_JSON"},
+		{"model: empty", "PUT", "model", `{}`, "MODEL_REQUIRED"},
+		{"model: blank", "PUT", "model", `{"model":"  "}`, "MODEL_REQUIRED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &fakeChatService{}

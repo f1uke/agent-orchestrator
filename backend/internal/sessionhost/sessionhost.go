@@ -32,13 +32,15 @@ type Config struct {
 	SocketPath string
 	PromptFile string
 
-	stdinGrace time.Duration
-	killGrace  time.Duration
+	stdinGrace     time.Duration
+	killGrace      time.Duration
+	controlTimeout time.Duration
 }
 
 const (
-	defaultStdinGrace = 5 * time.Second
-	defaultKillGrace  = 2 * time.Second
+	defaultStdinGrace     = 5 * time.Second
+	defaultKillGrace      = 2 * time.Second
+	defaultControlTimeout = requestTimeout / 2
 	// stdoutDrain bounds the wait for claude's stdout to reach EOF after it
 	// exits, in case a leftover subprocess still holds the pipe open.
 	stdoutDrain = 2 * time.Second
@@ -96,6 +98,8 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 		log:             lg,
 		folder:          folder,
 		subs:            map[*subscriber]struct{}{},
+		answers:         map[string]chan chatproto.ControlResponse{},
+		controlTimeout:  orDefault(cfg.controlTimeout, defaultControlTimeout),
 		promptAfterInit: prompt,
 	}
 	return h.run(ctx, cfg, ln, resume)
@@ -153,6 +157,8 @@ type host struct {
 	pid             int
 	initID          string
 	promptAfterInit string
+	answers         map[string]chan chatproto.ControlResponse
+	controlTimeout  time.Duration
 }
 
 func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume string) (int, error) {
@@ -285,6 +291,10 @@ func (h *host) finish(code *int, signal *string) {
 	for s := range h.subs {
 		h.dropLocked(s)
 	}
+	for id, ch := range h.answers {
+		close(ch)
+		delete(h.answers, id)
+	}
 }
 
 func (h *host) readStdout(r io.Reader) {
@@ -316,7 +326,12 @@ func (h *host) handleLine(line []byte) {
 		h.pane.line(dim("sessionhost: " + err.Error()))
 		return
 	}
-	if r, ok := ev.(chatproto.ControlResponse); ok && h.initID != "" && r.RequestID == h.initID {
+	r, isResponse := ev.(chatproto.ControlResponse)
+	if ch := h.answers[r.RequestID]; isResponse && ch != nil {
+		ch <- r
+		delete(h.answers, r.RequestID)
+	}
+	if isResponse && h.initID != "" && r.RequestID == h.initID {
 		h.initID = ""
 		if h.promptAfterInit != "" {
 			if err := h.writeThenLogLocked(chatproto.UserInput{UUID: uuid.NewString(), Text: h.promptAfterInit}); err != nil {

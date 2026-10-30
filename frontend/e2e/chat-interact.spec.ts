@@ -87,7 +87,7 @@ for (const viewport of VIEWPORTS) {
 			await shot("plan");
 			await plan.getByRole("button", { name: "Approve · auto-accept edits" }).click();
 			await expect(stream.locator('[data-pending="plan"]')).toHaveCount(0);
-			await expect(page.getByRole("button", { name: "Permission mode: Auto-accept edits" })).toBeVisible();
+			await expect(page.getByRole("button", { name: "Model and mode: Opus 5.5 · Auto-accept edits" })).toBeVisible();
 
 			const input = page.getByRole("textbox", { name: "Message Claude" });
 			await input.fill(QUEUED_TEXT);

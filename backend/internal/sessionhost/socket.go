@@ -39,6 +39,8 @@ type interruptRequest struct{}
 
 type setModeRequest struct{ Mode chatproto.PermissionMode }
 
+type setModelRequest struct{ Model string }
+
 type stateRequest struct{}
 
 type subscribeRequest struct{ FromSeq uint64 }
@@ -47,6 +49,7 @@ func (sendRequest) isRequest()      {}
 func (answerRequest) isRequest()    {}
 func (interruptRequest) isRequest() {}
 func (setModeRequest) isRequest()   {}
+func (setModelRequest) isRequest()  {}
 func (stateRequest) isRequest()     {}
 func (subscribeRequest) isRequest() {}
 
@@ -66,6 +69,7 @@ func parseRequest(line []byte) (request, error) {
 		Message            string            `json:"message"`
 		Interrupt          bool              `json:"interrupt"`
 		Mode               string            `json:"mode"`
+		Model              string            `json:"model"`
 		FromSeq            uint64            `json:"from_seq"`
 	}
 	if err := json.Unmarshal(line, &w); err != nil {
@@ -110,6 +114,11 @@ func parseRequest(line []byte) (request, error) {
 			return nil, err
 		}
 		return setModeRequest{Mode: mode}, nil
+	case "set_model":
+		if w.Model == "" {
+			return nil, errors.New("set_model needs model")
+		}
+		return setModelRequest{Model: w.Model}, nil
 	case "state":
 		return stateRequest{}, nil
 	case "subscribe":
@@ -267,6 +276,9 @@ func respond(conn net.Conn, v any) {
 }
 
 func (h *host) do(req request) (any, error) {
+	if r, ok := req.(setModelRequest); ok {
+		return h.setModel(r.Model)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	switch r := req.(type) {
@@ -293,6 +305,38 @@ func (h *host) do(req request) (any, error) {
 		return h.stateLocked(), nil
 	}
 	return nil, fmt.Errorf("unhandled request %T", req)
+}
+
+func (h *host) setModel(model string) (any, error) {
+	id := uuid.NewString()
+	answer := make(chan chatproto.ControlResponse, 1)
+	h.mu.Lock()
+	h.answers[id] = answer
+	err := h.writeThenLogLocked(chatproto.SetModel{RequestID: id, Model: model})
+	if err != nil {
+		delete(h.answers, id)
+	}
+	h.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	t := time.NewTimer(h.controlTimeout)
+	defer t.Stop()
+	select {
+	case r, ok := <-answer:
+		switch {
+		case !ok:
+			return nil, errNotRunning
+		case !r.OK:
+			return nil, errors.New(r.Error)
+		}
+		return okResponse{OK: true}, nil
+	case <-t.C:
+		h.mu.Lock()
+		delete(h.answers, id)
+		h.mu.Unlock()
+		return nil, fmt.Errorf("claude did not answer set_model within %s", h.controlTimeout)
+	}
 }
 
 func (h *host) answerLocked(r answerRequest) error {

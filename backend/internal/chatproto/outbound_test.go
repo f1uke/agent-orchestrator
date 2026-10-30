@@ -26,6 +26,8 @@ func TestEncode(t *testing.T) {
 		{"interrupt", Interrupt{RequestID: "r2"}, `{"type":"control_request","request_id":"r2","request":{"subtype":"interrupt"}}`},
 		{"set permission mode", SetPermissionMode{RequestID: "r3", Mode: ModePlan},
 			`{"type":"control_request","request_id":"r3","request":{"subtype":"set_permission_mode","mode":"plan"}}`},
+		{"set model", SetModel{RequestID: "r6", Model: "haiku"},
+			`{"type":"control_request","request_id":"r6","request":{"subtype":"set_model","model":"haiku"}}`},
 		{"allow", PermissionAnswer{RequestID: "r4", Decision: Allow{UpdatedInput: input}},
 			`{"type":"control_response","response":{"subtype":"success","request_id":"r4","response":{"behavior":"allow","updatedInput":{"file_path":"/a","content":"hi"}}}}`},
 		{"allow with permissions", PermissionAnswer{RequestID: "r4", Decision: Allow{UpdatedInput: input, UpdatedPermissions: []json.RawMessage{perm}}},
@@ -62,6 +64,8 @@ func TestEncodeRejects(t *testing.T) {
 		{"interrupt without id", Interrupt{}},
 		{"unknown mode", SetPermissionMode{RequestID: "r", Mode: "yolo"}},
 		{"empty mode", SetPermissionMode{RequestID: "r"}},
+		{"set model without id", SetModel{Model: "haiku"}},
+		{"set model without model", SetModel{RequestID: "r"}},
 		{"answer without id", PermissionAnswer{Decision: Deny{}}},
 		{"answer without decision", PermissionAnswer{RequestID: "r"}},
 		{"allow without input", PermissionAnswer{RequestID: "r", Decision: Allow{}}},
@@ -86,6 +90,7 @@ func outboundFromWire(payload json.RawMessage) (Outbound, error) {
 		Request   struct {
 			Subtype string `json:"subtype"`
 			Mode    string `json:"mode"`
+			Model   string `json:"model"`
 		} `json:"request"`
 		Response struct {
 			RequestID string `json:"request_id"`
@@ -112,6 +117,8 @@ func outboundFromWire(payload json.RawMessage) (Outbound, error) {
 		case "set_permission_mode":
 			mode, err := ParsePermissionMode(w.Request.Mode)
 			return SetPermissionMode{RequestID: w.RequestID, Mode: mode}, err
+		case "set_model":
+			return SetModel{RequestID: w.RequestID, Model: w.Request.Model}, nil
 		}
 	case "control_response":
 		r := w.Response.Response
@@ -127,7 +134,7 @@ func outboundFromWire(payload json.RawMessage) (Outbound, error) {
 
 func TestEncodeMatchesWhatTheCLIAccepted(t *testing.T) {
 	seen := map[string]int{}
-	for _, name := range []string{"first_session.jsonl", "resumed_session.jsonl"} {
+	for _, name := range []string{"first_session.jsonl", "resumed_session.jsonl", "set_model.jsonl"} {
 		for _, e := range loadFixture(t, name) {
 			if e.Dir != DirIn {
 				continue
@@ -144,7 +151,7 @@ func TestEncodeMatchesWhatTheCLIAccepted(t *testing.T) {
 			assertJSONEqual(t, got, e.Payload)
 		}
 	}
-	want := map[string]int{"UserInput": 10, "Initialize": 2, "SetPermissionMode": 1, "Interrupt": 1, "PermissionAnswer": 6}
+	want := map[string]int{"UserInput": 10, "Initialize": 2, "SetPermissionMode": 1, "Interrupt": 1, "PermissionAnswer": 6, "SetModel": 2}
 	if !reflect.DeepEqual(seen, want) {
 		t.Errorf("fixtures exercised %v, want %v", seen, want)
 	}

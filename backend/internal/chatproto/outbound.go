@@ -35,6 +35,14 @@ type SetPermissionMode struct {
 	Mode      PermissionMode
 }
 
+// SetModel switches the running session to Model, one of the values the
+// initialize response lists or a full model id. Claude answers with the
+// resolved model id, or an error for a model it does not know.
+type SetModel struct {
+	RequestID string
+	Model     string
+}
+
 // PermissionAnswer answers a can_use_tool request.
 type PermissionAnswer struct {
 	RequestID string
@@ -45,6 +53,7 @@ func (UserInput) isOutbound()         {}
 func (Initialize) isOutbound()        {}
 func (Interrupt) isOutbound()         {}
 func (SetPermissionMode) isOutbound() {}
+func (SetModel) isOutbound()          {}
 func (PermissionAnswer) isOutbound()  {}
 
 // Decision is the verdict in a PermissionAnswer.
@@ -103,6 +112,11 @@ func Encode(o Outbound) ([]byte, error) {
 			return nil, err
 		}
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "set_permission_mode", "mode": mode})
+	case SetModel:
+		if m.Model == "" {
+			return nil, errors.New("chatproto: set_model needs a model")
+		}
+		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "set_model", "model": m.Model})
 	case PermissionAnswer:
 		return encodePermissionAnswer(m)
 	}

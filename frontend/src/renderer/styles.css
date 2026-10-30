@@ -8317,6 +8317,132 @@ ol.note-prose__list {
 	color: var(--fg);
 }
 
+.chat-composer__field {
+	position: relative;
+}
+
+.chat-composer__ghost {
+	position: absolute;
+	inset: 0;
+	padding: 12px 14px 4px;
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-size: 14px;
+	line-height: 1.5;
+	overflow-wrap: break-word;
+	pointer-events: none;
+	white-space: pre-wrap;
+}
+
+.chat-composer__ghost-text {
+	visibility: hidden;
+}
+
+.chat-composer__tool {
+	display: inline-grid;
+	width: 26px;
+	height: 26px;
+	place-items: center;
+	border-radius: 6px;
+	color: var(--fg-passive);
+}
+
+.chat-composer__tool:hover:not(:disabled) {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.chat-menu-popover {
+	width: 420px;
+	max-height: 380px;
+	padding: 6px;
+	overflow: auto;
+	border-color: var(--border-1);
+	border-radius: 10px;
+	background: var(--bg-1);
+	box-shadow: var(--shadow);
+}
+
+.chat-menu__label {
+	padding: 6px 8px 4px;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+}
+
+.chat-menu__item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 8px;
+	border-radius: 6px;
+	color: var(--fg-muted);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.chat-menu__item[data-active] {
+	background: var(--interactive-active);
+	color: var(--fg);
+}
+
+.chat-menu__name {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--fg);
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-menu__icon {
+	color: var(--fg-passive);
+}
+
+.chat-menu__hint {
+	max-width: 220px;
+	margin-left: auto;
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-menu__empty {
+	padding: 6px 8px;
+	color: var(--fg-passive);
+	font-size: 12.5px;
+}
+
+.chat-model-menu {
+	width: 300px;
+}
+
+.chat-model-item__name {
+	flex: none;
+}
+
+.chat-model-item__hint {
+	min-width: 0;
+	margin-left: auto;
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-model-menu__note {
+	margin: 0;
+	padding: 0 8px 6px;
+	color: var(--fg-passive);
+	font-size: 12px;
+}
+
 .chat-stop {
 	display: inline-flex;
 	height: 32px;

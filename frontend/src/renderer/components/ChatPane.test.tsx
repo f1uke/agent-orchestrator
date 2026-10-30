@@ -12,6 +12,10 @@ vi.mock("../hooks/useSessionNames", () => ({
 	useSessionNames: () => new Map([["billing-portal-12", "invoice CSV export"]]),
 }));
 
+vi.mock("../hooks/useWorkspaceFiles", () => ({
+	useWorkspaceFiles: () => ({ isPending: false, data: { available: true, paths: [], truncated: false } }),
+}));
+
 const session: WorkspaceSession = {
 	id: "chat-1",
 	transport: "chat",
@@ -62,6 +66,7 @@ function fakeApi() {
 		answer: vi.fn<ChatApi["answer"]>(async () => OK),
 		interrupt: vi.fn<ChatApi["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
+		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
 	};
 }
 
@@ -324,13 +329,13 @@ describe("ChatPane composer", () => {
 	it("shows the transcript's mode and changes it through the picker", async () => {
 		const { feed, api, user } = renderPane();
 		feed(out({ type: "system", subtype: "init", session_id: "s", permissionMode: "default" }));
-		await user.click(screen.getByRole("button", { name: "Permission mode: Ask before edits" }));
+		await user.click(screen.getByRole("button", { name: "Model and mode: Ask before edits" }));
 		await user.click(await screen.findByRole("menuitemradio", { name: "Plan" }));
 		await settle();
 		expect(api.setMode).toHaveBeenCalledWith("chat-1", "plan");
 
 		feed(out({ type: "system", subtype: "status", status: null, permissionMode: "plan" }));
-		expect(screen.getByRole("button", { name: "Permission mode: Plan" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Model and mode: Plan" })).toBeInTheDocument();
 	});
 });
 
@@ -396,7 +401,7 @@ describe("ChatPane answers", () => {
 		expect(input).toBeDisabled();
 		expect(input).toHaveValue("hello");
 		expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
-		expect(screen.getByRole("button", { name: /Permission mode/ })).toBeDisabled();
+		expect(screen.getByRole("button", { name: /Model and mode/ })).toBeDisabled();
 		expect(screen.getByRole("button", { name: /Allow once/ })).toBeDisabled();
 
 		act(() => listeners!.offline());
