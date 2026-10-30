@@ -126,6 +126,12 @@ func (c Client) SetMode(ctx context.Context, mode chatproto.PermissionMode) erro
 	return c.call(ctx, map[string]string{"op": "set_mode", "mode": string(mode)}, &okResponse{})
 }
 
+// SetModel switches the running claude to model and returns once claude has
+// accepted it. Claude's refusal, such as an unknown model, is a RefusedError.
+func (c Client) SetModel(ctx context.Context, model string) error {
+	return c.call(ctx, map[string]string{"op": "set_model", "model": model}, &okResponse{})
+}
+
 // State reports what the host knows about its session right now.
 func (c Client) State(ctx context.Context) (State, error) {
 	var resp stateResponse

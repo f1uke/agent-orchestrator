@@ -436,6 +436,7 @@ func TestBadRequests(t *testing.T) {
 		{map[string]any{"op": "send", "images": []any{map[string]any{"media_type": "image/png"}}}, "send image needs media_type and base64"},
 		{map[string]any{"op": "answer", "request_id": "r", "behavior": "maybe"}, `answer behavior must be allow or deny, not "maybe"`},
 		{map[string]any{"op": "set_mode", "mode": "yolo"}, `chatproto: unknown permission mode "yolo"`},
+		{map[string]any{"op": "set_model"}, "set_model needs model"},
 	} {
 		if got := callErr(t, cfg.SocketPath, tc.req); got != tc.want {
 			t.Errorf("%v: error %q, want %q", tc.req, got, tc.want)
