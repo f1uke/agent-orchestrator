@@ -153,6 +153,7 @@ function mockProject(project: Record<string, unknown>) {
 		if (path === "/api/v1/agents") return agentCatalogResponse;
 		if (path === "/api/v1/settings/sim-trust") return globalSimTrustResponse;
 		if (path === "/api/v1/settings/claude-profiles") return claudeProfilesResponse;
+		if (path === "/api/v1/settings/worker-transport") return { data: { workerTransport: "chat" }, error: undefined };
 		return {
 			data: {
 				status: "ok",
@@ -533,6 +534,60 @@ describe("ProjectSettingsForm", () => {
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		const body = putMock.mock.calls[0][1].body.config;
 		expect(body.responseLanguage).toBeUndefined();
+	});
+
+	it("shows the inherited worker transport and saves an override through the save bar", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "claude-code" },
+				orchestrator: { agent: "claude-code" },
+				env: { FOO: "bar" },
+			},
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const transport = await screen.findByRole("combobox", { name: "Worker transport" });
+		expect(transport).toHaveTextContent("Inherit global default");
+		await chooseOption(transport, "Terminal");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.workerTransport).toBe("terminal");
+		expect(body.env).toEqual({ FOO: "bar" });
+	});
+
+	it("omits workerTransport when the project goes back to inheriting the global default", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "claude-code" },
+				orchestrator: { agent: "claude-code" },
+				workerTransport: "terminal",
+			},
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const transport = await screen.findByRole("combobox", { name: "Worker transport" });
+		expect(transport).toHaveTextContent("Terminal");
+		await chooseOption(transport, "Inherit global default");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		expect(putMock.mock.calls[0][1].body.config.workerTransport).toBeUndefined();
 	});
 
 	// One flag behind three effects (Browser tab, `ao preview` guidance, the

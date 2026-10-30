@@ -35,8 +35,8 @@ export const TIMING_TONE: Record<SettingTiming, "quiet" | "warn"> = {
 };
 
 // How a setting relates to the other scope. The honest finding behind this type
-// is that almost nothing is overridable: response language is the only true
-// Global -> Project override in the whole page, the per-project prompts APPEND
+// is that almost nothing is overridable: response language and worker transport
+// are the only true Global -> Project overrides in the whole page, the per-project prompts APPEND
 // rather than replace, and auto-nudge is a global default a SESSION (not a
 // project) may answer differently. Naming those three shapes separately is what
 // stops the page implying a hierarchy that does not exist.

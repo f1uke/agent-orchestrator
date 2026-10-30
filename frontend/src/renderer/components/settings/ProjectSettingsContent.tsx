@@ -10,6 +10,8 @@ import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
 import { SettingEditorControl } from "./SettingEditorControl";
 import { SettingsReadOnlyPanel, ReadonlyRow } from "./SettingsReadOnlyPanel";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
+import { WorkerTransportSelect } from "./WorkerTransportSelect";
+import { workerTransportLabel } from "./worker-transport";
 import { PROJECT_SECTIONS } from "./settings-sections";
 import type { SimTrustMode, useProjectSettingsForm } from "./useProjectSettingsForm";
 import { ClaudeProfileSelect } from "../ClaudeProfileSelect";
@@ -222,6 +224,7 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 		missingRequiredAgent,
 		validationError,
 		claudeProfiles,
+		globalWorkerTransport,
 	} = form;
 	// The supported list carries every agent's full identity, including its model
 	// tiers, so the per-kind model selectors resolve their options from the agent
@@ -297,6 +300,33 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 						value={draft.workerModel}
 						agent={agentEntry(draft.workerAgent)}
 						onChange={(v) => setField("workerModel", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Worker transport"
+					summary="How a new Claude Code worker on this project is driven: Chat is a headless session behind the chat view, Terminal is its own TUI in the pane."
+					detail="Overrides the global default for this project. A worker keeps the transport it was spawned with, so changing this never moves a running one. The orchestrator and workers on other agents are always Terminal. Choose Terminal to go back; ao project set-config <id> --worker-transport terminal does the same."
+					ownership={{
+						kind: "project-override",
+						globalValue: workerTransportLabel(globalWorkerTransport),
+						overriding: draft.workerTransport !== "",
+					}}
+					timing="next-worker"
+					value={
+						draft.workerTransport
+							? workerTransportLabel(draft.workerTransport)
+							: `${workerTransportLabel(globalWorkerTransport)} (inherited)`
+					}
+					modified={isFieldDirty("workerTransport")}
+					controlId="workerTransport"
+					onUseGlobal={() => setField("workerTransport", "")}
+				>
+					<WorkerTransportSelect
+						scope="project"
+						id="workerTransport"
+						value={draft.workerTransport}
+						onChange={(v) => setField("workerTransport", v)}
 					/>
 				</SettingRow>
 
