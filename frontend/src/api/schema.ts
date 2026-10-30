@@ -1274,6 +1274,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/chat/files/{root}/*": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve the bytes of a file the resolve route returned. Answers with the file's own Content-Type, nosniff and a sandbox CSP, and supports ranges. 404 for an unknown session or root, a path that escapes the root, a missing file or a type off the allowlist; 413 over the type's size cap */
+        get: operations["getChatFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        /** Headers of a chat file, as getChatFile would answer, without the body */
+        head: operations["headChatFile"];
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/chat/files/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve the file names a chat session's agent wrote (absolute, ~/, relative or glob) to files in the session's worktree or its project's knowledge directory. Only regular files of an allowed type and size inside those roots are returned */
+        post: operations["resolveChatFiles"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/chat/interrupt": {
         parameters: {
             query?: never;
@@ -3308,6 +3343,27 @@ export interface components {
         };
         ChatAckResponse: {
             ok: boolean;
+        };
+        ChatFileMatch: {
+            /** @enum {string} */
+            kind: "image" | "markdown" | "html" | "pdf" | "json" | "text" | "log" | "diff";
+            mime: string;
+            /** Format: date-time */
+            modifiedAt: string;
+            /** @description Slash-separated, relative to the root; pass it back as the rest of the GET path. */
+            path: string;
+            /**
+             * @description The root the file lives in; pass it back as {root} to GET the bytes.
+             * @enum {string}
+             */
+            root: "worktree" | "knowledge";
+            /** Format: int64 */
+            size: number;
+        };
+        ChatFileRef: {
+            /** @description Servable files only, at most 24 for a glob; empty when the ref names nothing the session may show. */
+            matches: components["schemas"]["ChatFileMatch"][];
+            ref: string;
         };
         ChatImage: {
             /** @description The image bytes, base64 encoded. */
@@ -6050,6 +6106,14 @@ export interface components {
         ReplyCommentResponse: {
             comment: components["schemas"]["SessionPRThreadComment"];
             ok: boolean;
+        };
+        ResolveChatFilesRequest: {
+            /** @description File names as the agent wrote them: absolute, ~/ or relative paths, or globs. Each is at most 1024 bytes. */
+            refs: string[];
+        };
+        ResolveChatFilesResponse: {
+            /** @description One entry per requested ref, in request order. */
+            files: components["schemas"]["ChatFileRef"][];
         };
         ResolveCommentsResponse: {
             ok: boolean;
@@ -11911,6 +11975,190 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getChatFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Which directory the file is read from, as the resolve route reported it. */
+                root: "worktree" | "knowledge";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Partial Content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    headChatFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Which directory the file is read from, as the resolve route reported it. */
+                root: "worktree" | "knowledge";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resolveChatFiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveChatFilesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveChatFilesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
