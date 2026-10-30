@@ -845,3 +845,33 @@ describe("chat fold: task messages", () => {
 		expect(ends.map((e) => e.durationMs)).toEqual([4_000, 12_000]);
 	});
 });
+
+describe("chat fold: the task brief", () => {
+	const spawn = (seq: number, resume = "") => synth(seq, "host", { kind: "spawn", argv: ["claude"], resume, pid: 1 });
+	const input = (seq: number, uuid: string, text: string) =>
+		synth(seq, "in", { type: "user", uuid, message: { role: "user", content: text }, parent_tool_use_id: null });
+	const briefs = (entries: ChatEntry[]) =>
+		users(foldEntries(entries))
+			.filter((u) => u.brief)
+			.map((u) => u.uuid);
+
+	it("marks the first input after a fresh spawn as the brief, and nothing after it", () => {
+		expect(briefs([spawn(1), input(2, "b", "/pstack:poteto-mode # Goal ..."), input(3, "u2", "thanks")])).toEqual([
+			"b",
+		]);
+	});
+
+	it("does not mark the first input after a resumed spawn", () => {
+		expect(briefs([spawn(1, "claude-session-1"), input(2, "u1", "continue")])).toEqual([]);
+	});
+
+	it("does not mark a peer message that arrives first", () => {
+		const origin = synth(2, "host", { kind: "user_origin", uuid: "p", origin: { via: "ao_send", from: "w-1" } });
+		expect(briefs([spawn(1), origin, input(3, "p", "[from @w-1] hello")])).toEqual([]);
+	});
+
+	it("keeps the first fresh brief when a later restore resumes the session", () => {
+		const entries = [spawn(1), input(2, "b", "# Goal"), spawn(3, "claude-session-1"), input(4, "u2", "go on")];
+		expect(briefs(entries)).toEqual(["b"]);
+	});
+});

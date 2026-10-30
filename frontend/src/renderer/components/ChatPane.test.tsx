@@ -123,6 +123,7 @@ describe("ChatPane", () => {
 		const { feed } = renderPane();
 		feed(
 			entry("host", { kind: "spawn", resume: "" }),
+			entry("in", { type: "user", uuid: "b", message: { content: "# Goal\nGreet the user." } }),
 			entry("in", { type: "user", uuid: "u1", message: { content: "Make hello.txt" } }),
 			entry("host", { kind: "user_origin", uuid: "u2", origin: { via: "ao_send", from: "billing-portal-12" } }),
 			entry("in", { type: "user", uuid: "u2", message: { content: "[from @billing-portal-12] Use the new name." } }),
@@ -665,6 +666,38 @@ describe("ChatPane calm view", () => {
 		const head = document.querySelector("[data-turn] .chat-group__head")!;
 		expect(head).toHaveTextContent(/^Worked for 36s · 1 failed$/);
 		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
+	});
+
+	describe("the task brief", () => {
+		const spawn = (resume = "") => entry("host", { kind: "spawn", argv: ["claude"], resume, pid: 1 });
+		const brief = "/pstack:poteto-mode # Goal\nFix the **flaky** test.\n\n## Rules\n- one\n- two";
+
+		it("folds the brief AO spawned the session with, and opens it as markdown", async () => {
+			const { feed, user } = renderPane();
+			feed(
+				spawn(),
+				userIn("b", brief),
+				lifecycle("b", "completed"),
+				userIn("u2", "thanks"),
+				lifecycle("u2", "completed"),
+			);
+			const row = screen.getByRole("button", { name: /Task brief/ });
+			expect(row).toHaveAttribute("aria-expanded", "false");
+			expect(row).toHaveTextContent("pstack:poteto-mode");
+			expect(row).toHaveTextContent("# Goal");
+			expect(screen.queryByText("Rules")).toBeNull();
+			expect(screen.getByText("thanks")).toBeInTheDocument();
+			await user.click(row);
+			expect(screen.getByRole("heading", { name: "Rules" })).toBeInTheDocument();
+			expect(screen.getByText("flaky").tagName).toBe("STRONG");
+		});
+
+		it("shows the first input after a restore as an ordinary message", () => {
+			const { feed } = renderPane();
+			feed(spawn("claude-session-1"), userIn("u1", "go on with the plan"), lifecycle("u1", "completed"));
+			expect(screen.queryByRole("button", { name: /Task brief/ })).toBeNull();
+			expect(screen.getByText("go on with the plan")).toBeInTheDocument();
+		});
 	});
 
 	describe("a turn that ends with background work still running", () => {

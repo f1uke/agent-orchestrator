@@ -585,11 +585,18 @@ function ItemRow({
 }) {
 	switch (item.kind) {
 		case "user":
-			return item.origin ? (
-				<PeerMessage item={item} sessionNames={sessionNames} theme={theme} />
-			) : (
-				<UserMessage item={item} />
-			);
+			if (item.origin) return <PeerMessage item={item} sessionNames={sessionNames} theme={theme} />;
+			if (item.brief) {
+				return (
+					<TaskBrief
+						item={item}
+						onToggle={(open) => toggleRow(rowKey, open)}
+						open={openRows[rowKey] ?? false}
+						theme={theme}
+					/>
+				);
+			}
+			return <UserMessage item={item} />;
 		case "assistant_text":
 			return (
 				<div className="note-prose chat-md">
@@ -753,6 +760,41 @@ function UserMessage({ item }: { item: UserItem }) {
 		<div className="chat-user" data-state={item.state}>
 			<div className="chat-user__bubble">{item.text}</div>
 			{meta.length ? <div className="chat-user__meta">{meta.join(" · ")}</div> : null}
+		</div>
+	);
+}
+
+// A brief that opens with a slash command, such as "/pstack:poteto-mode", runs that command with the rest as its arguments.
+const LEADING_COMMAND = /^\/([\w:.-]+)\s*/;
+
+/** The brief AO spawned the session with: long, so it stays folded behind its first line until opened. */
+function TaskBrief({
+	item,
+	open,
+	onToggle,
+	theme,
+}: {
+	item: UserItem;
+	open: boolean;
+	onToggle: (open: boolean) => void;
+	theme: Theme;
+}) {
+	const command = LEADING_COMMAND.exec(item.text);
+	const body = command ? item.text.slice(command[0].length) : item.text;
+	const preview = body.split("\n").find((line) => line.trim() !== "") ?? "";
+	return (
+		<div className="chat-brief" data-brief>
+			<button aria-expanded={open} className="chat-brief__head" onClick={() => onToggle(!open)} type="button">
+				<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
+				<span className="chat-brief__title">Task brief</span>
+				{command ? <span className="chat-brief__command">{command[1]}</span> : null}
+				{open ? null : <span className="chat-brief__preview">{preview}</span>}
+			</button>
+			{open ? (
+				<div className="chat-brief__body note-prose chat-md">
+					<NoteMarkdown source={body} theme={theme} />
+				</div>
+			) : null}
 		</div>
 	);
 }

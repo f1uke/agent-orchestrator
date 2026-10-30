@@ -8009,6 +8009,51 @@ ol.note-prose__list {
 	align-items: flex-end;
 }
 
+/* The brief AO spawned the session with, folded to one line until opened. */
+.chat-brief {
+	border: 1px solid var(--border-1);
+	border-radius: 12px;
+	background: var(--bg-2);
+}
+
+.chat-brief__head {
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	color: var(--fg-muted);
+	font-size: 13px;
+	text-align: left;
+}
+
+.chat-brief__title {
+	flex: none;
+	color: var(--fg);
+	font-weight: 500;
+}
+
+.chat-brief__command {
+	flex: none;
+	padding: 1px 6px;
+	border-radius: 4px;
+	background: var(--bg-3);
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+
+.chat-brief__preview {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-brief__body {
+	padding: 4px 16px 12px 36px;
+}
+
 .chat-user__bubble {
 	max-width: 78%;
 	padding: 10px 14px;

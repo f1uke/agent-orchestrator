@@ -40,6 +40,8 @@ export type UserItem = {
 	state: CommandState;
 	/** When the input entered the log. */
 	ts: string;
+	/** The task brief AO sent as the first input of a freshly spawned claude. */
+	brief?: true;
 };
 
 export type ToolCallItem = {
@@ -238,6 +240,8 @@ export class ChatFolder {
 	private context: number | undefined;
 	// When the turn now running started, until its result.
 	private turnStart: string | undefined;
+	// A fresh spawn's first input is the brief AO wrote; a resumed spawn has none.
+	private awaitingBrief = false;
 
 	get lastSeq(): number {
 		return this.last;
@@ -426,6 +430,8 @@ export class ChatFolder {
 		this.turnStart ??= this.ts;
 		const origin = this.origins.get(uuid);
 		if (origin) item.origin = origin;
+		else if (this.awaitingBrief) item.brief = true;
+		this.awaitingBrief = false;
 		if (uuid !== "") this.users.set(uuid, this.items.length);
 		this.items.push(item);
 	}
@@ -486,6 +492,7 @@ export class ChatFolder {
 			case "spawn":
 				this.endProcess();
 				this.model = modelFlag(note.argv);
+				this.awaitingBrief = note.resume === "";
 				if (note.resume !== "") this.notice("resumed", note.resume);
 				else this.notice("spawn", "");
 				break;
