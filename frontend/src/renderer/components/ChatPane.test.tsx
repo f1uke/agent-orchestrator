@@ -537,7 +537,7 @@ describe("ChatPane calm view", () => {
 			toolDone("c"),
 		);
 		const head = document.querySelector("[data-group] .chat-group__head")!;
-		expect(head).toHaveTextContent("Ran 2 commands · read 1 file");
+		expect(head).toHaveTextContent(/^Ran 2 commands, read a file$/);
 		expect(head).toHaveAttribute("aria-expanded", "false");
 		expect(document.querySelector("[data-tool]")).toBeNull();
 		await user.click(head);
@@ -553,13 +553,19 @@ describe("ChatPane calm view", () => {
 			toolUse("b", "Bash", { command: "go test" }),
 			toolDone("b", "Exit code 1\nFAIL", true),
 		);
-		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent("1 failed");
+		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(
+			/^Ran a command, read a file \(1 failed\)$/,
+		);
 		const shown = document.querySelectorAll("[data-tool]");
 		expect(shown).toHaveLength(1);
 		expect(shown[0]).toHaveAttribute("data-tool", "Bash");
 	});
 
-	it("names the running call on the header with the worktree root cut away", () => {
+	it("shows the running call as a plain verb with a timer that ticks each second", () => {
+		vi.useFakeTimers({
+			toFake: ["Date", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"],
+		});
+		vi.setSystemTime(Date.parse("2026-10-30T10:01:25.000Z"));
 		const { feed } = renderPane("chat", fakeApi(), rooted);
 		feed(
 			userIn("u1", "go"),
@@ -567,7 +573,10 @@ describe("ChatPane calm view", () => {
 			toolDone("a"),
 			toolUse("b", "Bash", { command: "cd /work/project && go test ./..." }),
 		);
-		expect(document.querySelector(".chat-group__live")).toHaveTextContent("cd . && go test ./...");
+		const head = document.querySelector("[data-group] .chat-group__head")!;
+		expect(head).toHaveTextContent(/^Running a command 1m 25s$/);
+		act(() => vi.advanceTimersByTime(1000));
+		expect(head).toHaveTextContent(/^Running a command 1m 26s$/);
 	});
 
 	it("folds a finished turn's work between the user's message and the last reply", async () => {
@@ -584,12 +593,34 @@ describe("ChatPane calm view", () => {
 			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
 		);
 		const head = document.querySelector("[data-turn] .chat-group__head")!;
-		expect(head).toHaveTextContent("Worked · ran 2 commands · 1 message");
+		expect(head).toHaveTextContent(/^Worked for 0s$/);
+		expect(head).toHaveAttribute("title", "Ran 2 commands, 1 message");
 		expect(screen.getByText("all fixed")).toBeInTheDocument();
 		expect(screen.queryByText("on it")).toBeNull();
 		await user.click(head);
 		expect(screen.getByText("on it")).toBeInTheDocument();
 		expect(document.querySelector("[data-group]")).not.toBeNull();
+	});
+
+	it("says how long a finished turn worked, and how many of its calls failed", () => {
+		const { feed } = renderPane();
+		const at = (sec: number, e: ChatEntry): ChatEntry => ({
+			...e,
+			ts: new Date(Date.parse("2026-10-30T10:00:00.000Z") + sec * 1000).toISOString(),
+		});
+		feed(
+			at(0, userIn("u1", "fix it")),
+			at(0, lifecycle("u1", "started")),
+			at(2, toolUse("a", "Bash", { command: "go test" })),
+			at(9, toolDone("a", "Exit code 1\nFAIL", true)),
+			at(10, toolUse("b", "Bash", { command: "go vet" })),
+			at(12, toolDone("b")),
+			at(30, saying("fixed")),
+			at(36, out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 })),
+		);
+		const head = document.querySelector("[data-turn] .chat-group__head")!;
+		expect(head).toHaveTextContent(/^Worked for 36s · 1 failed$/);
+		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
 	});
 
 	it("leaves a subagent's text and thinking out of the main column", () => {

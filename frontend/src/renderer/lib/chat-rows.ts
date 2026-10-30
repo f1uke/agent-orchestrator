@@ -1,6 +1,6 @@
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
-import { type ProcessSummary, describeTool, summarizeTools } from "./chat-tools";
+import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunning } from "./chat-tools";
 
 /** A step inside a process group: a tool call, or the thinking between tool calls. */
 export type ProcessMember =
@@ -12,7 +12,15 @@ export type ChatRow =
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
-	| { key: string; kind: "turn"; rows: ChatRow[]; summary: ProcessSummary; messages: number };
+	| {
+			key: string;
+			kind: "turn";
+			rows: ChatRow[];
+			summary: ProcessSummary;
+			messages: number;
+			/** The finished turn's duration, from its turn end. */
+			durationMs?: number;
+	  };
 
 export const itemRowKey = (itemIndex: number) => `i${itemIndex}`;
 
@@ -39,11 +47,9 @@ function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 	}
 }
 
-function liveDetail(calls: readonly ToolCallItem[], root: string): string | undefined {
-	const running = calls.filter((call) => !call.result).at(-1);
-	if (!running) return undefined;
-	const view = describeTool(running, { root });
-	return view.arg || view.title;
+function liveTool(calls: readonly ToolCallItem[]): LiveTool | undefined {
+	const running = calls.filter(toolRunning).at(-1);
+	return running && { verb: liveVerb(running), since: running.startedTs };
 }
 
 function memberRow(member: ProcessMember): ChatRow {
@@ -76,12 +82,12 @@ function tasksOf(rows: readonly ChatRow[]): Map<string, BackgroundTask> {
 	return tasks;
 }
 
-function turnRow(userKey: string, rows: ChatRow[]): ChatRow | undefined {
+function turnRow(userKey: string, rows: ChatRow[], durationMs: number | undefined): ChatRow | undefined {
 	const tasks = tasksOf(rows);
 	const summary = summarizeTools(callsOf(rows), (id) => tasks.get(id));
 	if (summary.counts.length === 0) return undefined;
 	const messages = rows.filter((row) => isItem(row, "assistant_text")).length;
-	return { key: `t${userKey}`, kind: "turn", rows, summary, messages };
+	return { key: `t${userKey}`, kind: "turn", rows, summary, messages, durationMs };
 }
 
 // A finished turn keeps its opening message and its last reply visible. What
@@ -106,8 +112,7 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 			}
 		}
 		const ended = end >= 0 ? rows[end] : undefined;
-		if (!ended || interrupted || (ended.kind === "item" && ended.item.kind === "turn_end" && ended.item.isError))
-			continue;
+		if (ended?.kind !== "item" || ended.item.kind !== "turn_end" || interrupted || ended.item.isError) continue;
 
 		let last = end;
 		for (let j = end - 1; j > i; j--) {
@@ -116,7 +121,7 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 				break;
 			}
 		}
-		const folded = turnRow(row.key, rows.slice(i + 1, last));
+		const folded = turnRow(row.key, rows.slice(i + 1, last), ended.item.durationMs);
 		if (!folded) continue;
 		out.push(folded);
 		i = last - 1;
@@ -128,7 +133,6 @@ export function chatRows(
 	transcript: Transcript,
 	overlay: StreamOverlay,
 	queued: ReadonlySet<string> = new Set(),
-	root = "",
 ): ChatRow[] {
 	const subagentTools = new Map<string, number>();
 	const toolIds = new Set<string>();
@@ -145,9 +149,10 @@ export function chatRows(
 	let run: ProcessMember[] = [];
 	const flush = (atTail: boolean) => {
 		const calls = run.flatMap((m) => (m.kind === "tool" ? [m.call] : []));
-		if (calls.length >= 2) {
+		const live = atTail ? liveTool(calls) : undefined;
+		if (calls.length >= 2 || live) {
 			const summary = summarizeTools(calls, (id) => taskByToolUse.get(id));
-			if (atTail) summary.live = liveDetail(calls, root);
+			summary.live = live;
 			rows.push({ key: `g${run[0].itemIndex}`, kind: "group", members: run, summary });
 		} else {
 			rows.push(...run.map(memberRow));

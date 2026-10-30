@@ -7959,31 +7959,87 @@ ol.note-prose__list {
 }
 
 .chat-group__text {
-	flex: none;
-}
-
-.chat-group__failed {
-	flex: none;
-	color: var(--red);
-	font-size: 12px;
-}
-
-.chat-group__live {
-	display: flex;
-	min-width: 0;
-	flex: 1;
-	align-items: center;
-	gap: 6px;
-	margin-left: 4px;
-	font-family: var(--font-mono);
-	font-size: 12px;
-}
-
-.chat-group__live-text {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.chat-group__failed {
+	color: var(--red);
+}
+
+.chat-group__running {
+	color: var(--fg-passive);
+	font-size: 13px;
+}
+
+/* A live row: what runs, in plain words, and for how long. */
+.chat-live {
+	display: inline-flex;
+	min-width: 0;
+	align-items: center;
+	gap: 8px;
+}
+
+.chat-live__verb {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-live__time {
+	flex: none;
+	font-variant-numeric: tabular-nums;
+}
+
+.chat-live__detail {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--fg-passive);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-dots {
+	display: inline-flex;
+	flex: none;
+	gap: 3px;
+}
+
+.chat-dots i {
+	width: 4px;
+	height: 4px;
+	border-radius: 999px;
+	background: var(--lane-working);
+	animation: chat-dots-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-dots i:nth-child(2) {
+	animation-delay: 0.2s;
+}
+
+.chat-dots i:nth-child(3) {
+	animation-delay: 0.4s;
+}
+
+@keyframes chat-dots-pulse {
+	0%,
+	80%,
+	100% {
+		opacity: 0.25;
+	}
+	40% {
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-dots i {
+		animation: none;
+		opacity: 0.7;
+	}
 }
 
 .chat-group__body,
@@ -8123,8 +8179,53 @@ ol.note-prose__list {
 	white-space: pre;
 }
 
-.chat-term__cmd {
+.chat-bash {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+}
+
+.chat-code {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--term-bg);
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.chat-code__prompt {
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.chat-code__text {
+	min-width: 0;
+	flex: 1;
+	max-height: 160px;
+	overflow: auto;
 	color: var(--fg);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.chat-code__copy {
+	margin-top: 3px;
+}
+
+.chat-tool__exit {
+	color: var(--red);
+	font-size: 12px;
+}
+
+.chat-bash .chat-term {
+	padding: 0;
+	background: none;
 }
 
 .chat-term__line--fail {

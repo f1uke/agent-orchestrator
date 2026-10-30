@@ -87,10 +87,7 @@ export function ChatPane({
 		[transcript.items, queuedIds],
 	);
 	const root = session.workspacePath ?? "";
-	const rows = useMemo(
-		() => chatRows(transcript, chat.overlay, queuedIds, root),
-		[transcript, chat.overlay, queuedIds, root],
-	);
+	const rows = useMemo(() => chatRows(transcript, chat.overlay, queuedIds), [transcript, chat.overlay, queuedIds]);
 	const runningInBackground = useMemo(
 		() => sessionActivity(transcript).filter((a) => unfinished(a.state)).length,
 		[transcript],

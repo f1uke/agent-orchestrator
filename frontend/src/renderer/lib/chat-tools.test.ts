@@ -4,7 +4,9 @@ import type { BackgroundTask, ToolCallItem } from "./chat-fold";
 import {
 	describeTool,
 	processKind,
-	processPhrases,
+	type ProcessKind,
+	processSentence,
+	liveVerb,
 	shortenPaths,
 	summarizeTools,
 	taskLabel,
@@ -58,7 +60,7 @@ describe("shortenPaths", () => {
 describe("describeTool path shortening", () => {
 	it("shortens a Bash command in the head and the body", () => {
 		const view = describeTool(call("Bash", { command: "cd /work/project && go test ./..." }), { root: ROOT });
-		expect(view.arg).toBe("cd . && go test ./...");
+		expect(view.title).toBe("cd . && go test ./...");
 		expect(view.body).toMatchObject({ kind: "bash", command: "cd . && go test ./..." });
 	});
 
@@ -187,14 +189,29 @@ describe("process summaries", () => {
 		expect(summary.failed).toBe(1);
 	});
 
-	it("words the counts, with todos unnumbered", () => {
-		expect(processPhrases(summarizeTools(calls))).toEqual([
-			"ran 2 commands",
-			"read 1 file",
-			"edited 1 file",
-			"updated todos",
-			"used 1 other tool",
-		]);
+	it("says the counts as one sentence, with todos unnumbered", () => {
+		expect(processSentence(summarizeTools(calls))).toBe(
+			"Ran 2 commands, read a file, edited a file, updated todos, used another tool",
+		);
+	});
+
+	it.each<[ProcessKind, number, string]>([
+		["commands", 1, "Ran a command"],
+		["commands", 3, "Ran 3 commands"],
+		["reads", 1, "Read a file"],
+		["reads", 2, "Read 2 files"],
+		["searches", 1, "Ran a search"],
+		["searches", 4, "Ran 4 searches"],
+		["edits", 1, "Edited a file"],
+		["writes", 2, "Wrote 2 files"],
+		["agents", 1, "Started an agent"],
+		["agents", 2, "Started 2 agents"],
+		["web", 1, "Made a web request"],
+		["skills", 1, "Ran a skill"],
+		["skills", 3, "Ran skill 3 times"],
+		["tools", 2, "Used 2 other tools"],
+	])("says %s x%i as %j", (kind, count, want) => {
+		expect(processSentence({ counts: [{ kind, count }], failed: 0 })).toBe(want);
 	});
 
 	it("counts a denied tool as failed", () => {
@@ -213,6 +230,23 @@ describe("process summaries", () => {
 		["Mystery", "tools"],
 	])("files %s under %s", (name, kind) => {
 		expect(processKind(name)).toBe(kind);
+	});
+});
+
+describe("liveVerb", () => {
+	it.each<[string, object, string]>([
+		["Bash", { command: "go test ./..." }, "Running a command"],
+		["Read", { file_path: "/work/project/docs/README.md" }, "Reading README.md"],
+		["Skill", { skill: "artifact-design" }, "Running skill /artifact-design"],
+		["Agent", { subagent_type: "Explore", description: "find callers" }, "Running agent Explore"],
+		["Task", {}, "Running an agent"],
+		["Grep", { pattern: "x" }, "Searching"],
+		["Glob", { pattern: "*.go" }, "Searching"],
+		["Edit", { file_path: "internal/webhook/sender.go" }, "Editing sender.go"],
+		["Write", { file_path: "budget.go" }, "Editing budget.go"],
+		["WebFetch", { url: "https://example.com" }, "Running WebFetch"],
+	])("says a running %s call in plain words", (name, input, want) => {
+		expect(liveVerb(call(name, input))).toBe(want);
 	});
 });
 

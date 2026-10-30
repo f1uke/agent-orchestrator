@@ -79,8 +79,8 @@ function transcript(items: ChatItem[], extra: Partial<Transcript> = {}): Transcr
 	};
 }
 
-const rowsOf = (items: ChatItem[], extra: Partial<Transcript> = {}, root = "") =>
-	chatRows(transcript(items, extra), emptyOverlay, new Set(), root);
+const rowsOf = (items: ChatItem[], extra: Partial<Transcript> = {}) =>
+	chatRows(transcript(items, extra), emptyOverlay, new Set());
 
 const shape = (rows: ChatRow[]) => rows.map((r) => (r.kind === "item" ? r.item.kind : r.kind));
 
@@ -188,23 +188,24 @@ describe("chatRows process groups", () => {
 
 	it("skips queued user messages", () => {
 		const queued = { ...user("q1", "later"), state: "queued" };
-		const rows = chatRows(transcript([user(), tool("Read"), queued, tool("Read")]), emptyOverlay, new Set(["q1"]), "");
+		const rows = chatRows(transcript([user(), tool("Read"), queued, tool("Read")]), emptyOverlay, new Set(["q1"]));
 		expect(shape(rows)).toEqual(["user", "group"]);
 	});
 });
 
 describe("chatRows live detail", () => {
-	it("names the newest tool that has no result, with the worktree root shortened", () => {
-		const rows = rowsOf(
-			[
-				user(),
-				tool("Read", { file_path: "/work/project/a.go" }),
-				tool("Bash", { command: "cd /work/project && go test ./..." }, "none"),
-			],
-			{},
-			"/work/project",
-		);
-		expect(group(rows).summary.live).toBe("cd . && go test ./...");
+	it("names the newest tool that has no result in plain words, with when it started", () => {
+		const running = { ...tool("Read", { file_path: "/work/project/docs/a.md" }, "none"), startedTs: "T1" };
+		const rows = rowsOf([user(), tool("Bash", { command: "go test" }), running]);
+		expect(group(rows).summary.live).toEqual({ verb: "Reading a.md", since: "T1" });
+	});
+
+	it("shows a lone running tool at the tail as a live group, and a lone finished one as its own row", () => {
+		const live = rowsOf([user(), say("on it"), tool("Bash", { command: "go test" }, "none")]);
+		expect(shape(live)).toEqual(["user", "assistant_text", "group"]);
+		expect(group(live).summary.live?.verb).toBe("Running a command");
+		const done = rowsOf([user(), say("on it"), tool("Bash", { command: "go test" })]);
+		expect(shape(done)).toEqual(["user", "assistant_text", "tool_call"]);
 	});
 
 	it("has no live detail once every tool has a result", () => {
@@ -267,6 +268,13 @@ describe("chatRows turn fold", () => {
 		expect(turn.kind === "turn" && shape(turn.rows)).toEqual(["assistant_text", "group"]);
 	});
 
+	it("carries the turn's duration onto its fold", () => {
+		const items = finished();
+		items[items.length - 1] = { ...(items.at(-1) as Extract<ChatItem, { kind: "turn_end" }>), durationMs: 36_000 };
+		const turn = rowsOf(items)[1];
+		expect(turn.kind === "turn" && turn.durationMs).toBe(36_000);
+	});
+
 	it("leaves the open turn unfolded", () => {
 		const items = finished();
 		items.pop();
@@ -312,7 +320,7 @@ describe("chatRows on the recorded long session", () => {
 	const walk = (rows: ChatRow[]): ChatRow[] => rows.flatMap((r) => (r.kind === "turn" ? [r, ...walk(r.rows)] : [r]));
 
 	it("shows far fewer rows than the log has items, with no empty thinking and no subagent text", () => {
-		const rows = chatRows(tr, emptyOverlay, new Set(), "/work/project");
+		const rows = chatRows(tr, emptyOverlay, new Set());
 		expect(rows.length).toBeLessThan(tr.items.length / 2);
 		const all = walk(rows);
 		const thoughts = all.flatMap((r) => (r.kind === "item" && r.item.kind === "thinking" ? [r.item] : []));

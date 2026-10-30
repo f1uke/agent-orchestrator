@@ -17,7 +17,7 @@ export type Question = {
 };
 
 export type ToolBody =
-	| { kind: "bash"; command: string; output: string; failed: boolean }
+	| { kind: "bash"; command: string; output: string; failed: boolean; exitCode?: number }
 	| { kind: "diff"; lines: DiffLine[]; hidden: number }
 	| { kind: "output"; text: string }
 	| { kind: "plan"; plan: string }
@@ -61,7 +61,17 @@ export function shortenPaths(text: string, root: string | undefined): string {
 	return text.replace(pattern, (_, tail: string) => (tail === "/" ? "" : "."));
 }
 
-export type ProcessKind = "commands" | "reads" | "searches" | "edits" | "writes" | "agents" | "web" | "todos" | "tools";
+export type ProcessKind =
+	| "commands"
+	| "reads"
+	| "searches"
+	| "edits"
+	| "writes"
+	| "agents"
+	| "skills"
+	| "web"
+	| "todos"
+	| "tools";
 
 const PROCESS_KIND: Record<string, ProcessKind> = {
 	Bash: "commands",
@@ -74,6 +84,7 @@ const PROCESS_KIND: Record<string, ProcessKind> = {
 	Write: "writes",
 	Agent: "agents",
 	Task: "agents",
+	Skill: "skills",
 	WebFetch: "web",
 	WebSearch: "web",
 	TodoWrite: "todos",
@@ -83,23 +94,56 @@ const PROCESS_KIND: Record<string, ProcessKind> = {
 
 export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolName] ?? "tools";
 
-export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; failed: number; live?: string };
+/** The tool still running at the tail of a group: what it is doing, in plain words, and since when. */
+export type LiveTool = { verb: string; since: string };
 
+export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; failed: number; live?: LiveTool };
+
+// One count, said with a natural article: "read a file", "read 2 files".
 const PHRASE: Record<ProcessKind, (n: number) => string> = {
-	commands: (n) => `ran ${plural(n, "command")}`,
-	reads: (n) => `read ${plural(n, "file")}`,
-	searches: (n) => `searched ${plural(n, "time")}`,
-	edits: (n) => `edited ${plural(n, "file")}`,
-	writes: (n) => `wrote ${plural(n, "file")}`,
-	agents: (n) => `started ${plural(n, "agent")}`,
-	web: (n) => `made ${plural(n, "web request")}`,
+	commands: (n) => `ran ${n === 1 ? "a command" : `${n} commands`}`,
+	reads: (n) => `read ${n === 1 ? "a file" : `${n} files`}`,
+	searches: (n) => `ran ${n === 1 ? "a search" : `${n} searches`}`,
+	edits: (n) => `edited ${n === 1 ? "a file" : `${n} files`}`,
+	writes: (n) => `wrote ${n === 1 ? "a file" : `${n} files`}`,
+	agents: (n) => `started ${n === 1 ? "an agent" : `${n} agents`}`,
+	skills: (n) => (n === 1 ? "ran a skill" : `ran skill ${n} times`),
+	web: (n) => `made ${n === 1 ? "a web request" : `${n} web requests`}`,
 	todos: () => "updated todos",
-	tools: (n) => `used ${plural(n, "other tool")}`,
+	tools: (n) => `used ${n === 1 ? "another tool" : `${n} other tools`}`,
 };
 
-/** The lowercase phrases of a summary, such as `ran 6 commands`, in a fixed kind order. */
-export function processPhrases(summary: ProcessSummary): string[] {
-	return summary.counts.map(({ kind, count }) => PHRASE[kind](count));
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** A summary as one sentence, such as `Ran 2 commands, read a file`, in a fixed kind order. */
+export function processSentence(summary: ProcessSummary): string {
+	return capitalize(summary.counts.map(({ kind, count }) => PHRASE[kind](count)).join(", "));
+}
+
+const baseName = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
+
+const LIVE_VERB: Record<string, (input: Record<string, unknown>) => string> = {
+	Bash: () => "Running a command",
+	Read: (i) => `Reading ${baseName(str(i.file_path))}`,
+	Skill: (i) => `Running skill /${str(i.skill)}`,
+	Agent: (i) => (str(i.subagent_type) ? `Running agent ${str(i.subagent_type)}` : "Running an agent"),
+	Grep: () => "Searching",
+	Glob: () => "Searching",
+	Edit: (i) => `Editing ${baseName(str(i.file_path))}`,
+	MultiEdit: (i) => `Editing ${baseName(str(i.file_path))}`,
+	Write: (i) => `Editing ${baseName(str(i.file_path))}`,
+};
+LIVE_VERB.Task = LIVE_VERB.Agent;
+
+/** What a running call is doing, in plain words: `Running a command`, `Reading sender.go`. */
+export function liveVerb(call: ToolCallItem): string {
+	const say = LIVE_VERB[call.name];
+	return say ? say(isObject(call.input) ? call.input : {}) : `Running ${call.name}`;
+}
+
+/** A call still running: no result yet, and not refused before it could run. */
+export function toolRunning(call: ToolCallItem): boolean {
+	return !call.result && call.permission?.status !== "denied" && call.permission?.status !== "cancelled";
 }
 
 /** A tool that did not run to success: its result errored, the user denied it, or its background task failed. */
@@ -122,6 +166,7 @@ const KIND_ORDER: ProcessKind[] = [
 	"edits",
 	"writes",
 	"agents",
+	"skills",
 	"web",
 	"todos",
 	"tools",
@@ -252,6 +297,7 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 	switch (call.name) {
 		case "Bash": {
 			const command = short(str(input.command));
+			const description = str(input.description);
 			const exit = /^Exit code (\d+)/.exec(output);
 			const failed = call.result?.isError === true;
 			const status: ToolStatus =
@@ -260,18 +306,20 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 					: !call.result
 						? { tone: "running" }
 						: failed
-							? { tone: "error", text: exit ? `exit ${exit[1]}` : "error" }
+							? { tone: "error", text: "Failed" }
 							: { tone: "ok", text: "done" };
 			return {
 				...base,
+				title: description || command,
 				family: "bash",
-				arg: command,
+				arg: description ? command : "",
 				status,
 				body: {
 					kind: "bash",
 					command,
 					output: exit ? output.slice(exit[0].length).replace(/^\n/, "") : output,
 					failed,
+					exitCode: exit ? Number(exit[1]) : undefined,
 				},
 			};
 		}

@@ -37,24 +37,33 @@ function card(
 			theme="dark"
 		/>,
 	);
-	return { head: screen.getByRole("button"), onToggle };
+	return { head: document.querySelector<HTMLElement>(".chat-tool__head")!, onToggle };
 }
 
 describe("ToolCard", () => {
-	it("keeps a failed Bash call shut, with its exit code on the head, and shows the command and output once opened", () => {
+	it("titles a failed Bash call by its description and opens to the command, its exit code and the output", () => {
 		const failed = call(
 			"Bash",
-			{ command: "go test ./..." },
+			{ command: "go test ./...", description: "Run the tests" },
 			{ isError: true, content: "Exit code 1\n--- FAIL: TestX\nok  \tpkg" },
 		);
-		expect(card(failed).head).toHaveAttribute("aria-expanded", "false");
+		const closed = card(failed).head;
+		expect(closed).toHaveAttribute("aria-expanded", "false");
+		expect(closed).toHaveTextContent("Run the tests");
+		expect(within(closed).getByText("Failed")).toHaveClass("chat-tool__status--error");
 		cleanup();
-		const { head } = card(failed, { open: true });
-		expect(head).toHaveTextContent("go test ./...");
-		expect(head).toHaveTextContent("exit 1");
-		expect(screen.getByText("$ go test ./...")).toBeInTheDocument();
-		expect(screen.getByText(/--- FAIL: TestX/)).toHaveClass("chat-term__line--fail");
-		expect(screen.queryByText(/Exit code 1/)).toBeNull();
+		card(failed, { open: true });
+		const body = document.querySelector(".chat-tool__body")! as HTMLElement;
+		expect(within(body).getByText("go test ./...")).toBeInTheDocument();
+		expect(within(body).getByRole("button", { name: /^Copy command/ })).toBeInTheDocument();
+		expect(within(body).getByText("Exit code 1")).toHaveClass("chat-tool__exit");
+		expect(within(body).getByText(/--- FAIL: TestX/)).toHaveClass("chat-term__line--fail");
+	});
+
+	it("titles a Bash call without a description by its command, and shows no exit line when it passed", () => {
+		card(call("Bash", { command: "ls -la" }, { isError: false, content: "a\nb" }), { open: true });
+		expect(document.querySelector(".chat-tool__head")).toHaveTextContent("ls -la");
+		expect(document.querySelector(".chat-tool__exit")).toBeNull();
 	});
 
 	it("keeps a passing Bash call shut until it is toggled", async () => {

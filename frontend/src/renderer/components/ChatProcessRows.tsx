@@ -1,15 +1,21 @@
-import { Brain, ChevronRight, Loader2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { Brain, ChevronRight } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { type ChatRow, itemRowKey, type ProcessMember } from "../lib/chat-rows";
-import { processPhrases, type ProcessSummary, toolFailed } from "../lib/chat-tools";
+import { formatDuration } from "../lib/chat-time";
+import {
+	type LiveTool,
+	liveVerb,
+	processSentence,
+	type ProcessSummary,
+	toolFailed,
+	toolRunning,
+} from "../lib/chat-tools";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
 import { ResolvedLine, ToolCard } from "./ChatToolCard";
 
 export type OpenRows = Readonly<Record<string, boolean>>;
 export type ToggleRow = (key: string, open: boolean) => void;
-
-const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 const latestLine = (text: string) =>
 	text
@@ -43,16 +49,65 @@ export function ThinkingRow({
 	);
 }
 
-function Failed({ count }: { count: number }) {
-	return count > 0 ? <span className="chat-group__failed">{count} failed</span> : null;
+function useNow(everyMs: number): number {
+	const [now, setNow] = useState(Date.now);
+	useEffect(() => {
+		const timer = setInterval(() => setNow(Date.now()), everyMs);
+		return () => clearInterval(timer);
+	}, [everyMs]);
+	return now;
 }
 
-function Head({ open, onToggle, children }: { open: boolean; onToggle: (open: boolean) => void; children: ReactNode }) {
+/** How long something has run, ticking once a second. Only live rows mount one. */
+export function Elapsed({ since }: { since: string }) {
+	const now = useNow(1000);
+	const start = Date.parse(since);
+	if (Number.isNaN(start)) return null;
+	return <span className="chat-live__time"> {formatDuration(now - start)}</span>;
+}
+
+export function LiveDots() {
 	return (
-		<button aria-expanded={open} className="chat-group__head" onClick={() => onToggle(!open)} type="button">
-			<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
+		<span aria-hidden="true" className="chat-dots">
+			<i />
+			<i />
+			<i />
+		</span>
+	);
+}
+
+function Head({
+	open,
+	onToggle,
+	title,
+	children,
+}: {
+	open: boolean;
+	onToggle: (open: boolean) => void;
+	title?: string;
+	children: ReactNode;
+}) {
+	return (
+		<button
+			aria-expanded={open}
+			className="chat-group__head"
+			onClick={() => onToggle(!open)}
+			title={title}
+			type="button"
+		>
 			{children}
+			<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
 		</button>
+	);
+}
+
+function LiveHead({ live }: { live: LiveTool }) {
+	return (
+		<span className="chat-live">
+			<LiveDots />
+			<span className="chat-live__verb">{live.verb}</span>
+			<Elapsed since={live.since} />
+		</span>
 	);
 }
 
@@ -85,44 +140,51 @@ function Member({ member, openRows, toggleRow, theme, root }: MembersProps & { m
 }
 
 /**
- * The tool calls between two replies, as one quiet line. A closed group still
- * shows the calls that failed or were denied.
+ * The tool calls between two replies, as one quiet sentence, or while one
+ * still runs, what it is doing and for how long. A closed group still shows
+ * the calls that failed or were denied.
  */
 export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow, { kind: "group" }> }) {
 	const open = rest.openRows[row.key] ?? false;
 	const { summary } = row;
 	const shown = open ? row.members : row.members.filter((m) => m.kind === "tool" && toolFailed(m.call, m.task));
+	const running = summary.live ? row.members.filter((m) => m.kind === "tool" && toolRunning(m.call)).at(-1) : undefined;
 	return (
-		<div className="chat-group" data-group>
+		<div className="chat-group" data-group data-live={summary.live ? "" : undefined}>
 			<Head onToggle={(next) => rest.toggleRow(row.key, next)} open={open}>
-				<span className="chat-group__text">{capitalize(processPhrases(summary).join(" · "))}</span>
-				<Failed count={summary.failed} />
-				<Live summary={summary} />
+				{summary.live ? (
+					<LiveHead live={summary.live} />
+				) : (
+					<span className="chat-group__text">
+						{processSentence(summary)}
+						{summary.failed > 0 ? <span className="chat-group__failed"> ({summary.failed} failed)</span> : null}
+					</span>
+				)}
 			</Head>
 			{shown.length > 0 ? (
 				<div className="chat-group__body">
-					{shown.map((member) => (
-						<Member key={itemRowKey(member.itemIndex)} member={member} {...rest} />
-					))}
+					{shown.map((member) =>
+						member === running && member.kind === "tool" ? (
+							<div className="chat-group__running" key={itemRowKey(member.itemIndex)}>
+								{liveVerb(member.call)}
+							</div>
+						) : (
+							<Member key={itemRowKey(member.itemIndex)} member={member} {...rest} />
+						),
+					)}
 				</div>
 			) : null}
+			{running?.kind === "tool" ? <ResolvedLine call={running.call} /> : null}
 		</div>
 	);
 }
 
-function Live({ summary }: { summary: ProcessSummary }) {
-	if (summary.live === undefined) return null;
-	return (
-		<span className="chat-group__live">
-			<Loader2 className="chat-icon animate-spin" aria-hidden="true" />
-			<span className="chat-group__live-text" title={summary.live}>
-				{summary.live}
-			</span>
-		</span>
-	);
-}
-
 const messages = (n: number) => (n === 1 ? "1 message" : `${n} messages`);
+
+function turnDetail(summary: ProcessSummary, replies: number): string {
+	const sentence = processSentence(summary);
+	return replies > 0 ? `${sentence}, ${messages(replies)}` : sentence;
+}
 
 /** A finished turn's work, folded between the user's message and the last reply. */
 export function TurnRow({
@@ -137,12 +199,13 @@ export function TurnRow({
 	renderRow: (row: ChatRow) => ReactNode;
 }) {
 	const open = openRows[row.key] ?? false;
-	const parts = ["Worked", ...processPhrases(row.summary), ...(row.messages > 0 ? [messages(row.messages)] : [])];
 	return (
 		<div className="chat-group chat-turn" data-turn>
-			<Head onToggle={(next) => toggleRow(row.key, next)} open={open}>
-				<span className="chat-group__text">{parts.join(" · ")}</span>
-				<Failed count={row.summary.failed} />
+			<Head onToggle={(next) => toggleRow(row.key, next)} open={open} title={turnDetail(row.summary, row.messages)}>
+				<span className="chat-group__text">
+					{row.durationMs === undefined ? "Worked" : `Worked for ${formatDuration(row.durationMs)}`}
+					{row.summary.failed > 0 ? <span className="chat-group__failed"> · {row.summary.failed} failed</span> : null}
+				</span>
 			</Head>
 			{open ? (
 				<div className="chat-turn__body">
