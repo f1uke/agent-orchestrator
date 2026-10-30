@@ -5,7 +5,7 @@ import { expect, type Page, test } from "@playwright/test";
 // (on the first row of each new stream), so it runs after the list has repositioned its rows:
 // what was painted.
 type Row = { key: string; top: number; bottom: number };
-type Sample = { frame: number; scrollTop: number; fromEnd: number; rows: Row[] };
+type Sample = { frame: number; session: string; visible: boolean; scrollTop: number; fromEnd: number; rows: Row[] };
 
 function recordFrames() {
 	const w = window as unknown as { __frames: Sample[]; __mark: number };
@@ -32,7 +32,15 @@ function recordFrames() {
 			.sort((a, b) => a.index - b.index)
 			.map(({ key, top, bottom }) => ({ key, top, bottom }));
 		const last = w.__frames.at(-1);
-		const next = { frame, scrollTop: sc.scrollTop, fromEnd: sc.scrollHeight - sc.scrollTop - sc.clientHeight, rows };
+		const session = sc.closest<HTMLElement>('[data-testid="chat-pane"]')?.dataset.session ?? "";
+		const next = {
+			frame,
+			session,
+			visible: getComputedStyle(sc).visibility !== "hidden",
+			scrollTop: sc.scrollTop,
+			fromEnd: sc.scrollHeight - sc.scrollTop - sc.clientHeight,
+			rows,
+		};
 		if (last?.frame === frame) w.__frames[w.__frames.length - 1] = next;
 		else w.__frames.push(next);
 	};
@@ -177,6 +185,23 @@ test.describe("chat scroll", () => {
 				await go(page, then);
 			}
 			await expectAtEnd(page, then ?? first);
+		}
+	});
+
+	test("a switched-to session paints its first frame at the newest row, with no scroll on the way", async ({
+		page,
+	}) => {
+		await page.goto("/#/projects/ao-demo/sessions/demo-chat");
+		await expectAtEnd(page, "demo-chat");
+		for (const id of ["demo-chat-tall", "demo-chat", "demo-chat-long", "demo-chat-tall"]) {
+			const mark = await markFrames(page);
+			await go(page, id);
+			await expectAtEnd(page, id);
+			await page.waitForTimeout(300);
+			const painted = (await framesSince(page, mark)).filter((s) => s.session === id && s.visible && s.rows.length > 0);
+			expect(painted.length, `${id} painted frames`).toBeGreaterThan(0);
+			const away = painted.filter((s) => s.fromEnd > 2).map((s) => `frame ${s.frame}: ${Math.round(s.fromEnd)}px`);
+			expect(away, `${id}: frames painted above the newest row`).toEqual([]);
 		}
 	});
 

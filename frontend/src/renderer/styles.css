@@ -7952,6 +7952,12 @@ ol.note-prose__list {
 	padding: 24px 32px 16px;
 }
 
+/* Until the newest row is laid out at the end, the stream stays unseen, so a switch shows it at once
+   instead of the list growing past the viewport. */
+.chat-scroll[data-unrevealed] {
+	visibility: hidden;
+}
+
 .chat-col {
 	position: relative;
 	max-width: 860px;

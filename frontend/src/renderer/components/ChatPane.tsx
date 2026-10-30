@@ -155,6 +155,7 @@ export function ChatPane({
 			) : (
 				<ChatStream
 					disabled={actions.hostDown}
+					replaying={chat.connection === "connecting"}
 					jumpTo={jumpTo}
 					onAnswer={onAnswer}
 					onJumped={onJumped}
@@ -267,6 +268,8 @@ const STICK_TO_BOTTOM_PX = 48;
 
 type StreamProps = {
 	rows: ChatRow[];
+	/** The session's log is still being replayed: the stream lays out at the end, unseen, until it catches up. */
+	replaying: boolean;
 	root: string;
 	pending: Pending[];
 	theme: Theme;
@@ -304,7 +307,18 @@ function isEditable(target: EventTarget): boolean {
 	);
 }
 
-function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, jumpTo, onJumped }: StreamProps) {
+function ChatStream({
+	rows,
+	replaying,
+	root,
+	pending,
+	theme,
+	requests,
+	disabled,
+	onAnswer,
+	jumpTo,
+	onJumped,
+}: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
@@ -347,6 +361,19 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 	});
 
 	useLayoutEffect(pinToEnd);
+
+	// A session opens unseen and shows itself once its newest row is laid out at the end, so a switch
+	// never paints the list growing or settling into place.
+	const [revealed, setRevealed] = useState(false);
+	const reveal = useCallback(() => {
+		const el = scrollRef.current;
+		if (!el || replaying) return;
+		const last = virtualizer.getVirtualItems().at(-1);
+		if (rows.length === 0 || (last?.index === rows.length - 1 && distanceFromEnd(el) <= AT_END_PX)) setRevealed(true);
+	}, [replaying, rows.length, virtualizer]);
+	useLayoutEffect(() => {
+		if (!revealed) reveal();
+	});
 
 	// Opening a row is reading it: the stream stops pinning the end, so the row
 	// the user clicked stays where it was while it grows.
@@ -441,6 +468,7 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 		<div className="chat-stream-wrap">
 			<div
 				className="chat-scroll"
+				data-unrevealed={revealed ? undefined : ""}
 				data-testid="chat-stream"
 				onKeyDown={(e) => {
 					if (SCROLL_UP_KEYS.has(e.key) && !isEditable(e.target)) leaveEnd(e.currentTarget);
