@@ -36,7 +36,7 @@ func stubAgentBinaries(t *testing.T) {
 	}
 }
 
-func TestClaudeLaunchesCarryTheTaskToolsOnEveryTransportAndKind(t *testing.T) {
+func TestClaudeSpawnsAndRestoresCarryTheTaskToolsOnEveryTransportAndKind(t *testing.T) {
 	stubAgentBinaries(t)
 	for _, tc := range []struct {
 		name      string
@@ -58,7 +58,22 @@ func TestClaudeLaunchesCarryTheTaskToolsOnEveryTransportAndKind(t *testing.T) {
 				t.Fatalf("transport = %q, want %q", rec.Transport, tc.transport)
 			}
 			if got := f.rt.lastCfg.Env[todoToolsEnv]; got != "1" {
-				t.Fatalf("runtime env %s = %q, want 1", todoToolsEnv, got)
+				t.Fatalf("spawn runtime env %s = %q, want 1", todoToolsEnv, got)
+			}
+
+			row := f.st.sessions[rec.ID]
+			row.IsTerminated = true
+			f.st.sessions[rec.ID] = row
+			f.rt.lastCfg = ports.RuntimeConfig{}
+			created := f.rt.created
+			if _, err := f.m.Restore(ctx, rec.ID); err != nil {
+				t.Fatal(err)
+			}
+			if f.rt.created != created+1 {
+				t.Fatalf("restore created %d runtimes, want 1 relaunch", f.rt.created-created)
+			}
+			if got := f.rt.lastCfg.Env[todoToolsEnv]; got != "1" {
+				t.Fatalf("restore runtime env %s = %q, want 1", todoToolsEnv, got)
 			}
 		})
 	}
