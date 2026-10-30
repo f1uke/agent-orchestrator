@@ -257,6 +257,43 @@ test.describe("chat scroll", () => {
 		expect(behind, "keeps following after the jump").toEqual([]);
 	});
 
+	test("a rail jump lands the turn's message at the top in one move, paints no overlap, and stops following", async ({
+		page,
+	}) => {
+		await openStreamingTall(page);
+		const rail = page.getByRole("navigation", { name: "Turns" });
+		const tick = rail.getByRole("button", { name: /^Turn 10:/ });
+		const mark = await markFrames(page);
+		await tick.click();
+		const target = stream(page).locator(".chat-row", { hasText: "Step 10: run the checks" });
+		await expect(target).toBeVisible();
+		await page.waitForTimeout(1500);
+
+		const key = await target.getAttribute("data-key");
+		const frames = await framesSince(page, mark);
+		const landed = frames.findIndex((s) => s.rows.some((r) => r.key === key));
+		expect(landed, "the turn's message was painted").toBeGreaterThanOrEqual(0);
+		const tops = frames.slice(landed).map((s) => s.rows.find((r) => r.key === key)?.top);
+		expect(new Set(tops).size, `one landing position, saw ${[...new Set(tops)].join(", ")}`).toBe(1);
+		expect(tops[0], "the message sits at the top").toBeLessThanOrEqual(40);
+		expect(maxOverlap(frames), "no painted frame overlaps two rows").toBeLessThanOrEqual(1);
+		expect(maxMove(frames.slice(landed)), "nothing moves once it landed").toBeLessThanOrEqual(1);
+		await expect(tick).toHaveAttribute("aria-current", "true");
+		expect(await fromEnd(page), "the jump left the end, and new turns below did not pull it back").toBeGreaterThan(100);
+	});
+
+	test("the rail's current tick follows the scroll", async ({ page }) => {
+		await openStreamingTall(page);
+		const rail = page.getByRole("navigation", { name: "Turns" });
+		const current = rail.locator('[aria-current="true"]');
+		const atEnd = await current.getAttribute("aria-label");
+		await rail.getByRole("button", { name: /^Turn 5:/ }).click();
+		await expect(current).toHaveAttribute("aria-label", /^Turn 5:/);
+		await wheelOverStream(page, 3, 400, 50);
+		await expect(current).not.toHaveAttribute("aria-label", /^Turn 5:/);
+		expect(await current.getAttribute("aria-label")).not.toBe(atEnd);
+	});
+
 	test("scrolled up with nothing new below, there is no jump button", async ({ page }) => {
 		await open(page, "demo-chat");
 		await expect(stream(page).locator("[data-streaming]")).toContainText("So far 31 of 50 passed with no failures.");

@@ -20,6 +20,7 @@ import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
 import { clockTime, formatDuration } from "../lib/chat-time";
 import { formatTokens, sessionActivity } from "../lib/chat-inspect";
+import { activeTurnIndex, railTurns } from "../lib/chat-rail";
 import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
@@ -30,6 +31,7 @@ import { ChatComposer } from "./ChatComposer";
 import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow } from "./ChatProcessRows";
+import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
 
@@ -367,6 +369,32 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 		[rows, setFollowing, virtualizer],
 	);
 
+	const turns = useMemo(() => railTurns(rows), [rows]);
+	const turnRows = useMemo(() => {
+		const indexOf = new Map(rows.map((row, i) => [row.key, i]));
+		return turns.map((turn) => indexOf.get(turn.key) ?? 0);
+	}, [rows, turns]);
+	const colRef = useRef<HTMLDivElement | null>(null);
+	const setCol = useCallback(
+		(node: HTMLDivElement | null) => {
+			colRef.current = node;
+			virtualizer.containerRef(node);
+		},
+		[virtualizer],
+	);
+	const [activeTurn, setActiveTurn] = useState(0);
+
+	// The turn being read is the last one whose opening row sits above the viewport's top third.
+	const findActiveTurn = useCallback(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const starts = turnRows.map((i) => virtualizer.measurementsCache[i]?.start ?? 0);
+		const probe = el.scrollTop + el.clientHeight / 3 - (colRef.current?.offsetTop ?? 0);
+		setActiveTurn(activeTurnIndex(starts, probe));
+	}, [turnRows, virtualizer]);
+
+	useLayoutEffect(findActiveTurn, [findActiveTurn]);
+
 	const jumpToLatest = useCallback(() => {
 		setFollowing(true);
 		pinToEnd();
@@ -385,6 +413,7 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 
 	const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
 		const el = e.currentTarget;
+		findActiveTurn();
 		if (distanceFromEnd(el) <= AT_END_PX) setFollowing(true);
 		else if (draggingRef.current) setFollowing(false);
 	};
@@ -413,7 +442,7 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 				ref={scrollRef}
 			>
 				{rows.length === 0 ? <div className="chat-empty">Nothing in this session's log yet.</div> : null}
-				<div className="chat-col" ref={virtualizer.containerRef}>
+				<div className="chat-col" ref={setCol}>
 					{virtualizer.getVirtualItems().map((v) => {
 						const row = rows[v.index];
 						return (
@@ -440,6 +469,7 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 					})}
 				</div>
 			</div>
+			<ChatTurnRail active={activeTurn} onJump={scrollToRow} turns={turns} />
 			{newBelow ? (
 				<button
 					aria-label="Jump to latest"

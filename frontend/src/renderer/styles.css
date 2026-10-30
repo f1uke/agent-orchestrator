@@ -7799,6 +7799,153 @@ ol.note-prose__list {
 	min-height: 0;
 	flex: 1;
 	flex-direction: column;
+	container-type: inline-size;
+}
+
+/* The turn rail: one tick per turn in the gutter right of the chat column,
+   clear of the text and of the scrollbar. */
+.chat-rail {
+	position: absolute;
+	top: 50%;
+	right: 22px;
+	z-index: 15;
+	display: flex;
+	width: 32px;
+	max-height: min(420px, calc(100% - 120px));
+	flex-direction: column;
+	transform: translateY(-50%);
+}
+
+.chat-rail__ladder {
+	display: flex;
+	min-height: 0;
+	flex-direction: column;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-width: none;
+}
+
+.chat-rail__ladder::-webkit-scrollbar {
+	display: none;
+}
+
+.chat-rail__ladder--fade-top {
+	mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
+}
+
+.chat-rail__ladder--fade-bottom {
+	mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+}
+
+.chat-rail__ladder--fade-top.chat-rail__ladder--fade-bottom {
+	mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+}
+
+.chat-rail__tick {
+	position: relative;
+	height: 12px;
+	flex: none;
+	cursor: pointer;
+}
+
+.chat-rail__tick::before {
+	position: absolute;
+	top: 50%;
+	right: 4px;
+	width: 20px;
+	height: 2px;
+	border-radius: 2px;
+	background: var(--fg-passive);
+	content: "";
+	opacity: 0.6;
+	transform: translateY(-50%) scaleX(0.55);
+	transform-origin: right center;
+	transition:
+		transform 140ms ease,
+		background-color 140ms ease,
+		opacity 140ms ease;
+}
+
+.chat-rail__tick:hover::before {
+	background: var(--fg-muted);
+	opacity: 1;
+	transform: translateY(-50%) scaleX(0.8);
+}
+
+.chat-rail__tick[aria-current="true"]::before {
+	background: var(--fg);
+	opacity: 1;
+	transform: translateY(-50%) scaleX(1);
+}
+
+.chat-rail__tick:focus-visible {
+	outline: none;
+}
+
+.chat-rail__tick:focus-visible::before {
+	background: var(--accent);
+	opacity: 1;
+	transform: translateY(-50%) scaleX(1);
+}
+
+.chat-rail__card {
+	position: absolute;
+	right: calc(100% + 8px);
+	width: 300px;
+	padding: 10px 12px;
+	border: 1px solid var(--border-1);
+	border-radius: 10px;
+	background: var(--bg-2);
+	box-shadow: var(--shadow);
+	font-size: 12px;
+	line-height: 1.45;
+	pointer-events: none;
+	transform: translateY(-50%);
+	animation: chat-rail-card-in 120ms ease-out;
+}
+
+.chat-rail__turn {
+	color: var(--fg);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.chat-rail__prompt {
+	overflow: hidden;
+	margin-top: 2px;
+	color: var(--fg-muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-rail__reply {
+	display: -webkit-box;
+	overflow: hidden;
+	margin-top: 4px;
+	color: var(--fg-passive);
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+}
+
+@keyframes chat-rail-card-in {
+	from {
+		opacity: 0;
+	}
+}
+
+/* No gutter beside the 860px column: the rail would cover the text. */
+@container (max-width: 1000px) {
+	.chat-rail {
+		display: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-rail__tick::before,
+	.chat-rail__card {
+		transition: none;
+		animation: none;
+	}
 }
 
 .chat-scroll {
