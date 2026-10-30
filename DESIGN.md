@@ -128,6 +128,17 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   (Approve / Edit first / Snooze / Reject with a reason). A conflict card is two
   columns - the rule you have, your newer words (amber) - with a three-way
   "Which wins?" that states each side's consequence before you commit.
+- **Derived (2026-10-30), the reference has no chat:** the **chat view** of a
+  headless chat session (`components/ChatPane.tsx`, `ChatToolCard.tsx`; `.chat-*`
+  in `styles.css`), from the approved headless-chat mockup. An 860px centred
+  column; user input as a right-aligned `--bg-2` bubble; assistant text through
+  `NoteMarkdown`; tool cards on `--bg-1` with a hairline `--border-1` and 8px
+  radius, Edit/Write diffs through `DiffRows`; `ao send` messages as 10px cards
+  tinted with `--purple` (peer) or `--accent` (orchestrator); a pending request
+  ringed in needs-you `--lane-needs` (a plan in `--accent`); settled requests as
+  a dashed one-line outcome. Chat | Terminal | Events is a segmented control in
+  the shell topbar, shown only for chat sessions. No new tokens: every tint is a
+  `color-mix` of an existing one.
   No decision is final (2026-10-04): a snoozed proposal keeps the whole decide
   bar plus Unsnooze; a rejected one has Reopen; an approved one has Edit
   (the file as it is now, same gates) and Undo; a settled conflict has Undo.
