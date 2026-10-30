@@ -24,7 +24,6 @@ const (
 	Knowledge Root = "knowledge"
 )
 
-// rootOrder is the order a relative ref is tried in.
 var rootOrder = []Root{Worktree, Knowledge}
 
 // Kind tells the chat view how to present a file.
@@ -52,9 +51,7 @@ type kindSpec struct {
 	max  int64
 }
 
-// kinds is the allowlist and the only place the type policy lives: extension
-// (lower case, no dot) to kind, Content-Type and size cap. An extension that is
-// not here is not servable.
+// kinds is the type allowlist: extension to kind, Content-Type and size cap.
 var kinds = map[string]kindSpec{
 	"png":      {KindImage, "image/png", 25 * mib},
 	"jpg":      {KindImage, "image/jpeg", 25 * mib},
@@ -98,9 +95,7 @@ type File struct {
 // directory is missing is absent.
 type Roots map[Root]string
 
-// NewRoots resolves the two directories once, so every later containment check
-// compares against the real location. On macOS a temp or home path is often
-// itself a symlink, and a lexical comparison against it would refuse every file.
+// NewRoots resolves both directories once, because macOS temp and home paths are symlinks.
 func NewRoots(worktree, knowledge string) Roots {
 	roots := Roots{}
 	for root, dir := range map[Root]string{Worktree: worktree, Knowledge: knowledge} {
@@ -119,10 +114,7 @@ func NewRoots(worktree, knowledge string) Roots {
 	return roots
 }
 
-// Open checks that rel names a servable file in root and returns it with its
-// resolved absolute path. rel must be relative and must not contain a ".."
-// segment: it is refused, never clamped, so a request for one file never
-// quietly serves another.
+// Open returns the servable file rel names in root; ".." in rel is refused, never clamped.
 func (r Roots) Open(root Root, rel string) (File, string, error) {
 	base, ok := r[root]
 	if !ok || !cleanRel(rel) {
@@ -221,9 +213,8 @@ func (r Roots) openAbsolute(abs string) []File {
 	return nil
 }
 
-// globAbsolute globs only below the pattern's literal directory prefix, and only
-// when that prefix resolves inside a root. A pattern such as /*/*.png therefore
-// never walks anything outside the roots.
+// globAbsolute expands only below the pattern's literal prefix, and only when
+// that prefix is inside a root, so /*/*.png never walks the disk.
 func (r Roots) globAbsolute(pattern string) []File {
 	segments := strings.Split(filepath.ToSlash(filepath.Clean(pattern)), "/")
 	literal := 0
@@ -258,9 +249,6 @@ func (r Roots) globRelative(pattern string) []File {
 	return out
 }
 
-// globIn matches a root-relative pattern and keeps the first limit servable
-// results in path order, de-duplicated by resolved path. Sorting before the cap
-// keeps the cap from depending on directory order.
 func (r Roots) globIn(root Root, pattern string, limit int) []File {
 	base, ok := r[root]
 	if !ok || limit <= 0 {
@@ -291,8 +279,6 @@ func (r Roots) globIn(root Root, pattern string, limit int) []File {
 	return out
 }
 
-// escapeGlob makes a literal directory safe to prefix a pattern with, so a root
-// whose own path holds a glob character still matches only itself.
 func escapeGlob(dir string) string {
 	var b strings.Builder
 	for _, c := range dir {
@@ -304,8 +290,6 @@ func escapeGlob(dir string) string {
 	return b.String()
 }
 
-// cleanRel reports whether rel is a plain relative path: non-empty, no NUL, not
-// absolute, and no ".." segment.
 func cleanRel(rel string) bool {
 	if rel == "" || strings.ContainsRune(rel, 0) || strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, `\`) || filepath.IsAbs(rel) {
 		return false
@@ -313,12 +297,10 @@ func cleanRel(rel string) bool {
 	return !hasParentSegment(rel)
 }
 
-// hasParentSegment matches whole segments, so "..config" and "a..b" pass.
 func hasParentSegment(p string) bool {
 	return slices.Contains(strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }), "..")
 }
 
-// relWithin returns abs relative to root and whether it stays inside root.
 func relWithin(root, abs string) (string, bool) {
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {

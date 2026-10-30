@@ -120,6 +120,19 @@ func TestOpenReadsTheKnowledgeRoot(t *testing.T) {
 	}
 }
 
+func TestOpenServesNamesThatOnlyContainDots(t *testing.T) {
+	f := newFixture(t)
+	for _, rel := range []string{"a..b.png", "..config/x.png", "dir/...png"} {
+		write(t, filepath.Join(f.worktree, filepath.FromSlash(rel)), "png")
+		if _, _, err := f.roots.Open(chatfiles.Worktree, rel); err != nil {
+			t.Errorf("Open %q = %v, want the file: only a whole \"..\" segment is a parent", rel, err)
+		}
+		if got := f.roots.Resolve(rel); len(got) != 1 {
+			t.Errorf("Resolve %q = %v, want the file", rel, got)
+		}
+	}
+}
+
 func TestOpenRefusesWhatItShouldNotServe(t *testing.T) {
 	f := newFixture(t)
 	write(t, filepath.Join(f.worktree, "ok.png"), "png")

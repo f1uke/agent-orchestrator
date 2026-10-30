@@ -20,9 +20,7 @@ import (
 const (
 	maxChatFileRefs     = 64
 	maxChatFileRefBytes = 1024
-	// maxChatFilesBody leaves room for 64 refs of the longest length once JSON
-	// escaping has expanded them.
-	maxChatFilesBody = 512 << 10
+	maxChatFilesBody    = 512 << 10
 
 	// chatFileCSP keeps an HTML or SVG file opened as a document on the daemon
 	// origin from running script or reaching the API.
@@ -55,11 +53,14 @@ func (c *ChatFilesController) roots(r *http.Request) (chatfiles.Roots, error) {
 		return nil, err
 	}
 	knowledge := ""
-	// A project id is one directory name; anything else would walk out of the store.
-	if id := string(sess.ProjectID); c.KnowledgeDir != "" && id != "" && id != "." && id != ".." && filepath.Base(id) == id {
+	if id := string(sess.ProjectID); c.KnowledgeDir != "" && isSingleDirName(id) {
 		knowledge = filepath.Join(c.KnowledgeDir, id)
 	}
 	return chatfiles.NewRoots(sess.Metadata.WorkspacePath, knowledge), nil
+}
+
+func isSingleDirName(name string) bool {
+	return name != "" && name != "." && name != ".." && filepath.Base(name) == name
 }
 
 func (c *ChatFilesController) resolve(w http.ResponseWriter, r *http.Request) {
