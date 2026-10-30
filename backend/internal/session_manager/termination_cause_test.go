@@ -12,7 +12,7 @@ func managerWithLCM() (*Manager, *fakeStore, *fakeLCM) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	lcm := &fakeLCM{store: st}
-	m := New(Deps{
+	m := New(Deps{WorkerTransport: terminalTransport,
 		Runtime: &fakeRuntime{}, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st,
 		Messenger: &fakeMessenger{}, Lifecycle: lcm,
 		LookPath: func(string) (string, error) { return "/bin/true", nil },

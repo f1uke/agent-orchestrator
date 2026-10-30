@@ -140,6 +140,8 @@ func (stubAgent) SessionInfo(context.Context, ports.SessionRef) (ports.SessionIn
 }
 
 // stubAgents resolves every harness to the same stubAgent.
+func terminalTransport() domain.Transport { return domain.TransportTerminal }
+
 type stubAgents struct{}
 
 func (stubAgents) Agent(domain.AgentHarness) (ports.Agent, bool) { return stubAgent{}, true }
@@ -220,7 +222,7 @@ func newStackWithIdleClose(t *testing.T, idleTTL time.Duration, clock func() tim
 	prm := prsvc.New(prsvc.Deps{Writer: store, Lifecycle: lcm})
 	rt := &stubRuntime{}
 	ws := &stubWorkspace{}
-	mgr := sessionmanager.New(sessionmanager.Deps{Runtime: rt, Agents: stubAgents{}, Workspace: ws, Store: store, Messenger: msg, Lifecycle: lcm, LookPath: func(string) (string, error) { return "/usr/bin/true", nil }, IdleCloseTTL: idleTTL, Clock: clock})
+	mgr := sessionmanager.New(sessionmanager.Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: stubAgents{}, Workspace: ws, Store: store, Messenger: msg, Lifecycle: lcm, LookPath: func(string) (string, error) { return "/usr/bin/true", nil }, IdleCloseTTL: idleTTL, Clock: clock})
 	sm := sessionsvc.New(mgr, store)
 	return &stack{store: store, sm: sm, mgr: mgr, lcm: lcm, prm: prm, rt: rt, ws: ws, msg: msg}
 }

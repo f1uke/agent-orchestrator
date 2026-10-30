@@ -220,7 +220,7 @@ func TestRestore_AppliesSymlinksAddedAfterSpawn(t *testing.T) {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: project, Config: domain.ProjectConfig{Symlinks: []string{".env"}}}
 	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: workspace, Branch: "b", AgentSessionID: "agent-x"})
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{path: workspace}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{path: workspace}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Restore(ctx, "mer-1"); err != nil {
 		t.Fatal(err)

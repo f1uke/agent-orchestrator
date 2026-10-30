@@ -91,7 +91,7 @@ func newCrewStackWithIdle(t *testing.T, idleTTL time.Duration) *crewStack {
 	rt := &stubRuntime{perSessionHandles: true, trackLiveness: true}
 	st := &crewStack{store: store, rt: rt, msg: msg, repo: repo, root: managed, now: time.Now()}
 	st.lcm = lcm
-	st.mgr = sessionmanager.New(sessionmanager.Deps{
+	st.mgr = sessionmanager.New(sessionmanager.Deps{WorkerTransport: terminalTransport,
 		Runtime: rt, Agents: stubAgents{}, Workspace: ws, Store: store, Messenger: msg,
 		Lifecycle:    lcm,
 		LookPath:     func(string) (string, error) { return "/usr/bin/true", nil },

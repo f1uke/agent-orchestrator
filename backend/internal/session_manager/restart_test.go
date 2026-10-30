@@ -136,7 +136,7 @@ func TestRestart_RealDirtyWorktreePreservesUncommittedWork(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: repo, Config: testRoleAgents()}
 	rt := &fakeRuntime{}
-	m := New(Deps{
+	m := New(Deps{WorkerTransport: terminalTransport,
 		Runtime: rt, Agents: fakeAgents{}, Workspace: realWS, Store: st,
 		Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		LookPath: func(string) (string, error) { return "/bin/true", nil },

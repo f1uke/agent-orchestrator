@@ -389,8 +389,10 @@ type SpawnSessionRequest struct {
 	ClaudeProfile string `json:"claudeProfile,omitempty"`
 	// Transport is how the agent is driven (`ao spawn --transport`): terminal
 	// runs its TUI in the pane, chat runs a headless claude under the session
-	// host. Absent/empty means terminal. chat needs the claude-code agent and is
-	// refused with TRANSPORT_UNSUPPORTED otherwise.
+	// host. Absent/empty lets the daemon choose: the project's workerTransport,
+	// else the global one, else chat for a claude-code worker, and terminal for
+	// every other agent and for an orchestrator. chat named here needs the
+	// claude-code agent and is refused with TRANSPORT_UNSUPPORTED otherwise.
 	Transport string `json:"transport,omitempty" enum:"terminal,chat"`
 }
 
@@ -2007,6 +2009,19 @@ type ResponseLanguageSettingsResponse struct {
 // /api/v1/settings/response-language.
 type SetResponseLanguageSettingsRequest struct {
 	Language string `json:"language"`
+}
+
+// WorkerTransportSettingsResponse mirrors workertransport.Settings on the wire.
+// It is the body of GET/PUT /api/v1/settings/worker-transport: how a new
+// claude-code worker is driven unless its project or its spawn says otherwise.
+type WorkerTransportSettingsResponse struct {
+	WorkerTransport domain.Transport `json:"workerTransport" enum:"terminal,chat"`
+}
+
+// SetWorkerTransportSettingsRequest is the body of PUT
+// /api/v1/settings/worker-transport.
+type SetWorkerTransportSettingsRequest struct {
+	WorkerTransport domain.Transport `json:"workerTransport" enum:"terminal,chat"`
 }
 
 // SystemPromptItem is one editable prompt kind on the wire: its built-in default

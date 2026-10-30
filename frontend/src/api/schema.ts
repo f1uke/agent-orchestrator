@@ -2898,6 +2898,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/worker-transport": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the global default transport for new claude-code workers */
+        get: operations["getWorkerTransportSettings"];
+        /** Replace the global default transport for new claude-code workers */
+        put: operations["setWorkerTransportSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sim/clones": {
         parameters: {
             query?: never;
@@ -4813,6 +4831,8 @@ export interface components {
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
             usesTestiny?: boolean;
             worker?: components["schemas"]["RoleOverride"];
+            /** @enum {string} */
+            workerTransport?: "terminal" | "chat";
         };
         ProjectGetResponse: {
             project: components["schemas"]["ProjectOrDegraded"];
@@ -6478,6 +6498,10 @@ export interface components {
             /** @description Only rows under these '## ' headings. Empty means every section. */
             sections?: string[];
         };
+        SetWorkerTransportSettingsRequest: {
+            /** @enum {string} */
+            workerTransport: "terminal" | "chat";
+        };
         SimBaseView: {
             deviceType: string;
             /** @description The label a clone of this base gets when none is named. */
@@ -7180,6 +7204,10 @@ export interface components {
             ownerAliases: string[];
             requireCreated: boolean;
             sections: string[];
+        };
+        WorkerTransportSettingsResponse: {
+            /** @enum {string} */
+            workerTransport: "terminal" | "chat";
         };
         WorkspaceChangesResponse: {
             available: boolean;
@@ -18649,6 +18677,77 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getWorkerTransportSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerTransportSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setWorkerTransportSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetWorkerTransportSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerTransportSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

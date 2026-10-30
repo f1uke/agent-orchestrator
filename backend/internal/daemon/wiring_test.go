@@ -31,6 +31,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/treewatch"
+	"github.com/aoagents/agent-orchestrator/backend/internal/workertransport"
 )
 
 // TestWiring_WriteFlowsToBroadcaster exercises the real boot path end to end:
@@ -171,12 +172,16 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptoverrides.NewStore: %v", err)
 	}
+	workerTransport, err := workertransport.NewStore(cfg.DataDir)
+	if err != nil {
+		t.Fatalf("workertransport.NewStore: %v", err)
+	}
 	responseLang, err := responselang.NewStore(cfg.DataDir)
 	if err != nil {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
 	watcher := &recordingWatcher{}
-	svc, reviewSvc, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, claudeprofile.Builtins(), promptOverrides, responseLang, nil, watcher, log)
+	svc, reviewSvc, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, claudeprofile.Builtins(), promptOverrides, responseLang, workerTransport, nil, watcher, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}
@@ -311,11 +316,15 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptoverrides.NewStore: %v", err)
 	}
+	workerTransport, err := workertransport.NewStore(cfg.DataDir)
+	if err != nil {
+		t.Fatalf("workertransport.NewStore: %v", err)
+	}
 	responseLang, err := responselang.NewStore(cfg.DataDir)
 	if err != nil {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
-	svc, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, claudeprofile.Builtins(), promptOverrides, responseLang, nil, nil, log)
+	svc, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, claudeprofile.Builtins(), promptOverrides, responseLang, workerTransport, nil, nil, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}

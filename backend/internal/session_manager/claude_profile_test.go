@@ -52,7 +52,7 @@ func newProfileFixture(t *testing.T) profileFixture {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	rt := &fakeRuntime{}
 	agent := &launchEnvAgent{}
-	m := New(Deps{Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }, ClaudeProfiles: profiles})
+	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }, ClaudeProfiles: profiles})
 	return profileFixture{m: m, st: st, rt: rt, agent: agent, work: work, profiles: profiles}
 }
 

@@ -21,7 +21,7 @@ func managerWithAgentAndDataDir(t *testing.T, agents ports.AgentResolver) (*Mana
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	rt := &fakeRuntime{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{
+	m := New(Deps{WorkerTransport: terminalTransport,
 		Runtime: rt, Agents: agents, Workspace: &fakeWorkspace{path: t.TempDir()},
 		Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		DataDir: dataDir, LookPath: lookPath,

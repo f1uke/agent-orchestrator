@@ -408,6 +408,8 @@ var schemaNames = map[string]string{
 	"ControllersSetAutoNudgeSettingsRequest":        "SetAutoNudgeSettingsRequest",
 	"ControllersResponseLanguageSettingsResponse":   "ResponseLanguageSettingsResponse",
 	"ControllersSetResponseLanguageSettingsRequest": "SetResponseLanguageSettingsRequest",
+	"ControllersWorkerTransportSettingsResponse":    "WorkerTransportSettingsResponse",
+	"ControllersSetWorkerTransportSettingsRequest":  "SetWorkerTransportSettingsRequest",
 	"ControllersWikiSettingsResponse":               "WikiSettingsResponse",
 	"ControllersSetWikiSettingsRequest":             "SetWikiSettingsRequest",
 	"ControllersRefLinksSettingsResponse":           "RefLinksSettingsResponse",
@@ -2836,6 +2838,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetResponseLanguageSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ResponseLanguageSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/worker-transport", id: "getWorkerTransportSettings", tag: "settings",
+			summary: "Fetch the global default transport for new claude-code workers",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WorkerTransportSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/worker-transport", id: "setWorkerTransportSettings", tag: "settings",
+			summary: "Replace the global default transport for new claude-code workers",
+			reqBody: controllers.SetWorkerTransportSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WorkerTransportSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

@@ -35,6 +35,7 @@ import (
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
+	"github.com/aoagents/agent-orchestrator/backend/internal/workertransport"
 )
 
 type notificationSink interface {
@@ -158,7 +159,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, claudeProfiles *claudeprofile.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, claudeProfiles *claudeprofile.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, workerTransport *workertransport.Store, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -210,6 +211,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// against the per-project override, so a settings edit takes effect on the
 		// next spawn/restore.
 		ResponseLanguage: func() string { return responseLang.Language() },
+		WorkerTransport:  workerTransport.Transport,
 		ClaudeProfiles:   claudeProfiles,
 	})
 	// A crew is one task on one worktree. When the reducer terminates a dev

@@ -50,7 +50,7 @@ func newChildManager(capable bool, children *fakeChildren) (*Manager, *fakeStore
 	rt := &fakeRuntime{}
 	agent := &childCapableAgent{capable: capable}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 	if children != nil {
 		m.SetChildren(children)
 	}

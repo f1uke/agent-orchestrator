@@ -280,6 +280,7 @@ type Store interface {
 	// restart. ok=false means the session id does not exist.
 	SetSessionClaudeProfile(ctx context.Context, id domain.SessionID, profile string, updatedAt time.Time) (ok bool, err error)
 	SetSessionRestartPending(ctx context.Context, id domain.SessionID, pending bool, updatedAt time.Time) (ok bool, err error)
+	SetSessionTransport(ctx context.Context, id domain.SessionID, transport domain.Transport, updatedAt time.Time) (ok bool, err error)
 }
 
 // Manager coordinates internal session spawn, restore, kill, and cleanup over
@@ -323,6 +324,7 @@ type Manager struct {
 	// Nil (bare Manager/omitting wiring) means English (no directive) — the safe
 	// default that leaves every prompt byte-for-byte unchanged.
 	responseLanguage func() string
+	workerTransport  func() domain.Transport
 	// sessionPaneReaper closes the AUXILIARY panes a session leaves behind when
 	// it is torn down: its reviewer pane and its iOS run pane. Both are bare
 	// runtime handles named after the session id - no database row, no worktree,
@@ -400,6 +402,7 @@ type Deps struct {
 	// read at spawn/restore so an edit takes effect on the next (re)launch. Nil
 	// defaults to English (no directive injected).
 	ResponseLanguage func() string
+	WorkerTransport  func() domain.Transport
 	// ClaudeProfiles resolves the Claude profile a claude-code session launches
 	// with. Nil knows only the built-in profiles.
 	ClaudeProfiles ClaudeProfileRegistry
@@ -426,6 +429,7 @@ func New(d Deps) *Manager {
 		spawnConfirmEnabled: d.SpawnConfirmEnabled,
 		promptOverrides:     d.PromptOverrides,
 		responseLanguage:    d.ResponseLanguage,
+		workerTransport:     d.WorkerTransport,
 		claudeProfiles:      d.ClaudeProfiles,
 	}
 	if m.claudeProfiles == nil {
@@ -570,6 +574,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w: %q", ErrUnknownHarness, cfg.Harness)
 	}
+	cfg.Transport = m.resolveTransport(cfg.Transport, cfg.Harness, cfg.Kind, project.Config)
 	if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
 	}
@@ -925,6 +930,7 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w: %q", id, ErrUnknownHarness, cfg.Harness)
 	}
+	cfg.Transport = m.resolveTransport(row.Transport, cfg.Harness, cfg.Kind, project.Config)
 	if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
@@ -943,10 +949,20 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if err := m.setClaudeProfile(ctx, id, cfg.ClaudeProfile); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
+	if row.Transport == "" {
+		if err := m.setTransport(ctx, id, cfg.Transport); err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
+		}
+	}
 	out, err := m.materialize(ctx, project, cfg, id, prompt, systemPrompt, true, childWorktrees)
 	if err != nil {
 		if restoreErr := m.setClaudeProfile(ctx, id, row.ClaudeProfile); restoreErr != nil {
 			m.logger.Warn("start todo: put back the task's Claude profile override", "sessionID", id, "error", restoreErr)
+		}
+		if row.Transport == "" {
+			if restoreErr := m.setTransport(ctx, id, domain.TransportUnresolved); restoreErr != nil {
+				m.logger.Warn("start todo: put back the task's unset transport", "sessionID", id, "error", restoreErr)
+			}
 		}
 		return out, err
 	}
@@ -3413,7 +3429,7 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
 		ClaudeProfile:   cfg.ClaudeProfile,
-		Transport:       cfg.Transport.WithDefault(),
+		Transport:       cfg.Transport,
 	}
 }
 
@@ -3467,7 +3483,7 @@ func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
 		ClaudeProfile:   cfg.ClaudeProfile,
-		Transport:       cfg.Transport.WithDefault(),
+		Transport:       cfg.Transport,
 		Metadata:        domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
 	}
 }

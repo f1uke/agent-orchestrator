@@ -30,7 +30,7 @@ func crewOffAgentManager(t *testing.T) (*Manager, *fakeStore, *recordingAgent) {
 	cfg.DisableAutoCrew = true
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
 	agent := &recordingAgent{}
-	m := New(Deps{
+	m := New(Deps{WorkerTransport: terminalTransport,
 		Runtime:   &fakeRuntime{},
 		Agents:    singleAgent{agent: agent},
 		Workspace: &fakeWorkspace{},
