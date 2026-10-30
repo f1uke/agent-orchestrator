@@ -14,7 +14,14 @@ import {
 import { type ChatRow, chatRows, rowIndexOfItem } from "./chat-rows";
 import { emptyOverlay } from "./chat-stream";
 
-const user = (uuid = "u1", text = "go"): UserItem => ({ kind: "user", uuid, text, images: 0, state: "completed" });
+const user = (uuid = "u1", text = "go"): UserItem => ({
+	kind: "user",
+	uuid,
+	text,
+	images: 0,
+	state: "completed",
+	ts: "",
+});
 const say = (text: string, parentToolUseId = ""): ChatItem => ({
 	kind: "assistant_text",
 	messageId: "m",
@@ -32,6 +39,7 @@ const turnEnd = (isError = false): ChatItem => ({
 	sessionId: "s",
 	usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
 	contextWindows: {},
+	ts: "",
 });
 
 let n = 0;
@@ -48,6 +56,7 @@ function tool(
 		name,
 		parentToolUseId,
 		input,
+		startedTs: "",
 		result: result === "none" ? undefined : { isError: result === "error", content: "" },
 	};
 }

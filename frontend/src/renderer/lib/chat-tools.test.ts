@@ -25,6 +25,7 @@ function call(
 		name,
 		parentToolUseId: "",
 		input,
+		startedTs: "",
 		result: result ? { isError: result.isError ?? false, content: result.content ?? "" } : undefined,
 	};
 }

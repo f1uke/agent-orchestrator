@@ -448,6 +448,8 @@ describe("chat fold rules", () => {
 				sessionId: "",
 				usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
 				contextWindows: {},
+				ts: "",
+				durationMs: undefined,
 			},
 		]);
 		expect(tr.costUsd).toBe(0.25);
@@ -489,7 +491,7 @@ describe("chat fold rules", () => {
 			synth(2, "out", json(`{"type":"user","uuid":"u1","isReplay":true,"message":{"content":"look"}}`)),
 			synth(3, "in", input),
 		]);
-		expect(tr.items).toEqual([{ kind: "user", uuid: "u1", text: "look", images: 1, state: "sent" }]);
+		expect(tr.items).toEqual([{ kind: "user", uuid: "u1", text: "look", images: 1, state: "sent", ts: "" }]);
 		expect(tr.queued).toEqual(["u1"]);
 	});
 
@@ -711,5 +713,55 @@ describe("chat fold: long_session.jsonl", () => {
 		const withSub = foldEntries(entries.filter((e) => e.seq <= 26));
 		const without = foldEntries(entries.filter((e) => e.seq <= 25));
 		expect(withSub.contextTokens).toBe(without.contextTokens);
+	});
+});
+
+describe("chat fold timing", () => {
+	const T0 = Date.parse("2026-10-30T10:00:00.000Z");
+	const at = (seq: number, sec: number, dir: Direction, payload: object): ChatEntry => ({
+		seq,
+		ts: new Date(T0 + sec * 1000).toISOString(),
+		dir,
+		payload,
+	});
+	const iso = (sec: number) => new Date(T0 + sec * 1000).toISOString();
+	const input = (uuid: string, text: string) => ({ type: "user", uuid, message: { content: text } });
+	const started = (uuid: string) => ({ type: "command_lifecycle", command_uuid: uuid, state: "started" });
+	const done = { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.1 };
+
+	it("stamps the user input, each tool call's start and result, and the turn end with their entry times", () => {
+		const tr = foldEntries([
+			at(1, 0, "in", input("u1", "go")),
+			at(2, 10, "out", {
+				type: "assistant",
+				message: { id: "m1", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] },
+			}),
+			at(3, 25, "out", {
+				type: "user",
+				message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+			}),
+			at(4, 134, "out", done),
+		]);
+		expect(tr.items[0]).toMatchObject({ kind: "user", ts: iso(0) });
+		expect(tr.items[1]).toMatchObject({ kind: "tool_call", startedTs: iso(10), endedTs: iso(25) });
+		expect(tr.items[2]).toMatchObject({ kind: "turn_end", ts: iso(134), durationMs: 134_000 });
+	});
+
+	it("measures a queued input's turn from when it started, not from when it was sent", () => {
+		const tr = foldEntries([
+			at(1, 0, "in", input("u1", "first")),
+			at(2, 0, "out", started("u1")),
+			at(3, 100, "in", input("u2", "second")),
+			at(4, 134, "out", done),
+			at(5, 135, "out", started("u2")),
+			at(6, 180, "out", done),
+		]);
+		const ends = tr.items.filter((i) => i.kind === "turn_end");
+		expect(ends.map((e) => e.durationMs)).toEqual([134_000, 45_000]);
+	});
+
+	it("has no duration for a turn whose start it never saw", () => {
+		const tr = foldEntries([at(1, 5, "out", done)]);
+		expect(tr.items[0]).toMatchObject({ kind: "turn_end", ts: iso(5), durationMs: undefined });
 	});
 });

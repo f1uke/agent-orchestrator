@@ -7,7 +7,8 @@ import { useSessionNames } from "../hooks/useSessionNames";
 import type { ChatEntry } from "../lib/chat-event";
 import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
-import type { BackgroundTask, ChatItem, Pending, UserItem } from "../lib/chat-fold";
+import type { BackgroundTask, ChatItem, Pending, TurnEndItem, UserItem } from "../lib/chat-fold";
+import { formatDuration } from "../lib/chat-time";
 import { sessionActivity } from "../lib/chat-inspect";
 import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
@@ -574,13 +575,19 @@ function ItemRow({
 		case "turn_end":
 			return (
 				<div className={cn("chat-sys", item.isError && "chat-sys--error")} data-notice="turn_end">
-					{item.isError ? `Turn ended: ${item.subtype.replace(/_/g, " ")}` : "Turn complete"}
-					{item.costUsd > 0 ? ` · ${formatCost(item.costUsd)} this session` : ""}
+					{turnEndText(item)}
 				</div>
 			);
 		case "notice":
 			return <NoticeRow notice={item} />;
 	}
+}
+
+function turnEndText(item: TurnEndItem): string {
+	const took = item.durationMs === undefined ? undefined : formatDuration(item.durationMs);
+	if (!item.isError) return took ? `Completed in ${took}` : "Completed";
+	const ended = `Turn ended: ${item.subtype.replace(/_/g, " ")}`;
+	return took ? `${ended} · ${took}` : ended;
 }
 
 const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id);

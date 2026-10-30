@@ -267,6 +267,7 @@ function PermissionCard({ request, theme, state, disabled, onAnswer }: CardProps
 		name: request.toolName,
 		parentToolUseId: "",
 		input: request.input,
+		startedTs: "",
 	});
 	const command = typeof input.command === "string" ? input.command : preview.arg;
 	const suggestions = describeSuggestions(request.suggestions);

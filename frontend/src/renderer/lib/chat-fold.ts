@@ -15,6 +15,7 @@ import {
 	parseEvent,
 	parseHostNote,
 } from "./chat-event";
+import { elapsedMs } from "./chat-time";
 
 export type PermissionStatus = "pending" | "allowed" | "denied" | "cancelled";
 
@@ -36,6 +37,8 @@ export type UserItem = {
 	images: number;
 	origin?: Origin;
 	state: CommandState;
+	/** When the input entered the log. */
+	ts: string;
 };
 
 export type ToolCallItem = {
@@ -46,6 +49,10 @@ export type ToolCallItem = {
 	input: unknown;
 	result?: ToolResult;
 	permission?: PermissionOutcome;
+	/** The ts of the tool_use entry. */
+	startedTs: string;
+	/** The ts of the tool_result entry. */
+	endedTs?: string;
 };
 
 export type TurnEndItem = {
@@ -58,6 +65,9 @@ export type TurnEndItem = {
 	usage: Usage;
 	contextTokens?: number;
 	contextWindows: Record<string, number>;
+	ts: string;
+	/** From the turn's start (its input started, or arrived) to this result; absent when the log missed the start. */
+	durationMs?: number;
 };
 
 export type NoticeItem = { kind: "notice"; notice: NoticeKind; text: string; ts: string };
@@ -208,6 +218,8 @@ export class ChatFolder {
 	private tasks = new Map<string, BackgroundTask>();
 	private ts = "";
 	private context: number | undefined;
+	// When the turn now running started, until its result.
+	private turnStart: string | undefined;
 
 	get lastSeq(): number {
 		return this.last;
@@ -283,6 +295,8 @@ export class ChatFolder {
 				this.cost = event.totalCostUsd;
 				if (event.contextTokens !== undefined) this.context = event.contextTokens;
 				this.items.push({
+					ts: this.ts,
+					durationMs: elapsedMs(this.turnStart, this.ts),
 					kind: "turn_end",
 					subtype: event.subtype,
 					isError: event.isError,
@@ -293,6 +307,7 @@ export class ChatFolder {
 					contextTokens: event.contextTokens,
 					contextWindows: event.contextWindows,
 				});
+				this.turnStart = undefined;
 				break;
 			case "control_request":
 				if (event.canUseTool) this.openPermission(event.requestId, event.canUseTool);
@@ -340,7 +355,14 @@ export class ChatFolder {
 				this.items.push({ kind: "thinking", text: block.text, parentToolUseId });
 			} else if (block.type === "tool_use" && !this.tools.has(block.id)) {
 				this.tools.set(block.id, this.items.length);
-				this.items.push({ kind: "tool_call", id: block.id, name: block.name, parentToolUseId, input: block.input });
+				this.items.push({
+					kind: "tool_call",
+					id: block.id,
+					name: block.name,
+					parentToolUseId,
+					input: block.input,
+					startedTs: this.ts,
+				});
 			}
 		}
 	}
@@ -348,7 +370,10 @@ export class ChatFolder {
 	private applyToolResults(blocks: Block[]): void {
 		for (const block of blocks) {
 			if (block.type === "tool_result") {
-				this.updateTool(block.toolUseId, { result: { isError: block.isError, content: block.content } });
+				this.updateTool(block.toolUseId, {
+					result: { isError: block.isError, content: block.content },
+					endedTs: this.ts,
+				});
 			} else if (block.type === "text" && block.text.startsWith(INTERRUPT_MARKER)) {
 				this.notice("interrupted", "");
 			}
@@ -369,7 +394,8 @@ export class ChatFolder {
 			if (block.type === "text") text += block.text;
 			else if (block.type === "image") images += 1;
 		}
-		const item: UserItem = { kind: "user", uuid, text, images, state: this.commands.get(uuid) ?? "sent" };
+		const item: UserItem = { kind: "user", uuid, text, images, state: this.commands.get(uuid) ?? "sent", ts: this.ts };
+		this.turnStart ??= this.ts;
 		const origin = this.origins.get(uuid);
 		if (origin) item.origin = origin;
 		if (uuid !== "") this.users.set(uuid, this.items.length);
@@ -377,6 +403,7 @@ export class ChatFolder {
 	}
 
 	private setCommand(uuid: string, state: CommandState): void {
+		if (state === "started" && this.commands.get(uuid) !== "started") this.turnStart = this.ts;
 		this.commands.set(uuid, state);
 		this.updateUser(uuid, { state });
 	}

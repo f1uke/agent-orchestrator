@@ -118,7 +118,7 @@ describe("ChatPane", () => {
 		expect(mux).not.toHaveBeenCalled();
 	});
 
-	it("draws user input, peer and orchestrator messages, notices and the turn's cost", () => {
+	it("draws user input, peer and orchestrator messages, notices and the session's cost", () => {
 		const { feed } = renderPane();
 		feed(
 			entry("host", { kind: "spawn", resume: "" }),
@@ -148,9 +148,33 @@ describe("ChatPane", () => {
 		expect(screen.getByRole("button", { name: /Thought/ })).toHaveAttribute("aria-expanded", "false");
 		expect(screen.queryByText("plan it")).toBeNull();
 		expect(screen.getByText("now").tagName).toBe("STRONG");
-		expect(screen.getByText("Turn complete · $0.044 this session")).toBeInTheDocument();
 		expect(screen.getByText("Claude exited · exit code 0")).toBeInTheDocument();
 		expect(screen.getByText("$0.044 this session")).toBeInTheDocument();
+	});
+
+	it("ends a turn with how long it took, never a money amount", () => {
+		const { feed } = renderPane();
+		const at = (dir: ChatEntry["dir"], sec: number, payload: object): ChatEntry => ({
+			seq: ++seq,
+			ts: new Date(Date.parse("2026-10-30T10:00:00.000Z") + sec * 1000).toISOString(),
+			dir,
+			payload,
+		});
+		feed(
+			at("in", 0, { type: "user", uuid: "u1", message: { content: "go" } }),
+			at("out", 0, { type: "command_lifecycle", command_uuid: "u1", state: "started" }),
+			at("out", 30, { type: "assistant", message: { id: "m1", content: [{ type: "text", text: "done" }] } }),
+			at("out", 134, { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 23.45 }),
+			at("in", 140, { type: "user", uuid: "u2", message: { content: "again" } }),
+			at("out", 140, { type: "command_lifecycle", command_uuid: "u2", state: "started" }),
+			at("out", 152, { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1 }),
+		);
+		const ends = [...rowOf("turn_end")];
+		expect(ends.map((e) => e.querySelector("[data-notice]")?.textContent)).toEqual([
+			"Completed in 2m 14s",
+			"Turn ended: error during execution · 12s",
+		]);
+		expect(ends.every((e) => !e.textContent?.includes("$"))).toBe(true);
 	});
 
 	it("streams a reply with a caret until the logged block replaces it", () => {

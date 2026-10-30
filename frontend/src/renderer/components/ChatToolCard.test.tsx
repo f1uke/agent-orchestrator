@@ -5,7 +5,16 @@ import type { BackgroundTask, Pending, PermissionOutcome, ToolCallItem } from ".
 import { PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 
 const call = (name: string, input: unknown, result?: ToolCallItem["result"], permission?: PermissionOutcome) =>
-	({ kind: "tool_call", id: `t-${name}`, name, parentToolUseId: "", input, result, permission }) satisfies ToolCallItem;
+	({
+		kind: "tool_call",
+		id: `t-${name}`,
+		name,
+		parentToolUseId: "",
+		input,
+		result,
+		permission,
+		startedTs: "",
+	}) satisfies ToolCallItem;
 
 function card(
 	item: ToolCallItem,
