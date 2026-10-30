@@ -141,6 +141,7 @@ const pending = (kind: Pending["kind"], toolName: string, input: unknown, sugges
 	kind,
 	input,
 	suggestions,
+	defaultToNo: false,
 });
 
 function renderPending(request: Pending) {

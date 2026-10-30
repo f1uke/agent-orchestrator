@@ -23,11 +23,12 @@ export type CanUseTool = {
 	description: string;
 	input: unknown;
 	suggestions: unknown[];
+	defaultToNo: boolean;
 };
 
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string }
-	| { type: "system"; subtype: string }
+	| { type: "system"; subtype: string; permissionMode: string }
 	| { type: "assistant"; messageId: string; parentToolUseId: string; blocks: Block[] }
 	| { type: "user"; uuid: string; isReplay: boolean; blocks: Block[] }
 	| { type: "result"; subtype: string; isError: boolean; numTurns: number; totalCostUsd: number }
@@ -103,7 +104,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			if (line.subtype === "init") {
 				return { type: "system_init", sessionId: str(line.session_id), permissionMode: str(line.permissionMode) };
 			}
-			return { type: "system", subtype: str(line.subtype) };
+			return { type: "system", subtype: str(line.subtype), permissionMode: str(line.permissionMode) };
 		case "assistant":
 			return {
 				type: "assistant",
@@ -140,6 +141,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 					description: lenient(request.description),
 					input: request.input,
 					suggestions: Array.isArray(request.permission_suggestions) ? request.permission_suggestions : [],
+					defaultToNo: request.default_to_no === true,
 				},
 			};
 		}
