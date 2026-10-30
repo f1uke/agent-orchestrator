@@ -2269,10 +2269,11 @@ func sessionOperations() []operation {
 		},
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/preview/files/*", id: "getSessionPreviewFile", tag: "sessions",
-			summary:    "Serve a static browser preview file from a session workspace",
+			summary:    "Serve a static browser preview file from the session's preview origin (<session>.preview.localhost); other hosts redirect there",
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, ""},
+				{http.StatusTemporaryRedirect, nil},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

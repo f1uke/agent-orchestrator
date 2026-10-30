@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonmeta"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/releaseweb"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
 	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
@@ -52,6 +54,7 @@ func NewRouterWithControl(cfg config.Config, log *slog.Logger, termMgr *terminal
 	// vector (chi deprecated it for this reason: GHSA-3fxj-6jh8-hvhx).
 	r.Use(requestLogger(log, deps.Telemetry))
 	r.Use(recoverTelemetry(log, deps.Telemetry))
+	r.Use(previewOriginOnlyServesPreviews)
 	r.Use(corsMiddleware(cfg.AllowedOrigins, releaseWebPorts(cfg.DataDir)))
 
 	// JSON envelopes for unmatched routes / methods — chi's defaults are
@@ -210,6 +213,34 @@ func releaseWebPorts(dataDir string) func(port int) bool {
 	return func(port int) bool {
 		return port == releaseweb.DefaultPort || port == releaseweb.RecordedPort(paths)
 	}
+}
+
+// previewOriginOnlyServesPreviews confines a request addressed to a session's
+// preview origin (<session>.preview.localhost) to that session's preview files.
+// A preview page is agent-made HTML; anything else on its origin, the API,
+// /mux and /shutdown included, would be a same-origin call the CORS check
+// never sees. A module script sends an Origin header even to its own origin,
+// so a same-origin Origin is dropped before the CORS check, which would
+// otherwise refuse the preview origin.
+func previewOriginOnlyServesPreviews(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, ok := preview.HostSession(r.Host)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rest, found := strings.CutPrefix(r.URL.Path, "/api/v1/sessions/")
+		id, file, _ := strings.Cut(rest, "/")
+		if !found || !strings.EqualFold(id, session) || !strings.HasPrefix(file, "preview/files/") ||
+			(r.Method != http.MethodGet && r.Method != http.MethodHead) {
+			notFoundJSON(w, r)
+			return
+		}
+		if strings.EqualFold(r.Header.Get("Origin"), "http://"+r.Host) {
+			r.Header.Del("Origin")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // localControlRequest reports whether a control request is a trusted local

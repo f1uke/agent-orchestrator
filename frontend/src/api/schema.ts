@@ -1865,7 +1865,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Serve a static browser preview file from a session workspace */
+        /** Serve a static browser preview file from the session's preview origin (<session>.preview.localhost); other hosts redirect there */
         get: operations["getSessionPreviewFile"];
         put?: never;
         post?: never;
@@ -14395,6 +14395,13 @@ export interface operations {
                 content: {
                     "text/html": string;
                 };
+            };
+            /** @description Temporary Redirect */
+            307: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Not Found */
             404: {

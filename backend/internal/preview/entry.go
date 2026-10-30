@@ -2,6 +2,7 @@ package preview
 
 import (
 	"io/fs"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -206,8 +207,32 @@ func IsMarkdownPath(p string) bool {
 	return false
 }
 
+// ServedPath is ConfinedPath for a file the daemon is about to serve. It also
+// resolves symlinks on the root and the file, so a link inside the workspace
+// cannot hand out a file outside it. A missing file is refused.
+func ServedPath(workspacePath, assetPath string) (string, bool) {
+	file, ok := ConfinedPath(workspacePath, assetPath)
+	if !ok {
+		return "", false
+	}
+	root, err := filepath.EvalSymlinks(workspacePath)
+	if err != nil {
+		return "", false
+	}
+	resolved, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return resolved, true
+}
+
 // ConfinedPath maps an asset path into workspacePath and rejects paths that
-// escape the workspace root.
+// escape the workspace root. It is lexical; a caller that reads the file uses
+// ServedPath, which also resolves symlinks.
 func ConfinedPath(workspacePath, assetPath string) (string, bool) {
 	root, err := filepath.Abs(workspacePath)
 	if err != nil || root == "" {
@@ -229,9 +254,37 @@ func ConfinedPath(workspacePath, assetPath string) (string, bool) {
 	return absFile, true
 }
 
-// FileURL builds the daemon preview/files URL for a workspace-local entry.
+// hostSuffix names the per-session preview origins. A preview page is
+// agent-made HTML and the daemon has no auth, so the page must not share the
+// daemon's origin: on <session>.preview.localhost its calls to the API are
+// cross-origin, and the daemon serves that host nothing but the session's own
+// preview files. Browsers resolve every *.localhost name to loopback.
+const hostSuffix = ".preview.localhost"
+
+// Host is the preview origin's host name for a session.
+func Host(id domain.SessionID) string {
+	return strings.ToLower(string(id)) + hostSuffix
+}
+
+// HostSession reports whether a request Host is a preview origin and, if so,
+// the lowercased session id it belongs to.
+func HostSession(host string) (string, bool) {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	label, ok := strings.CutSuffix(strings.ToLower(host), hostSuffix)
+	return label, ok && label != ""
+}
+
+// FileURL builds the preview/files URL for a workspace-local entry, on the
+// session's preview origin and baseURL's port.
 func FileURL(baseURL string, id domain.SessionID, entry string) string {
 	u := normalizedBaseURL(baseURL)
+	port := u.Port()
+	u.Host = Host(id)
+	if port != "" {
+		u.Host = net.JoinHostPort(u.Host, port)
+	}
 	u.Path = "/api/v1/sessions/" + url.PathEscape(string(id)) + "/preview/files/" + escapePath(entry)
 	u.RawQuery = ""
 	u.Fragment = ""

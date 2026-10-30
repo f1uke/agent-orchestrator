@@ -5585,6 +5585,8 @@ paths:
               schema:
                 type: string
           description: OK
+        "307":
+          description: Temporary Redirect
         "404":
           content:
             application/json:
@@ -5603,7 +5605,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: Serve a static browser preview file from a session workspace
+      summary: Serve a static browser preview file from the session's preview origin
+        (<session>.preview.localhost); other hosts redirect there
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/restart:
