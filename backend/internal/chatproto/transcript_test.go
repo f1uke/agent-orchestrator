@@ -273,7 +273,7 @@ func TestFoldResumedSession(t *testing.T) {
 	for _, c := range []struct {
 		seq  uint64
 		want string
-	}{{19, "default"}, {20, "plan"}, {54, "plan"}, {59, "default"}, {91, "default"}} {
+	}{{16, "default"}, {17, "plan"}, {20, "plan"}, {43, "plan"}, {44, "default"}, {54, "default"}, {59, "default"}, {91, "default"}} {
 		if got := foldEntries(t, upTo(entries, c.seq)).PermissionMode; got != c.want {
 			t.Errorf("PermissionMode after seq %d = %q, want %q", c.seq, got, c.want)
 		}
