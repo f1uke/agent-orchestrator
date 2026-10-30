@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -950,5 +951,30 @@ func TestSessionSetBranch_MissingBranchIsUsageError(t *testing.T) {
 		if got := ExitCode(err); got != 2 {
 			t.Fatalf("args %q: exit code = %d, want 2 (err=%v)", args, got, err)
 		}
+	}
+}
+
+func TestE2E_SessionSetKeepWarmSetsAndClears(t *testing.T) {
+	sessions := &fakeSessionService{}
+	startDriftTestDaemon(t, sessions, &fakeProjectManager{})
+
+	out, err := runDriftCLI(t, "session", "set-keep-warm", "demo-1")
+	if err != nil {
+		t.Fatalf("set: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "session demo-1 keep-warm: on") {
+		t.Fatalf("set output %q", out)
+	}
+
+	out, err = runDriftCLI(t, "session", "set-keep-warm", "demo-1", "--off")
+	if err != nil {
+		t.Fatalf("clear: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "session demo-1 keep-warm: off") {
+		t.Fatalf("clear output %q", out)
+	}
+
+	if want := []bool{true, false}; !slices.Equal(sessions.keepWarmCalls, want) {
+		t.Fatalf("daemon got %v, want %v", sessions.keepWarmCalls, want)
 	}
 }

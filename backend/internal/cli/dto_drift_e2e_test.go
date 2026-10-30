@@ -56,6 +56,7 @@ type fakeSessionService struct {
 	claudeProfileCall    claudeProfileCall
 	claudeProfileOutcome domain.ClaudeProfileRestart
 	resolvedTransport    domain.Transport
+	keepWarmCalls        []bool
 }
 
 type claudeProfileCall struct {
@@ -177,8 +178,9 @@ func (f *fakeSessionService) SetAutoResolve(context.Context, domain.SessionID, *
 	return domain.Session{}, nil
 }
 
-func (f *fakeSessionService) SetKeepWarmOnMerge(context.Context, domain.SessionID, bool) (domain.Session, error) {
-	return domain.Session{}, nil
+func (f *fakeSessionService) SetKeepWarmOnMerge(_ context.Context, id domain.SessionID, enabled bool) (domain.Session, error) {
+	f.keepWarmCalls = append(f.keepWarmCalls, enabled)
+	return domain.Session{SessionRecord: domain.SessionRecord{ID: id, KeepWarmOnMerge: enabled}}, nil
 }
 
 func (f *fakeSessionService) SetTargetBranch(context.Context, domain.SessionID, string) (domain.Session, error) {

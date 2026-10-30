@@ -14,6 +14,7 @@ Flags: `ao session <command> --help`. `-p <project>` scopes a lookup when ids co
 | `ao session claim-pr <id> <pr>` | Attach an existing PR to a session. By default it takes the PR over from whichever session owns it; `--no-takeover` refuses instead |
 | `ao session set-branch <id> <branch>` | Record the session's own branch. A `git branch -m` in its worktree is followed by itself; use this when the old branch was kept or the worktree is detached |
 | `ao session set-claude-profile <id> <profile>` | Switch a claude-code session to another Claude profile. `--restart` restarts the agent onto it now when it is idle, or once it is idle when it is mid-turn; without it the profile applies on the next restart |
+| `ao session set-keep-warm <id>` | Keep a worker running on the board when its PR merges, like `ao spawn --keep-warm` or the board's "Keep warm after merge" item. `--off` clears it |
 
 ```bash
 ao session restore mer-3
