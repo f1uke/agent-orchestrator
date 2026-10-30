@@ -8,26 +8,22 @@ export type Todo = { content: string; activeForm: string; status: TodoStatus };
 
 export type ActivityKind = "agent" | "background" | "task";
 
-/** A subagent, a background Bash or a bare system task, with the state the log last gave it. */
 export type Activity = {
 	key: string;
 	kind: ActivityKind;
 	title: string;
 	detail: string;
 	state: TaskState;
-	/** Tool calls the subagent made. */
 	tools: number;
 };
 
 /** Totals for the latest claude session id, whose total_cost_usd carries across a --resume. */
 export type UsageSummary = { sessionId: string; costUsd: number; outputTokens: number; cacheReadTokens: number };
 
-/** `window` is set only when the log names the model's context window. */
 export type ContextUsage = { tokens: number; window?: number };
 
 export type AddedRule = { rule: string; behavior: string };
 
-/** One claude process: from its spawn or resume notice up to the next one. */
 export type HistoryRow = {
 	itemIndex: number;
 	startedAt: string;
@@ -48,7 +44,6 @@ function turnEnds(tr: Transcript): TurnEndItem[] {
 	return tr.items.filter((i): i is TurnEndItem => i.kind === "turn_end");
 }
 
-/** The list the latest top-level TodoWrite wrote, or undefined when claude never wrote one. */
 export function latestTodos(tr: Transcript): Todo[] | undefined {
 	for (let i = tr.items.length - 1; i >= 0; i--) {
 		const item = tr.items[i];
@@ -69,7 +64,6 @@ function callState(call: ToolCallItem, processEnded: boolean): TaskState {
 	return processEnded ? "stopped" : "running";
 }
 
-/** Unfinished first, then the rest; newest first within each. */
 export function sessionActivity(tr: Transcript): Activity[] {
 	const taskByToolUse = new Map(tr.tasks.filter((t) => t.toolUseId !== "").map((t) => [t.toolUseId, t]));
 	const subagentTools = new Map<string, number>();
@@ -139,21 +133,15 @@ export function usageSummary(tr: Transcript): UsageSummary | undefined {
 	};
 }
 
-function contextWindow(windows: Record<string, number>, model: string): number | undefined {
-	if (windows[model] !== undefined) return windows[model];
-	const all = Object.values(windows);
-	return all.length === 1 ? all[0] : undefined;
-}
-
 export function contextUsage(tr: Transcript): ContextUsage | undefined {
 	const last = turnEnds(tr)
 		.filter((e) => e.contextTokens !== undefined)
 		.at(-1);
 	if (last?.contextTokens === undefined) return undefined;
-	return { tokens: last.contextTokens, window: contextWindow(last.contextWindows, tr.model) };
+	const window = last.contextWindows[tr.model];
+	return window === undefined ? { tokens: last.contextTokens } : { tokens: last.contextTokens, window };
 }
 
-/** Rules allowed requests added through updatedPermissions (the fold keeps those only on an allow), once each. */
 export function addedRules(tr: Transcript): AddedRule[] {
 	const rules = new Map<string, AddedRule>();
 	for (const item of tr.items) {
