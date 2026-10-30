@@ -3,8 +3,13 @@ name: Prettier
 # Check-only: reports formatting issues without modifying the branch.
 # Runs on pull_request (so fork PRs are checked too) and only checks the
 # files the PR actually changed, so a PR can never go red for unformatted
-# files it did not touch. Developers run `npx prettier@3 --write <files>`
-# locally to fix the reported files.
+# files it did not touch.
+#
+# The Prettier version is pinned in one place: the exact `prettier`
+# devDependency in frontend/package.json (resolved in frontend/package-lock.json).
+# This job reads it from there, so CI and local runs format identically.
+# To fix reported files, run from the repo root:
+#   npx prettier@"$(node -p "require('./frontend/package.json').devDependencies.prettier")" --write <files>
 
 on:
   pull_request:
@@ -22,6 +27,7 @@ jobs:
 
       - name: Check formatting of changed files with Prettier
         run: |
+          version=$(node -p "require('./frontend/package.json').devDependencies.prettier")
           git diff --name-only -z --diff-filter=d \
             "origin/${{ github.base_ref }}...HEAD" \
-            | xargs -0 --no-run-if-empty npx --yes prettier@3 --check --ignore-unknown
+            | xargs -0 --no-run-if-empty npx --yes "prettier@${version}" --check --ignore-unknown
