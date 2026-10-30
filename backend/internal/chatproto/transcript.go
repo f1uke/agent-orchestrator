@@ -213,6 +213,9 @@ func (f *Folder) applyOut(ev Event) {
 			f.mode = ev.PermissionMode
 		}
 	case System:
+		if ev.PermissionMode != "" {
+			f.mode = ev.PermissionMode
+		}
 		if ev.Subtype == "compact_boundary" {
 			f.items = append(f.items, Notice{Kind: NoticeCompacted})
 		}

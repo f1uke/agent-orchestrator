@@ -28,9 +28,10 @@ type SystemInit struct {
 
 // System is every system event other than init (status, thinking_tokens, ...).
 type System struct {
-	Subtype   string
-	SessionID string
-	Raw       json.RawMessage
+	Subtype        string
+	SessionID      string
+	PermissionMode string // set on a status event after the mode changes
+	Raw            json.RawMessage
 }
 
 // Assistant is one assistant message event. With partial messages on, claude
@@ -288,7 +289,7 @@ func decodeSystem(subtype string, line []byte) (Event, bool) {
 			CWD: w.CWD, Tools: w.Tools, SlashCommands: w.SlashCommands,
 		}, true
 	}
-	return System{Subtype: subtype, SessionID: w.SessionID, Raw: bytes.Clone(line)}, true
+	return System{Subtype: subtype, SessionID: w.SessionID, PermissionMode: w.PermissionMode, Raw: bytes.Clone(line)}, true
 }
 
 func decodeAssistant(line []byte) (Event, bool) {
