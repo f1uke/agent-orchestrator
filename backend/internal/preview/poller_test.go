@@ -57,7 +57,7 @@ func TestPollerSetsPreviewWhenActiveWorkerEntryAppears(t *testing.T) {
 
 	assertSets(t, svc.sets, previewSet{
 		id:  "ao-1",
-		url: "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/index.html",
+		url: "http://ao-1.preview.localhost:3001/api/v1/sessions/ao-1/preview/files/index.html",
 	})
 }
 
@@ -73,7 +73,7 @@ func TestPollerUsesFirstExistingEntrypoint(t *testing.T) {
 
 	assertSets(t, svc.sets, previewSet{
 		id:  "ao-1",
-		url: "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/dist/index.html",
+		url: "http://ao-1.preview.localhost:3001/api/v1/sessions/ao-1/preview/files/dist/index.html",
 	})
 }
 
@@ -90,7 +90,7 @@ func TestPollerPreservesEntrypointPriority(t *testing.T) {
 
 	assertSets(t, svc.sets, previewSet{
 		id:  "ao-1",
-		url: "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/public/index.html",
+		url: "http://ao-1.preview.localhost:3001/api/v1/sessions/ao-1/preview/files/public/index.html",
 	})
 }
 
@@ -136,7 +136,7 @@ func TestPollerRediscoverEntryAfterDeleteAndRecreate(t *testing.T) {
 	if err := poller.Poll(context.Background()); err != nil {
 		t.Fatalf("first Poll: %v", err)
 	}
-	wantURL := "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/index.html"
+	wantURL := "http://ao-1.preview.localhost:3001/api/v1/sessions/ao-1/preview/files/index.html"
 	assertSets(t, svc.sets, previewSet{id: "ao-1", url: wantURL})
 
 	// Delete the entry — poller must clear the preview and mark the session cleared.
@@ -272,7 +272,7 @@ func TestPollerKeepsExplicitWorkspaceFilePreviewUntilItIsGone(t *testing.T) {
 	workspace := t.TempDir()
 	report := filepath.Join(workspace, "REPORT.md")
 	writeFile(t, report, "# report")
-	current := "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/REPORT.md"
+	current := "http://ao-1.preview.localhost:3001/api/v1/sessions/ao-1/preview/files/REPORT.md"
 	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, current)}}
 	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
 
@@ -322,7 +322,7 @@ func TestPollerRespectsProjectWithoutWebUI(t *testing.T) {
 	}
 	assertSets(t, svc.sets, previewSet{
 		id:  "ao-1",
-		url: "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/index.html",
+		url: "http://ao-1.preview.localhost:3001/api/v1/sessions/ao-1/preview/files/index.html",
 	})
 }
 
@@ -331,7 +331,7 @@ func TestPollerRespectsProjectWithoutWebUI(t *testing.T) {
 // before a project opted out gets dropped.
 func TestPollerClearsStalePreviewEvenWithoutWebUI(t *testing.T) {
 	workspace := t.TempDir()
-	stale := "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/index.html"
+	stale := "http://ao-1.preview.localhost:3001/api/v1/sessions/ao-1/preview/files/index.html"
 	svc := &fakePreviewSessions{
 		sessions:       []domain.SessionRecord{workerSession("ao-1", workspace, stale)},
 		previewRefusal: errors.New("WEB_PREVIEW_DISABLED"),

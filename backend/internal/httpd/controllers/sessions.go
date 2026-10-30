@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -418,11 +419,22 @@ func (c *SessionsController) previewFile(w http.ResponseWriter, r *http.Request)
 		envelope.WriteError(w, r, err)
 		return
 	}
-	file, ok := confinedPreviewPath(sess.Metadata.WorkspacePath, chi.URLParam(r, "*"))
+	entry := chi.URLParam(r, "*")
+	if _, onPreviewOrigin := previewutil.HostSession(r.Host); !onPreviewOrigin {
+		local, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+		target := previewutil.FileURL("http://"+local.String(), sess.ID, entry)
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusTemporaryRedirect) //nolint:gosec // G710: host is the session's fixed preview origin on our own listener port
+		return
+	}
+	file, ok := previewutil.ServedPath(sess.Metadata.WorkspacePath, entry)
 	if !ok {
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "PREVIEW_FILE_NOT_FOUND", "Preview file not found", nil)
 		return
 	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if previewutil.IsMarkdownPath(file) {
 		c.servePreviewMarkdown(w, r, file)
 		return
