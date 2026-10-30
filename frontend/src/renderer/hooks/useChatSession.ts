@@ -1,28 +1,22 @@
-// The live binding between a chat view and a chat session's event log on the
-// mux `chat` channel: replay, then the host's live stream, folded into a
-// transcript. It reconnects the way useTerminalSession does (500 ms doubling
-// to 8 s, at once when the daemon comes back), and every reopen resumes after
-// the last seq it holds, so nothing is folded twice.
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiBaseUrl } from "../lib/api-client";
 import type { ChatEntry } from "../lib/chat-event";
 import { ChatFolder, type Transcript } from "../lib/chat-fold";
+import { createStubChatMux } from "../lib/chat-mock";
 import { type ChatMux, createChatMux } from "../lib/chat-mux";
 import { applyDelta, emptyOverlay, settleOverlay, type StreamOverlay } from "../lib/chat-stream";
 import { muxUrlFromApiBase } from "../lib/terminal-mux";
 
 export type ChatConnection =
-	| "connecting" // first open in flight, or replaying
-	| "live" // the host stream is attached
-	| "offline" // the log is replayed and no host is running; retried while the session is live
-	| "reconnecting" // waiting on backoff or on the daemon
-	| "error"; // the server refused the stream; no automatic retry
+	| "connecting"
+	| "live"
+	| "offline"
+	| "reconnecting"
+	| "error";
 
 export type ChatSessionState = {
 	transcript: Transcript;
 	overlay: StreamOverlay;
-	/** Every log entry received, in seq order, for the Events view. */
 	entries: readonly ChatEntry[];
 	connection: ChatConnection;
 	error?: string;
@@ -30,16 +24,17 @@ export type ChatSessionState = {
 
 export type UseChatSessionOptions = {
 	daemonReady: boolean;
-	/** Whether a host may still appear: an offline stream of a live session is retried. */
 	sessionLive: boolean;
-	/** Test seam: build the mux client. Defaults to a fresh socket against the current API base. */
 	createMux?: () => ChatMux;
 };
 
 const RETRY_BASE_MS = 500;
 const RETRY_MAX_MS = 8_000;
 
+const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
+
 function defaultCreateMux(): ChatMux {
+	if (usePreviewData) return createStubChatMux();
 	return createChatMux(muxUrlFromApiBase(getApiBaseUrl()));
 }
 
@@ -49,7 +44,8 @@ function emptySnapshot(): Snapshot {
 	return { transcript: new ChatFolder().transcript(), overlay: emptyOverlay, entries: [] };
 }
 
-export function useChatSession(sessionId: string | undefined, options: UseChatSessionOptions): ChatSessionState {
+export function useChatSession(sessionId: string | undefined, given: UseChatSessionOptions): ChatSessionState {
+	const options = usePreviewData ? { ...given, daemonReady: true } : given;
 	const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
 	const [connection, setConnection] = useState<ChatConnection>("connecting");
 	const [error, setError] = useState<string | undefined>(undefined);
@@ -76,7 +72,6 @@ export function useChatSession(sessionId: string | undefined, options: UseChatSe
 		setError(message);
 	}, []);
 
-	// Many frames arrive per paint while a log replays; fold them all, render once.
 	const scheduleFlush = useCallback(() => {
 		if (r.frame !== null) return;
 		r.frame = requestAnimationFrame(() => {
@@ -192,8 +187,6 @@ export function useChatSession(sessionId: string | undefined, options: UseChatSe
 		};
 	}, [connect, r, sessionId, teardown, transition]);
 
-	// The daemon came back while we waited, or the session came back to life
-	// while its stream sat offline: reconnect now, without backoff debt.
 	const { daemonReady, sessionLive } = options;
 	useEffect(() => {
 		if (!daemonReady || !sessionId || r.retryTimer) return;
