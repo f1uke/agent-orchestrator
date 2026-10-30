@@ -169,6 +169,7 @@ func newSessionCommand(ctx *commandContext) *cobra.Command {
 	cmd.AddCommand(newSessionClaimPRCommand(ctx))
 	cmd.AddCommand(newSessionSetBranchCommand(ctx))
 	cmd.AddCommand(newSessionSetClaudeProfileCommand(ctx))
+	cmd.AddCommand(newSessionSetKeepWarmCommand(ctx))
 	return cmd
 }
 
@@ -406,6 +407,51 @@ func (c *commandContext) setSessionBranch(ctx context.Context, cmd *cobra.Comman
 		return err
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s branch: %s\n", id, res.Session.Branch)
+	return err
+}
+
+func newSessionSetKeepWarmCommand(ctx *commandContext) *cobra.Command {
+	var opts sessionOptions
+	var off bool
+	cmd := &cobra.Command{
+		Use:   "set-keep-warm <session-id>",
+		Short: "Keep a worker running on the board when its PR merges",
+		Long: `Mark the session keep-warm, the same as ao spawn --keep-warm or the board's
+"Keep warm after merge" menu item: when its PR merges, the worker keeps running
+(its tmux, and any build or test in it, carries on) instead of archiving to Done.
+It still sleeps after the idle window like any worker.
+
+Use --off to clear the flag, so the next merge archives the worker as usual.`,
+		Example: "  ao session set-keep-warm ao-12\n  ao session set-keep-warm ao-12 --off",
+		Args:    oneSessionIDArg,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := normalizeSessionID(args[0])
+			if err != nil {
+				return err
+			}
+			return ctx.setSessionKeepWarm(cmd.Context(), cmd, id, !off, opts)
+		},
+	}
+	addSessionProjectFlag(cmd.Flags(), &opts.project, "Project id to scope the lookup")
+	cmd.Flags().BoolVar(&off, "off", false, "Clear keep-warm, so the next merge archives the worker to Done")
+	return cmd
+}
+
+func (c *commandContext) setSessionKeepWarm(ctx context.Context, cmd *cobra.Command, id string, enabled bool, opts sessionOptions) error {
+	if opts.project != "" {
+		if _, err := c.fetchScopedSession(ctx, id, opts.project); err != nil {
+			return err
+		}
+	}
+	var res sessionResponse
+	if err := c.putJSON(ctx, "sessions/"+url.PathEscape(id)+"/keep-warm", controllers.SetSessionKeepWarmRequest{Enabled: enabled}, &res); err != nil {
+		return err
+	}
+	state := "off"
+	if res.Session.KeepWarmOnMerge {
+		state = "on"
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s keep-warm: %s\n", id, state)
 	return err
 }
 
