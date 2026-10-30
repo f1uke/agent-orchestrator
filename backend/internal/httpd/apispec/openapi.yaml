@@ -3512,6 +3512,224 @@ paths:
       summary: Set the session's own branch to one that exists in its worktree
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/answers:
+    post:
+      operationId: answerChatRequest
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerChatRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Answer a permission, question or plan request a chat session's agent
+        is waiting on. Answers 409 CHAT_REQUEST_REJECTED when the request is not pending
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/chat/interrupt:
+    post:
+      operationId: interruptChat
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop the turn a chat session's agent is running
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/chat/messages:
+    post:
+      operationId: sendChatMessage
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendChatMessageRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendChatMessageResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Send what the human typed to a chat session's agent. Answers 409 SESSION_HOST_NOT_RUNNING
+        while the session's host is asleep or restarting
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/chat/mode:
+    put:
+      operationId: setChatMode
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetChatModeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Change the permission mode of a chat session's agent
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/children:
     get:
       operationId: listChildren
@@ -9692,6 +9910,35 @@ components:
       - id
       - label
       type: object
+    AnswerChatRequest:
+      properties:
+        behavior:
+          enum:
+          - allow
+          - deny
+          type: string
+        interrupt:
+          description: 'deny only: also end the turn.'
+          type: boolean
+        message:
+          description: 'deny only: why, told to the model.'
+          type: string
+        requestId:
+          description: The pending request being answered.
+          minLength: 1
+          type: string
+        updatedInput:
+          description: 'allow only: an edited tool input. Omitted keeps the request''s
+            own input.'
+        updatedPermissions:
+          description: 'allow only: permission rules to apply from now on, taken from
+            the request''s suggestions.'
+          items: {}
+          type: array
+      required:
+      - requestId
+      - behavior
+      type: object
     ApprovalRule:
       properties:
         enabled:
@@ -9734,6 +9981,27 @@ components:
       - binary
       - committed
       - kind
+      type: object
+    ChatAckResponse:
+      properties:
+        ok:
+          type: boolean
+      required:
+      - ok
+      type: object
+    ChatImage:
+      properties:
+        base64:
+          description: The image bytes, base64 encoded.
+          minLength: 1
+          type: string
+        mediaType:
+          description: The image's media type, for example image/png.
+          minLength: 1
+          type: string
+      required:
+      - mediaType
+      - base64
       type: object
     ChildBriefResponse:
       properties:
@@ -16740,6 +17008,28 @@ components:
       - uncommitted
       - unpublished
       type: object
+    SendChatMessageRequest:
+      properties:
+        images:
+          items:
+            $ref: '#/components/schemas/ChatImage'
+          type: array
+        text:
+          description: What the human typed. Must not be blank.
+          minLength: 1
+          type: string
+      required:
+      - text
+      type: object
+    SendChatMessageResponse:
+      properties:
+        uuid:
+          description: The id the host gave the message; its echo in the event log
+            carries the same uuid.
+          type: string
+      required:
+      - uuid
+      type: object
     SendSessionMessageRequest:
       properties:
         about:
@@ -17399,6 +17689,20 @@ components:
           - boolean
       required:
       - override
+      type: object
+    SetChatModeRequest:
+      properties:
+        mode:
+          enum:
+          - default
+          - acceptEdits
+          - plan
+          - bypassPermissions
+          - auto
+          - dontAsk
+          type: string
+      required:
+      - mode
       type: object
     SetClaudeProfilesRequest:
       properties:

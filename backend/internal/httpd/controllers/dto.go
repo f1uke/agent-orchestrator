@@ -2376,3 +2376,42 @@ type SetWikiTasksSettingsRequest struct {
 	OwnerAliases   []string `json:"ownerAliases,omitempty" description:"Owner tokens that mean 'me', for the mine/others filter."`
 	RequireCreated bool     `json:"requireCreated,omitempty" description:"Show only rows carrying their own 'created:' date, and judge the cutoff by that date alone. Hides, never modifies."`
 }
+
+// ChatImage is an inline image attached to a chat message.
+type ChatImage struct {
+	MediaType string `json:"mediaType" minLength:"1" description:"The image's media type, for example image/png."`
+	Base64    string `json:"base64" minLength:"1" description:"The image bytes, base64 encoded."`
+}
+
+// SendChatMessageRequest is the body of POST /api/v1/sessions/{sessionId}/chat/messages.
+type SendChatMessageRequest struct {
+	Text   string      `json:"text" minLength:"1" description:"What the human typed. Must not be blank."`
+	Images []ChatImage `json:"images,omitempty"`
+}
+
+// SendChatMessageResponse is the body of POST /api/v1/sessions/{sessionId}/chat/messages.
+type SendChatMessageResponse struct {
+	UUID string `json:"uuid" description:"The id the host gave the message; its echo in the event log carries the same uuid."`
+}
+
+// AnswerChatRequest is the body of POST /api/v1/sessions/{sessionId}/chat/answers.
+// updatedInput and updatedPermissions stay raw JSON, exactly as the host protocol
+// carries them.
+type AnswerChatRequest struct {
+	RequestID          string            `json:"requestId" minLength:"1" description:"The pending request being answered."`
+	Behavior           string            `json:"behavior" enum:"allow,deny"`
+	UpdatedInput       json.RawMessage   `json:"updatedInput,omitempty" description:"allow only: an edited tool input. Omitted keeps the request's own input."`
+	UpdatedPermissions []json.RawMessage `json:"updatedPermissions,omitempty" description:"allow only: permission rules to apply from now on, taken from the request's suggestions."`
+	Message            string            `json:"message,omitempty" description:"deny only: why, told to the model."`
+	Interrupt          bool              `json:"interrupt,omitempty" description:"deny only: also end the turn."`
+}
+
+// SetChatModeRequest is the body of PUT /api/v1/sessions/{sessionId}/chat/mode.
+type SetChatModeRequest struct {
+	Mode string `json:"mode" enum:"default,acceptEdits,plan,bypassPermissions,auto,dontAsk"`
+}
+
+// ChatAckResponse is the body of the chat endpoints that return nothing else.
+type ChatAckResponse struct {
+	OK bool `json:"ok"`
+}
