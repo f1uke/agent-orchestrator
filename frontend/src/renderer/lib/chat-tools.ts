@@ -220,6 +220,12 @@ export function describeTool(call: ToolCallItem, subagentTools = 0): ToolView {
 	};
 }
 
+/** A permission rule as claude's settings write it: `Bash(go test:*)`, or the bare tool name. */
+export function ruleLabel(rule: Record<string, unknown>): string {
+	const content = str(rule.ruleContent);
+	return content ? `${str(rule.toolName)}(${content})` : str(rule.toolName);
+}
+
 export function describeUpdates(updates: readonly unknown[]): { rules: string[]; mode?: string } {
 	const rules: string[] = [];
 	let mode: string | undefined;
@@ -227,10 +233,7 @@ export function describeUpdates(updates: readonly unknown[]): { rules: string[];
 		if (!isObject(update)) continue;
 		if (update.type === "setMode" && typeof update.mode === "string") mode = update.mode;
 		if (update.type === "addRules" && Array.isArray(update.rules)) {
-			for (const rule of update.rules.filter(isObject)) {
-				const content = str(rule.ruleContent);
-				rules.push(content ? `${str(rule.toolName)}(${content})` : str(rule.toolName));
-			}
+			for (const rule of update.rules.filter(isObject)) rules.push(ruleLabel(rule));
 		}
 	}
 	return { rules, mode };

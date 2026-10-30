@@ -6,7 +6,11 @@ import {
 	type CommandState,
 	type HostNote,
 	type Origin,
+	type TaskEvent,
+	type TaskState,
+	type Usage,
 	isObject,
+	unfinished,
 	parseEvent,
 	parseHostNote,
 } from "./chat-event";
@@ -43,13 +47,35 @@ export type ToolCallItem = {
 	permission?: PermissionOutcome;
 };
 
+export type TurnEndItem = {
+	kind: "turn_end";
+	subtype: string;
+	isError: boolean;
+	numTurns: number;
+	costUsd: number;
+	sessionId: string;
+	usage: Usage;
+	contextTokens?: number;
+	contextWindows: Record<string, number>;
+};
+
+export type NoticeItem = { kind: "notice"; notice: NoticeKind; text: string; ts: string };
+
 export type ChatItem =
 	| UserItem
 	| { kind: "assistant_text"; messageId: string; text: string }
 	| { kind: "thinking"; text: string }
 	| ToolCallItem
-	| { kind: "turn_end"; subtype: string; isError: boolean; numTurns: number; costUsd: number }
-	| { kind: "notice"; notice: NoticeKind; text: string };
+	| TurnEndItem
+	| NoticeItem;
+
+export type BackgroundTask = {
+	id: string;
+	toolUseId: string;
+	description: string;
+	taskType: string;
+	state: TaskState;
+};
 
 export type PendingKind = "permission" | "question" | "plan";
 
@@ -91,6 +117,7 @@ export type Transcript = {
 	models: ChatModel[];
 	/** In use: the spawn's --model, then system/init or an accepted set_model. */
 	model: string;
+	tasks: BackgroundTask[];
 	lastSeq: number;
 };
 
@@ -169,6 +196,8 @@ export class ChatFolder {
 	private slash: ChatCommand[] = [];
 	private models: ChatModel[] = [];
 	private model = "";
+	private tasks = new Map<string, BackgroundTask>();
+	private ts = "";
 
 	get lastSeq(): number {
 		return this.last;
@@ -181,6 +210,7 @@ export class ChatFolder {
 	 */
 	apply(entry: ChatEntry): void {
 		if (entry.seq <= this.last) return;
+		this.ts = entry.ts;
 		switch (entry.dir) {
 			case "out":
 			case "in": {
@@ -214,6 +244,7 @@ export class ChatFolder {
 			commands: [...this.slash],
 			models: [...this.models],
 			model: this.model,
+			tasks: [...this.tasks.values()],
 			lastSeq: this.last,
 		};
 	}
@@ -227,7 +258,8 @@ export class ChatFolder {
 				break;
 			case "system":
 				if (event.permissionMode !== "") this.mode = event.permissionMode;
-				if (event.subtype === "compact_boundary") this.items.push({ kind: "notice", notice: "compacted", text: "" });
+				if (event.subtype === "compact_boundary") this.notice("compacted", "");
+				if (event.task) this.applyTask(event.task);
 				break;
 			case "assistant":
 				this.applyAssistant(event.messageId, event.parentToolUseId, event.blocks);
@@ -243,6 +275,10 @@ export class ChatFolder {
 					isError: event.isError,
 					numTurns: event.numTurns,
 					costUsd: event.totalCostUsd,
+					sessionId: event.sessionId,
+					usage: event.usage,
+					contextTokens: event.contextTokens,
+					contextWindows: event.contextWindows,
 				});
 				break;
 			case "control_request":
@@ -301,7 +337,7 @@ export class ChatFolder {
 			if (block.type === "tool_result") {
 				this.updateTool(block.toolUseId, { result: { isError: block.isError, content: block.content } });
 			} else if (block.type === "text" && block.text.startsWith(INTERRUPT_MARKER)) {
-				this.items.push({ kind: "notice", notice: "interrupted", text: "" });
+				this.notice("interrupted", "");
 			}
 		}
 	}
@@ -382,19 +418,12 @@ export class ChatFolder {
 			case "spawn":
 				this.endProcess();
 				this.model = modelFlag(note.argv);
-				this.items.push(
-					note.resume !== ""
-						? { kind: "notice", notice: "resumed", text: note.resume }
-						: { kind: "notice", notice: "spawn", text: "" },
-				);
+				if (note.resume !== "") this.notice("resumed", note.resume);
+				else this.notice("spawn", "");
 				break;
 			case "exit":
 				this.endProcess();
-				this.items.push({
-					kind: "notice",
-					notice: "exit",
-					text: note.code === null ? "terminated by signal" : `exit code ${note.code}`,
-				});
+				this.notice("exit", note.code === null ? "terminated by signal" : `exit code ${note.code}`);
 				break;
 			case "user_origin":
 				if (!note.origin || note.uuid === "") return;
@@ -404,7 +433,25 @@ export class ChatFolder {
 		}
 	}
 
+	private notice(notice: NoticeKind, text: string): void {
+		this.items.push({ kind: "notice", notice, text, ts: this.ts });
+	}
+
+	private applyTask(event: TaskEvent): void {
+		const prev = this.tasks.get(event.taskId);
+		this.tasks.set(event.taskId, {
+			id: event.taskId,
+			toolUseId: event.toolUseId || prev?.toolUseId || "",
+			description: prev?.description || event.description,
+			taskType: event.taskType || prev?.taskType || "",
+			state: event.state ?? prev?.state ?? "running",
+		});
+	}
+
 	private endProcess(): void {
+		for (const [id, task] of this.tasks) {
+			if (unfinished(task.state)) this.tasks.set(id, { ...task, state: "stopped" });
+		}
 		for (const requestId of this.perms.keys()) this.settle(requestId, "cancelled", "", []);
 		for (const [uuid, state] of this.commands) {
 			if (live(state)) this.setCommand(uuid, "cancelled");
