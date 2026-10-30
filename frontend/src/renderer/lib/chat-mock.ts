@@ -66,6 +66,36 @@ const STREAMED =
 
 type Step = [Direction, object];
 
+const TODOS = [
+	["Read sender and dead-letter store", "Reading sender and dead-letter store"],
+	["Add Budget type with full jitter", "Adding Budget type"],
+	["Wire Budget into Sender.Deliver", "Wiring Budget into Sender.Deliver"],
+	["Fix parked-attempt count and rename callers", "Fixing parked-attempt count"],
+	["Run go test -race ./...", "Running go test -race"],
+	["Open PR against main", "Opening the PR"],
+];
+
+const FLAKE_RUN = "go test -run TestDeliver -count=50 ./internal/webhook";
+
+const BRIEF_RESULT = {
+	type: "result",
+	subtype: "success",
+	is_error: false,
+	num_turns: 9,
+	session_id: SESSION,
+	total_cost_usd: 1.84,
+	usage: {
+		input_tokens: 40,
+		output_tokens: 30_709,
+		cache_read_input_tokens: 1_771_285,
+		cache_creation_input_tokens: 21_400,
+		iterations: [
+			{ input_tokens: 6, output_tokens: 412, cache_read_input_tokens: 118_200, cache_creation_input_tokens: 5_794 },
+		],
+	},
+	modelUsage: { "claude-opus-5-5": { outputTokens: 30_709, contextWindow: 200_000, costUSD: 1.8 } },
+};
+
 const tool = (id: string, messageId: string, name: string, input: object, parent: string | null = null): Step => [
 	"out",
 	{
@@ -96,6 +126,14 @@ const thinking = (messageId: string, text: string): Step => [
 		message: { id: messageId, content: [{ type: "thinking", thinking: text }] },
 	},
 ];
+const todoWrite = (id: string, messageId: string, done: number): Step => {
+	const todos = TODOS.map(([content, activeForm], i) => ({
+		content,
+		activeForm,
+		status: i < done ? "completed" : i === done ? "in_progress" : "pending",
+	}));
+	return tool(id, messageId, "TodoWrite", { todos });
+};
 const sent = (uuid: string, text: string): Step => [
 	"in",
 	{ type: "user", uuid, session_id: "", message: { role: "user", content: text } },
@@ -267,6 +305,8 @@ const SCRIPT: Step[] = [
 		"msg_m12",
 		"The sender already loops on `maxAttempts`, but the delay is a fixed 2 s and nothing parks the event when it gives up. The dead-letter store exists, so no migration is needed. I'll add a `Budget` type and wire it in.",
 	),
+	todoWrite("t-todo-1", "msg_m12", 1),
+	result("t-todo-1", "Todos have been modified successfully."),
 	tool("t-edit", "msg_m13", "Edit", {
 		file_path: "internal/webhook/sender.go",
 		old_string: SENDER_BEFORE,
@@ -316,12 +356,33 @@ const SCRIPT: Step[] = [
 		"t-agent",
 	),
 	result("t-agent", "3 callers: internal/webhook/sender.go:65, internal/admin/replay.go:19, cmd/requeue/main.go:44"),
+	["out", BRIEF_RESULT],
 	lifecycle("brief-1", "completed"),
 	lifecycle("peer-1", "started"),
 	say(
 		"msg_m18",
 		"Three callers. I'll switch them to the new name in one commit so the two branches don't conflict, then rerun the full test suite.",
 	),
+	todoWrite("t-todo-2", "msg_m18", 3),
+	result("t-todo-2", "Todos have been modified successfully."),
+	tool("t-bash-bg", "msg_m18", "Bash", {
+		command: FLAKE_RUN,
+		description: "Run the delivery test 50 times in the background",
+		run_in_background: true,
+	}),
+	result("t-bash-bg", "Command running in background with ID: bash_1"),
+	[
+		"out",
+		{
+			type: "system",
+			subtype: "task_started",
+			task_id: "bash_1",
+			tool_use_id: "t-bash-bg",
+			description: FLAKE_RUN,
+			task_type: "local_bash",
+			session_id: SESSION,
+		},
+	],
 	tool("t-bash-2", "msg_m19", "Bash", BASH_2),
 	ask("req-bash-2", "t-bash-2", "Bash", BASH_2, [GO_TEST_RULE]),
 	tool("t-ask", "msg_m20", "AskUserQuestion", QUESTIONS),

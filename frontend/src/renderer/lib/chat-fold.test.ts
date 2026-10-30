@@ -439,7 +439,16 @@ describe("chat fold rules", () => {
 		expect(tr.items).toEqual([
 			{ kind: "thinking", text: "" },
 			{ kind: "assistant_text", messageId: "m1", text: "hello" },
-			{ kind: "turn_end", subtype: "success", isError: false, numTurns: 1, costUsd: 0.25 },
+			{
+				kind: "turn_end",
+				subtype: "success",
+				isError: false,
+				numTurns: 1,
+				costUsd: 0.25,
+				sessionId: "",
+				usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+				contextWindows: {},
+			},
 		]);
 		expect(tr.costUsd).toBe(0.25);
 	});
@@ -503,7 +512,7 @@ describe("chat fold rules", () => {
 			expect([tr.busy, tr.pending, tr.queued]).toEqual([false, [], []]);
 			expect(toolCalls(tr, "Write")[0].permission?.status).toBe("cancelled");
 			expect(users(tr)[0].state).toBe("cancelled");
-			expect(notices(tr).at(-1)).toEqual({ kind: "notice", notice: "exit", text: "terminated by signal" });
+			expect(notices(tr).at(-1)).toEqual({ kind: "notice", notice: "exit", text: "terminated by signal", ts: "" });
 		});
 
 		it("exit with queued input", () => {
@@ -535,6 +544,7 @@ describe("chat fold rules", () => {
 				kind: "notice",
 				notice: "resumed",
 				text: "12e38fc9-a4a5-4819-b046-4107629b2c8b",
+				ts: "",
 			});
 		});
 	});
@@ -554,7 +564,7 @@ describe("chat fold rules", () => {
 				message: { role: "user", content: "This session is being continued..." },
 			}),
 		]);
-		expect(tr.items).toEqual([{ kind: "notice", notice: "compacted", text: "" }]);
+		expect(tr.items).toEqual([{ kind: "notice", notice: "compacted", text: "", ts: "" }]);
 	});
 
 	it("lets unknown events change nothing but the seq", () => {

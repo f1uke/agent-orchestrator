@@ -6,6 +6,8 @@ export type ChatRow =
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean };
 
+export const itemRowKey = (itemIndex: number) => `i${itemIndex}`;
+
 export function chatRows(
 	transcript: Transcript,
 	overlay: StreamOverlay,
@@ -27,7 +29,7 @@ export function chatRows(
 		if (item.kind === "assistant_text" && item.text.trim() === "") return;
 		if (item.kind === "user" && queued.has(item.uuid)) return;
 		const count = item.kind === "tool_call" ? (subagentTools.get(item.id) ?? 0) : 0;
-		rows.push({ key: `i${index}`, kind: "item", item, subagentTools: count });
+		rows.push({ key: itemRowKey(index), kind: "item", item, subagentTools: count });
 	});
 	for (const pending of transcript.pending) {
 		if (!toolIds.has(pending.toolUseId)) rows.push({ key: `p${pending.requestId}`, kind: "pending", pending });

@@ -26,12 +26,32 @@ export type CanUseTool = {
 	defaultToNo: boolean;
 };
 
+export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
+
+export type TaskState = "pending" | "running" | "paused" | "done" | "error" | "stopped";
+
+export function unfinished(state: TaskState): boolean {
+	return state === "pending" || state === "running" || state === "paused";
+}
+
+export type TaskEvent = { taskId: string; toolUseId: string; description: string; taskType: string; state?: TaskState };
+
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
-	| { type: "system"; subtype: string; permissionMode: string }
+	| { type: "system"; subtype: string; permissionMode: string; task?: TaskEvent }
 	| { type: "assistant"; messageId: string; parentToolUseId: string; blocks: Block[] }
 	| { type: "user"; uuid: string; isReplay: boolean; blocks: Block[] }
-	| { type: "result"; subtype: string; isError: boolean; numTurns: number; totalCostUsd: number }
+	| {
+			type: "result";
+			subtype: string;
+			isError: boolean;
+			numTurns: number;
+			totalCostUsd: number;
+			sessionId: string;
+			usage: Usage;
+			contextTokens?: number;
+			contextWindows: Record<string, number>;
+	  }
 	| { type: "control_request"; requestId: string; subtype: string; canUseTool?: CanUseTool }
 	| { type: "control_response"; requestId: string; ok: boolean; error: string; response: unknown }
 	| { type: "control_cancel"; requestId: string }
@@ -97,6 +117,63 @@ function decodeBlocks(content: unknown): Block[] {
 	return content.map(decodeBlock);
 }
 
+function decodeUsage(raw: unknown): Usage {
+	const u = isObject(raw) ? raw : {};
+	return {
+		inputTokens: num(u.input_tokens),
+		outputTokens: num(u.output_tokens),
+		cacheReadTokens: num(u.cache_read_input_tokens),
+		cacheCreationTokens: num(u.cache_creation_input_tokens),
+	};
+}
+
+// usage sums every API call of the turn, so a two-call turn reads twice the
+// context it held. The last entry of usage.iterations is one call: the true size.
+function decodeContext(raw: unknown): number | undefined {
+	const iterations = isObject(raw) && Array.isArray(raw.iterations) ? raw.iterations : [];
+	const last = iterations.at(-1);
+	if (!isObject(last)) return undefined;
+	const { inputTokens, cacheReadTokens, cacheCreationTokens } = decodeUsage(last);
+	return inputTokens + cacheReadTokens + cacheCreationTokens;
+}
+
+function decodeWindows(raw: unknown): Record<string, number> {
+	const windows: Record<string, number> = {};
+	if (!isObject(raw)) return windows;
+	for (const [model, usage] of Object.entries(raw)) {
+		if (isObject(usage) && typeof usage.contextWindow === "number" && usage.contextWindow > 0) {
+			windows[model] = usage.contextWindow;
+		}
+	}
+	return windows;
+}
+
+const TASK_STATES: Record<string, TaskState> = {
+	pending: "pending",
+	running: "running",
+	paused: "paused",
+	completed: "done",
+	failed: "error",
+	stopped: "stopped",
+	killed: "stopped",
+};
+
+function decodeTask(line: Obj): TaskEvent | undefined {
+	const subtype = str(line.subtype);
+	const taskId = str(line.task_id);
+	if (!subtype.startsWith("task_") || taskId === "") return undefined;
+	const patch = isObject(line.patch) ? line.patch : {};
+	const status = subtype === "task_updated" ? str(patch.status) : str(line.status);
+	const started = subtype === "task_started" || subtype === "task_progress";
+	return {
+		taskId,
+		toolUseId: str(line.tool_use_id),
+		description: str(line.description) || str(patch.description) || str(line.summary),
+		taskType: str(line.task_type) || str(line.subagent_type),
+		state: started ? "running" : TASK_STATES[status],
+	};
+}
+
 function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 	const message = isObject(line.message) ? line.message : {};
 	switch (type) {
@@ -109,7 +186,12 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 					model: str(line.model),
 				};
 			}
-			return { type: "system", subtype: str(line.subtype), permissionMode: str(line.permissionMode) };
+			return {
+				type: "system",
+				subtype: str(line.subtype),
+				permissionMode: str(line.permissionMode),
+				task: decodeTask(line),
+			};
 		case "assistant":
 			return {
 				type: "assistant",
@@ -131,6 +213,10 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				isError: line.is_error === true,
 				numTurns: num(line.num_turns),
 				totalCostUsd: num(line.total_cost_usd),
+				sessionId: str(line.session_id),
+				usage: decodeUsage(line.usage),
+				contextTokens: decodeContext(line.usage),
+				contextWindows: decodeWindows(line.modelUsage),
 			};
 		case "control_request": {
 			const request = isObject(line.request) ? line.request : undefined;

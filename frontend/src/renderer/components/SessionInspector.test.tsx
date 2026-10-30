@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionInspector } from "./SessionInspector";
+import { foldEntries } from "../lib/chat-fold";
 import type { PRState, PullRequestFacts, WorkspaceSession } from "../types/workspace";
 
 const { getMock, postMock, putMock } = vi.hoisted(() => ({
@@ -428,6 +429,22 @@ describe("SessionInspector tabs", () => {
 		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 		// And the body actually renders Summary, not nothing.
 		expect(screen.getByText("Branch")).toBeInTheDocument();
+	});
+
+	it("puts Session first for a chat session, opens on it, and never shows it for a terminal session", () => {
+		const chat = foldEntries([]);
+		const { unmount } = renderWithQuery(
+			<SessionInspector chat={chat} session={{ ...session([]), transport: "chat" }} view="session" />,
+		);
+		expect(tabNames()).toEqual(["Session", "Summary", "Reviews", "Files"]);
+		expect(screen.getByRole("tab", { name: "Session" })).toHaveAttribute("aria-selected", "true");
+		expect(screen.getByRole("region", { name: "Todo" })).toBeInTheDocument();
+		unmount();
+
+		renderWithQuery(<SessionInspector chat={chat} session={session([])} view="session" />);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files"]);
+		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+		expect(screen.queryByRole("region", { name: "Todo" })).toBeNull();
 	});
 
 	it("shows the intake issue id in the summary overview when present", () => {

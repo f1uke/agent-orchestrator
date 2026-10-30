@@ -2,13 +2,13 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Brain, ChevronRight, Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
-import { type ChatConnection, useChatSession } from "../hooks/useChatSession";
+import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
 import type { ChatEntry } from "../lib/chat-event";
 import { isObject } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { ChatItem, Pending, UserItem } from "../lib/chat-fold";
-import { type ChatRow, chatRows } from "../lib/chat-rows";
+import { type ChatRow, chatRows, itemRowKey } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
@@ -21,11 +21,16 @@ import { NoteMarkdown } from "./NoteMarkdown";
 
 export type ChatPaneView = "chat" | "events";
 
+export type ChatJump = { itemIndex: number };
+
 type ChatPaneProps = {
 	session: WorkspaceSession;
 	view: ChatPaneView;
 	theme: Theme;
 	daemonReady: boolean;
+	chat?: ChatSessionState;
+	jumpTo?: ChatJump | null;
+	onJumped?: () => void;
 	createMux?: () => ChatMux;
 	chatApi?: ChatApi;
 };
@@ -51,12 +56,23 @@ function useToast(): [string | null, (message: string) => void] {
 	return [toast, show];
 }
 
-export function ChatPane({ session, view, theme, daemonReady, createMux, chatApi }: ChatPaneProps) {
-	const chat = useChatSession(session.id, {
+export function ChatPane({
+	session,
+	view,
+	theme,
+	daemonReady,
+	chat: given,
+	jumpTo,
+	onJumped,
+	createMux,
+	chatApi,
+}: ChatPaneProps) {
+	const own = useChatSession(given ? undefined : session.id, {
 		daemonReady,
 		sessionLive: session.status !== "terminated",
 		createMux,
 	});
+	const chat = given ?? own;
 	const actions = useChatActions(session.id, chat.connection, chatApi);
 	const [requests, setRequests] = useState<RequestStates>({});
 	const [toast, showToast] = useToast();
@@ -117,7 +133,9 @@ export function ChatPane({ session, view, theme, daemonReady, createMux, chatApi
 			) : (
 				<ChatStream
 					disabled={actions.hostDown}
+					jumpTo={jumpTo}
 					onAnswer={onAnswer}
+					onJumped={onJumped}
 					pending={transcript.pending}
 					requests={requests}
 					rows={rows}
@@ -225,9 +243,11 @@ type StreamProps = {
 	requests: RequestStates;
 	disabled: boolean;
 	onAnswer: AnswerHandler;
+	jumpTo?: ChatJump | null;
+	onJumped?: () => void;
 };
 
-function ChatStream({ rows, pending, theme, requests, disabled, onAnswer }: StreamProps) {
+function ChatStream({ rows, pending, theme, requests, disabled, onAnswer, jumpTo, onJumped }: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const atBottomRef = useRef(true);
 	const [openTools, setOpenTools] = useState<Readonly<Record<string, boolean>>>({});
@@ -242,6 +262,9 @@ function ChatStream({ rows, pending, theme, requests, disabled, onAnswer }: Stre
 		getItemKey: (index) => rows[index]?.key ?? index,
 		overscan: 6,
 		observeElementRect: measuredOrFallbackRect,
+		// Rows measure themselves from a ref callback, inside React's commit; a
+		// synchronous flush from there is refused with a console error mid-scroll.
+		useFlushSync: false,
 	});
 
 	const toggleTool = useCallback((id: string, open: boolean) => {
@@ -251,6 +274,15 @@ function ChatStream({ rows, pending, theme, requests, disabled, onAnswer }: Stre
 	useLayoutEffect(() => {
 		if (rows.length > 0 && atBottomRef.current) virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
 	}, [rows, virtualizer]);
+
+	useLayoutEffect(() => {
+		if (!jumpTo) return;
+		const index = rows.findIndex((row) => row.key === itemRowKey(jumpTo.itemIndex));
+		if (index < 0) return;
+		atBottomRef.current = false;
+		virtualizer.scrollToIndex(index, { align: "start" });
+		onJumped?.();
+	}, [jumpTo, onJumped, rows, virtualizer]);
 
 	const onScroll = useCallback(() => {
 		const el = scrollRef.current;

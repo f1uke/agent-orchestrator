@@ -6,7 +6,8 @@ import { X } from "lucide-react";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
-import { ChatPane } from "./ChatPane";
+import { type ChatJump, ChatPane } from "./ChatPane";
+import { useChatSession } from "../hooks/useChatSession";
 import { neverStarted } from "../lib/crew";
 import { useSessionTask } from "../hooks/useSessionTask";
 import { CrewMemberNotStartedPane } from "./CrewMemberNotStartedPane";
@@ -174,6 +175,23 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const taskId = session ? taskKeyOf(session) : undefined;
 	const history = useFileHistory(taskId);
 
+	const isChat = session?.transport === "chat";
+	const chat = useChatSession(isChat ? session.id : undefined, {
+		daemonReady: daemonStatus.state === "ready",
+		sessionLive: session?.status !== "terminated",
+	});
+	const [chatJump, setChatJump] = useState<ChatJump | null>(null);
+	const setChatView = useUiStore((state) => state.setChatView);
+	const clearChatJump = useCallback(() => setChatJump(null), []);
+	const jumpToChat = useCallback(
+		(itemIndex: number) => {
+			if (!session) return;
+			setChatView(session.id, "chat");
+			setChatJump({ itemIndex });
+		},
+		[session, setChatView],
+	);
+
 	// THE ONE PLACE A FILE IS OPENED. Every entry point — a clicked terminal
 	// reference, the ⌘⇧O palette, and later a go-to-definition jump — describes
 	// what it wants as a `WorkspaceFileOpen` and calls this. Repointing the editor
@@ -262,8 +280,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// and the back/forward stack are keyed by the same identity — see `taskKeyOf`.
 	useEffect(() => {
 		if (!taskId) return;
-		setInspectorView("summary");
-	}, [taskId]);
+		setInspectorView(isChat ? "session" : "summary");
+		setChatJump(null);
+	}, [taskId, isChat]);
 
 	// A rail tab asked for from OUTSIDE this tree — the topbar's review pip. It is
 	// honoured once, opens the rail if it is shut, and is cleared.
@@ -759,8 +778,11 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		if (session && centerView !== "terminal") {
 			return (
 				<ChatPane
+					chat={chat}
 					daemonReady={daemonStatus.state === "ready"}
+					jumpTo={chatJump}
 					key={session.id}
+					onJumped={clearChatJump}
 					session={session}
 					theme={theme}
 					view={centerView}
@@ -925,6 +947,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									view={inspectorView}
 									browserView={browserView}
 									session={session}
+									chat={isChat ? chat.transcript : undefined}
+									onJumpToChat={jumpToChat}
 								/>
 							</div>
 						</ResizablePanel>
