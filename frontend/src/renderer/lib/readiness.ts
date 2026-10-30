@@ -238,6 +238,8 @@ function deriveVerdict(
 		// who stopped it.
 		if (session.status === "terminated")
 			return { hue: "todo", word: "Stopped", caption: stoppedCaption(session.termination?.source) };
+		if (session.status === "needs_input" || session.activity?.state === "waiting_input")
+			return { hue: "needs", word: "Input Needed", caption: "The agent is waiting for your answer." };
 		return {
 			hue: "working",
 			word: "Working",

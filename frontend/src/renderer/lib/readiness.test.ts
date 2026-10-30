@@ -53,6 +53,12 @@ describe("deriveReadiness — verdict", () => {
 		expect(tones(r).pr).toBe("idle");
 	});
 
+	it("no PR + agent waiting on the human → Input Needed, matching the session header", () => {
+		const r = deriveReadiness({ activity: { state: "waiting_input" }, status: "needs_input" }, []);
+		expect(r.verdict.word).toBe("Input Needed");
+		expect(r.verdict.hue).toBe("needs");
+	});
+
 	it("a PR closed without merging → Closed", () => {
 		const r = deriveReadiness({}, [pr({ state: "closed" })]);
 		expect(r.verdict.word).toBe("Closed");
