@@ -181,4 +181,31 @@ describe("useChatSession", () => {
 			{ kind: "assistant_text", messageId: "m1", text: "Hello", parentToolUseId: "" },
 		]);
 	});
+
+	it("never hands a new session the transcript of the session it replaced", () => {
+		const muxes: FakeMux[] = [];
+		const createMux = () => {
+			const fake = createFakeMux();
+			muxes.push(fake);
+			return fake.mux;
+		};
+		const renders: Array<{ id: string; texts: string[] }> = [];
+		const view = renderHook(
+			({ id }) => {
+				const state = useChatSession(id, { createMux, daemonReady: true, sessionLive: true });
+				renders.push({ id, texts: state.transcript.items.map((i) => (i.kind === "user" ? i.text : i.kind)) });
+				return state;
+			},
+			{ initialProps: { id: "chat-1" } },
+		);
+		act(() => {
+			muxes[0].listeners!.entry(userInput(1, "u1", "from chat-1"));
+		});
+		act(() => void vi.advanceTimersToNextFrame());
+		expect(view.result.current.transcript.items).toHaveLength(1);
+
+		renders.length = 0;
+		view.rerender({ id: "chat-2" });
+		expect(renders.filter((r) => r.id === "chat-2").map((r) => r.texts)).not.toContainEqual(["from chat-1"]);
+	});
 });

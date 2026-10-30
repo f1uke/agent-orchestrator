@@ -33,15 +33,18 @@ function defaultCreateMux(): ChatMux {
 	return createChatMux(muxUrlFromApiBase(getApiBaseUrl()));
 }
 
-type Snapshot = Pick<ChatSessionState, "transcript" | "overlay" | "entries">;
+// A snapshot names the session it was folded from: on a switch, the render
+// before the reset effect must show the new session as empty, not the old
+// session's rows in the new session's pane.
+type Snapshot = Pick<ChatSessionState, "transcript" | "overlay" | "entries"> & { sessionId: string | undefined };
 
-function emptySnapshot(): Snapshot {
-	return { transcript: new ChatFolder().transcript(), overlay: emptyOverlay, entries: [] };
+function emptySnapshot(sessionId: string | undefined): Snapshot {
+	return { sessionId, transcript: new ChatFolder().transcript(), overlay: emptyOverlay, entries: [] };
 }
 
 export function useChatSession(sessionId: string | undefined, given: UseChatSessionOptions): ChatSessionState {
 	const options = usePreviewData ? { ...given, daemonReady: true } : given;
-	const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
+	const [snapshot, setSnapshot] = useState<Snapshot>(() => emptySnapshot(sessionId));
 	const [connection, setConnection] = useState<ChatConnection>("connecting");
 	const [error, setError] = useState<string | undefined>(undefined);
 	const optionsRef = useRef(options);
@@ -59,6 +62,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		attempts: 0,
 		retryTimer: null as ReturnType<typeof setTimeout> | null,
 		frame: null as number | null,
+		sessionId,
 	}).current;
 
 	const transition = useCallback((next: ChatConnection, message?: string) => {
@@ -71,7 +75,12 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		if (r.frame !== null) return;
 		r.frame = requestAnimationFrame(() => {
 			r.frame = null;
-			setSnapshot({ transcript: r.folder.transcript(), overlay: r.overlay, entries: [...r.entries] });
+			setSnapshot({
+				sessionId: r.sessionId,
+				transcript: r.folder.transcript(),
+				overlay: r.overlay,
+				entries: [...r.entries],
+			});
 		});
 	}, [r]);
 
@@ -166,7 +175,8 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		r.overlay = emptyOverlay;
 		r.lastSeq = 0;
 		r.attempts = 0;
-		setSnapshot(emptySnapshot());
+		r.sessionId = sessionId;
+		setSnapshot(emptySnapshot(sessionId));
 		if (!sessionId) return;
 		if (optionsRef.current.daemonReady) {
 			transition("connecting");
@@ -191,5 +201,6 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		connect();
 	}, [connect, daemonReady, r, sessionId, sessionLive]);
 
-	return { ...snapshot, connection, error };
+	const shown = snapshot.sessionId === sessionId ? snapshot : emptySnapshot(sessionId);
+	return { transcript: shown.transcript, overlay: shown.overlay, entries: shown.entries, connection, error };
 }
