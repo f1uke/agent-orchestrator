@@ -23,6 +23,7 @@
 ### Task 1: Syntax highlighting infra + DiffHunk (highlight + copy button + tighter rows)
 
 **Files:**
+
 - Modify: `frontend/package.json` (add `highlight.js`)
 - Create: `frontend/src/renderer/lib/highlight.ts`
 - Create: `frontend/src/renderer/lib/highlight.test.ts`
@@ -31,6 +32,7 @@
 - Modify: `frontend/src/renderer/components/DiffHunk.test.tsx` (if it exists; else create)
 
 **Interfaces:**
+
 - Produces: `languageForPath(path: string): string | null`; `highlightLine(text: string, language: string | null): string` (returns HTML-escaped, hljs-marked-up string).
 
 - [ ] **Step 1: Install highlight.js** — `cd frontend && npm install highlight.js`. Confirm it lands in `dependencies` (not dev). Revert any unrelated lockfile churn beyond the highlight.js addition.
@@ -39,9 +41,10 @@
   - `languageForPath("a/b/File.swift")` → `"swift"`; `"x.tsx"` → `"typescript"`; `"Makefile"` (no ext) → `null`; `".unknownext"` → `null`.
   - `highlightLine("let x = 1", "swift")` contains an `hljs-` class span and the text `x`.
   - **Escape test (security):** `highlightLine("<script>", null)` returns `"&lt;script&gt;"` (no raw `<script>`), and `highlightLine("a < b && c", null)` escapes `<` and `&`.
-  Run → FAIL (module missing).
+    Run → FAIL (module missing).
 
 - [ ] **Step 3: Implement `highlight.ts`:**
+
   ```ts
   import hljs from "highlight.js/lib/core";
   import bash from "highlight.js/lib/languages/bash";
@@ -68,48 +71,103 @@
   import yaml from "highlight.js/lib/languages/yaml";
 
   const LANGS: Record<string, unknown> = {
-    bash, c, cpp, csharp, css, go, java, javascript, json, kotlin, markdown,
-    objectivec, php, python, ruby, rust, scss, sql, swift, typescript, xml, yaml,
+  	bash,
+  	c,
+  	cpp,
+  	csharp,
+  	css,
+  	go,
+  	java,
+  	javascript,
+  	json,
+  	kotlin,
+  	markdown,
+  	objectivec,
+  	php,
+  	python,
+  	ruby,
+  	rust,
+  	scss,
+  	sql,
+  	swift,
+  	typescript,
+  	xml,
+  	yaml,
   };
   for (const [name, def] of Object.entries(LANGS)) hljs.registerLanguage(name, def as never);
 
   // File extension → registered hljs language name.
   const EXT_LANG: Record<string, string> = {
-    swift: "swift", ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
-    js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-    go: "go", py: "python", rb: "ruby", java: "java", kt: "kotlin", kts: "kotlin",
-    m: "objectivec", mm: "objectivec", h: "cpp", hpp: "cpp", c: "c", cc: "cpp", cpp: "cpp", cxx: "cpp",
-    cs: "csharp", rs: "rust", php: "php", json: "json", yaml: "yaml", yml: "yaml",
-    sh: "bash", bash: "bash", zsh: "bash", sql: "sql", html: "xml", xml: "xml",
-    css: "css", scss: "scss", sass: "scss", md: "markdown", markdown: "markdown",
+  	swift: "swift",
+  	ts: "typescript",
+  	tsx: "typescript",
+  	mts: "typescript",
+  	cts: "typescript",
+  	js: "javascript",
+  	jsx: "javascript",
+  	mjs: "javascript",
+  	cjs: "javascript",
+  	go: "go",
+  	py: "python",
+  	rb: "ruby",
+  	java: "java",
+  	kt: "kotlin",
+  	kts: "kotlin",
+  	m: "objectivec",
+  	mm: "objectivec",
+  	h: "cpp",
+  	hpp: "cpp",
+  	c: "c",
+  	cc: "cpp",
+  	cpp: "cpp",
+  	cxx: "cpp",
+  	cs: "csharp",
+  	rs: "rust",
+  	php: "php",
+  	json: "json",
+  	yaml: "yaml",
+  	yml: "yaml",
+  	sh: "bash",
+  	bash: "bash",
+  	zsh: "bash",
+  	sql: "sql",
+  	html: "xml",
+  	xml: "xml",
+  	css: "css",
+  	scss: "scss",
+  	sass: "scss",
+  	md: "markdown",
+  	markdown: "markdown",
   };
 
   export function languageForPath(path: string): string | null {
-    const base = path.split("/").pop() ?? "";
-    if (!base.includes(".")) return null;
-    const ext = base.split(".").pop()?.toLowerCase() ?? "";
-    return EXT_LANG[ext] ?? null;
+  	const base = path.split("/").pop() ?? "";
+  	if (!base.includes(".")) return null;
+  	const ext = base.split(".").pop()?.toLowerCase() ?? "";
+  	return EXT_LANG[ext] ?? null;
   }
 
   function escapeHtml(s: string): string {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   // Returns HTML-safe markup for one code line. Both branches escape, so the
   // result is safe for dangerouslySetInnerHTML. Per-line: multi-line tokens
   // (block comments, multi-line strings) do not carry across lines.
   export function highlightLine(text: string, language: string | null): string {
-    if (!language) return escapeHtml(text);
-    try {
-      return hljs.highlight(text, { language, ignoreIllegal: true }).value;
-    } catch {
-      return escapeHtml(text);
-    }
+  	if (!language) return escapeHtml(text);
+  	try {
+  		return hljs.highlight(text, { language, ignoreIllegal: true }).value;
+  	} catch {
+  		return escapeHtml(text);
+  	}
   }
   ```
+
   Run tests → PASS.
 
 - [ ] **Step 4: Add the highlight palette to `styles.css`.** In the `:root` (dark) block add:
+
   ```css
   --hl-keyword: #ff7b72;
   --hl-string: #a5d6ff;
@@ -120,7 +178,9 @@
   --hl-attr: #79c0ff;
   --hl-tag: #7ee787;
   ```
+
   In the `:root[data-theme="light"]` block add:
+
   ```css
   --hl-keyword: #cf222e;
   --hl-string: #0a3069;
@@ -131,30 +191,75 @@
   --hl-attr: #0550ae;
   --hl-tag: #116329;
   ```
+
   At the END of `styles.css` add the token rules:
+
   ```css
-  .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-doctag { color: var(--hl-keyword); }
-  .hljs-string, .hljs-meta .hljs-string, .hljs-regexp, .hljs-addition { color: var(--hl-string); }
-  .hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
-  .hljs-number, .hljs-symbol, .hljs-bullet { color: var(--hl-number); }
-  .hljs-title, .hljs-title.function_, .hljs-built_in { color: var(--hl-function); }
-  .hljs-type, .hljs-class .hljs-title, .hljs-title.class_ { color: var(--hl-type); }
-  .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-property { color: var(--hl-attr); }
-  .hljs-tag, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--hl-tag); }
-  .hljs-meta, .hljs-params { color: var(--hl-comment); }
-  .hljs-emphasis { font-style: italic; }
-  .hljs-strong { font-weight: 600; }
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-literal,
+  .hljs-section,
+  .hljs-doctag {
+  	color: var(--hl-keyword);
+  }
+  .hljs-string,
+  .hljs-meta .hljs-string,
+  .hljs-regexp,
+  .hljs-addition {
+  	color: var(--hl-string);
+  }
+  .hljs-comment,
+  .hljs-quote {
+  	color: var(--hl-comment);
+  	font-style: italic;
+  }
+  .hljs-number,
+  .hljs-symbol,
+  .hljs-bullet {
+  	color: var(--hl-number);
+  }
+  .hljs-title,
+  .hljs-title.function_,
+  .hljs-built_in {
+  	color: var(--hl-function);
+  }
+  .hljs-type,
+  .hljs-class .hljs-title,
+  .hljs-title.class_ {
+  	color: var(--hl-type);
+  }
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-variable,
+  .hljs-template-variable,
+  .hljs-property {
+  	color: var(--hl-attr);
+  }
+  .hljs-tag,
+  .hljs-name,
+  .hljs-selector-id,
+  .hljs-selector-class {
+  	color: var(--hl-tag);
+  }
+  .hljs-meta,
+  .hljs-params {
+  	color: var(--hl-comment);
+  }
+  .hljs-emphasis {
+  	font-style: italic;
+  }
+  .hljs-strong {
+  	font-weight: 600;
+  }
   ```
+
   (No `.hljs` background/foreground rule — the diff row's own bg/fg and add/del tints are preserved; only token spans get color.)
 
 - [ ] **Step 5: Update `DiffHunk.tsx`** — highlight each line, add a copy-code button, tighten rows. Key changes:
   - Compute `const lang = languageForPath(path);` once.
   - Replace the plain text span with highlighted markup:
     ```tsx
-    <span
-      className="whitespace-pre"
-      dangerouslySetInnerHTML={{ __html: highlightLine(l.text, lang) }}
-    />
+    <span className="whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightLine(l.text, lang) }} />
     ```
   - Wrap the hunk in a `group relative` container and add a copy button (top-right, `opacity-0 group-hover:opacity-100 transition`), using `navigator.clipboard.writeText(code)` where `code = ctx.lines.map((l) => l.text).join("\n")`. Show a transient "Copied ✓" state (mirror SendToWorkerButton's `sent` timer pattern, or a 1.5s `useState`). Use `Copy`/`Check` from lucide-react.
   - Tighten row line-height/padding a touch (e.g. `leading-[1.45]`), keep `overflow-x-auto`.
@@ -169,34 +274,42 @@
 ### Task 2: Resolved-collapse + filename-first header + tighter spacing (ThreadCard)
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/CommentsView.tsx`
 - Create: `frontend/src/renderer/components/FileHeader.tsx` (filename-first header)
 - Modify/Create: `frontend/src/renderer/components/CommentsView.test.tsx`
 - Test: `frontend/src/renderer/components/FileHeader.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `Thread` type (CommentsView), `Badge`, `ChevronRight`/`ChevronDown` from lucide-react.
 
 - [ ] **Step 1: Write failing tests.**
   - `FileHeader.test.tsx`: given `path="a/b/c/File.swift"`, renders the basename `File.swift` prominently and the full path as the element's `title`. Given a path with no slash, renders it as-is.
   - `CommentsView.test.tsx` (extend the existing mock-dispatch test): a **resolved** thread renders COLLAPSED — its comments and DiffHunk are NOT in the document initially, and a header showing the "Resolved" badge + comment count IS; clicking the header expands (comments now present). An **unresolved** thread renders EXPANDED (comments present without clicking).
-  Run → FAIL.
+    Run → FAIL.
 
 - [ ] **Step 2: Implement `FileHeader.tsx`** — filename-first, directory dimmed and left-truncated, full path in `title`:
+
   ```tsx
   export function FileHeader({ path, line }: { path: string; line: number }) {
-    const slash = path.lastIndexOf("/");
-    const dir = slash >= 0 ? path.slice(0, slash + 1) : "";
-    const name = slash >= 0 ? path.slice(slash + 1) : path;
-    return (
-      <span className="flex min-w-0 items-baseline gap-0 font-mono text-[11.5px]" title={path}>
-        {dir && <span className="truncate text-muted-foreground" dir="rtl">{dir}</span>}
-        <span className="shrink-0 text-foreground">{name}</span>
-        {line > 0 && <span className="shrink-0 text-muted-foreground">:{line}</span>}
-      </span>
-    );
+  	const slash = path.lastIndexOf("/");
+  	const dir = slash >= 0 ? path.slice(0, slash + 1) : "";
+  	const name = slash >= 0 ? path.slice(slash + 1) : path;
+  	return (
+  		<span className="flex min-w-0 items-baseline gap-0 font-mono text-[11.5px]" title={path}>
+  			{dir && (
+  				<span className="truncate text-muted-foreground" dir="rtl">
+  					{dir}
+  				</span>
+  			)}
+  			<span className="shrink-0 text-foreground">{name}</span>
+  			{line > 0 && <span className="shrink-0 text-muted-foreground">:{line}</span>}
+  		</span>
+  	);
   }
   ```
+
   (The `dir="rtl"` + `truncate` on the directory truncates it on the LEFT so the filename stays visible; verify visually — if `dir="rtl"` reverses punctuation oddly, fall back to a plain left-truncation via `text-overflow` on a max-width container. The test only asserts basename text + `title`.)
 
 - [ ] **Step 3: Rework `ThreadCard`** in CommentsView.tsx:
@@ -215,10 +328,12 @@
 ### Task 3: Collapsible reply composer + ⌘/Ctrl+Enter (ThreadActions)
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/ThreadActions.tsx`
 - Modify: `frontend/src/renderer/components/ThreadActions.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `useReplyToThread`, `useResolveThread` (unchanged).
 
 - [ ] **Step 1: Write failing tests** (extend ThreadActions.test.tsx):
@@ -227,7 +342,7 @@
   - Clicking "Cancel" hides the composer and clears the text.
   - The "Resolve" button is still shown (when `!thread.resolved`) in the collapsed state.
   - Keep the existing tests (error line hoisted, resolve.mutate args, resolve hidden when resolved) working — adjust them for the new collapsed layout (Reply now toggles, so the submit assertions must open the composer first).
-  Run → FAIL.
+    Run → FAIL.
 
 - [ ] **Step 2: Implement.** Restructure `ThreadActions`:
   - `const [composing, setComposing] = useState(false);`
@@ -246,11 +361,13 @@
 ---
 
 ## Final verification
+
 - [ ] `cd frontend && npm run typecheck && npx vitest run` — whole suite green.
 - [ ] No `routeTree.gen.ts` / `pnpm-lock.yaml` churn committed; only the intended `package.json`/`package-lock` highlight.js addition.
 - [ ] Manual visual pass after reinstall: Swift diff is colored; resolved thread starts collapsed and expands on click; Reply button reveals composer; ⌘+Enter sends; copy button copies code; filename readable.
 
 ## Self-Review notes
+
 - **Ask coverage:** syntax highlighting → Task 1; resolved-collapse → Task 2; filename header → Task 2; collapsible composer → Task 3; ⌘/Ctrl+Enter → Task 3; tighter spacing → Tasks 1+2; copy-code button → Task 1.
 - **Security:** the only `dangerouslySetInnerHTML` is fed by `highlightLine`, which escapes on BOTH paths (hljs default + explicit fallback) — locked by a test. Code text is the developer's own repo content rendered in their own app.
 - **Type consistency:** `languageForPath`/`highlightLine` signatures identical across Task 1 usage; `Thread` type reused in Task 2/3.

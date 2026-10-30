@@ -10,7 +10,7 @@
 The app decides whether an agent session is **working** or **needs you** by deriving a
 display status from durable facts at read time (`deriveStatus`,
 `backend/internal/service/session/status.go`). The derivation is a pure function whose
-decision — *which branch fired* — is discarded the moment it returns. As a result there
+decision — _which branch fired_ — is discarded the moment it returns. As a result there
 is **no way to see why a status pill flipped**.
 
 The observed pain (confirmed with the user):
@@ -36,7 +36,7 @@ Unix socket instead of HTTP. It does **not** scrape the terminal/PTY. It already
 
 Where cmux is ahead: background-work modeling (stay "running" while a background task is
 live) and a 3-way semantic split (idle-"done" distinct from needs-input). Where **we are
-ahead**: stale-active aging so a lost `Stop` cannot pin "working" forever — cmux's *open*
+ahead**: stale-active aging so a lost `Stop` cannot pin "working" forever — cmux's _open_
 issue #3749 asks for exactly what our PR #5 already shipped.
 
 Conclusion: we are already ~90% aligned with cmux and ahead on the "stuck on working"
@@ -70,17 +70,17 @@ to the next flip. Surface both in the Session Inspector and `ao session get`.
 
 One reason code per `deriveStatus` return branch (`status.go:47-98`), 9 total:
 
-| Reason code | Fires when | Meaning for diagnosis |
-|---|---|---|
-| `working` | `active`, `now - lastActivityAt <= 15m` | Genuinely busy; heartbeat fresh |
-| `waiting_input` | `activity_state == waiting_input` | **Real** agent prompt (Notification hook) |
-| `active_stale` | `active` aged past `activeStaleGrace` (15m) → `needs_input` | **Timeout guess** — likely false "needs you" while working |
-| `idle_aged` | `idle` + has signalled + aged past `waitingInputGrace` (45s) → `needs_input` | **Timeout guess** — turn ended, promoted by clock |
-| `idle` | fresh idle within grace, or hook-less harness | Recently active / normal quiet |
-| `no_signal` | signal-capable, never signalled, silent past `noSignalGrace` (90s) | Hook pipeline may be broken |
-| `pr_pipeline` | open-PR worst-wins aggregate produced the status | The `status` field itself names which (ci_failed/changes_requested/…) |
-| `terminated` | terminated, no merged PR | — |
-| `merged` | merged branch, or terminated with a merged PR | — |
+| Reason code     | Fires when                                                                   | Meaning for diagnosis                                                 |
+| --------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `working`       | `active`, `now - lastActivityAt <= 15m`                                      | Genuinely busy; heartbeat fresh                                       |
+| `waiting_input` | `activity_state == waiting_input`                                            | **Real** agent prompt (Notification hook)                             |
+| `active_stale`  | `active` aged past `activeStaleGrace` (15m) → `needs_input`                  | **Timeout guess** — likely false "needs you" while working            |
+| `idle_aged`     | `idle` + has signalled + aged past `waitingInputGrace` (45s) → `needs_input` | **Timeout guess** — turn ended, promoted by clock                     |
+| `idle`          | fresh idle within grace, or hook-less harness                                | Recently active / normal quiet                                        |
+| `no_signal`     | signal-capable, never signalled, silent past `noSignalGrace` (90s)           | Hook pipeline may be broken                                           |
+| `pr_pipeline`   | open-PR worst-wins aggregate produced the status                             | The `status` field itself names which (ci_failed/changes_requested/…) |
+| `terminated`    | terminated, no merged PR                                                     | —                                                                     |
+| `merged`        | merged branch, or terminated with a merged PR                                | —                                                                     |
 
 **Key property:** a false "needs you" while working always carries reason `active_stale`
 or `idle_aged` (timeout-driven), never `waiting_input` (real prompt). That single
@@ -92,12 +92,12 @@ For the three states sitting on a pending timeout, also emit **`nextTransitionAt
 timestamp, so the UI can tick locally and stay accurate between reads) and
 **`nextTransitionTo`** (the status it will become):
 
-| Current | `nextTransitionAt` | `nextTransitionTo` |
-|---|---|---|
-| `working` (active, within grace) | `lastActivityAt + 15m` | `needs_input` |
-| fresh `idle`, has signalled | `lastActivityAt + 45s` | `needs_input` |
-| fresh `idle`, never signalled (signal-capable) | `lastActivityAt + 90s` | `no_signal` |
-| all others (waiting_input, active_stale, idle_aged, no_signal, pr_*, terminated, merged) | — (nil) | — |
+| Current                                                                                  | `nextTransitionAt`     | `nextTransitionTo` |
+| ---------------------------------------------------------------------------------------- | ---------------------- | ------------------ |
+| `working` (active, within grace)                                                         | `lastActivityAt + 15m` | `needs_input`      |
+| fresh `idle`, has signalled                                                              | `lastActivityAt + 45s` | `needs_input`      |
+| fresh `idle`, never signalled (signal-capable)                                           | `lastActivityAt + 90s` | `no_signal`        |
+| all others (waiting_input, active_stale, idle_aged, no_signal, pr_*, terminated, merged) | — (nil)                | —                  |
 
 Exactly one countdown row applies per session (a fresh idle is either signalled or not,
 per `FirstSignalAt`). Computed against the injected clock `s.now()` (`service.go:597`) so
@@ -146,11 +146,11 @@ headless answer to "I can't tell why."
   Activity timeline (`:289-299`, where the activity pill + `no_signal` warning already
   render), add:
   - a muted **"why" caption** driven by a reason-code→sentence map, e.g.
-    - `active_stale` → *"No signal for 16m — assumed waiting (turn's Stop hook may have been lost)"*
-    - `idle_aged` → *"Turn ended, idle 48s — assumed waiting"*
-    - `waiting_input` → *"Agent requested input"*
-    - `working` → *"Working — heartbeat 2m ago"*
-  - a **countdown** caption where `nextTransitionAt` is set, e.g. *"→ Needs input in 13m"*,
+    - `active_stale` → _"No signal for 16m — assumed waiting (turn's Stop hook may have been lost)"_
+    - `idle_aged` → _"Turn ended, idle 48s — assumed waiting"_
+    - `waiting_input` → _"Agent requested input"_
+    - `working` → _"Working — heartbeat 2m ago"_
+  - a **countdown** caption where `nextTransitionAt` is set, e.g. _"→ Needs input in 13m"_,
     ticking locally from the absolute timestamp.
 - Reason labels that end in "assumed" make it explicit that a `needs_input` came from a
   timeout inference, not a real prompt.

@@ -22,10 +22,12 @@
 ### Task 1: Config — `AO_SESSION_IDLE_CLOSE`
 
 **Files:**
+
 - Modify: `backend/internal/config/config.go` (struct ~line 74-97, const block ~line 17-39, `Load` ~line 125-230, doc comment ~line 109-123)
 - Test: `backend/internal/config/config_test.go`
 
 **Interfaces:**
+
 - Produces: `config.Config.SessionIdleClose time.Duration`; `config.DefaultSessionIdleClose = 24 * time.Hour`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -138,11 +140,13 @@ git commit -m "feat(config): add AO_SESSION_IDLE_CLOSE idle auto-close window (d
 ### Task 2: `Manager.CloseIdleSessions` + replace boot reap
 
 **Files:**
+
 - Modify: `backend/internal/session_manager/manager.go` (add struct field ~line 137, `Deps` field ~line 166, `New` ~line 170-200, delete `reconcileReap` ~line 814-834, rewrite `Reconcile` ~line 836-871, add `CloseIdleSessions`/`closeIdle`/`idleReference`)
 - Test: `backend/internal/session_manager/manager_test.go` (delete the two `reconcileReap` tests ~line 2088-2127, add `CloseIdleSessions` tests)
 - Test: `backend/internal/integration/lifecycle_sqlite_test.go` (add `newStackWithIdleClose` ~line 121, update `TestReconcile_TerminatesDeadLiveSessionAndReapsLeakedTmux` ~line 217)
 
 **Interfaces:**
+
 - Consumes: `config.Config.SessionIdleClose` (wired in Task 3 via `Deps.IdleCloseTTL`).
 - Produces:
   - `sessionmanager.Deps.IdleCloseTTL time.Duration` (0 disables).
@@ -485,6 +489,7 @@ git commit -m "feat(session): CloseIdleSessions idle sweep; replace immediate bo
 ### Task 3: Daemon idle-sweep ticker + wiring
 
 **Files:**
+
 - Create: `backend/internal/daemon/idle_sweep.go`
 - Create: `backend/internal/daemon/idle_sweep_test.go`
 - Modify: `backend/internal/daemon/lifecycle_wiring.go` (`sessionLifecycle` interface ~line 73-76; pass `IdleCloseTTL` into `sessionmanager.New` ~line 104-114)
@@ -492,6 +497,7 @@ git commit -m "feat(session): CloseIdleSessions idle sweep; replace immediate bo
 - Modify: `backend/internal/daemon/wiring_test.go` (`fakeSessionLifecycle` ~line 439-454)
 
 **Interfaces:**
+
 - Consumes: `(*Manager).CloseIdleSessions` (Task 2); `config.Config.SessionIdleClose` (Task 1).
 - Produces: `daemon.idleSweepInterval` const; `daemon.startIdleSweep(ctx, interval, sweep, log) <-chan struct{}`; `sessionLifecycle.CloseIdleSessions(ctx) error`.
 
@@ -687,4 +693,5 @@ AO_SESSION_IDLE_CLOSE=1m ao start   # or launch the app with the env set
 # spawn/idle a session, wait >1m, confirm its board card shows "terminated"
 # and the "Restore session" button relaunches it with its worktree intact.
 ```
+
 Expected: after ~1m idle the session is terminated (tmux gone) with its worktree preserved; Restore brings it back.

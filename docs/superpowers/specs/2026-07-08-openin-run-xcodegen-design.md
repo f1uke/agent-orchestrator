@@ -66,23 +66,23 @@ Pure, dependency-injected. Types:
 
 ```ts
 export type XcodegenDirResult = {
-  dir: string;           // path relative to the searched root ("." for root)
-  ok: boolean;
-  exitCode: number | null;
-  output: string;        // combined stdout+stderr, trimmed
+	dir: string; // path relative to the searched root ("." for root)
+	ok: boolean;
+	exitCode: number | null;
+	output: string; // combined stdout+stderr, trimmed
 };
 
 export type RunXcodegenResult =
-  | { status: "not-installed" }
-  | { status: "no-specs"; root: string }
-  | { status: "ran"; root: string; results: XcodegenDirResult[] };
+	| { status: "not-installed" }
+	| { status: "no-specs"; root: string }
+	| { status: "ran"; root: string; results: XcodegenDirResult[] };
 ```
 
 Functions:
 
 - `shouldSkipDir(name: string): boolean` — `name.startsWith(".") ||
-  IGNORED_DIR_NAMES.has(name)` where `IGNORED_DIR_NAMES = { node_modules, Pods,
-  Carthage, DerivedData, build, .build }`. Exported + unit-tested.
+IGNORED_DIR_NAMES.has(name)` where `IGNORED_DIR_NAMES = { node_modules, Pods,
+Carthage, DerivedData, build, .build }`. Exported + unit-tested.
 - `findProjectSpecDirs(root, readdir): Promise<string[]>` — recursive walk;
   returns every directory (absolute) that directly contains a `project.yml`,
   skipping `shouldSkipDir` subdirs. `readdir` is injected (defaults to
@@ -109,14 +109,14 @@ typical case is 1–2 specs, so latency is a non-issue.
 
 - `frontend/src/main.ts`: import `runXcodegen` + `withFallbackPath`; register
   `ipcMain.handle("openIn:xcodegen", async (_e, dir) => { await
-  ensureShellEnv(); const env = { ...process.env, PATH:
-  withFallbackPath(cachedShellEnv?.PATH ?? process.env.PATH) }; return
-  runXcodegen(dir, { env }); })`. macOS-only guard consistent with the other
+ensureShellEnv(); const env = { ...process.env, PATH:
+withFallbackPath(cachedShellEnv?.PATH ?? process.env.PATH) }; return
+runXcodegen(dir, { env }); })`. macOS-only guard consistent with the other
   handlers (return `{ status: "no-specs" }`-shaped early off darwin, or rely on
   the menu being hidden off-mac — the menu already hides off-mac).
 - `frontend/src/preload.ts`: add
   `xcodegen: (dir: string) => ipcRenderer.invoke("openIn:xcodegen", dir) as
-  Promise<RunXcodegenResult>` under `openIn`; import `RunXcodegenResult` type.
+Promise<RunXcodegenResult>` under `openIn`; import `RunXcodegenResult` type.
 - `frontend/src/renderer/lib/bridge.ts`: add fallback stub
   `xcodegen: async () => ({ status: "no-specs", root: "" })`.
 
@@ -146,13 +146,13 @@ typical case is 1–2 specs, so latency is a non-issue.
 
 ## Output / error surfacing summary
 
-| Case | Surface |
-| --- | --- |
-| Search running / generate in progress | Sheet, spinner |
-| Ran, all/some dirs | Sheet, per-dir ✓/✗ + scrollable output |
-| No `project.yml` found | Sheet, friendly empty state |
-| `xcodegen` not installed / not on PATH | Sheet, `brew install xcodegen` hint |
-| IPC/unexpected failure | Sheet, generic error |
+| Case                                   | Surface                                |
+| -------------------------------------- | -------------------------------------- |
+| Search running / generate in progress  | Sheet, spinner                         |
+| Ran, all/some dirs                     | Sheet, per-dir ✓/✗ + scrollable output |
+| No `project.yml` found                 | Sheet, friendly empty state            |
+| `xcodegen` not installed / not on PATH | Sheet, `brew install xcodegen` hint    |
+| IPC/unexpected failure                 | Sheet, generic error                   |
 
 ## Testing
 

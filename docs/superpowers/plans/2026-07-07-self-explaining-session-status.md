@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Expose *why* a session shows its working/needs-you status — a machine-readable reason code per derivation branch plus a countdown to the next timeout-driven flip — in the Session Inspector and `ao session get`, without changing any status behavior.
+**Goal:** Expose _why_ a session shows its working/needs-you status — a machine-readable reason code per derivation branch plus a countdown to the next timeout-driven flip — in the Session Inspector and `ao session get`, without changing any status behavior.
 
 **Architecture:** `deriveStatus` (the pure read-time derivation) gains a sibling `deriveStatusDetail` that returns the same status plus a `StatusReason` and an optional next-transition timestamp/target. `deriveStatus` becomes a thin wrapper so every existing caller and test is untouched. The three new facts ride out on `domain.Session` (already the API read model, embedded in `SessionView`), through the code-first OpenAPI regen, into the frontend session type, and render as a muted "why" caption + live countdown under the Inspector activity pill. Reason/countdown are pure derivations from columns that already exist — no persistence, no migration.
 
@@ -13,7 +13,7 @@
 - **Behavior-preserving.** No status value or transition-timing change. The existing `status_test.go` cases (`TestServiceDerivesStatusFromSessionFactsAndPR`, `TestAggregateStackedChildSignals`) MUST pass unchanged.
 - **No new persistence / migration.** Reason and countdown derive from `activity_state`, `activity_last_at`, `first_signal_at`, and the existing grace constants only.
 - **Code-first API.** After editing `domain/session.go` DTOs, regenerate with `npm run api`; never hand-edit `frontend/src/api/schema.ts` or `backend/internal/httpd/apispec/openapi.yaml`.
-- **Do not store derived/display status** (AGENTS.md hard rule) — this feature only *derives and surfaces*, never stores.
+- **Do not store derived/display status** (AGENTS.md hard rule) — this feature only _derives and surfaces_, never stores.
 - **Surgical changes only.** No drive-by refactors. Conventional commits (`feat:`/`test:`/`docs:`). Branch: `worktree-needs-input-detection` (already checked out, based on `main-fluke`).
 - **Reason code value set (load-bearing, keep Go ↔ TS in sync):** `working`, `waiting_input`, `active_stale`, `idle_aged`, `idle`, `no_signal`, `pr_pipeline`, `terminated`, `merged` (TS adds `unknown` as the safe fallback).
 
@@ -22,6 +22,7 @@
 ### Task 1: Backend — reason + countdown in the derivation
 
 **Files:**
+
 - Modify: `backend/internal/domain/status.go` (add `StatusReason` type + constants)
 - Modify: `backend/internal/domain/session.go:68-76` (three new optional fields on `Session`)
 - Modify: `backend/internal/service/session/status.go` (add `deriveStatusDetail`, `statusResult`, `idleCountdown`; make `deriveStatus` a wrapper)
@@ -29,6 +30,7 @@
 - Test: `backend/internal/service/session/status_test.go` (new reason + countdown tests)
 
 **Interfaces:**
+
 - Produces: `domain.StatusReason` (string) with constants `domain.ReasonWorking`, `domain.ReasonWaitingInput`, `domain.ReasonActiveStale`, `domain.ReasonIdleAged`, `domain.ReasonIdle`, `domain.ReasonNoSignal`, `domain.ReasonPRPipeline`, `domain.ReasonTerminated`, `domain.ReasonMerged`.
 - Produces: `domain.Session.StatusReason StatusReason`, `domain.Session.NextTransitionAt *time.Time`, `domain.Session.NextTransitionTo SessionStatus`.
 - Produces: `deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool, minApprovals int) statusResult` where `statusResult{Status domain.SessionStatus; Reason domain.StatusReason; NextTransitionAt *time.Time; NextTransitionTo domain.SessionStatus}`.
@@ -317,10 +319,12 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 2: Regenerate the API contract + verify no drift
 
 **Files:**
+
 - Regenerate: `backend/internal/httpd/apispec/openapi.yaml`, `frontend/src/api/schema.ts` (via `npm run api` — do NOT hand-edit)
 - Possibly modify: `backend/internal/httpd/apispec/specgen/build.go:125` (`schemaNames`) only if the drift test demands it
 
 **Interfaces:**
+
 - Consumes: the new `domain.Session` fields from Task 1.
 - Produces: `components["schemas"]["Session"]` / `["SessionView"]` in `schema.ts` gain optional `statusReason?`, `nextTransitionAt?`, `nextTransitionTo?` — consumed by Task 4.
 
@@ -366,10 +370,12 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 3: CLI — surface the reason in `ao session get`
 
 **Files:**
+
 - Modify: `backend/internal/cli/session.go:42-54` (`sessionDTO`), `:709-741` (`writeSessionDetails`)
 - Test: `backend/internal/cli/session_test.go` (new focused test)
 
 **Interfaces:**
+
 - Consumes: the `statusReason` JSON field from the daemon (Task 2).
 - Produces: `ao session get <id>` prints a `reason: <code>` line after `status:`.
 
@@ -462,11 +468,13 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 4: Frontend types — reason mapping, labels, countdown helper
 
 **Files:**
+
 - Modify: `frontend/src/renderer/types/workspace.ts` (new `StatusReason` type + helpers + `WorkspaceSession` fields)
 - Modify: `frontend/src/renderer/hooks/useWorkspaceQuery.ts:5-12` (import), `:60-66` (map new fields)
 - Test: `frontend/src/renderer/types/workspace.test.ts` (new describes)
 
 **Interfaces:**
+
 - Consumes: `session.statusReason`, `session.nextTransitionAt`, `session.nextTransitionTo` from the generated schema (Task 2).
 - Produces: `StatusReason` type; `toStatusReason(reason?: string): StatusReason | undefined`; `statusReasonLabel: Record<StatusReason, string>`; `formatCountdown(ms: number): string`; `formatNextTransition(session, now: number): string`; `WorkspaceSession.statusReason?`, `.nextTransitionAt?`, `.nextTransitionTo?` — consumed by Task 5.
 
@@ -487,8 +495,15 @@ describe("toStatusReason", () => {
 describe("statusReasonLabel", () => {
 	it("has a non-empty label for every real reason code", () => {
 		for (const r of [
-			"working", "waiting_input", "active_stale", "idle_aged",
-			"idle", "no_signal", "pr_pipeline", "terminated", "merged",
+			"working",
+			"waiting_input",
+			"active_stale",
+			"idle_aged",
+			"idle",
+			"no_signal",
+			"pr_pipeline",
+			"terminated",
+			"merged",
 		] as const) {
 			expect(statusReasonLabel[r].length).toBeGreaterThan(0);
 		}
@@ -502,15 +517,19 @@ describe("formatNextTransition", () => {
 		expect(
 			formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "needs_input" }, now),
 		).toBe("→ Needs input in 4m");
-		expect(
-			formatNextTransition({ nextTransitionAt: "2026-01-01T00:00:30Z", nextTransitionTo: "no_signal" }, now),
-		).toBe("→ No signal in 30s");
+		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:00:30Z", nextTransitionTo: "no_signal" }, now)).toBe(
+			"→ No signal in 30s",
+		);
 	});
 
 	it("is empty when already due, missing, or targeting a non-countdown status", () => {
-		expect(formatNextTransition({ nextTransitionAt: "2025-12-31T23:59:00Z", nextTransitionTo: "needs_input" }, now)).toBe("");
+		expect(
+			formatNextTransition({ nextTransitionAt: "2025-12-31T23:59:00Z", nextTransitionTo: "needs_input" }, now),
+		).toBe("");
 		expect(formatNextTransition({}, now)).toBe("");
-		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "working" }, now)).toBe("");
+		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "working" }, now)).toBe(
+			"",
+		);
 	});
 });
 ```
@@ -660,9 +679,11 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 5: Frontend UI — "why" caption + live countdown in the Inspector
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/SessionInspector.tsx:2` (import `useEffect`), `:11` (import helpers), `:245-299` (`ActivityTimeline`)
 
 **Interfaces:**
+
 - Consumes: `session.statusReason`, `session.nextTransitionAt`, `session.nextTransitionTo` (Task 4) and `statusReasonLabel`, `formatNextTransition` (Task 4).
 - Produces: the Inspector activity "now" row renders a muted caption `"<why> · <countdown>"`, the countdown ticking every second while a transition is pending.
 
@@ -685,15 +706,15 @@ import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonL
 In `frontend/src/renderer/components/SessionInspector.tsx`, at the top of `ActivityTimeline` (immediately after `function ActivityTimeline({ session }: { session: WorkspaceSession }) {`, line 245), insert:
 
 ```tsx
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		if (!session.nextTransitionAt) return;
-		const id = setInterval(() => setNow(Date.now()), 1000);
-		return () => clearInterval(id);
-	}, [session.nextTransitionAt]);
-	const why = session.statusReason ? statusReasonLabel[session.statusReason] : "";
-	const countdown = formatNextTransition(session, now);
-	const activityCaption = [why, countdown].filter(Boolean).join(" · ");
+const [now, setNow] = useState(() => Date.now());
+useEffect(() => {
+	if (!session.nextTransitionAt) return;
+	const id = setInterval(() => setNow(Date.now()), 1000);
+	return () => clearInterval(id);
+}, [session.nextTransitionAt]);
+const why = session.statusReason ? statusReasonLabel[session.statusReason] : "";
+const countdown = formatNextTransition(session, now);
+const activityCaption = [why, countdown].filter(Boolean).join(" · ");
 ```
 
 - [ ] **Step 3: Render the caption under the activity pill**
@@ -768,8 +789,9 @@ Expected: empty (both already committed in Task 2; no stray regen diff).
 - [ ] **Step 4: Manual check in the running app**
 
 Launch the app (per the local build/run runbook), open the Session Inspector on a live session, and confirm:
-- A `working` session shows *"Agent active · → Needs input in ~15m"* under the activity pill.
-- A session that has sat idle shows *"Turn ended and went quiet — assumed waiting"* (reason `idle_aged`) — visibly different from a real prompt.
+
+- A `working` session shows _"Agent active · → Needs input in ~15m"_ under the activity pill.
+- A session that has sat idle shows _"Turn ended and went quiet — assumed waiting"_ (reason `idle_aged`) — visibly different from a real prompt.
 - `ao session get <id>` prints a `reason:` line matching the pill.
 
 Confirm the countdown ticks down each second while the session is `working`/fresh-`idle`.
@@ -788,6 +810,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ## Self-Review
 
 **Spec coverage:**
+
 - Reason taxonomy (9 codes) → Task 1 (Go constants) + Task 4 (TS). ✓
 - Countdown (`nextTransitionAt` + `nextTransitionTo`) → Task 1 (derive) + Task 4 (`formatNextTransition`) + Task 5 (render). ✓
 - Backend no-migration derivation → Task 1. ✓

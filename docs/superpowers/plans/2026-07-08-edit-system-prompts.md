@@ -29,10 +29,12 @@
 Centralizes all standing prompt TEXT so both the session manager, the review engine, and the settings controller read defaults from one place. Moves the verbatim default text out of `manager.go`/`review/prompt.go`.
 
 **Files:**
+
 - Create: `backend/internal/prompts/prompts.go`
 - Test: `backend/internal/prompts/prompts_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `type Kind string` with `KindOrchestrator = "orchestrator"`, `KindWorker = "worker"`, `KindReviewer = "reviewer"`.
   - `func KnownKinds() []Kind`
@@ -299,10 +301,12 @@ git commit -m "feat(prompts): central package for default bases, floor, and guar
 File-backed store under `~/.ao`, mirroring `internal/spawnconfirm`.
 
 **Files:**
+
 - Create: `backend/internal/promptoverrides/store.go`
 - Test: `backend/internal/promptoverrides/store_test.go`
 
 **Interfaces:**
+
 - Consumes: `prompts.Kind` (Task 1).
 - Produces:
   - `type Overrides struct { Base map[prompts.Kind]string `json:"base,omitempty"` }`
@@ -507,11 +511,13 @@ git commit -m "feat(promptoverrides): file-backed store for global prompt-base o
 Adds a typed per-kind addition field to the project config blob (no migration) and mirrors it in the CLI type so `--config-json` round-trips it.
 
 **Files:**
+
 - Modify: `backend/internal/domain/projectconfig.go`
 - Test: `backend/internal/domain/projectconfig_test.go`
 - Modify: `backend/internal/cli/project.go` (add the field to the `projectConfig` mirror struct at lines ~103-115)
 
 **Interfaces:**
+
 - Produces:
   - `type SystemPromptAdditions struct { Orchestrator string `json:"orchestrator,omitempty"`; Worker string `json:"worker,omitempty"`; Reviewer string `json:"reviewer,omitempty"` }`
   - New field on `ProjectConfig`: `SystemPromptAdditions SystemPromptAdditions `json:"systemPromptAdditions,omitempty"``
@@ -616,10 +622,12 @@ git commit -m "feat(domain): per-project SystemPromptAdditions on ProjectConfig"
 Compose `base + addition + floor + dynamic + guard` using `prompts` + an injected overrides getter + the project's additions. Add a nil-safe `PromptOverrides` dep (production wiring in Task 6; nil ⇒ built-in defaults). Remove the now-relocated `orchestratorPrompt`, `workerMultiPRPrompt`, `systemPromptGuard` from `manager.go`.
 
 **Files:**
+
 - Modify: `backend/internal/session_manager/manager.go`
 - Test: `backend/internal/session_manager/manager_test.go`
 
 **Interfaces:**
+
 - Consumes: `prompts.DefaultBase/CoordinationFloor/ConfidentialityGuard/RenderBase/Section/Kind` (Task 1), `promptoverrides.Overrides` (Task 2), `domain.SystemPromptAdditions` (Task 3).
 - Produces: `Deps.PromptOverrides func() promptoverrides.Overrides` and matching `Manager.promptOverrides` field + `func (m *Manager) effectiveBase(k prompts.Kind, projectID domain.ProjectID) string`.
 
@@ -804,12 +812,14 @@ git commit -m "feat(session): layered system-prompt assembly (base+addition+floo
 Thread the effective reviewer base + per-project addition into `reviewTexts`, append the reviewer floor + guard, and resolve the override/addition in the Engine (which already loads the worker's project).
 
 **Files:**
+
 - Modify: `backend/internal/review/prompt.go` (compose base + addition + floor + guard)
 - Modify: `backend/internal/review/launcher.go` (`LaunchSpec` gains `ReviewerBase`, `ReviewerAddition`)
 - Modify: `backend/internal/review/review.go` (`reviewLaunchSpec` resolves them; Engine gains a `PromptOverrides` getter)
 - Test: `backend/internal/review/prompt_test.go`
 
 **Interfaces:**
+
 - Consumes: `prompts.*` (Task 1), `promptoverrides.Overrides` (Task 2), `domain.SystemPromptAdditions` (Task 3).
 - Produces: `LaunchSpec.ReviewerBase string`, `LaunchSpec.ReviewerAddition string`; Engine field `promptOverrides func() promptoverrides.Overrides` (nil ⇒ defaults).
 
@@ -919,6 +929,7 @@ git commit -m "feat(review): reviewer prompt honors global base override + per-p
 Extend `SettingsController` with `/api/v1/settings/prompts`, wire the `promptoverrides` store into the daemon (controller + Manager getter + review Engine getter), and regenerate the API artifacts.
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go` (new DTOs)
 - Modify: `backend/internal/httpd/controllers/settings.go` (new service iface + routes + handlers)
 - Modify: `backend/internal/httpd/api.go` (`APIDeps.SystemPrompts`, controller construction)
@@ -929,6 +940,7 @@ Extend `SettingsController` with `/api/v1/settings/prompts`, wire the `promptove
 - Regenerate: `frontend/src/api/schema.ts`, `backend/internal/httpd/apispec/openapi.yaml`
 
 **Interfaces:**
+
 - Produces:
   - DTOs: `SystemPromptItem { Kind string; Default string; Override *string }`, `SystemPromptsResponse { Prompts []SystemPromptItem }`, `SetSystemPromptRequest { Base string }`.
   - Controller iface `SystemPromptsService { Get() promptoverrides.Overrides; SetBase(prompts.Kind, string) error; ClearBase(prompts.Kind) error }` (satisfied by `*promptoverrides.Store`).
@@ -1220,6 +1232,7 @@ git commit -m "feat(api): /settings/prompts endpoints + wire promptoverrides sto
 No textarea primitive exists. Add a minimal shadcn-style one matching the form's input styling.
 
 **Files:**
+
 - Create: `frontend/src/renderer/components/ui/textarea.tsx`
 
 - [ ] **Step 1: Create the primitive**
@@ -1264,6 +1277,7 @@ git commit -m "feat(ui): add Textarea primitive"
 Clone `SpawnConfirmSection` into a card that lists a textarea per kind (prefilled with override else default), with Save (PUT) and Reset-to-default (DELETE, disabled when no override).
 
 **Files:**
+
 - Create: `frontend/src/renderer/components/SystemPromptsSection.tsx`
 - Modify: `frontend/src/renderer/components/GlobalSettingsForm.tsx` (render `<SystemPromptsSection />`)
 - Test: `frontend/src/renderer/components/SystemPromptsSection.test.tsx`
@@ -1276,7 +1290,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getMock, putMock, deleteMock } = vi.hoisted(() => ({ getMock: vi.fn(), putMock: vi.fn(), deleteMock: vi.fn() }));
+const { getMock, putMock, deleteMock } = vi.hoisted(() => ({
+	getMock: vi.fn(),
+	putMock: vi.fn(),
+	deleteMock: vi.fn(),
+}));
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock, PUT: putMock, DELETE: deleteMock },
 	apiErrorMessage: (e: unknown, fb = "Request failed") => (e instanceof Error ? e.message : fb),
@@ -1417,9 +1435,9 @@ export function SystemPromptsSection() {
 			</CardHeader>
 			<CardContent className="flex flex-col gap-5">
 				<p className="text-[12px] text-muted-foreground">
-					Edit the global base each session kind starts from. AO always appends a protected coordination floor,
-					the confidentiality guard, and dynamic context (git convention, spawn-confirm, session and project ids) —
-					those are not shown here. Use <code>{"{{.ProjectID}}"}</code> in the orchestrator base to insert the project id.
+					Edit the global base each session kind starts from. AO always appends a protected coordination floor, the
+					confidentiality guard, and dynamic context (git convention, spawn-confirm, session and project ids) — those
+					are not shown here. Use <code>{"{{.ProjectID}}"}</code> in the orchestrator base to insert the project id.
 				</p>
 				{items.map((p) => (
 					<div key={p.kind} className="flex flex-col gap-1.5">
@@ -1468,13 +1486,13 @@ export function SystemPromptsSection() {
 ```tsx
 import { SystemPromptsSection } from "./SystemPromptsSection";
 // ...
-				<div className="mx-auto flex max-w-2xl flex-col gap-4">
-					<SystemPromptsSection />
-					<SpawnConfirmSection />
-					<AutoReclaimSection />
-					<UpdatesSection />
-					<MigrationSection />
-				</div>
+<div className="mx-auto flex max-w-2xl flex-col gap-4">
+	<SystemPromptsSection />
+	<SpawnConfirmSection />
+	<AutoReclaimSection />
+	<UpdatesSection />
+	<MigrationSection />
+</div>;
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -1498,6 +1516,7 @@ git commit -m "feat(web): global System Prompts settings card"
 Add per-kind additional-prompt textareas to `ProjectSettingsForm`, seeded from `config.systemPromptAdditions` and saved via the existing `PUT /projects/{id}/config` (spread-then-overlay).
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/ProjectSettingsForm.tsx`
 - Test: `frontend/src/renderer/components/ProjectSettingsForm.test.tsx`
 
@@ -1522,7 +1541,11 @@ it("edits per-kind additional prompts and saves them without dropping hidden con
 	await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 	await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 	const body = putMock.mock.calls[0][1].body.config;
-	expect(body.systemPromptAdditions).toEqual({ orchestrator: undefined, worker: "new worker note", reviewer: undefined });
+	expect(body.systemPromptAdditions).toEqual({
+		orchestrator: undefined,
+		worker: "new worker note",
+		reviewer: undefined,
+	});
 	expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
 });
 ```
@@ -1609,17 +1632,20 @@ Expected: PASS.
 - [ ] **Step 3: Revert generated churn**
 
 Run:
+
 ```bash
 git status --short
 git checkout -- frontend/src/renderer/routeTree.gen.ts 2>/dev/null || true
 # If frontend/pnpm-lock.yaml was rewritten wholesale by an install, revert it:
 git checkout -- frontend/pnpm-lock.yaml 2>/dev/null || true
 ```
+
 Confirm `frontend/src/api/schema.ts` and `backend/internal/httpd/apispec/openapi.yaml` changes ARE kept (those are intended API artifacts).
 
 - [ ] **Step 4: End-to-end demo via `ao preview`**
 
 Bring up the change and drive it (see the "Demo frontend without disrupting running app" runbook if isolating from the live daemon). Verify:
+
 1. Global Settings → System Prompts: edit the **worker** base (e.g. prepend a marker line) and Save.
 2. A project's Settings → add a **worker additional prompt**.
 3. Spawn (or restart) a worker and confirm its system prompt shows **both** the edited base **and** the addition, **plus** the git-convention + spawn-confirm dynamic injections, the worker floor, and the confidentiality guard.

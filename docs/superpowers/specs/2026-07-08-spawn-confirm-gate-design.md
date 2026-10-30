@@ -149,7 +149,7 @@ Extend the existing `SettingsController` (do not add a new controller):
   `SetSpawnConfirmSettingsRequest{ Enabled bool }`.
 - `specgen/build.go`: add the two schema-name mappings and two operations in
   `settingsOperations()`; regenerate with `npm run api` (commits `openapi.yaml`
-  + `schema.ts`).
+  - `schema.ts`).
 
 ## Daemon wiring
 

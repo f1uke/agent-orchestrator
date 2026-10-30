@@ -2,7 +2,7 @@
 
 **Status:** proposal (awaiting human confirmation — no code written yet)
 **Date:** 2026-07-09
-**Scope:** let the user manually move a board session to **Done**, which *terminates*
+**Scope:** let the user manually move a board session to **Done**, which _terminates_
 the session (kills runtime + reclaims worktree), and back out again (Reopen).
 
 ---
@@ -13,12 +13,12 @@ the session (kills runtime + reclaims worktree), and back out again (Reopen).
   (`deriveStatusDetail`, `status.go:66`). The manual-vs-auto "crux" dissolves once you
   see this: **"Done" is already a durable fact — `is_terminated`** — and the derivation
   **short-circuits on it before any auto rule runs** (`status.go:67-72`). So a manual
-  Done can *never* be flipped back to `needs_input` by `idle_aged`. **No new "pin"
+  Done can _never_ be flipped back to `needs_input` by `idle_aged`. **No new "pin"
   column, no override state machine, no migration.**
 - Everything the backend needs already exists: **`POST /sessions/{id}/kill`** (terminate
-  + reclaim worktree, keep branch, restorable), **`POST /sessions/{id}/restore`** (Reopen),
-  **`DELETE /sessions/{id}`** (permanent). The done-bar already wires Reopen + Delete.
-- **The gap is UI-only:** active board cards have *no action affordance* today (click =
+  - reclaim worktree, keep branch, restorable), **`POST /sessions/{id}/restore`** (Reopen),
+    **`DELETE /sessions/{id}`** (permanent). The done-bar already wires Reopen + Delete.
+- **The gap is UI-only:** active board cards have _no action affordance_ today (click =
   open). Add a **⋯ menu on the card** whose headline item is **Move to Done → `/kill`**.
 - **Recommendation:** the two manual transitions with real, non-stale semantics are
   **Done (terminate)** and **Reopen (restore)**. Keep the intermediate lanes
@@ -51,15 +51,16 @@ The board maps that status → one of five kanban lanes via `attentionZone`
 
 ### The crux (decision #3), resolved
 
-> *"A manual 'Done' must NOT get flipped back to needs_input by idle_aged."*
+> _"A manual 'Done' must NOT get flipped back to needs_input by idle_aged."_
 
 **It structurally can't, because Done = terminate.** `Kill` records terminal intent via
 `MarkTerminated` (`lifecycle/manager.go:276`), setting the persisted `is_terminated=true`.
 Rule **1** returns `terminated`/`merged` **before** rules 6–8 (`active_stale`,
 `idle_aged`, `no_signal`) can ever run — those only apply to non-terminated sessions.
-So **the terminate bit *is* the pin.** No parallel `manual_status` field is needed.
+So **the terminate bit _is_ the pin.** No parallel `manual_status` field is needed.
 
 Bonus properties this buys for free:
+
 - **Survives daemon restart** — it's a DB column, not in-memory state. Re-derivation on
   boot reads the same fact → still Done.
 - **Reversible** — Reopen (`/restore`) revives the row; `MarkSpawned` sets `Reactivated`
@@ -94,11 +95,11 @@ This honors decision #2 (map to the existing lifecycle; invent no taxonomy) and 
 
 Everything is already built and battle-tested; I cite it so review can confirm reuse:
 
-| Capability | Endpoint | Service → Manager | Notes |
-|---|---|---|---|
+| Capability                              | Endpoint                                                                                       | Service → Manager                                                                     | Notes                                                                                                                                                                                                           |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Done = terminate + reclaim worktree** | `POST /api/v1/sessions/{id}/kill` (`controllers/sessions.go:84`, handler `sessions.go` `kill`) | `Service.Kill` (`service.go:405`) → `Manager.Kill` (`session_manager/manager.go:523`) | Marks terminated, deletes restore marker, destroys runtime, destroys worktree. **Keeps the git branch.** Dirty worktree is **preserved** (returns `freed=false`, `manager.go:552-554`) — never force-discarded. |
-| **Reopen (reverse Done)** | `POST /api/v1/sessions/{id}/restore` (`sessions.go:82`) | `Service.Restore` (`service.go:385`) → `Manager.Restore` (`manager.go:662`) | Relaunches; `Reactivated=true` → returns as `needs_input`. `SESSION_NOT_RESTORABLE` for a still-live merged session is a **benign no-op** the UI already handles (`SessionsBoard.tsx:313`). |
-| **Permanent delete (from Done)** | `DELETE /api/v1/sessions/{id}?force=` (`sessions.go:74`) | `Service.Delete` (`service.go:459`) → `Manager.PurgeSession` (`manager.go:568`) | Gated on terminal status; refuses dirty worktree unless `force`. |
+| **Reopen (reverse Done)**               | `POST /api/v1/sessions/{id}/restore` (`sessions.go:82`)                                        | `Service.Restore` (`service.go:385`) → `Manager.Restore` (`manager.go:662`)           | Relaunches; `Reactivated=true` → returns as `needs_input`. `SESSION_NOT_RESTORABLE` for a still-live merged session is a **benign no-op** the UI already handles (`SessionsBoard.tsx:313`).                     |
+| **Permanent delete (from Done)**        | `DELETE /api/v1/sessions/{id}?force=` (`sessions.go:74`)                                       | `Service.Delete` (`service.go:459`) → `Manager.PurgeSession` (`manager.go:568`)       | Gated on terminal status; refuses dirty worktree unless `force`.                                                                                                                                                |
 
 The `KillSessionResponse{ OK, SessionID, Freed }` (`controllers/dto.go:221`) already
 returns `freed` so the UI can tell "worktree reclaimed" from "worktree preserved
@@ -156,8 +157,8 @@ established session-action idiom is the topbar **⋯ menu (rename/restart/kill/c
 - **Confirm:** inline arm-confirm (reuse the exact pattern in `TopbarKillButton`,
   `ShellTopbar.tsx:248-317`), not a modal — lighter, matches the idiom, and Done is
   reversible via Reopen so heavy friction isn't warranted.
-- **Confirm copy** makes the semantics explicit: *"Stops the agent and frees the worktree
-  (the branch is kept). Any open PR stays open. Reversible via Reopen."*
+- **Confirm copy** makes the semantics explicit: _"Stops the agent and frees the worktree
+  (the branch is kept). Any open PR stays open. Reversible via Reopen."_
 - **Workers only:** the board renders only `workerSessions` (`SessionsBoard.tsx:89`), so
   the menu never appears on an orchestrator — matching the topbar, which hides Kill for
   orchestrators (`ShellTopbar.tsx:198`).
@@ -172,8 +173,8 @@ established session-action idiom is the topbar **⋯ menu (rename/restart/kill/c
    `SESSION_NOT_RESTORABLE` handled as no-op (`SessionsBoard.tsx:313`). **No new work.**
 2. **Dirty worktree on Done** — `Kill` **never** force-removes it (`manager.go:552-554`):
    the session still terminates (`is_terminated=true`, card moves to Done) but returns
-   `freed=false`, **preserving uncommitted work on disk**. Surface a subtle *"worktree
-   kept — uncommitted changes"* note from `freed=false`. Permanent Delete later still
+   `freed=false`, **preserving uncommitted work on disk**. Surface a subtle _"worktree
+   kept — uncommitted changes"_ note from `freed=false`. Permanent Delete later still
    refuses dirty unless forced (existing "Delete anyway", `SessionsBoard.tsx:419`). **No
    data-loss path.**
 3. **Open PR moved to Done** — `Kill` tears down runtime + worktree but makes **no SCM
@@ -223,7 +224,7 @@ No backend, DTO, openapi, or migration changes in the recommended plan.
    semantics since only → Done is meaningful).
 2. **Card menu scope** — v1 = just **Move to Done**, or also surface **Rename/Restart**
    (both already exist as services) to make the card menu the board's full session menu?
-3. **"Snooze / dismiss Needs-you"** — the *one* intermediate manual gesture with arguable
+3. **"Snooze / dismiss Needs-you"** — the _one_ intermediate manual gesture with arguable
    value: quiet a session that's nagging in the Needs-you lane **without** terminating it.
    This is notification-noise, **not** a status pin (so it doesn't reopen the derived-status
    can of worms). In scope, or defer?
