@@ -704,6 +704,21 @@ func TestFoldFollowsAnAcceptedSetModel(t *testing.T) {
 	}
 }
 
+func TestFoldKeepsTheChosenModelAcrossALaterInit(t *testing.T) {
+	entries := loadFixture(t, "set_model.jsonl")
+	if tr := foldEntries(t, entries[:1]); tr.ChosenModel != "" {
+		t.Errorf("before claude answered ChosenModel = %q, want none", tr.ChosenModel)
+	}
+	if tr := foldEntries(t, entries); tr.ChosenModel != "claude-sonnet-5-5" {
+		t.Errorf("ChosenModel = %q, want the accepted claude-sonnet-5-5 and not the refused one", tr.ChosenModel)
+	}
+	respawned := append(slices.Clone(entries),
+		synth(5, DirOut, `{"type":"system","subtype":"init","session_id":"s-2","model":"claude-opus-5-5","permissionMode":"default"}`))
+	if tr := foldEntries(t, respawned); tr.ChosenModel != "claude-sonnet-5-5" {
+		t.Errorf("after a later init ChosenModel = %q, want it kept", tr.ChosenModel)
+	}
+}
+
 func TestFoldKeepsTheLastAcceptedInitialize(t *testing.T) {
 	initialize := func(seq uint64, id string) Entry {
 		return synth(seq, DirIn, `{"type":"control_request","request_id":"`+id+`","request":{"subtype":"initialize"}}`)

@@ -271,6 +271,55 @@ func TestRestartResumes(t *testing.T) {
 	assertSameShape(t, got, want)
 }
 
+func TestRestartKeepsTheChosenModel(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _, _ := runFirstSession(t, dir)
+	before := loadEntries(t, cfg.LogPath)
+	last := before[len(before)-1].Seq
+	appendEntries(t, cfg.LogPath,
+		chatproto.Entry{Seq: last + 1, Dir: chatproto.DirIn, Payload: json.RawMessage(
+			`{"type":"control_request","request_id":"sm-1","request":{"subtype":"set_model","model":"haiku"}}`)},
+		chatproto.Entry{Seq: last + 2, Dir: chatproto.DirOut, Payload: json.RawMessage(
+			`{"type":"control_response","response":{"subtype":"success","request_id":"sm-1","response":{"model":"claude-haiku-5-5"}}}`)},
+	)
+
+	resumed := loadEntries(t, fixturePath(t, "resumed_session.jsonl"))
+	cfg2, argvFile := fakeConfig(t, dir, fixturePath(t, "resumed_session.jsonl"))
+	cfg2.PromptFile = cfg.PromptFile
+	r := startHost(t, cfg2)
+	replayInputs(t, cfg2.SocketPath, last+2, resumed, 0)
+	if res := r.wait(t); res.err != nil || res.code != 0 {
+		t.Fatalf("Run = %d, %v; want 0\npane:\n%s", res.code, res.err, r.pane)
+	}
+
+	argv := readArgv(t, argvFile)
+	if i := slices.Index(argv, "--model"); i < 0 || i+1 >= len(argv) || argv[i+1] != "claude-haiku-5-5" {
+		t.Errorf("argv = %v, want --model claude-haiku-5-5, the model set before the restart", argv)
+	}
+	if slices.Contains(argv, "sonnet") {
+		t.Errorf("argv = %v still carries the launch model", argv)
+	}
+}
+
+func appendEntries(t *testing.T, path string, entries ...chatproto.Entry) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	for _, e := range entries {
+		e.TS = time.Now().UTC()
+		b, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func waitingFixture(t *testing.T, dir string, extra ...fixtureLine) string {
 	t.Helper()
 	first := loadEntries(t, fixturePath(t, "first_session.jsonl"))

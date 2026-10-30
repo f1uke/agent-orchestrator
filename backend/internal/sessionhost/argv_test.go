@@ -10,6 +10,7 @@ func TestClaudeArgv(t *testing.T) {
 		name    string
 		command []string
 		resume  string
+		model   string
 		want    []string
 	}{
 		{
@@ -30,6 +31,18 @@ func TestClaudeArgv(t *testing.T) {
 			want:    append(append([]string{"claude", "--model", "opus"}, protocolFlags...), "--resume", "other"),
 		},
 		{
+			name:    "a chosen model replaces the launch model",
+			command: []string{"claude", "--model", "opus", "--effort", "high"},
+			model:   "claude-sonnet-5-5",
+			want:    append([]string{"claude", "--effort", "high", "--model", "claude-sonnet-5-5"}, protocolFlags...),
+		},
+		{
+			name:    "a chosen model replaces the joined form too",
+			command: []string{"claude", "--model=opus", "--", "--model", "x"},
+			model:   "claude-sonnet-5-5",
+			want:    append(append([]string{"claude", "--model", "claude-sonnet-5-5"}, protocolFlags...), "--", "--model", "x"),
+		},
+		{
 			name:    "a session id after -- is prompt text, not a flag",
 			command: []string{"claude", "--model", "opus", "--", "--session-id", "x"},
 			resume:  "pin",
@@ -38,8 +51,8 @@ func TestClaudeArgv(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := claudeArgv(c.command, c.resume); !slices.Equal(got, c.want) {
-				t.Errorf("claudeArgv(%v, %q) =\n %v\nwant\n %v", c.command, c.resume, got, c.want)
+			if got := claudeArgv(c.command, c.resume, c.model); !slices.Equal(got, c.want) {
+				t.Errorf("claudeArgv(%v, %q, %q) =\n %v\nwant\n %v", c.command, c.resume, c.model, got, c.want)
 			}
 		})
 	}

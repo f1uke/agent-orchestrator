@@ -86,6 +86,7 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 	defer func() { _ = lg.file.Close() }()
 
 	t := folder.Transcript()
+	model := t.ChosenModel
 	resume := ""
 	if n := len(t.ClaudeSessionIDs); n > 0 {
 		resume = t.ClaudeSessionIDs[n-1]
@@ -102,7 +103,7 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 		controlTimeout:  orDefault(cfg.controlTimeout, defaultControlTimeout),
 		promptAfterInit: prompt,
 	}
-	return h.run(ctx, cfg, ln, resume)
+	return h.run(ctx, cfg, ln, resume, model)
 }
 
 func readPrompt(path string) (string, error) {
@@ -161,8 +162,8 @@ type host struct {
 	controlTimeout  time.Duration
 }
 
-func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume string) (int, error) {
-	argv := claudeArgv(cfg.Command, resume)
+func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, model string) (int, error) {
+	argv := claudeArgv(cfg.Command, resume, model)
 	cmd := process.Command(argv[0], argv[1:]...)
 	process.Detach(cmd)
 	cmd.Dir = cfg.Dir
@@ -222,8 +223,9 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume stri
 
 // claudeArgv puts the protocol flags and --resume before any "--", after
 // which claude reads prompt text. Claude refuses --session-id beside --resume,
-// so a resume drops the pinned id the agent command carries.
-func claudeArgv(command []string, resume string) []string {
+// so a resume drops the pinned id the agent command carries. A model chosen
+// with set_model replaces the command's --model, so a respawn keeps it.
+func claudeArgv(command []string, resume, model string) []string {
 	flags, rest := command, []string(nil)
 	if i := slices.Index(command, "--"); i >= 0 {
 		flags, rest = command[:i], command[i:]
@@ -234,9 +236,15 @@ func claudeArgv(command []string, resume string) []string {
 		case resume != "" && flags[i] == "--session-id":
 			i++
 		case resume != "" && strings.HasPrefix(flags[i], "--session-id="):
+		case model != "" && flags[i] == "--model":
+			i++
+		case model != "" && strings.HasPrefix(flags[i], "--model="):
 		default:
 			argv = append(argv, flags[i])
 		}
+	}
+	if model != "" {
+		argv = append(argv, "--model", model)
 	}
 	argv = append(argv, protocolFlags...)
 	if resume != "" {
