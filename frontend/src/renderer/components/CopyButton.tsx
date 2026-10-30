@@ -41,7 +41,6 @@ export function CopyButton({
 	className,
 	/** Extra classes while confirming, for a caller whose reveal rules differ. */
 	copiedClassName,
-	/** False for a value too long to read out, such as a whole reply: the name is then just "Copy <what>". */
 	named = true,
 }: {
 	value: string;

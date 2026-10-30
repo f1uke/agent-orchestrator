@@ -1,4 +1,3 @@
-/** One way to say how long something took or has run: `45s`, `2m 14s`, `1h 5m`. */
 export function formatDuration(ms: number): string {
 	const seconds = Math.max(0, Math.floor(ms / 1000));
 	if (seconds < 60) return `${seconds}s`;
@@ -7,14 +6,12 @@ export function formatDuration(ms: number): string {
 	return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-/** Milliseconds from one log timestamp to another, or undefined when either is missing or unreadable. */
 export function elapsedMs(from: string | undefined, to: string | undefined): number | undefined {
 	const start = Date.parse(from ?? "");
 	const end = Date.parse(to ?? "");
 	return Number.isNaN(start) || Number.isNaN(end) ? undefined : end - start;
 }
 
-/** A log timestamp as the local wall-clock time, `17:51`. */
 export function clockTime(ts: string): string {
 	const d = new Date(ts);
 	if (Number.isNaN(d.getTime())) return "";

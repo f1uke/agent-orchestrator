@@ -94,12 +94,10 @@ const PROCESS_KIND: Record<string, ProcessKind> = {
 
 export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolName] ?? "tools";
 
-/** The tool still running at the tail of a group: what it is doing, in plain words, and since when. */
 export type LiveTool = { verb: string; since: string };
 
 export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; failed: number; live?: LiveTool };
 
-// One count, said with a natural article: "read a file", "read 2 files".
 const PHRASE: Record<ProcessKind, (n: number) => string> = {
 	commands: (n) => `ran ${n === 1 ? "a command" : `${n} commands`}`,
 	reads: (n) => `read ${n === 1 ? "a file" : `${n} files`}`,
@@ -115,7 +113,6 @@ const PHRASE: Record<ProcessKind, (n: number) => string> = {
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-/** A summary as one sentence, such as `Ran 2 commands, read a file`, in a fixed kind order. */
 export function processSentence(summary: ProcessSummary): string {
 	return capitalize(summary.counts.map(({ kind, count }) => PHRASE[kind](count)).join(", "));
 }
@@ -135,7 +132,6 @@ const LIVE_VERB: Record<string, (input: Record<string, unknown>) => string> = {
 };
 LIVE_VERB.Task = LIVE_VERB.Agent;
 
-/** What a running call is doing, in plain words: `Running a command`, `Reading sender.go`. */
 export function liveVerb(call: ToolCallItem): string {
 	const say = LIVE_VERB[call.name];
 	return say ? say(isObject(call.input) ? call.input : {}) : `Running ${call.name}`;
@@ -143,7 +139,6 @@ export function liveVerb(call: ToolCallItem): string {
 
 const isAgentTask = (task: BackgroundTask) => task.taskType.includes("agent");
 
-/** What a finished turn left running, in plain words: `Waiting on background command "Run the soak test"`. */
 export function waitingVerb(tasks: readonly BackgroundTask[]): string {
 	if (tasks.length === 1) {
 		const [task] = tasks;
@@ -155,7 +150,6 @@ export function waitingVerb(tasks: readonly BackgroundTask[]): string {
 	return `Waiting on ${tasks.length} ${noun}`;
 }
 
-/** A call still running: no result yet, and not refused before it could run. */
 export function toolRunning(call: ToolCallItem): boolean {
 	return !call.result && call.permission?.status !== "denied" && call.permission?.status !== "cancelled";
 }

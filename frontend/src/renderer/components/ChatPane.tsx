@@ -384,7 +384,6 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 	);
 	const [activeTurn, setActiveTurn] = useState(0);
 
-	// The turn being read is the last one whose opening row sits above the viewport's top third.
 	const findActiveTurn = useCallback(() => {
 		const el = scrollRef.current;
 		if (!el) return;
@@ -651,12 +650,10 @@ function ItemRow({
 	}
 }
 
-// The task's own name: its description, or the quoted name claude puts in the summary.
 function taskLabel(item: TaskMessageItem, task: BackgroundTask | undefined): string {
 	return task?.description || /"([^"]+)"/.exec(item.summary)?.[1] || item.summary;
 }
 
-/** A background task or subagent finished: one quiet line that opens to what claude was told. */
 function TaskMessageCard({
 	item,
 	task,
@@ -696,7 +693,6 @@ function TaskMessageCard({
 	);
 }
 
-/** Under a turn's last reply: copy it, what the turn used, and when it ended. */
 function AnswerBar({ end, reply }: { end: TurnEndItem; reply: string }) {
 	const u = end.usage;
 	const total = u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens;
@@ -764,10 +760,8 @@ function UserMessage({ item }: { item: UserItem }) {
 	);
 }
 
-// A brief that opens with a slash command, such as "/pstack:poteto-mode", runs that command with the rest as its arguments.
 const LEADING_COMMAND = /^\/([\w:.-]+)\s*/;
 
-/** The brief AO spawned the session with: long, so it stays folded behind its first line until opened. */
 function TaskBrief({
 	item,
 	open,

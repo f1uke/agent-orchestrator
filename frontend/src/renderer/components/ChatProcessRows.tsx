@@ -60,7 +60,6 @@ function useNow(everyMs: number): number {
 	return now;
 }
 
-/** How long something has run, ticking once a second. Only live rows mount one. */
 export function Elapsed({ since }: { since: string }) {
 	const now = useNow(1000);
 	const start = Date.parse(since);
@@ -141,11 +140,6 @@ function Member({ member, openRows, toggleRow, theme, root }: MembersProps & { m
 	);
 }
 
-/**
- * The tool calls between two replies, as one quiet sentence, or while one
- * still runs, what it is doing and for how long. A closed group still shows
- * the calls that failed or were denied.
- */
 export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow, { kind: "group" }> }) {
 	const open = rest.openRows[row.key] ?? false;
 	const { summary } = row;
@@ -181,7 +175,6 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 	);
 }
 
-/** The tail after a finished turn whose background work still runs: what claude waits on, and for how long. */
 export function WaitingRow({
 	row,
 	openRows,

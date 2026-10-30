@@ -2,7 +2,6 @@ import { type KeyboardEvent, useCallback, useId, useLayoutEffect, useRef, useSta
 import type { RailTurn } from "../lib/chat-rail";
 import { cn } from "../lib/utils";
 
-// The band at each end of the ladder that a fade covers while it can still scroll.
 const FADE_PX = 20;
 
 type Preview = { index: number; top: number };
@@ -14,13 +13,6 @@ const NAV_KEYS: Record<string, (i: number, last: number) => number> = {
 	End: (_, last) => last,
 };
 
-/**
- * One tick per turn in the gutter right of the chat column. The current
- * turn's tick is brighter and longer; hovering or focusing a tick previews
- * its turn; a click, Enter or Space jumps to it. A ladder taller than its
- * frame scrolls inside it and keeps the current tick in view while the
- * pointer is elsewhere.
- */
 export function ChatTurnRail({
 	turns,
 	active,
@@ -55,7 +47,6 @@ export function ChatTurnRail({
 		setPreview((prev) => prev && previewAt(prev.index));
 	}, [previewAt]);
 
-	// Keep the current tick in view, unless the pointer is working the rail.
 	useLayoutEffect(() => {
 		const ladder = ladderRef.current;
 		const tick = ladder?.children[active] as HTMLElement | undefined;

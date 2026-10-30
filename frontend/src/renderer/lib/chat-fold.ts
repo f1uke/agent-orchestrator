@@ -38,9 +38,7 @@ export type UserItem = {
 	images: number;
 	origin?: Origin;
 	state: CommandState;
-	/** When the input entered the log. */
 	ts: string;
-	/** The task brief AO sent as the first input of a freshly spawned claude. */
 	brief?: true;
 };
 
@@ -52,9 +50,7 @@ export type ToolCallItem = {
 	input: unknown;
 	result?: ToolResult;
 	permission?: PermissionOutcome;
-	/** The ts of the tool_use entry. */
 	startedTs: string;
-	/** The ts of the tool_result entry. */
 	endedTs?: string;
 };
 
@@ -69,11 +65,9 @@ export type TurnEndItem = {
 	contextTokens?: number;
 	contextWindows: Record<string, number>;
 	ts: string;
-	/** From the turn's start (its input started, or arrived) to this result; absent when the log missed the start. */
 	durationMs?: number;
 };
 
-/** A background task or subagent stopped, and claude told the model so. */
 export type TaskMessageItem = {
 	kind: "task_message";
 	ts: string;
@@ -81,9 +75,7 @@ export type TaskMessageItem = {
 	toolUseId: string;
 	status: string;
 	summary: string;
-	/** An agent's final text; empty for a command. */
 	result: string;
-	/** It arrived with no turn running, so claude starts a turn to answer it. */
 	opensTurn: boolean;
 };
 
@@ -110,7 +102,6 @@ export type BackgroundTask = {
 	/** The task_notification summary: for an agent, its final text. */
 	summary?: string;
 	usage?: TaskUsage;
-	/** The time of the task's first event. */
 	startedTs?: string;
 };
 
@@ -238,9 +229,7 @@ export class ChatFolder {
 	private tasks = new Map<string, BackgroundTask>();
 	private ts = "";
 	private context: number | undefined;
-	// When the turn now running started, until its result.
 	private turnStart: string | undefined;
-	// A fresh spawn's first input is the brief AO wrote; a resumed spawn has none.
 	private awaitingBrief = false;
 
 	get lastSeq(): number {
@@ -403,7 +392,6 @@ export class ChatFolder {
 		}
 	}
 
-	// claude replays the user's own input too; only a task notification is new.
 	private applyTaskMessage(blocks: Block[]): void {
 		const text = blocks.map((b) => (b.type === "text" ? b.text : "")).join("");
 		const note = parseTaskNotification(text);

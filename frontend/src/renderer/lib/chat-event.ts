@@ -51,19 +51,16 @@ export type TaskEvent = {
 	usage?: TaskUsage;
 };
 
-/** What claude tells the model when a background task or subagent stops: a replayed user message. */
 export type TaskNotification = {
 	taskId: string;
 	toolUseId: string;
 	status: string;
 	summary: string;
-	/** An agent's final text; empty for a command. */
 	result: string;
 };
 
 const TASK_NOTIFICATION = "<task-notification>";
 
-/** The notification inside a replayed user message's text, or undefined for any other text. */
 export function parseTaskNotification(text: string): TaskNotification | undefined {
 	const body = text.trimStart();
 	if (!body.startsWith(TASK_NOTIFICATION)) return undefined;

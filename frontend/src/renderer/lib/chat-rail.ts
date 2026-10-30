@@ -1,13 +1,10 @@
 import type { ChatRow } from "./chat-rows";
 
-/** One turn on the rail: where it starts and what it was about. */
 export type RailTurn = { turn: number; key: string; prompt: string; reply: string };
 
 const PROMPT_CHARS = 50;
-// Enough for three clamped lines of the hover card.
 const REPLY_CHARS = 360;
 
-/** Markdown read as one plain line: no emphasis, code ticks, headings or list marks. */
 function plain(markdown: string): string {
 	return markdown
 		.replace(/```[^\n]*\n?/g, "")
@@ -31,7 +28,6 @@ function opening(row: ChatRow): string | undefined {
 	return undefined;
 }
 
-/** Every turn in the rows, in order, each with its opening message and its last reply. */
 export function railTurns(rows: readonly ChatRow[]): RailTurn[] {
 	const turns: RailTurn[] = [];
 	for (const row of rows) {
@@ -45,7 +41,6 @@ export function railTurns(rows: readonly ChatRow[]): RailTurn[] {
 	return turns;
 }
 
-/** The turn being read: the last one whose opening row starts at or above the probe line. */
 export function activeTurnIndex(starts: readonly number[], probe: number): number {
 	let active = 0;
 	starts.forEach((start, i) => {

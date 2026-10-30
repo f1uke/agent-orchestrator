@@ -512,11 +512,6 @@ function tallEntries(): ChatEntry[] {
 	}));
 }
 
-/**
- * The preview session that shows live work: opened on its task brief, it runs a
- * command long enough to watch the live row tick, then ends its turn with a
- * background soak test still running.
- */
 export const MOCK_LIVE_CHAT_SESSION = "demo-chat-live";
 
 const LIVE_BRIEF = [

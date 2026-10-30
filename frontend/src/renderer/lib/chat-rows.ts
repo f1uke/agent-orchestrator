@@ -8,7 +8,6 @@ export type ProcessMember =
 	| { kind: "tool"; itemIndex: number; call: ToolCallItem; subagentTools: number; task?: BackgroundTask }
 	| { kind: "thinking"; itemIndex: number; text: string };
 
-/** Background work a finished turn left running: the task, its command, and since when. */
 export type WaitingTask = { task: BackgroundTask; command: string; since: string };
 
 export type ChatRow =
@@ -18,7 +17,6 @@ export type ChatRow =
 			item: ChatItem;
 			subagentTools: number;
 			task?: BackgroundTask;
-			/** On a turn end: the turn's last reply, which its answer bar copies. */
 			reply?: string;
 	  }
 	| { key: string; kind: "pending"; pending: Pending }
@@ -31,7 +29,6 @@ export type ChatRow =
 			rows: ChatRow[];
 			summary: ProcessSummary;
 			messages: number;
-			/** The finished turn's duration, from its turn end. */
 			durationMs?: number;
 	  };
 
@@ -61,7 +58,6 @@ function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 	}
 }
 
-// Where a turn begins: the user's input, or a task message claude woke up to answer.
 const opensTurn = (row: ChatRow) =>
 	row.kind === "item" && (row.item.kind === "user" || (row.item.kind === "task_message" && row.item.opensTurn));
 
@@ -101,8 +97,6 @@ function tasksOf(rows: readonly ChatRow[]): Map<string, BackgroundTask> {
 }
 
 function turnRow(userKey: string, body: ChatRow[], durationMs: number | undefined): ChatRow | undefined {
-	// A turn whose work is one group opens straight to its calls: the group's
-	// sentence would only repeat the turn's own line.
 	const only = body.length === 1 && body[0].kind === "group" ? body[0] : undefined;
 	const rows = only ? only.members.map(memberRow) : body;
 	const tasks = tasksOf(rows);
@@ -151,7 +145,6 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 	return out;
 }
 
-// The last turn ended, and background tasks it started still run: the tail says what claude waits on.
 function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {
 	const last = rows.at(-1);
 	if (transcript.busy || !last || !isItem(last, "turn_end")) return undefined;

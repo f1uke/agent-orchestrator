@@ -7802,8 +7802,6 @@ ol.note-prose__list {
 	container-type: inline-size;
 }
 
-/* The turn rail: one tick per turn in the gutter right of the chat column,
-   clear of the text and of the scrollbar. */
 .chat-rail {
 	position: absolute;
 	top: 50%;
@@ -7933,7 +7931,6 @@ ol.note-prose__list {
 	}
 }
 
-/* No gutter beside the 860px column: the rail would cover the text. */
 @container (max-width: 1000px) {
 	.chat-rail {
 		display: none;
@@ -8009,7 +8006,6 @@ ol.note-prose__list {
 	align-items: flex-end;
 }
 
-/* The brief AO spawned the session with, folded to one line until opened. */
 .chat-brief {
 	border: 1px solid var(--border-1);
 	border-radius: 12px;
@@ -8176,7 +8172,6 @@ ol.note-prose__list {
 	font-size: 13px;
 }
 
-/* A live row: what runs, in plain words, and for how long. */
 .chat-live {
 	display: inline-flex;
 	min-width: 0;
@@ -8244,7 +8239,6 @@ ol.note-prose__list {
 	}
 }
 
-/* A task message: a background task or subagent finished. Quieter than a tool card. */
 .chat-task {
 	border: 1px solid var(--border-1);
 	border-radius: 8px;
@@ -8523,7 +8517,6 @@ ol.note-prose__list {
 	margin-top: 0;
 }
 
-/* Under a turn's last reply: copy, the turn's usage, the time it ended. */
 .chat-answer {
 	display: flex;
 	align-items: center;
