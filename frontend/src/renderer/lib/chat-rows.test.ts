@@ -368,6 +368,36 @@ describe("chatRows task messages", () => {
 	});
 });
 
+describe("chatRows waiting on background work", () => {
+	const soak = { ...tool("Bash", { command: "go test -count=50 ./...", run_in_background: true }), id: "bg" };
+	const running = {
+		id: "k1",
+		toolUseId: "bg",
+		description: "Run the soak test",
+		taskType: "local_bash",
+		state: "running" as const,
+		background: true,
+		startedTs: "2026-10-30T10:00:05.000Z",
+	};
+	const ended = [user(), soak, say("started it"), turnEnd()];
+
+	it("ends the rows with what the finished turn left running, its command and since when", () => {
+		const rows = rowsOf(ended, { tasks: [running] });
+		const last = rows.at(-1)!;
+		expect(last.kind).toBe("waiting");
+		expect(last.kind === "waiting" && last.tasks).toEqual([
+			{ task: running, command: "go test -count=50 ./...", since: "2026-10-30T10:00:05.000Z" },
+		]);
+	});
+
+	it("has no waiting row once the task ended, while the turn still runs, or for a foreground task", () => {
+		const done = { ...running, state: "done" as const };
+		expect(rowsOf(ended, { tasks: [done] }).at(-1)?.kind).not.toBe("waiting");
+		expect(rowsOf(ended.slice(0, 3), { tasks: [running], busy: true }).at(-1)?.kind).not.toBe("waiting");
+		expect(rowsOf(ended, { tasks: [{ ...running, background: false }] }).at(-1)?.kind).not.toBe("waiting");
+	});
+});
+
 describe("chatRows on the recorded long session", () => {
 	const dir = join(dirname(fileURLToPath(import.meta.url)), "../../../../backend/internal/chatproto/testdata");
 	const entries = readFileSync(join(dir, "long_session.jsonl"), "utf8")

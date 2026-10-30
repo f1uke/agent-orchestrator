@@ -11,6 +11,7 @@ import {
 	summarizeTools,
 	taskLabel,
 	toolFailed,
+	waitingVerb,
 } from "./chat-tools";
 
 const ROOT = "/work/project";
@@ -258,5 +259,24 @@ describe("taskLabel", () => {
 		["", "Task"],
 	])("%j reads %j", (type, want) => {
 		expect(taskLabel(type)).toBe(want);
+	});
+});
+
+describe("waitingVerb", () => {
+	const command = (description = "") => task("running", { description });
+	const agent = (description = "") => task("running", { taskType: "local_agent", description });
+	it.each<[string, BackgroundTask[], string]>([
+		[
+			"a command by its description",
+			[command("Run the soak test")],
+			'Waiting on background command "Run the soak test"',
+		],
+		["a command with no description", [command()], "Waiting on 1 background command"],
+		["an agent by its description", [agent("Summarize docs")], 'Waiting on agent "Summarize docs"'],
+		["two commands", [command("a"), command("b")], "Waiting on 2 background commands"],
+		["two agents", [agent("a"), agent("b")], "Waiting on 2 agents"],
+		["a command and an agent", [command("a"), agent("b")], "Waiting on 2 background tasks"],
+	])("says %s", (_, tasks, want) => {
+		expect(waitingVerb(tasks)).toBe(want);
 	});
 });

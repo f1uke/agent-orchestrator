@@ -1,3 +1,4 @@
+import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
 import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunning } from "./chat-tools";
@@ -6,6 +7,9 @@ import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunni
 export type ProcessMember =
 	| { kind: "tool"; itemIndex: number; call: ToolCallItem; subagentTools: number; task?: BackgroundTask }
 	| { kind: "thinking"; itemIndex: number; text: string };
+
+/** Background work a finished turn left running: the task, its command, and since when. */
+export type WaitingTask = { task: BackgroundTask; command: string; since: string };
 
 export type ChatRow =
 	| {
@@ -20,6 +24,7 @@ export type ChatRow =
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
+	| { key: string; kind: "waiting"; tasks: WaitingTask[] }
 	| {
 			key: string;
 			kind: "turn";
@@ -146,6 +151,24 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 	return out;
 }
 
+// The last turn ended, and background tasks it started still run: the tail says what claude waits on.
+function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {
+	const last = rows.at(-1);
+	if (transcript.busy || !last || !isItem(last, "turn_end")) return undefined;
+	const running = transcript.tasks.filter((t) => unfinished(t.state) && t.background !== false);
+	if (running.length === 0) return undefined;
+	const calls = new Map(
+		transcript.items.flatMap((item) => (item.kind === "tool_call" ? [[item.id, item] as const] : [])),
+	);
+	const tasks = running.map((task) => {
+		const call = calls.get(task.toolUseId);
+		const input = call && isObject(call.input) ? call.input : {};
+		const command = typeof input.command === "string" ? input.command : "";
+		return { task, command, since: task.startedTs || call?.startedTs || "" };
+	});
+	return { key: "waiting", kind: "waiting", tasks };
+}
+
 export function chatRows(
 	transcript: Transcript,
 	overlay: StreamOverlay,
@@ -226,6 +249,8 @@ export function chatRows(
 	});
 	flush(true);
 	rows = foldTurns(rows);
+	const waiting = waitingRow(transcript, rows);
+	if (waiting) rows.push(waiting);
 
 	for (const pending of transcript.pending) {
 		if (!toolIds.has(pending.toolUseId)) rows.push({ key: `p${pending.requestId}`, kind: "pending", pending });

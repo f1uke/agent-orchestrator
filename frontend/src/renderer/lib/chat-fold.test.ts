@@ -760,6 +760,22 @@ describe("chat fold timing", () => {
 		expect(ends.map((e) => e.durationMs)).toEqual([134_000, 45_000]);
 	});
 
+	it("stamps a task with the time of its first event, and keeps it through later ones", () => {
+		const task = (subtype: string, extra: object = {}) => ({
+			type: "system",
+			subtype,
+			task_id: "k1",
+			tool_use_id: "t1",
+			task_type: "local_bash",
+			...extra,
+		});
+		const tr = foldEntries([
+			at(1, 3, "out", task("task_started", { description: "soak" })),
+			at(2, 9, "out", task("task_updated")),
+		]);
+		expect(tr.tasks[0]).toMatchObject({ id: "k1", startedTs: iso(3) });
+	});
+
 	it("has no duration for a turn whose start it never saw", () => {
 		const tr = foldEntries([at(1, 5, "out", done)]);
 		expect(tr.items[0]).toMatchObject({ kind: "turn_end", ts: iso(5), durationMs: undefined });

@@ -141,6 +141,20 @@ export function liveVerb(call: ToolCallItem): string {
 	return say ? say(isObject(call.input) ? call.input : {}) : `Running ${call.name}`;
 }
 
+const isAgentTask = (task: BackgroundTask) => task.taskType.includes("agent");
+
+/** What a finished turn left running, in plain words: `Waiting on background command "Run the soak test"`. */
+export function waitingVerb(tasks: readonly BackgroundTask[]): string {
+	if (tasks.length === 1) {
+		const [task] = tasks;
+		const what = isAgentTask(task) ? "agent" : "background command";
+		return task.description ? `Waiting on ${what} "${task.description}"` : `Waiting on 1 ${what}`;
+	}
+	const agents = tasks.filter(isAgentTask).length;
+	const noun = agents === tasks.length ? "agents" : agents === 0 ? "background commands" : "background tasks";
+	return `Waiting on ${tasks.length} ${noun}`;
+}
+
 /** A call still running: no result yet, and not refused before it could run. */
 export function toolRunning(call: ToolCallItem): boolean {
 	return !call.result && call.permission?.status !== "denied" && call.permission?.status !== "cancelled";

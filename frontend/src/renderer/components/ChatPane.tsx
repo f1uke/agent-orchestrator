@@ -30,7 +30,7 @@ import type { WorkspaceSession } from "../types/workspace";
 import { ChatComposer } from "./ChatComposer";
 import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
-import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow } from "./ChatProcessRows";
+import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow, WaitingRow } from "./ChatProcessRows";
 import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
@@ -532,6 +532,8 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			);
 		case "group":
 			return <GroupRow openRows={openRows} root={root} row={row} theme={theme} toggleRow={toggleRow} />;
+		case "waiting":
+			return <WaitingRow openRows={openRows} root={root} row={row} toggleRow={toggleRow} />;
 		case "turn":
 			return (
 				<TurnRow

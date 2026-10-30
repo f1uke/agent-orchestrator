@@ -667,6 +667,55 @@ describe("ChatPane calm view", () => {
 		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
 	});
 
+	describe("a turn that ends with background work still running", () => {
+		const turnWithBackground = (finished: boolean): ChatEntry[] => [
+			userIn("u1", "run the soak test"),
+			toolUse("bg", "Bash", { command: "go test -run Soak ./...", run_in_background: true }),
+			out({
+				type: "system",
+				subtype: "task_started",
+				task_id: "t1",
+				tool_use_id: "bg",
+				task_type: "local_bash",
+				is_backgrounded: true,
+				description: "Run the soak test",
+			}),
+			toolDone("bg", "Command running in background with ID: t1."),
+			saying("started it"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			...(finished
+				? [out({ type: "system", subtype: "task_notification", task_id: "t1", tool_use_id: "bg", status: "completed" })]
+				: []),
+		];
+
+		it("says what claude waits on, and opens to the command", async () => {
+			const { feed, user } = renderPane();
+			feed(...turnWithBackground(false));
+			const row = document.querySelector("[data-waiting] .chat-group__head")!;
+			expect(row).toHaveTextContent('Waiting on background command "Run the soak test"');
+			await user.click(row);
+			expect(document.querySelector("[data-waiting]")).toHaveTextContent("$ go test -run Soak ./...");
+		});
+
+		it("shows no waiting row once the background task has ended", () => {
+			const { feed } = renderPane();
+			feed(...turnWithBackground(true));
+			expect(document.querySelector("[data-waiting]")).toBeNull();
+		});
+
+		it("shows no waiting row for a turn that left nothing running", () => {
+			const { feed } = renderPane();
+			feed(
+				userIn("u1", "fix it"),
+				toolUse("a", "Bash", { command: "go test" }),
+				toolDone("a"),
+				saying("fixed"),
+				out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			);
+			expect(document.querySelector("[data-waiting]")).toBeNull();
+		});
+	});
+
 	it("shows a finished agent's task message as a quiet card that opens to its summary", async () => {
 		const { feed, user } = renderPane();
 		const notification = [

@@ -7,8 +7,10 @@ import {
 	liveVerb,
 	processSentence,
 	type ProcessSummary,
+	shortenPaths,
 	toolFailed,
 	toolRunning,
+	waitingVerb,
 } from "../lib/chat-tools";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
@@ -175,6 +177,41 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 				</div>
 			) : null}
 			{running?.kind === "tool" ? <ResolvedLine call={running.call} /> : null}
+		</div>
+	);
+}
+
+/** The tail after a finished turn whose background work still runs: what claude waits on, and for how long. */
+export function WaitingRow({
+	row,
+	openRows,
+	toggleRow,
+	root,
+}: Omit<MembersProps, "theme"> & { row: Extract<ChatRow, { kind: "waiting" }> }) {
+	const open = openRows[row.key] ?? false;
+	const since = row.tasks
+		.map((t) => t.since)
+		.filter((ts) => ts !== "")
+		.sort()[0];
+	return (
+		<div className="chat-group" data-live="" data-waiting>
+			<Head onToggle={(next) => toggleRow(row.key, next)} open={open}>
+				<span className="chat-live">
+					<LiveDots />
+					<span className="chat-live__verb">{waitingVerb(row.tasks.map((t) => t.task))}</span>
+					{since ? <Elapsed since={since} /> : null}
+				</span>
+			</Head>
+			{open ? (
+				<div className="chat-group__body">
+					{row.tasks.map(({ task, command }) => (
+						<div className="chat-waiting" key={task.id}>
+							<div className="chat-waiting__title">{task.description || task.id}</div>
+							{command ? <pre className="chat-term">$ {shortenPaths(command, root)}</pre> : null}
+						</div>
+					))}
+				</div>
+			) : null}
 		</div>
 	);
 }

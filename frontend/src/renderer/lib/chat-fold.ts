@@ -108,6 +108,8 @@ export type BackgroundTask = {
 	/** The task_notification summary: for an agent, its final text. */
 	summary?: string;
 	usage?: TaskUsage;
+	/** The time of the task's first event. */
+	startedTs?: string;
 };
 
 export type PendingKind = "permission" | "question" | "plan";
@@ -515,6 +517,7 @@ export class ChatFolder {
 			exitCode: event.exitCode ?? prev?.exitCode,
 			summary: event.summary ?? prev?.summary,
 			usage: event.usage ?? prev?.usage,
+			startedTs: prev?.startedTs ?? this.ts,
 		});
 	}
 

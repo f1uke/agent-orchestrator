@@ -8121,6 +8121,16 @@ ol.note-prose__list {
 	font-size: 13px;
 }
 
+.chat-waiting + .chat-waiting {
+	margin-top: 8px;
+}
+
+.chat-waiting__title {
+	margin-bottom: 4px;
+	color: var(--fg-muted);
+	font-size: 13px;
+}
+
 /* A live row: what runs, in plain words, and for how long. */
 .chat-live {
 	display: inline-flex;
