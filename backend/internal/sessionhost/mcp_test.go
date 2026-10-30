@@ -15,7 +15,6 @@ func mcpMessage(id, message string) string {
 
 const mcpReplyLine = `{"type":"control_response","response":{"subtype":"success","request_id":"x","response":{}}}`
 
-// mcpReplies returns the mcp_response of every reply the host logged, by request id.
 func mcpReplies(t *testing.T, entries []chatproto.Entry) map[string]json.RawMessage {
 	t.Helper()
 	out := map[string]json.RawMessage{}
@@ -170,8 +169,6 @@ func TestHostAsksForItsMCPServerAndAllowsOnlyItsTools(t *testing.T) {
 	}
 }
 
-// A claude that predates SDK MCP servers may refuse the initialize field. The
-// session still starts: the prompt goes out and the turn runs, with no ao tools.
 func TestSessionRunsWhenClaudeRefusesSDKMCPServers(t *testing.T) {
 	dir := shortDir(t)
 	first := loadEntries(t, fixturePath(t, "first_session.jsonl"))

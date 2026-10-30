@@ -9,14 +9,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 )
 
-// The host serves one MCP server to claude over the control protocol
-// (initialize.sdkMcpServers plus mcp_message requests). Its tools only ask the
-// chat view to draw something; the view renders from the tool_use input in the
-// log, so a call's answer is a short acknowledgement.
 const mcpServerName = "ao"
 
-// maxWidgetCode bounds show_widget's widget_code. The code is logged once, in
-// the assistant message that carries the tool_use.
 const maxWidgetCode = 128 << 10
 
 //go:embed widget_guide.md
@@ -26,8 +20,9 @@ type mcpTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
-	Meta        map[string]any  `json:"_meta"`
-	reply       func(args map[string]any) (string, error)
+	// claude defers MCP tools behind tool search unless this is set.
+	Meta  alwaysLoad `json:"_meta"`
+	reply func(args map[string]any) (string, error)
 }
 
 var mcpTools = []mcpTool{
@@ -113,9 +108,6 @@ var mcpTools = []mcpTool{
 	},
 }
 
-// mcpAllowedTools are the host's tools in the form claude names them. The
-// host lists exactly these in --allowedTools: they only draw in the chat view,
-// so they need no permission prompt.
 func mcpAllowedTools() string {
 	names := make([]string, len(mcpTools))
 	for i, t := range mcpTools {
@@ -135,7 +127,6 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// mcpReply answers one JSON-RPC message claude sent to the host's MCP server.
 // A notification gets the empty result the official SDK sends for one.
 func mcpReply(server string, message json.RawMessage) json.RawMessage {
 	var m rpcMessage
@@ -162,21 +153,16 @@ func mcpReply(server string, message json.RawMessage) json.RawMessage {
 	case "ping":
 		return rpcReply(m.ID, struct{}{}, nil)
 	case "tools/list":
-		return rpcReply(m.ID, map[string]any{"tools": listedTools()}, nil)
+		return rpcReply(m.ID, map[string]any{"tools": mcpTools}, nil)
 	case "tools/call":
 		return rpcReply(m.ID, callTool(m.Params), nil)
 	}
 	return rpcReply(m.ID, nil, &rpcError{Code: -32601, Message: "method not found: " + m.Method})
 }
 
-func listedTools() []mcpTool {
-	out := make([]mcpTool, len(mcpTools))
-	for i, t := range mcpTools {
-		t.Meta = map[string]any{"anthropic/alwaysLoad": true}
-		out[i] = t
-	}
-	return out
-}
+type alwaysLoad struct{}
+
+func (alwaysLoad) MarshalJSON() ([]byte, error) { return []byte(`{"anthropic/alwaysLoad":true}`), nil }
 
 func callTool(params json.RawMessage) map[string]any {
 	var p struct {
@@ -224,9 +210,6 @@ type mcpCall struct {
 	logLine   []byte
 }
 
-// mcpRequest picks out an mcp_message control request. Its log line drops the
-// tools/call arguments: the same input is already logged in the assistant
-// message's tool_use, and a widget's code can be large.
 func mcpRequest(ev chatproto.Event) (mcpCall, bool) {
 	req, ok := ev.(chatproto.ControlRequest)
 	if !ok {

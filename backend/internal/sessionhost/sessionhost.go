@@ -56,8 +56,6 @@ var protocolFlags = []string{
 	"--replay-user-messages",
 	"--include-partial-messages",
 	"--permission-prompt-tool=stdio",
-	// The host's own MCP tools only draw in the chat view, so they need no
-	// permission prompt. Nothing else goes on this list.
 	"--allowedTools", mcpAllowedTools(),
 }
 
