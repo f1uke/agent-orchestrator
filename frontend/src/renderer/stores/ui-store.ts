@@ -5,6 +5,7 @@ import { parseSplitLayouts, serializeSplitLayouts, type SplitNode } from "../lib
 export type Theme = "light" | "dark";
 /** Worker detail view toggles — Changes (Git rail) is the default. */
 export type WorkbenchTab = "changes" | "files" | "terminal";
+export type ChatView = "chat" | "terminal" | "events";
 
 // Selection (which project/session is open) now lives in the URL — the router
 // is the single source of truth, read via route params. This store holds only
@@ -60,6 +61,7 @@ type UiState = {
 	 * honours it once, opens the rail if it is shut, and clears it.
 	 */
 	inspectorViewRequest: InspectorView | null;
+	chatViews: Readonly<Record<string, ChatView>>;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	setTheme: (theme: Theme) => void;
 	toggleTheme: () => void;
@@ -76,6 +78,7 @@ type UiState = {
 	requestPetLibrary: (sessionRef: string | null) => void;
 	/** Ask the session rail to show a tab, or with null, forget the request. */
 	requestInspectorView: (view: InspectorView | null) => void;
+	setChatView: (sessionId: string, view: ChatView) => void;
 };
 
 const sidebarStorageKey = "ao.sidebar.open";
@@ -194,6 +197,7 @@ export const useUiStore = create<UiState>((set) => ({
 	orchestratorReplacementErrors: {},
 	petLibraryRequest: null,
 	inspectorViewRequest: null,
+	chatViews: {},
 	setWorkbenchTab: (workbenchTab) => set({ workbenchTab }),
 	setTheme: (theme) => {
 		getLocalStorage()?.setItem(themeStorageKey, theme);
@@ -278,4 +282,13 @@ export const useUiStore = create<UiState>((set) => ({
 		}),
 	requestPetLibrary: (sessionRef) => set({ petLibraryRequest: sessionRef }),
 	requestInspectorView: (view) => set({ inspectorViewRequest: view }),
+	setChatView: (sessionId, view) => set((state) => ({ chatViews: { ...state.chatViews, [sessionId]: view } })),
 }));
+
+export function centerViewOf(
+	session: { id: string; transport?: "terminal" | "chat" } | undefined,
+	chatViews: Readonly<Record<string, ChatView>>,
+): ChatView {
+	if (session?.transport !== "chat") return "terminal";
+	return chatViews[session.id] ?? "chat";
+}

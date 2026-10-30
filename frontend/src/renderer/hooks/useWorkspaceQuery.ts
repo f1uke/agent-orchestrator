@@ -63,6 +63,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 			.map((session) => ({
 				id: session.id,
 				terminalHandleId: session.terminalHandleId,
+				transport: session.transport,
 				workspaceId: project.id,
 				workspaceName: project.name,
 				// Display NAME is the human summary, never the Jira card number — the
