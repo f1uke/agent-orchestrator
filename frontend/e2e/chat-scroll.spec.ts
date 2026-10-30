@@ -272,9 +272,13 @@ test.describe("chat scroll", () => {
 
 		await wheelOverStream(page, 10, -150, 30);
 		await expect(jump).toBeVisible();
+		const glide = await markFrames(page);
 		await jump.click();
 		await expect.poll(() => fromEnd(page)).toBeLessThanOrEqual(2);
 		await expect(jump).toHaveCount(0);
+		const gliding = await framesSince(page, glide);
+		expect(gliding.filter((s) => s.fromEnd > 2).length, "the jump glides over several frames").toBeGreaterThan(2);
+		expect(maxOverlap(gliding), "no painted frame overlaps two rows").toBeLessThanOrEqual(1);
 
 		const mark = await markFrames(page);
 		await page.waitForTimeout(1000);
@@ -282,9 +286,7 @@ test.describe("chat scroll", () => {
 		expect(behind, "keeps following after the jump").toEqual([]);
 	});
 
-	test("a rail jump lands the turn's message at the top in one move, paints no overlap, and stops following", async ({
-		page,
-	}) => {
+	test("a rail jump glides the turn's message to the top, paints no overlap, and stops following", async ({ page }) => {
 		await openStreamingTall(page);
 		const rail = page.getByRole("navigation", { name: "Turns" });
 		const tick = rail.getByRole("button", { name: /^Turn 10:/ });
@@ -298,13 +300,42 @@ test.describe("chat scroll", () => {
 		const frames = await framesSince(page, mark);
 		const landed = frames.findIndex((s) => s.rows.some((r) => r.key === key));
 		expect(landed, "the turn's message was painted").toBeGreaterThanOrEqual(0);
-		const tops = frames.slice(landed).map((s) => s.rows.find((r) => r.key === key)?.top);
-		expect(new Set(tops).size, `one landing position, saw ${[...new Set(tops)].join(", ")}`).toBe(1);
-		expect(tops[0], "the message sits at the top").toBeLessThanOrEqual(40);
+		const tops = frames.slice(landed).map((s) => s.rows.find((r) => r.key === key)?.top ?? NaN);
+		expect(new Set(tops).size, "the message was painted at several positions on its way up").toBeGreaterThan(2);
+		const rest = tops.findIndex((top, i) => tops.slice(i).every((t) => t === top));
+		expect(tops[rest], "the message comes to rest at the top").toBeLessThanOrEqual(40);
+		expect(maxMoveUp(frames.slice(landed)), "the glide only moves rows down toward the message").toBeLessThanOrEqual(1);
 		expect(maxOverlap(frames), "no painted frame overlaps two rows").toBeLessThanOrEqual(1);
-		expect(maxMove(frames.slice(landed)), "nothing moves once it landed").toBeLessThanOrEqual(1);
 		await expect(tick).toHaveAttribute("aria-current", "true");
 		expect(await fromEnd(page), "the jump left the end, and new turns below did not pull it back").toBeGreaterThan(100);
+	});
+
+	test("a wheel during a glide stops it and leaves the user where they scrolled", async ({ page }) => {
+		await openStreamingTall(page);
+		await wheelOverStream(page, 10, -150, 30);
+		await page.getByRole("button", { name: "Jump to latest" }).click();
+		await page.waitForTimeout(60);
+		await wheelOverStream(page, 1, -200, 0);
+		const mark = await markFrames(page);
+		const stopped = await fromEnd(page);
+		await page.waitForTimeout(600);
+		expect(stopped, "the glide had not reached the end").toBeGreaterThan(100);
+		expect(maxMove(await framesSince(page, mark)), "nothing moves once the user took over").toBeLessThanOrEqual(1);
+	});
+
+	test("with reduced motion, a rail jump lands in one frame", async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await openStreamingTall(page);
+		const tick = page.getByRole("navigation", { name: "Turns" }).getByRole("button", { name: /^Turn 10:/ });
+		const mark = await markFrames(page);
+		await tick.click();
+		const target = stream(page).locator(".chat-row", { hasText: "Step 10: run the checks" });
+		await expect(target).toBeVisible();
+		await page.waitForTimeout(600);
+		const key = await target.getAttribute("data-key");
+		const tops = (await framesSince(page, mark)).flatMap((s) => s.rows.filter((r) => r.key === key).map((r) => r.top));
+		expect(new Set(tops).size, `one landing position, saw ${[...new Set(tops)].join(", ")}`).toBe(1);
+		expect(tops[0], "the message sits at the top").toBeLessThanOrEqual(40);
 	});
 
 	test("the rail's current tick follows the scroll", async ({ page }) => {

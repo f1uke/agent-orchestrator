@@ -300,6 +300,10 @@ function tailOf(rows: readonly ChatRow[]): string | undefined {
 
 const distanceFromEnd = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
 
+const GLIDE_MS = 320;
+
+const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
 function isEditable(target: EventTarget): boolean {
 	return (
 		target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select") !== null)
@@ -337,10 +341,46 @@ function ChatStream({
 		setFollowState(following ? { mode: "follow" } : { mode: "free", seenTail: tailRef.current });
 	}, []);
 
+	const glideRef = useRef<number | null>(null);
+
 	const pinToEnd = useCallback(() => {
 		const el = scrollRef.current;
+		if (glideRef.current !== null) return;
 		if (followingRef.current && el && distanceFromEnd(el) > AT_END_PX) el.scrollTop = el.scrollHeight;
 	}, []);
+
+	const stopGlide = useCallback(() => {
+		if (glideRef.current !== null) cancelAnimationFrame(glideRef.current);
+		glideRef.current = null;
+	}, []);
+
+	// The target is read again every frame, because rows measured on the way move it. A target more
+	// than a viewport away is reached at once to within a viewport, so the glide only paints rows near it.
+	const glideTo = useCallback(
+		(target: () => number) => {
+			const el = scrollRef.current;
+			if (!el) return;
+			stopGlide();
+			const goal = () => Math.max(0, Math.min(target(), el.scrollHeight - el.clientHeight));
+			if (reducedMotion()) {
+				el.scrollTop = goal();
+				return;
+			}
+			const gap = goal() - el.scrollTop;
+			el.scrollTop = goal() - Math.sign(gap) * Math.min(Math.abs(gap), el.clientHeight);
+			const from = el.scrollTop;
+			const start = performance.now();
+			const step = (now: number) => {
+				const t = Math.min(1, (now - start) / GLIDE_MS);
+				el.scrollTop = from + (goal() - from) * (1 - (1 - t) ** 3);
+				glideRef.current = t < 1 ? requestAnimationFrame(step) : null;
+			};
+			glideRef.current = requestAnimationFrame(step);
+		},
+		[stopGlide],
+	);
+
+	useEffect(() => stopGlide, [stopGlide]);
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
@@ -381,14 +421,20 @@ function ChatStream({
 
 	// The one way to show a given row: it stops following and brings the row to the top.
 	const scrollToRow = useCallback(
-		(key: string) => {
+		(key: string, glide = false) => {
 			const index = rows.findIndex((row) => row.key === key);
 			if (index < 0) return;
 			setFollowing(false);
-			virtualizer.scrollToIndex(index, { align: "start" });
+			if (!glide) {
+				stopGlide();
+				virtualizer.scrollToIndex(index, { align: "start" });
+				return;
+			}
+			glideTo(() => virtualizer.getOffsetForIndex(index, "start")?.[0] ?? scrollRef.current?.scrollTop ?? 0);
 		},
-		[rows, setFollowing, virtualizer],
+		[glideTo, rows, setFollowing, stopGlide, virtualizer],
 	);
+	const glideToRow = useCallback((key: string) => scrollToRow(key, true), [scrollToRow]);
 
 	const turns = useMemo(() => railTurns(rows), [rows]);
 	const turnRows = useMemo(() => {
@@ -417,8 +463,8 @@ function ChatStream({
 
 	const jumpToLatest = useCallback(() => {
 		setFollowing(true);
-		pinToEnd();
-	}, [pinToEnd, setFollowing]);
+		glideTo(() => scrollRef.current?.scrollHeight ?? 0);
+	}, [glideTo, setFollowing]);
 
 	useLayoutEffect(() => {
 		if (!jumpTo) return;
@@ -437,6 +483,10 @@ function ChatStream({
 		const el = scrollRef.current;
 		if (!el) return;
 		const onWheel = (e: WheelEvent) => {
+			if (glideRef.current !== null) {
+				stopGlide();
+				if (distanceFromEnd(el) > AT_END_PX) setFollowing(false);
+			}
 			if (e.deltaY < 0) leaveEnd(el);
 		};
 		el.addEventListener("wheel", onWheel, { capture: true, passive: true });
@@ -452,6 +502,7 @@ function ChatStream({
 
 	const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
 		if (e.target !== e.currentTarget) return;
+		stopGlide();
 		draggingRef.current = true;
 		window.addEventListener("pointerup", () => (draggingRef.current = false), { once: true });
 	};
@@ -465,7 +516,9 @@ function ChatStream({
 				data-unrevealed={revealed ? undefined : ""}
 				data-testid="chat-stream"
 				onKeyDown={(e) => {
-					if (SCROLL_UP_KEYS.has(e.key) && !isEditable(e.target)) leaveEnd(e.currentTarget);
+					if (!SCROLL_UP_KEYS.has(e.key) || isEditable(e.target)) return;
+					stopGlide();
+					leaveEnd(e.currentTarget);
 				}}
 				onPointerDown={onPointerDown}
 				onScroll={onScroll}
@@ -499,7 +552,7 @@ function ChatStream({
 					})}
 				</div>
 			</div>
-			<ChatTurnRail active={activeTurn} onJump={scrollToRow} turns={turns} />
+			<ChatTurnRail active={activeTurn} onJump={glideToRow} turns={turns} />
 			{newBelow ? (
 				<button
 					aria-label="Jump to latest"
