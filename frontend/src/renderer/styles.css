@@ -1228,6 +1228,44 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	white-space: nowrap;
 }
 
+.chat-insp__fold {
+	margin-top: 6px;
+	font-size: 12.5px;
+}
+
+.chat-insp__fold > summary {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+	color: var(--fg-passive);
+	cursor: pointer;
+	list-style: none;
+}
+
+.chat-insp__fold > summary::-webkit-details-marker {
+	display: none;
+}
+
+.chat-insp__fold > summary:hover {
+	color: var(--fg-muted);
+}
+
+.chat-insp__fold-chev {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	transition: transform 0.15s;
+}
+
+.chat-insp__fold[open] > summary .chat-insp__fold-chev {
+	transform: rotate(90deg);
+}
+
+.chat-insp__fold-failed {
+	color: var(--red);
+}
+
 .chat-insp__task-detail {
 	overflow: hidden;
 	margin-top: 3px;
@@ -7847,20 +7885,92 @@ ol.note-prose__list {
 	font-size: 13px;
 }
 
-.chat-think > summary {
-	display: inline-flex;
+.chat-think__head,
+.chat-group__head {
+	display: flex;
+	max-width: 100%;
 	align-items: center;
 	gap: 6px;
+	color: inherit;
 	cursor: pointer;
-	list-style: none;
+	text-align: left;
 }
 
-.chat-think > summary::-webkit-details-marker {
-	display: none;
+.chat-think__head:hover,
+.chat-group__head:hover {
+	color: var(--fg-muted);
 }
 
-.chat-think[open] > summary .chat-chev {
+.chat-think__tail {
+	min-width: 0;
+	overflow: hidden;
+	margin-left: 4px;
+	font-style: italic;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-chev--open {
 	transform: rotate(90deg);
+}
+
+.chat-group {
+	color: var(--fg-passive);
+	font-size: 13px;
+}
+
+.chat-group__head {
+	width: 100%;
+}
+
+.chat-group__text {
+	flex: none;
+}
+
+.chat-group__failed {
+	flex: none;
+	color: var(--red);
+	font-size: 12px;
+}
+
+.chat-group__live {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	align-items: center;
+	gap: 6px;
+	margin-left: 4px;
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+
+.chat-group__live-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-group__body,
+.chat-turn__body {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin: 8px 0 0 7px;
+	padding-left: 12px;
+	border-left: 2px solid var(--border-1);
+	color: var(--fg);
+}
+
+.chat-statusline__bg {
+	display: inline-flex;
+	align-items: center;
+	color: inherit;
+	cursor: pointer;
+}
+
+.chat-statusline__bg:hover {
+	color: var(--fg-muted);
 }
 
 .chat-think__body {
