@@ -313,6 +313,12 @@ describe("chatRows turn fold", () => {
 		expect(shape(rows)).toEqual(["user", "assistant_text", "assistant_text", "turn_end"]);
 	});
 
+	it("hands each turn end the turn's last reply, for its answer bar", () => {
+		const rows = rowsOf([...finished(), user("u2", "and?"), tool("Read"), turnEnd()]);
+		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");
+		expect(ends.map((r) => r.kind === "item" && r.reply)).toEqual(["all done", undefined]);
+	});
+
 	it("finds a folded item's row", () => {
 		const rows = rowsOf(finished());
 		expect(rowIndexOfItem(rows, 3)).toBe(1);

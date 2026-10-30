@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatApi, ChatResult } from "../lib/chat-api";
@@ -6,6 +6,7 @@ import type { ChatEntry } from "../lib/chat-event";
 import { foldEntries } from "../lib/chat-fold";
 import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import { emptyOverlay } from "../lib/chat-stream";
+import { aoBridge } from "../lib/bridge";
 import { useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatPane, ChatViewToggle } from "./ChatPane";
@@ -718,6 +719,44 @@ describe("ChatPane calm view", () => {
 		const head = document.querySelector("[data-task-message] button")!;
 		expect(head).toHaveTextContent(/^Task message received\s*Run slow check\s*Failed/);
 		expect(head.querySelector(".chat-task__failed")).toHaveTextContent("Failed");
+	});
+
+	it("ends a finished turn's reply with a bar that copies it and shows the turn's usage and end time", async () => {
+		const write = vi.spyOn(aoBridge.clipboard, "writeText").mockResolvedValue();
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "fix it"),
+			lifecycle("u1", "started"),
+			toolUse("a", "Bash", { command: "go test" }),
+			toolDone("a"),
+			saying("**All fixed.**"),
+			out({
+				type: "result",
+				subtype: "success",
+				num_turns: 1,
+				total_cost_usd: 0.01,
+				usage: {
+					input_tokens: 1200,
+					output_tokens: 800,
+					cache_read_input_tokens: 10000,
+					cache_creation_input_tokens: 300,
+				},
+			}),
+		);
+		const bar = document.querySelector("[data-answer-bar]")!;
+		expect(bar).toHaveTextContent(/Usage 12.3k tok\s*\d\d:\d\d$/);
+		await user.click(within(bar as HTMLElement).getByRole("button", { name: "Copy reply" }));
+		expect(write).toHaveBeenCalledWith("**All fixed.**");
+	});
+
+	it("draws no answer bar while a turn runs or for a turn with no reply", () => {
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), lifecycle("u1", "started"), saying("working on it"));
+		expect(document.querySelector("[data-answer-bar]")).toBeNull();
+		feed(toolUse("a", "Bash", { command: "go test" }), toolDone("a"), out({ type: "result", subtype: "success" }));
+		expect(document.querySelector("[data-answer-bar]")).not.toBeNull();
+		feed(userIn("u2", "again"), lifecycle("u2", "started"), out({ type: "result", subtype: "success" }));
+		expect(document.querySelectorAll("[data-answer-bar]")).toHaveLength(1);
 	});
 
 	it("leaves a subagent's text and thinking out of the main column", () => {

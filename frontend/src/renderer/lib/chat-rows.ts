@@ -8,7 +8,15 @@ export type ProcessMember =
 	| { kind: "thinking"; itemIndex: number; text: string };
 
 export type ChatRow =
-	| { key: string; kind: "item"; item: ChatItem; subagentTools: number; task?: BackgroundTask }
+	| {
+			key: string;
+			kind: "item";
+			item: ChatItem;
+			subagentTools: number;
+			task?: BackgroundTask;
+			/** On a turn end: the turn's last reply, which its answer bar copies. */
+			reply?: string;
+	  }
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
@@ -163,6 +171,7 @@ export function chatRows(
 
 	let rows: ChatRow[] = [];
 	let run: ProcessMember[] = [];
+	let reply: string | undefined;
 	const flush = (atTail: boolean) => {
 		const calls = run.flatMap((m) => (m.kind === "tool" ? [m.call] : []));
 		const live = atTail ? liveTool(calls) : undefined;
@@ -180,16 +189,24 @@ export function chatRows(
 		switch (role(item, queued)) {
 			case "skip":
 				return;
-			case "break":
+			case "break": {
 				flush(false);
-				rows.push({
+				const row: ChatRow = {
 					key: itemRowKey(index),
 					kind: "item",
 					item,
 					subagentTools: item.kind === "tool_call" ? (subagentTools.get(item.id) ?? 0) : 0,
 					task: taskOf(item),
-				});
+				};
+				if (item.kind === "user" || (item.kind === "task_message" && item.opensTurn)) reply = undefined;
+				else if (item.kind === "assistant_text") reply = item.text;
+				else if (item.kind === "turn_end") {
+					if (reply !== undefined) row.reply = reply;
+					reply = undefined;
+				}
+				rows.push(row);
 				return;
+			}
 			case "process": {
 				if (item.kind === "thinking") {
 					const prev = run.at(-1);

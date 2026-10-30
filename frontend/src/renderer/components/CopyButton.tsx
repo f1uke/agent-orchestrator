@@ -41,9 +41,12 @@ export function CopyButton({
 	className,
 	/** Extra classes while confirming, for a caller whose reveal rules differ. */
 	copiedClassName,
+	/** False for a value too long to read out, such as a whole reply: the name is then just "Copy <what>". */
+	named = true,
 }: {
 	value: string;
 	what: string;
+	named?: boolean;
 	className?: string;
 	copiedClassName?: string;
 	size?: number;
@@ -67,7 +70,8 @@ export function CopyButton({
 			});
 	};
 
-	const label = copied ? `Copied ${what} ${value}` : `Copy ${what} ${value}`;
+	const subject = named ? `${what} ${value}` : what;
+	const label = copied ? `Copied ${subject}` : `Copy ${subject}`;
 	return (
 		<button
 			aria-label={label}

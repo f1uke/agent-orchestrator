@@ -5,6 +5,7 @@ import {
 	ChevronRight,
 	Code,
 	CloudOff,
+	Database,
 	type LucideIcon,
 	MessageSquare,
 	SquareTerminal,
@@ -18,7 +19,7 @@ import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
 import { clockTime, formatDuration } from "../lib/chat-time";
-import { sessionActivity } from "../lib/chat-inspect";
+import { formatTokens, sessionActivity } from "../lib/chat-inspect";
 import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
@@ -26,6 +27,7 @@ import { cn } from "../lib/utils";
 import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatComposer } from "./ChatComposer";
+import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow } from "./ChatProcessRows";
 import { OrchestratorIcon } from "./icons";
@@ -516,6 +518,7 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 					item={row.item}
 					openRows={openRows}
 					pendingByRequest={pendingByRequest}
+					reply={row.reply}
 					root={root}
 					rowKey={row.key}
 					sessionNames={props.sessionNames}
@@ -534,13 +537,20 @@ function ItemRow({
 	rowKey,
 	subagentTools,
 	task,
+	reply,
 	theme,
 	root,
 	openRows,
 	toggleRow,
 	pendingByRequest,
 	sessionNames,
-}: Omit<RowProps, "row"> & { item: ChatItem; rowKey: string; subagentTools: number; task?: BackgroundTask }) {
+}: Omit<RowProps, "row"> & {
+	item: ChatItem;
+	rowKey: string;
+	subagentTools: number;
+	task?: BackgroundTask;
+	reply?: string;
+}) {
 	switch (item.kind) {
 		case "user":
 			return item.origin ? (
@@ -580,9 +590,12 @@ function ItemRow({
 		}
 		case "turn_end":
 			return (
-				<div className={cn("chat-sys", item.isError && "chat-sys--error")} data-notice="turn_end">
-					{turnEndText(item)}
-				</div>
+				<>
+					{reply !== undefined ? <AnswerBar end={item} reply={reply} /> : null}
+					<div className={cn("chat-sys", item.isError && "chat-sys--error")} data-notice="turn_end">
+						{turnEndText(item)}
+					</div>
+				</>
 			);
 		case "task_message":
 			return (
@@ -640,6 +653,30 @@ function TaskMessageCard({
 					) : null}
 				</div>
 			) : null}
+		</div>
+	);
+}
+
+/** Under a turn's last reply: copy it, what the turn used, and when it ended. */
+function AnswerBar({ end, reply }: { end: TurnEndItem; reply: string }) {
+	const u = end.usage;
+	const total = u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens;
+	const detail = [
+		`${formatTokens(u.inputTokens)} in`,
+		`${formatTokens(u.outputTokens)} out`,
+		`${formatTokens(u.cacheReadTokens)} cache read`,
+		`${formatTokens(u.cacheCreationTokens)} cache write`,
+	].join(" · ");
+	return (
+		<div className="chat-answer" data-answer-bar>
+			<CopyButton className="chat-answer__copy" named={false} value={reply} what="reply" />
+			{total > 0 ? (
+				<span className="chat-answer__usage" title={detail}>
+					<Database className="chat-icon" aria-hidden="true" />
+					Usage {formatTokens(total)} tok
+				</span>
+			) : null}
+			<span className="chat-answer__time">{clockTime(end.ts)}</span>
 		</div>
 	);
 }

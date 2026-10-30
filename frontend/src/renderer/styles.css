@@ -8321,6 +8321,31 @@ ol.note-prose__list {
 	margin-top: 0;
 }
 
+/* Under a turn's last reply: copy, the turn's usage, the time it ended. */
+.chat-answer {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	margin: -6px 0 12px;
+	color: var(--fg-passive);
+	font-size: 12px;
+}
+
+.chat-answer__usage {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.chat-answer__usage .chat-icon {
+	width: 13px;
+	height: 13px;
+}
+
+.chat-answer__time {
+	font-variant-numeric: tabular-nums;
+}
+
 .chat-sys {
 	display: flex;
 	align-items: center;
