@@ -27,12 +27,12 @@ export type CanUseTool = {
 };
 
 export type ChatEvent =
-	| { type: "system_init"; sessionId: string; permissionMode: string }
+	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
 	| { type: "system"; subtype: string; permissionMode: string }
 	| { type: "assistant"; messageId: string; parentToolUseId: string; blocks: Block[] }
 	| { type: "user"; uuid: string; isReplay: boolean; blocks: Block[] }
 	| { type: "result"; subtype: string; isError: boolean; numTurns: number; totalCostUsd: number }
-	| { type: "control_request"; requestId: string; canUseTool?: CanUseTool }
+	| { type: "control_request"; requestId: string; subtype: string; canUseTool?: CanUseTool }
 	| { type: "control_response"; requestId: string; ok: boolean; error: string; response: unknown }
 	| { type: "control_cancel"; requestId: string }
 	| { type: "command_lifecycle"; commandUuid: string; state: CommandState }
@@ -41,7 +41,7 @@ export type ChatEvent =
 export type Origin = { via: string; from: string };
 
 export type HostNote =
-	| { kind: "spawn"; resume: string }
+	| { kind: "spawn"; resume: string; argv: string[] }
 	| { kind: "exit"; code: number | null }
 	| { kind: "user_origin"; uuid: string; origin?: Origin }
 	| { kind: "other"; noteKind: string };
@@ -102,7 +102,12 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 	switch (type) {
 		case "system":
 			if (line.subtype === "init") {
-				return { type: "system_init", sessionId: str(line.session_id), permissionMode: str(line.permissionMode) };
+				return {
+					type: "system_init",
+					sessionId: str(line.session_id),
+					permissionMode: str(line.permissionMode),
+					model: str(line.model),
+				};
 			}
 			return { type: "system", subtype: str(line.subtype), permissionMode: str(line.permissionMode) };
 		case "assistant":
@@ -131,10 +136,12 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			const request = isObject(line.request) ? line.request : undefined;
 			if (!request) return undefined;
 			const requestId = str(line.request_id);
-			if (request.subtype !== "can_use_tool") return { type: "control_request", requestId };
+			const subtype = str(request.subtype);
+			if (subtype !== "can_use_tool") return { type: "control_request", requestId, subtype };
 			return {
 				type: "control_request",
 				requestId,
+				subtype,
 				canUseTool: {
 					toolName: str(request.tool_name),
 					toolUseId: str(request.tool_use_id),
@@ -181,7 +188,11 @@ export function parseHostNote(payload: unknown): HostNote {
 	if (kind === "") throw new Error("host note: missing kind");
 	switch (kind) {
 		case "spawn":
-			return { kind, resume: str(payload.resume) };
+			return {
+				kind,
+				resume: str(payload.resume),
+				argv: Array.isArray(payload.argv) ? payload.argv.filter((a): a is string => typeof a === "string") : [],
+			};
 		case "exit":
 			return { kind, code: typeof payload.code === "number" ? payload.code : null };
 		case "user_origin": {

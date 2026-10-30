@@ -63,6 +63,19 @@ export type Pending = {
 	defaultToNo: boolean;
 };
 
+/** A slash command or skill claude offers. `builtin` is absent when claude does not say. */
+export type ChatCommand = { name: string; description: string; argumentHint: string; builtin?: boolean };
+
+/** A model the session can switch to. `value` is what set_model takes: an alias such as "sonnet", or a full id. */
+export type ChatModel = {
+	value: string;
+	resolvedModel: string;
+	displayName: string;
+	description: string;
+	supportsEffort: boolean;
+	supportedEffortLevels: string[];
+};
+
 export type Transcript = {
 	claudeSessionIds: string[];
 	items: ChatItem[];
@@ -72,6 +85,12 @@ export type Transcript = {
 	permissionMode: string;
 	/** The latest result's total_cost_usd, cumulative for the claude process. */
 	costUsd: number;
+	/** From the latest initialize response. */
+	commands: ChatCommand[];
+	/** From the latest initialize response. */
+	models: ChatModel[];
+	/** In use: the spawn's --model, then system/init or an accepted set_model. */
+	model: string;
 	lastSeq: number;
 };
 
@@ -85,6 +104,47 @@ function pendingKind(tool: string): PendingKind {
 	if (tool === "AskUserQuestion") return "question";
 	if (tool === "ExitPlanMode") return "plan";
 	return "permission";
+}
+
+function strField(o: Record<string, unknown>, key: string): string {
+	return typeof o[key] === "string" ? o[key] : "";
+}
+
+function parseCommands(raw: unknown): ChatCommand[] {
+	if (!Array.isArray(raw)) return [];
+	return raw.filter(isObject).map((c) => {
+		const command: ChatCommand = {
+			name: strField(c, "name"),
+			description: strField(c, "description"),
+			argumentHint: strField(c, "argumentHint"),
+		};
+		if (typeof c.builtin === "boolean") command.builtin = c.builtin;
+		return command;
+	});
+}
+
+function parseModels(raw: unknown): ChatModel[] {
+	if (!Array.isArray(raw)) return [];
+	return raw.filter(isObject).map((m) => ({
+		value: strField(m, "value"),
+		resolvedModel: strField(m, "resolvedModel"),
+		displayName: strField(m, "displayName"),
+		description: strField(m, "description"),
+		supportsEffort: m.supportsEffort === true,
+		supportedEffortLevels: Array.isArray(m.supportedEffortLevels)
+			? m.supportedEffortLevels.filter((l): l is string => typeof l === "string")
+			: [],
+	}));
+}
+
+function modelFlag(argv: readonly string[]): string {
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === "--") break;
+		if (arg.startsWith("--model=")) return arg.slice("--model=".length);
+		if (arg === "--model" && i + 1 < argv.length) return argv[i + 1];
+	}
+	return "";
 }
 
 function live(state: CommandState): boolean {
@@ -103,6 +163,12 @@ export class ChatFolder {
 	private pending: Pending[] = [];
 	private mode = "";
 	private cost = 0;
+	// The id of a host's initialize or set_model request, to its subtype,
+	// because claude's response does not repeat it.
+	private controls = new Map<string, string>();
+	private slash: ChatCommand[] = [];
+	private models: ChatModel[] = [];
+	private model = "";
 
 	get lastSeq(): number {
 		return this.last;
@@ -145,6 +211,9 @@ export class ChatFolder {
 			busy: [...this.commands.values()].includes("started"),
 			permissionMode: this.mode,
 			costUsd: this.cost,
+			commands: [...this.slash],
+			models: [...this.models],
+			model: this.model,
 			lastSeq: this.last,
 		};
 	}
@@ -154,6 +223,7 @@ export class ChatFolder {
 			case "system_init":
 				if (!this.sessions.includes(event.sessionId)) this.sessions.push(event.sessionId);
 				if (event.permissionMode !== "") this.mode = event.permissionMode;
+				if (event.model !== "") this.model = event.model;
 				break;
 			case "system":
 				if (event.permissionMode !== "") this.mode = event.permissionMode;
@@ -180,6 +250,7 @@ export class ChatFolder {
 				break;
 			case "control_response":
 				this.answerPermission(event);
+				this.answerControl(event);
 				break;
 			case "control_cancel":
 				this.settle(event.requestId, "cancelled", "", []);
@@ -193,6 +264,23 @@ export class ChatFolder {
 	private applyIn(event: ChatEvent): void {
 		if (event.type === "user") this.addUserInput(event.uuid, event.blocks);
 		else if (event.type === "control_response") this.answerPermission(event);
+		else if (event.type === "control_request" && (event.subtype === "initialize" || event.subtype === "set_model")) {
+			this.controls.set(event.requestId, event.subtype);
+		}
+	}
+
+	private answerControl(response: Extract<ChatEvent, { type: "control_response" }>): void {
+		const subtype = this.controls.get(response.requestId);
+		if (subtype === undefined) return;
+		this.controls.delete(response.requestId);
+		if (!response.ok || !isObject(response.response)) return;
+		const body = response.response;
+		if (subtype === "initialize") {
+			this.slash = parseCommands(body.commands);
+			this.models = parseModels(body.models);
+		} else if (typeof body.model === "string" && body.model !== "") {
+			this.model = body.model;
+		}
 	}
 
 	private applyAssistant(messageId: string, parentToolUseId: string, blocks: Block[]): void {
@@ -293,6 +381,7 @@ export class ChatFolder {
 		switch (note.kind) {
 			case "spawn":
 				this.endProcess();
+				this.model = modelFlag(note.argv);
 				this.items.push(
 					note.resume !== ""
 						? { kind: "notice", notice: "resumed", text: note.resume }

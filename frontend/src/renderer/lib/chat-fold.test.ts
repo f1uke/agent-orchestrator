@@ -578,3 +578,85 @@ describe("chat fold rules", () => {
 		expect({ ...folder.transcript(), lastSeq: base.lastSeq }).toEqual(base);
 	});
 });
+
+describe("chat fold parity: commands, models and the model in use", () => {
+	it.each(["first_session.jsonl", "resumed_session.jsonl"])("reads them from %s", (name) => {
+		const entries = loadFixture(name);
+		const before = foldEntries(upTo(entries, 2));
+		expect(before).toMatchObject({ model: "sonnet", commands: [], models: [] });
+
+		const tr = foldEntries(entries);
+		expect(tr.commands).toEqual([
+			{ name: "compact", description: "Clear history but keep a summary in context", argumentHint: "", builtin: true },
+			{ name: "review", description: "Review a pull request", argumentHint: "", builtin: true },
+			{ name: "tdd", description: "Write the failing test first", argumentHint: "", builtin: false },
+		]);
+		expect(tr.models).toHaveLength(13);
+		expect(tr.models[1]).toEqual({
+			value: "opus",
+			resolvedModel: "claude-opus-5-5",
+			displayName: "Opus 5.5",
+			description: "For complex work and everyday tasks",
+			supportsEffort: true,
+			supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+		});
+		expect(tr.model).toBe("claude-sonnet-5-5");
+	});
+
+	it("never carries the account block claude sends with them", () => {
+		const tr = foldEntries(loadFixture("first_session.jsonl"));
+		expect(Object.keys(tr)).not.toContain("account");
+		const text = JSON.stringify(tr);
+		for (const secret of ["dev@example.com", "Example Org", "subscriptionType"]) expect(text).not.toContain(secret);
+	});
+
+	it("follows an accepted set_model and ignores a refused one", () => {
+		const entries = loadFixture("set_model.jsonl");
+		expect(foldEntries(upTo(entries, 2)).model).toBe("claude-sonnet-5-5");
+		expect(foldEntries(entries).model).toBe("claude-sonnet-5-5");
+		const unasked = foldEntries([
+			synth(1, "out", {
+				type: "control_response",
+				response: { subtype: "success", request_id: "x", response: { model: "claude-haiku-5-5" } },
+			}),
+		]);
+		expect(unasked.model).toBe("");
+	});
+
+	it("keeps the last accepted initialize over a failed one", () => {
+		const initialize = (seq: number, id: string) =>
+			synth(seq, "in", { type: "control_request", request_id: id, request: { subtype: "initialize" } });
+		const tr = foldEntries([
+			initialize(1, "a"),
+			synth(2, "out", {
+				type: "control_response",
+				response: {
+					subtype: "success",
+					request_id: "a",
+					response: {
+						commands: [{ name: "compact", description: "d", argumentHint: "<what>" }],
+						models: [{ value: "haiku", displayName: "Haiku" }],
+						account: { email: "x@example.com" },
+					},
+				},
+			}),
+			initialize(3, "b"),
+			synth(4, "out", { type: "control_response", response: { subtype: "error", request_id: "b", error: "boom" } }),
+		]);
+		expect(tr.commands).toEqual([{ name: "compact", description: "d", argumentHint: "<what>" }]);
+		expect(tr.models.map((m) => m.value)).toEqual(["haiku"]);
+	});
+
+	it.each([
+		[["claude", "--model", "opus"], "opus"],
+		[["claude", "--model=haiku"], "haiku"],
+		[["claude", "--", "--model", "opus"], ""],
+		[["claude", "--model"], ""],
+	])("a spawn with argv %j takes model %j", (argv, want) => {
+		const tr = foldEntries([
+			synth(1, "out", { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-5-5" }),
+			synth(2, "host", { kind: "spawn", resume: "", argv }),
+		]);
+		expect(tr.model).toBe(want);
+	});
+});
