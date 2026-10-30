@@ -63,42 +63,6 @@ func writeActivitySSE(w http.ResponseWriter, flusher http.Flusher, ev domain.Act
 	return nil
 }
 
-// activityEventFromSignal builds the feed frame for an accepted activity signal.
-//
-// The whole truth contract lives in this function. Every frame carries the
-// coarse level the signal implies AND how long that level stays true; a frame
-// that also carries curated detail carries the (much shorter) window in which
-// that detail may be shown as currently happening. A consumer therefore cannot
-// render a finished action as live: the detail expires and it falls back to the
-// coarse level, then to "unknown".
-//
-// A detail whose kind AO does not recognise, or that arrives over-long or
-// secret-shaped, is clamped or dropped here — the per-tool whitelist in the hook
-// process is the primary guard, this is the backstop.
-func activityEventFromSignal(id domain.SessionID, state domain.ActivityState, detail *domain.ActivityDetail) domain.ActivityEvent {
-	coarse, coarseTTL := domain.CoarseFromActivityState(state)
-	ev := domain.ActivityEvent{
-		SessionID:   id,
-		Kind:        domain.ActivityEventActivity,
-		At:          time.Now().UTC(),
-		Coarse:      coarse,
-		CoarseTTLMs: domain.DurationMs(coarseTTL),
-	}
-	if detail == nil {
-		return ev
-	}
-	safe, ok := detail.SanitizedForFeed()
-	if !ok {
-		return ev
-	}
-	ev.Kind = safe.Kind
-	ev.Tool = safe.Tool
-	ev.Target = safe.Target
-	ev.Text = safe.Text
-	ev.TTLMs = domain.DurationMs(domain.DetailTTL(safe.Kind))
-	return ev
-}
-
 // activityEventFromMessage builds the feed frame for an accepted ao send.
 //
 // It carries NO coarse level on purpose: a message tells you something flew by,
