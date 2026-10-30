@@ -268,7 +268,6 @@ const STICK_TO_BOTTOM_PX = 48;
 
 type StreamProps = {
 	rows: ChatRow[];
-	/** The session's log is still replaying, so the newest row is not known yet. */
 	replaying: boolean;
 	root: string;
 	pending: Pending[];
@@ -362,8 +361,6 @@ function ChatStream({
 
 	useLayoutEffect(pinToEnd);
 
-	// A session opens unseen and shows itself once its newest row is laid out at the end, so a switch
-	// never paints the list growing or settling into place.
 	const [revealed, setRevealed] = useState(false);
 	useLayoutEffect(() => {
 		const el = scrollRef.current;

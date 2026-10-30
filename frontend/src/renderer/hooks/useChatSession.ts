@@ -147,8 +147,6 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 				live: () => {
 					if (!current()) return;
 					r.attempts = 0;
-					// The replay's last entries wait for the next frame's flush; going live before it would
-					// show the stream one frame short of its newest row.
 					if (r.frame !== null && connectionRef.current === "connecting") r.liveAfterFlush = true;
 					else transition("live");
 				},
