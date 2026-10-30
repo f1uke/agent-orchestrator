@@ -602,6 +602,49 @@ describe("ChatPane calm view", () => {
 		expect(document.querySelector("[data-group]")).not.toBeNull();
 	});
 
+	it("opens a turn whose work is one group straight to its calls, with no inner sentence", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "check it"),
+			lifecycle("u1", "started"),
+			toolUse("a", "Bash", { command: "go test" }),
+			toolDone("a"),
+			toolUse("b", "Bash", { command: "go vet" }),
+			toolDone("b"),
+			saying("all green"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		const turn = document.querySelector("[data-turn]")!;
+		await user.click(turn.querySelector(".chat-group__head")!);
+		expect(turn.querySelector("[data-group]")).toBeNull();
+		expect(turn).not.toHaveTextContent("Ran 2 commands");
+		expect(turn.querySelectorAll("[data-tool]")).toHaveLength(2);
+	});
+
+	it("keeps the sentence line of each group when an opened turn holds several", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "fix it"),
+			lifecycle("u1", "started"),
+			toolUse("a", "Bash", { command: "go test" }),
+			toolDone("a"),
+			toolUse("b", "Read", { file_path: "a.go" }),
+			toolDone("b"),
+			saying("found it"),
+			toolUse("c", "Edit", { file_path: "a.go", old_string: "x", new_string: "y" }),
+			toolDone("c"),
+			toolUse("d", "Bash", { command: "go test" }),
+			toolDone("d"),
+			saying("fixed"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		const turn = document.querySelector("[data-turn]")!;
+		await user.click(turn.querySelector(".chat-group__head")!);
+		const heads = [...turn.querySelectorAll("[data-group] .chat-group__head")].map((h) => h.textContent);
+		expect(heads).toEqual(["Ran a command, read a file", "Ran a command, edited a file"]);
+		expect(turn.querySelectorAll("[data-tool]")).toHaveLength(0);
+	});
+
 	it("says how long a finished turn worked, and how many of its calls failed", () => {
 		const { feed } = renderPane();
 		const at = (sec: number, e: ChatEntry): ChatEntry => ({

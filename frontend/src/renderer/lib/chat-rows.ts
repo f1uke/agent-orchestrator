@@ -82,7 +82,11 @@ function tasksOf(rows: readonly ChatRow[]): Map<string, BackgroundTask> {
 	return tasks;
 }
 
-function turnRow(userKey: string, rows: ChatRow[], durationMs: number | undefined): ChatRow | undefined {
+function turnRow(userKey: string, body: ChatRow[], durationMs: number | undefined): ChatRow | undefined {
+	// A turn whose work is one group opens straight to its calls: the group's
+	// sentence would only repeat the turn's own line.
+	const only = body.length === 1 && body[0].kind === "group" ? body[0] : undefined;
+	const rows = only ? only.members.map(memberRow) : body;
 	const tasks = tasksOf(rows);
 	const summary = summarizeTools(callsOf(rows), (id) => tasks.get(id));
 	if (summary.counts.length === 0) return undefined;
