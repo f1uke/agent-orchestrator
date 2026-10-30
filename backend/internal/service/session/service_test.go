@@ -1085,6 +1085,22 @@ func TestToAPIError_ChatHostNotReachable(t *testing.T) {
 	}
 }
 
+func TestSendFromChatHostRefusalIsAConflictWithTheReason(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Transport: domain.TransportChat}
+	refused := fmt.Errorf("deliver to mer-1: session mer-1: %w", &sessionhost.RefusedError{Reason: "claude is not running"})
+	svc := &Service{store: st, manager: &fakeCommander{sendErr: refused}, clock: time.Now}
+
+	_, err := svc.SendFrom(context.Background(), "mer-1", "hi", CrewTalk{})
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Kind != apierr.KindConflict || e.Code != "CHAT_REQUEST_REJECTED" {
+		t.Fatalf("err = %v, want Conflict CHAT_REQUEST_REJECTED", err)
+	}
+	if e.Message != "claude is not running" {
+		t.Fatalf("message = %q, want the host's own reason", e.Message)
+	}
+}
+
 func TestSendFromChatHostNotReachableIsAConflict(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Transport: domain.TransportChat}
