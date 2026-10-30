@@ -13,6 +13,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -154,10 +156,7 @@ type host struct {
 }
 
 func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume string) (int, error) {
-	argv := append(append([]string{}, cfg.Command...), protocolFlags...)
-	if resume != "" {
-		argv = append(argv, "--resume", resume)
-	}
+	argv := claudeArgv(cfg.Command, resume)
 	cmd := process.Command(argv[0], argv[1:]...)
 	process.Detach(cmd)
 	cmd.Dir = cfg.Dir
@@ -213,6 +212,31 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume stri
 	h.finish(code, signal)
 	srv.close()
 	return ret, nil
+}
+
+// claudeArgv puts the protocol flags and --resume before any "--", after
+// which claude reads prompt text. Claude refuses --session-id beside --resume,
+// so a resume drops the pinned id the agent command carries.
+func claudeArgv(command []string, resume string) []string {
+	flags, rest := command, []string(nil)
+	if i := slices.Index(command, "--"); i >= 0 {
+		flags, rest = command[:i], command[i:]
+	}
+	argv := make([]string, 0, len(command)+len(protocolFlags)+2)
+	for i := 0; i < len(flags); i++ {
+		switch {
+		case resume != "" && flags[i] == "--session-id":
+			i++
+		case resume != "" && strings.HasPrefix(flags[i], "--session-id="):
+		default:
+			argv = append(argv, flags[i])
+		}
+	}
+	argv = append(argv, protocolFlags...)
+	if resume != "" {
+		argv = append(argv, "--resume", resume)
+	}
+	return append(argv, rest...)
 }
 
 func orDefault(d, def time.Duration) time.Duration {
