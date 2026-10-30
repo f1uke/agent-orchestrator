@@ -16,7 +16,7 @@ func newSyncMgr(t *testing.T, defaultBranch string) (*Manager, *fakeWorkspace, *
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{DefaultBranch: defaultBranch}}
 	ws := &fakeWorkspace{}
-	m := New(Deps{
+	m := New(Deps{WorkerTransport: terminalTransport,
 		Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}},
 		Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		LookPath: func(string) (string, error) { return "/bin/true", nil },

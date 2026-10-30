@@ -99,6 +99,7 @@ type spawnResult struct {
 		// TargetBranch is the target the daemon RESOLVED and recorded, which for
 		// an omitted --target is the only place the caller learns what it got.
 		TargetBranch string `json:"targetBranch"`
+		Transport    string `json:"transport"`
 	} `json:"session"`
 }
 
@@ -252,6 +253,11 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 			}
+			if transport := strings.TrimSpace(res.Session.Transport); transport != "" {
+				if _, err := fmt.Fprintf(out, "transport: %s\n", transport); err != nil {
+					return err
+				}
+			}
 			_, err = fmt.Fprintf(out, "attach with: %s\n", spawnAttachHint(res.Session.ProjectID, res.Session.Branch, res.Session.ID))
 			return err
 		},
@@ -280,7 +286,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until ao session start <id>)")
 	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker running on the board when its PR merges instead of archiving it to Done: its tmux, and any build or test in it, carries on (it still sleeps after the idle window like any worker) - for a worker that will open more PRs")
 	f.StringVar(&opts.claudeProfile, "claude-profile", "", "Claude profile (a named Claude Code settings file, see ao claude-profile ls) a claude-code worker launches with (default: the project's, else Subscription); ignored for other agents")
-	f.StringVar(&opts.transport, "transport", "", "How the agent is driven: terminal (default) runs its TUI in the pane, chat runs a headless claude under the session host (claude-code only)")
+	f.StringVar(&opts.transport, "transport", "", "How the agent is driven: terminal runs its TUI in the pane, chat runs a headless claude under the session host (claude-code only). Default: the project's worker transport (ao project set-config --worker-transport), else the global one (ao settings worker-transport), else chat for a claude-code worker and terminal for everything else")
 	f.StringVar(&opts.taskSize, "task-size", "", "How big the task is - it decides both the ceremony AND how many agents work it.\n"+
 		"  mechanical  ONE agent. Skips the up-front requirements/plan/test-first ceremony and goes\n"+
 		"              straight to edit + verify.\n"+

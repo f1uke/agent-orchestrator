@@ -14,7 +14,7 @@ func TestSessionsAPI_SpawnTransport(t *testing.T) {
 	}{
 		{`{"projectId":"ao","kind":"worker","transport":"chat"}`, domain.TransportChat},
 		{`{"projectId":"ao","kind":"worker","transport":"terminal"}`, domain.TransportTerminal},
-		{`{"projectId":"ao","kind":"worker"}`, domain.TransportTerminal},
+		{`{"projectId":"ao","kind":"worker"}`, ""},
 	} {
 		svc := newFakeSessionService()
 		srv := newSessionTestServer(t, svc)

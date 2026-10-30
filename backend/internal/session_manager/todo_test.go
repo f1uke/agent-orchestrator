@@ -60,7 +60,7 @@ func TestPrepareTodo_HarnessValidation(t *testing.T) {
 	// A non-empty but unregistered harness is rejected up front.
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
-	mNoAgents := New(Deps{Runtime: &fakeRuntime{}, Agents: missingAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }})
+	mNoAgents := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: missingAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }})
 	if _, err := mNoAgents.PrepareTodo(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Harness: "bogus"}); !errors.Is(err, ErrUnknownHarness) {
 		t.Fatalf("unknown harness err = %v, want ErrUnknownHarness", err)
 	}
@@ -109,7 +109,7 @@ func TestStartTodo_ReplaysMechanicalTaskSizeIntoPrompt(t *testing.T) {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	agent := &recordingAgent{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	prepared, err := m.PrepareTodo(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,

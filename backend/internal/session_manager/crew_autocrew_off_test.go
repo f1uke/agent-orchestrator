@@ -52,7 +52,7 @@ func TestSpawn_CrewOffProjectLaunchesDevWithTheSoloPrompt(t *testing.T) {
 			st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
 			agent := &recordingAgent{}
 			lookPath := func(string) (string, error) { return "/bin/true", nil }
-			m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+			m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 			if _, err := m.Spawn(ctx, ports.SpawnConfig{
 				ProjectID: "mer", Kind: domain.KindWorker, Prompt: "build the thing", TaskSize: size,

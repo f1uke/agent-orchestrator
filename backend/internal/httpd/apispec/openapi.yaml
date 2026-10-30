@@ -9187,6 +9187,55 @@ paths:
       summary: Replace the Tasks tab configuration (an empty folder scans nothing)
       tags:
       - settings
+  /api/v1/settings/worker-transport:
+    get:
+      operationId: getWorkerTransportSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerTransportSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the global default transport for new claude-code workers
+      tags:
+      - settings
+    put:
+      operationId: setWorkerTransportSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetWorkerTransportSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerTransportSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the global default transport for new claude-code workers
+      tags:
+      - settings
   /api/v1/sim/clones:
     get:
       operationId: listSimClones
@@ -13636,6 +13685,11 @@ components:
           type: boolean
         worker:
           $ref: '#/components/schemas/RoleOverride'
+        workerTransport:
+          enum:
+          - terminal
+          - chat
+          type: string
       type: object
     ProjectGetResponse:
       properties:
@@ -17962,6 +18016,16 @@ components:
             type: string
           type: array
       type: object
+    SetWorkerTransportSettingsRequest:
+      properties:
+        workerTransport:
+          enum:
+          - terminal
+          - chat
+          type: string
+      required:
+      - workerTransport
+      type: object
     SimBaseView:
       properties:
         deviceType:
@@ -19605,6 +19669,16 @@ components:
       - cutoff
       - ownerAliases
       - requireCreated
+      type: object
+    WorkerTransportSettingsResponse:
+      properties:
+        workerTransport:
+          enum:
+          - terminal
+          - chat
+          type: string
+      required:
+      - workerTransport
       type: object
     WorkspaceChangesResponse:
       properties:

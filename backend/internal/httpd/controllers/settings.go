@@ -13,6 +13,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
@@ -26,6 +27,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/workertransport"
 )
 
 // SettingsService is the reclaim-settings store surface the controller needs.
@@ -61,6 +63,12 @@ type AutoNudgeService interface {
 type ResponseLanguageService interface {
 	Get() responselang.Settings
 	Set(responselang.Settings) error
+}
+
+// WorkerTransportService is the worker-transport settings store the controller needs.
+type WorkerTransportService interface {
+	Get() workertransport.Settings
+	Set(workertransport.Settings) error
 }
 
 // WikiSettingsService is the Wiki settings store surface the controller needs.
@@ -123,6 +131,7 @@ type SettingsController struct {
 	ClaudeProfiles   ClaudeProfilesService
 	AutoNudge        AutoNudgeService
 	ResponseLanguage ResponseLanguageService
+	WorkerTransport  WorkerTransportService
 	Wiki             WikiSettingsService
 	RefLinks         RefLinksService
 	QAEvidence       QAEvidenceSettingsService
@@ -144,6 +153,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/auto-nudge", c.setAutoNudge)
 	r.Get("/settings/response-language", c.getResponseLanguage)
 	r.Put("/settings/response-language", c.setResponseLanguage)
+	r.Get("/settings/worker-transport", c.getWorkerTransport)
+	r.Put("/settings/worker-transport", c.setWorkerTransport)
 	r.Get("/settings/wiki", c.getWiki)
 	r.Put("/settings/wiki", c.setWiki)
 	r.Get("/settings/wiki/tasks", c.getWikiTasks)
@@ -310,6 +321,36 @@ func (c *SettingsController) setResponseLanguage(w http.ResponseWriter, r *http.
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ResponseLanguageSettingsResponse{Language: c.ResponseLanguage.Get().Language})
+}
+
+func (c *SettingsController) getWorkerTransport(w http.ResponseWriter, r *http.Request) {
+	if c.WorkerTransport == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/worker-transport")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, WorkerTransportSettingsResponse{WorkerTransport: c.WorkerTransport.Get().WorkerTransport})
+}
+
+func (c *SettingsController) setWorkerTransport(w http.ResponseWriter, r *http.Request) {
+	if c.WorkerTransport == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/worker-transport")
+		return
+	}
+	var in SetWorkerTransportSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	transport, err := domain.ParseTransport(strings.TrimSpace(string(in.WorkerTransport)))
+	if err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "TRANSPORT_INVALID", err.Error(), nil)
+		return
+	}
+	if err := c.WorkerTransport.Set(workertransport.Settings{WorkerTransport: transport}); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, WorkerTransportSettingsResponse{WorkerTransport: c.WorkerTransport.Get().WorkerTransport})
 }
 
 func (c *SettingsController) getWiki(w http.ResponseWriter, r *http.Request) {

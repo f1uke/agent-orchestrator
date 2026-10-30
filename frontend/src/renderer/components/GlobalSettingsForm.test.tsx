@@ -178,6 +178,8 @@ function mockGet(
 				return { data: { enabled: false }, error: undefined };
 			case "/api/v1/settings/response-language":
 				return { data: { language: "English" }, error: undefined };
+			case "/api/v1/settings/worker-transport":
+				return { data: { workerTransport: "chat" }, error: undefined };
 			case "/api/v1/settings/reclaim":
 				return { data: { enabled: true, graceMinutes: 1440, artifactsEnabled: true }, error: undefined };
 			case "/api/v1/settings/wiki":
@@ -299,6 +301,21 @@ describe("GlobalSettingsForm", () => {
 		await waitFor(() =>
 			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/response-language", { body: { language: "Thai" } }),
 		);
+	});
+
+	it("routes the default worker transport through the save bar (PUT worker-transport)", async () => {
+		renderForm();
+		await openRows();
+		const transport = await screen.findByRole("combobox", { name: "Default worker transport" });
+		expect(transport).toHaveTextContent("Chat");
+		await chooseOption(transport, "Terminal");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/worker-transport", {
+				body: { workerTransport: "terminal" },
+			}),
+		);
+		expect(putMock).not.toHaveBeenCalledWith("/api/v1/settings/response-language", expect.anything());
 	});
 
 	it("routes the Auto-send toggle through the save bar (PUT auto-nudge)", async () => {

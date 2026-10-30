@@ -55,6 +55,7 @@ type fakeSessionService struct {
 	previewErr           error
 	claudeProfileCall    claudeProfileCall
 	claudeProfileOutcome domain.ClaudeProfileRestart
+	resolvedTransport    domain.Transport
 }
 
 type claudeProfileCall struct {
@@ -76,8 +77,12 @@ func (f *fakeSessionService) List(context.Context, sessionsvc.ListFilter) ([]dom
 
 func (f *fakeSessionService) Spawn(_ context.Context, cfg ports.SpawnConfig) (domain.Session, error) {
 	f.spawned = cfg
+	transport := cfg.Transport
+	if transport == "" {
+		transport = f.resolvedTransport
+	}
 	return domain.Session{
-		SessionRecord: domain.SessionRecord{ID: domain.SessionID(string(cfg.ProjectID) + "-1")},
+		SessionRecord: domain.SessionRecord{ID: domain.SessionID(string(cfg.ProjectID) + "-1"), Transport: transport},
 		Status:        domain.StatusIdle,
 	}, nil
 }

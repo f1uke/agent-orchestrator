@@ -22,7 +22,7 @@ func TestWorkerPrompt_NamesThePRTargetAndTheBaseFlag(t *testing.T) {
 		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
 		agent := &recordingAgent{}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath}), agent
+		return New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath}), agent
 	}
 
 	t.Run("explicit --target", func(t *testing.T) {
@@ -84,7 +84,7 @@ func TestWorkerPrompt_NamesThePRTargetAndTheBaseFlag(t *testing.T) {
 		st := newFakeStore()
 		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA, PRTarget: "main-fluke"})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
@@ -126,7 +126,7 @@ func TestRestoredWorkerPrompt_KeepsThePRTarget(t *testing.T) {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	agent := &recordingAgent{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	st.sessions["mer-1"] = domain.SessionRecord{
 		ID:           "mer-1",

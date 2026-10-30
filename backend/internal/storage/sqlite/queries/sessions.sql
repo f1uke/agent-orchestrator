@@ -117,6 +117,13 @@ UPDATE sessions SET pr_target = ?, updated_at = ? WHERE id = ?;
 -- from. Bumps updated_at so the sessions_cdc_update trigger redraws the chip.
 UPDATE sessions SET claude_profile = ?, updated_at = ? WHERE id = ?;
 
+-- name: SetSessionTransport :execrows
+-- Sole writer of transport after the row is inserted. A queued TODO is inserted
+-- with no transport and takes the one it resolved when it starts; a started
+-- session's transport never changes. Bumps updated_at so the
+-- sessions_cdc_update trigger refreshes the board.
+UPDATE sessions SET transport = ?, updated_at = ? WHERE id = ?;
+
 -- name: SetSessionRestartPending :execrows
 -- Sole writer of restart_pending: set when a profile switch asks for a restart
 -- while the agent is mid-turn, cleared by the relaunch that applies it.

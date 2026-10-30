@@ -10,7 +10,8 @@ import {
 	parseCaFileLines,
 	simTrustSettingsQueryKey,
 } from "../../lib/sim-trust";
-import { responseLanguageQueryKey } from "./useGlobalSettingsForm";
+import { responseLanguageQueryKey, workerTransportQueryKey } from "./useGlobalSettingsForm";
+import { BUILT_IN_WORKER_TRANSPORT, type WorkerTransport } from "./worker-transport";
 import { captureRendererEvent } from "../../lib/telemetry";
 import { useClaudeProfiles } from "../../lib/claude-profiles";
 import { spawnOrchestrator } from "../../lib/spawn-orchestrator";
@@ -75,6 +76,7 @@ export type ProjectSettingsFormState = {
 	workerPrompt: string;
 	reviewerPrompt: string;
 	responseLanguage: string;
+	workerTransport: WorkerTransport | "";
 };
 
 export type ProjectSettingsFieldKey = keyof ProjectSettingsFormState;
@@ -118,6 +120,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		workerPrompt: config.systemPromptAdditions?.worker ?? "",
 		reviewerPrompt: config.systemPromptAdditions?.reviewer ?? "",
 		responseLanguage: config.responseLanguage ?? "",
+		workerTransport: config.workerTransport ?? "",
 	};
 }
 
@@ -231,6 +234,15 @@ export function useProjectSettingsForm({
 		},
 	});
 	const globalResponseLanguage = globalResponseLanguageQuery.data?.language || "English";
+	const globalWorkerTransportQuery = useQuery({
+		queryKey: workerTransportQueryKey,
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/worker-transport", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as components["schemas"]["WorkerTransportSettingsResponse"];
+		},
+	});
+	const globalWorkerTransport = globalWorkerTransportQuery.data?.workerTransport ?? BUILT_IN_WORKER_TRANSPORT;
 	// The global root-CA list this project's override replaces, stated at the
 	// field for the same reason as the response language above.
 	const globalSimTrustQuery = useQuery({ queryKey: simTrustSettingsQueryKey, queryFn: fetchSimTrustSettings });
@@ -333,6 +345,7 @@ export function useProjectSettingsForm({
 				// Empty means "inherit the global default" - omit the field so an
 				// otherwise-unset config still persists as unset.
 				responseLanguage: form.responseLanguage || undefined,
+				workerTransport: form.workerTransport || undefined,
 				claudeProfile: form.claudeProfile || undefined,
 			};
 			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {
@@ -417,6 +430,7 @@ export function useProjectSettingsForm({
 		refreshAgentsMutation,
 		missingRequiredAgent,
 		globalResponseLanguage,
+		globalWorkerTransport,
 		globalSimTrustCaFiles,
 		intakeForm,
 		patchIntake,

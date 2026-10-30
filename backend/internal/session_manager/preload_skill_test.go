@@ -28,7 +28,7 @@ func preloadManager(t *testing.T, agent ports.Agent) (*Manager, *fakeStore) {
 	t.Helper()
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
-	m := New(Deps{
+	m := New(Deps{WorkerTransport: terminalTransport,
 		Runtime:   &fakeRuntime{},
 		Agents:    singleAgent{agent: agent},
 		Workspace: &fakeWorkspace{},

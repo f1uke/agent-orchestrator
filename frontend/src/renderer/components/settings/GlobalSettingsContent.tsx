@@ -15,6 +15,8 @@ import { CompanionPreview } from "./CompanionPreview";
 import { PetLibrary } from "./PetLibrary";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
+import { WorkerTransportSelect } from "./WorkerTransportSelect";
+import { workerTransportLabel } from "./worker-transport";
 import { ShortcutField } from "./ShortcutField";
 import { DEFAULT_EDITOR_SETTINGS } from "../../../shared/editor-settings";
 import { shortcutLabel } from "../../../shared/editor-shortcuts";
@@ -114,6 +116,24 @@ function EveryAgentSection({ form }: { form: GlobalForm }) {
 						id="responseLanguage"
 						value={draft.responseLanguage}
 						onChange={(v) => setField("responseLanguage", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Default worker transport"
+					summary="How a new Claude Code worker is driven: Chat is a headless session behind the chat view, Terminal is its own TUI in the pane."
+					detail="Applies to every project that does not set its own. A worker keeps the transport it was spawned with, so changing this never moves a running one. Orchestrators and other agents are always Terminal. Set Terminal here to go back for every project; ao settings worker-transport terminal does the same."
+					ownership={{ kind: "global-overridable" }}
+					timing="next-worker"
+					value={workerTransportLabel(draft.workerTransport)}
+					modified={isFieldDirty("workerTransport")}
+					controlId="workerTransport"
+				>
+					<WorkerTransportSelect
+						scope="global"
+						id="workerTransport"
+						value={draft.workerTransport}
+						onChange={(v) => setField("workerTransport", v)}
 					/>
 				</SettingRow>
 
