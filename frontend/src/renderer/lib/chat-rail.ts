@@ -5,7 +5,7 @@ export type RailTurn = { turn: number; key: string; prompt: string; reply: strin
 const PROMPT_CHARS = 50;
 const REPLY_CHARS = 360;
 
-function plain(markdown: string): string {
+function markdownAsLine(markdown: string): string {
 	return markdown
 		.replace(/```[^\n]*\n?/g, "")
 		.replace(/^\s*(#+|[-*+]|\d+\.)\s+/gm, "")
@@ -33,9 +33,14 @@ export function railTurns(rows: readonly ChatRow[]): RailTurn[] {
 	for (const row of rows) {
 		const prompt = opening(row);
 		if (prompt !== undefined) {
-			turns.push({ turn: turns.length + 1, key: row.key, prompt: clip(plain(prompt), PROMPT_CHARS), reply: "" });
+			turns.push({
+				turn: turns.length + 1,
+				key: row.key,
+				prompt: clip(markdownAsLine(prompt), PROMPT_CHARS),
+				reply: "",
+			});
 		} else if (row.kind === "item" && row.item.kind === "assistant_text" && turns.length > 0) {
-			turns[turns.length - 1].reply = clip(plain(row.item.text), REPLY_CHARS);
+			turns[turns.length - 1].reply = clip(markdownAsLine(row.item.text), REPLY_CHARS);
 		}
 	}
 	return turns;

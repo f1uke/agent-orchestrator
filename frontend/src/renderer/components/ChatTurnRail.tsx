@@ -2,7 +2,7 @@ import { type KeyboardEvent, useCallback, useId, useLayoutEffect, useRef, useSta
 import type { RailTurn } from "../lib/chat-rail";
 import { cn } from "../lib/utils";
 
-const FADE_PX = 20;
+const EDGE_FADE_PX = 20;
 
 type Preview = { index: number; top: number };
 
@@ -53,7 +53,7 @@ export function ChatTurnRail({
 		if (ladder && tick && !pointerInside.current) {
 			const top = tick.offsetTop;
 			const bottom = top + tick.offsetHeight;
-			if (top < ladder.scrollTop + FADE_PX || bottom > ladder.scrollTop + ladder.clientHeight - FADE_PX) {
+			if (top < ladder.scrollTop + EDGE_FADE_PX || bottom > ladder.scrollTop + ladder.clientHeight - EDGE_FADE_PX) {
 				ladder.scrollTop = top - (ladder.clientHeight - tick.offsetHeight) / 2;
 			}
 		}

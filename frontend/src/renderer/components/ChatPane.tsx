@@ -650,7 +650,7 @@ function ItemRow({
 	}
 }
 
-function taskLabel(item: TaskMessageItem, task: BackgroundTask | undefined): string {
+function taskDisplayName(item: TaskMessageItem, task: BackgroundTask | undefined): string {
 	return task?.description || /"([^"]+)"/.exec(item.summary)?.[1] || item.summary;
 }
 
@@ -675,7 +675,7 @@ function TaskMessageCard({
 				<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
 				<Icon className="chat-icon" aria-hidden="true" />
 				<span className="chat-task__title">{agent ? "Agent finished" : "Task message received"}</span>
-				<span className="chat-task__label">{taskLabel(item, task)}</span>
+				<span className="chat-task__label">{taskDisplayName(item, task)}</span>
 				{item.status === "failed" ? <span className="chat-task__failed">Failed</span> : null}
 				<span className="chat-task__time">{clockTime(item.ts)}</span>
 			</button>
@@ -760,7 +760,7 @@ function UserMessage({ item }: { item: UserItem }) {
 	);
 }
 
-const LEADING_COMMAND = /^\/([\w:.-]+)\s*/;
+const BRIEF_SLASH_COMMAND = /^\/([\w:.-]+)\s*/;
 
 function TaskBrief({
 	item,
@@ -773,7 +773,7 @@ function TaskBrief({
 	onToggle: (open: boolean) => void;
 	theme: Theme;
 }) {
-	const command = LEADING_COMMAND.exec(item.text);
+	const command = BRIEF_SLASH_COMMAND.exec(item.text);
 	const body = command ? item.text.slice(command[0].length) : item.text;
 	const preview = body.split("\n").find((line) => line.trim() !== "") ?? "";
 	return (
