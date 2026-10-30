@@ -2,8 +2,6 @@ package tmux
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -13,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/sockpath"
 )
 
 // ONE TMUX SERVER PER SESSION.
@@ -38,15 +38,6 @@ import (
 // `$TMUX` itself stays in the pane: Claude Code reads it to record which tmux
 // session owns it, and claudepeer delivery joins AO's handle on that record.
 
-// maxSocketPathLen is the longest unix socket path every supported platform
-// accepts: sun_path is 104 bytes on macOS (108 on Linux), NUL included. tmux
-// refuses a longer -S path outright.
-const maxSocketPathLen = 103
-
-// hashedSocketNameLen is the length of the fallback socket file name
-// SocketPathIn uses when a session name does not fit.
-const hashedSocketNameLen = len("s-") + 16
-
 // SocketDir returns the directory holding the tmux sockets of the AO instance
 // whose data dir is dataDir: `<dataDir>/tmux`. When that is too long to leave
 // room for a socket name (a data dir deep under a temp dir), it falls back to a
@@ -57,12 +48,7 @@ func SocketDir(dataDir string) string {
 	if dataDir == "" {
 		return filepath.Join(os.TempDir(), fmt.Sprintf("ao-tmux-%d", os.Getuid()))
 	}
-	dir := filepath.Join(dataDir, "tmux")
-	if len(dir)+1+hashedSocketNameLen <= maxSocketPathLen {
-		return dir
-	}
-	sum := sha256.Sum256([]byte(dir))
-	return filepath.Join(os.TempDir(), "ao-tmux-"+hex.EncodeToString(sum[:6]))
+	return sockpath.Dir(filepath.Join(dataDir, "tmux"), "ao-tmux-")
 }
 
 // SocketPath returns the socket of the tmux server hosting session name for the
@@ -74,13 +60,9 @@ func SocketPath(dataDir, name string) string {
 
 // SocketPathIn names a session's socket inside dir: the session name itself, so
 // `ls` of the directory reads like `tmux ls` did, or a hash of it when the name
-// would push the path past maxSocketPathLen.
+// would push the path past sockpath.MaxLen.
 func SocketPathIn(dir, name string) string {
-	if p := filepath.Join(dir, name); len(p) <= maxSocketPathLen {
-		return p
-	}
-	sum := sha256.Sum256([]byte(name))
-	return filepath.Join(dir, "s-"+hex.EncodeToString(sum[:8]))
+	return sockpath.In(dir, name)
 }
 
 // LegacyDefaultSocket returns the socket of tmux's default server - where AO ran
