@@ -92,10 +92,11 @@ const (
 	NoticeSpawn       NoticeKind = "spawn"
 	NoticeResumed     NoticeKind = "resumed"
 	NoticeExit        NoticeKind = "exit"
+	NoticeCompacted   NoticeKind = "compacted"
 )
 
-// Notice is a marker in the transcript that is not a message: an interrupt or
-// a process lifecycle event. For resumed, Text is the claude session id.
+// Notice is a marker in the transcript that is not a message: an interrupt, a
+// compaction, or a process lifecycle event. For resumed, Text is the claude session id.
 type Notice struct {
 	Kind NoticeKind
 	Text string
@@ -210,6 +211,10 @@ func (f *Folder) applyOut(ev Event) {
 		}
 		if ev.PermissionMode != "" {
 			f.mode = ev.PermissionMode
+		}
+	case System:
+		if ev.Subtype == "compact_boundary" {
+			f.items = append(f.items, Notice{Kind: NoticeCompacted})
 		}
 	case Assistant:
 		f.applyAssistant(ev)
@@ -372,6 +377,7 @@ func (f *Folder) settle(requestID string, status PermissionStatus, message strin
 func (f *Folder) applyHost(n HostNote) {
 	switch n.Kind {
 	case NoteSpawn:
+		f.endProcess()
 		if n.Resume != "" {
 			f.items = append(f.items, Notice{Kind: NoticeResumed, Text: n.Resume})
 		} else {

@@ -592,6 +592,34 @@ func TestExitSettlesWhatTheProcessLeftBehind(t *testing.T) {
 	})
 }
 
+func TestSpawnSettlesWhatACrashedHostLeftBehind(t *testing.T) {
+	entries := loadFixture(t, "first_session.jsonl")
+	spawn := synth(1000, DirHost, `{"kind":"spawn","argv":["claude"],"resume":"12e38fc9-a4a5-4819-b046-4107629b2c8b","pid":7}`)
+	tr := foldEntries(t, append(slices.Clone(upTo(entries, 12)), spawn))
+	if tr.Busy || len(tr.Pending) != 0 || len(tr.Queued) != 0 {
+		t.Errorf("Busy=%v Pending=%v Queued=%v, want all cleared", tr.Busy, tr.Pending, tr.Queued)
+	}
+	if p := toolCalls(tr, "Write")[0].Permission; p.Status != PermissionCancelled {
+		t.Errorf("permission = %+v, want cancelled", p)
+	}
+	if u := itemsOf[UserItem](tr)[0]; u.State != CommandCancelled {
+		t.Errorf("running input state = %q, want cancelled", u.State)
+	}
+	if n := itemsOf[Notice](tr); n[len(n)-1] != (Notice{Kind: NoticeResumed, Text: "12e38fc9-a4a5-4819-b046-4107629b2c8b"}) {
+		t.Errorf("last notice = %+v", n[len(n)-1])
+	}
+}
+
+func TestCompactBoundaryIsANotice(t *testing.T) {
+	tr := foldEntries(t, []Entry{
+		synth(1, DirOut, `{"type":"system","subtype":"compact_boundary","session_id":"s","compact_metadata":{"trigger":"manual","pre_tokens":12000}}`),
+		synth(2, DirOut, `{"type":"user","uuid":"c1","session_id":"s","message":{"role":"user","content":"This session is being continued from a previous conversation. Summary: ..."}}`),
+	})
+	if want := []Item{Notice{Kind: NoticeCompacted}}; !reflect.DeepEqual(tr.Items, want) {
+		t.Errorf("Items = %+v, want %+v", tr.Items, want)
+	}
+}
+
 func TestUnknownEventsChangeNothing(t *testing.T) {
 	base := foldEntries(t, upTo(loadFixture(t, "first_session.jsonl"), 12))
 	f := NewFolder()
