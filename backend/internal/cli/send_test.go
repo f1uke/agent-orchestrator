@@ -643,6 +643,24 @@ func TestSend_SaysTheMessageWentOverClaudesOwnChannel(t *testing.T) {
 	}
 }
 
+func TestSend_SaysTheMessageWentToTheChatSessionsHost(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, _ := sendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"hello","delivery":{"path":"host","msgId":"u-1"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "send", "--session", "demo-1", "--message", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "delivered: host (the chat session's host)") {
+		t.Fatalf("output = %q, want it to name the host path", out)
+	}
+}
+
 // A fallback is the interesting case, so the REASON is printed verbatim - the
 // same string the daemon logged and the journal kept, so a reader can match the
 // three up.

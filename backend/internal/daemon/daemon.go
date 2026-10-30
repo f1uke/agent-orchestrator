@@ -167,7 +167,7 @@ func Run() error {
 	// runtime consults it before SendMessage so an inbound message never merges
 	// into — or submits — the line the user is mid-typing in the shared pane.
 	inputGate := inputgate.New()
-	gatedRuntime := newGatedRuntime(runtimeAdapter, inputGate)
+	gatedRuntime := newGatedRuntime(runtimeAdapter, inputGate, &hostRouter{sessions: store, dataDir: cfg.DataDir, journal: journalOrNil(deliveryJournal)})
 	termMgr := terminal.NewManager(runtimeAdapter, cdcPipe.Broadcaster, log, terminal.WithInputRecorder(inputGate))
 	defer termMgr.Close()
 

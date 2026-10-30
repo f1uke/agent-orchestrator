@@ -37,7 +37,7 @@ func (f *fakeInnerRuntime) sentCount() int {
 func TestGatedRuntime_DeliversImmediatelyWhenPaneIdle(t *testing.T) {
 	inner := &fakeInnerRuntime{}
 	gate := inputgate.New() // no NoteInput -> WaitForQuiet returns at once
-	g := newGatedRuntime(inner, gate)
+	g := newGatedRuntime(inner, gate, nil)
 
 	if err := g.SendMessage(context.Background(), ports.RuntimeHandle{ID: "pane"}, "hello"); err != nil {
 		t.Fatalf("SendMessage: %v", err)
@@ -51,7 +51,7 @@ func TestGatedRuntime_DefersWhileUserTyping(t *testing.T) {
 	inner := &fakeInnerRuntime{}
 	// A short but observable quiet window and cap for a real-time test.
 	gate := inputgate.New(inputgate.WithQuietWindow(120*time.Millisecond), inputgate.WithMaxDefer(5*time.Second))
-	g := newGatedRuntime(inner, gate)
+	g := newGatedRuntime(inner, gate, nil)
 
 	gate.NoteInput("pane") // user is mid-keystroke
 	start := time.Now()
@@ -87,7 +87,7 @@ func TestGatedRuntimeConnectsStdinFiles(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("conpty cannot connect a stdin file; prompts stay in the command there")
 	}
-	rt := newGatedRuntime(runtimeselect.New(nil, runtimeselect.Options{}), nil)
+	rt := newGatedRuntime(runtimeselect.New(nil, runtimeselect.Options{}), nil, nil)
 	if c, ok := rt.(ports.StdinFileConnector); !ok || !c.ConnectsStdinFile() {
 		t.Fatal("the daemon's runtime does not connect stdin files; task briefs would ride on argv")
 	}
@@ -106,7 +106,7 @@ func TestGatedRuntimeKeepsAgentLiveness(t *testing.T) {
 	if agentLivenessProber(adapter) == nil {
 		t.Fatal("the selected runtime must expose AgentAlive, or queued messages lose their readiness signal")
 	}
-	if _, ok := newGatedRuntime(adapter, nil).(ports.AgentLivenessProber); !ok {
+	if _, ok := newGatedRuntime(adapter, nil, nil).(ports.AgentLivenessProber); !ok {
 		t.Fatal("the input gate hides AgentAlive; the session manager would read every pane as agentless")
 	}
 }
@@ -124,7 +124,7 @@ func (p probeOnlyInner) AgentAlive(context.Context, ports.RuntimeHandle) (bool, 
 // The wrapper forwards the inner runtime's answer, and a runtime without the
 // capability (conpty) stays without it, so its consumers keep their fallback.
 func TestGatedRuntimeForwardsAgentLivenessOnlyWhenInnerHasIt(t *testing.T) {
-	g := newGatedRuntime(probeOnlyInner{alive: true}, nil)
+	g := newGatedRuntime(probeOnlyInner{alive: true}, nil, nil)
 	prober, ok := g.(ports.AgentLivenessProber)
 	if !ok {
 		t.Fatal("capability lost through the gate")
@@ -132,7 +132,7 @@ func TestGatedRuntimeForwardsAgentLivenessOnlyWhenInnerHasIt(t *testing.T) {
 	if alive, err := prober.AgentAlive(context.Background(), ports.RuntimeHandle{ID: "h"}); err != nil || !alive {
 		t.Fatalf("AgentAlive = %v, %v; want the inner runtime's true", alive, err)
 	}
-	if _, ok := newGatedRuntime(&fakeInnerRuntime{}, nil).(ports.AgentLivenessProber); ok {
+	if _, ok := newGatedRuntime(&fakeInnerRuntime{}, nil, nil).(ports.AgentLivenessProber); ok {
 		t.Fatal("a runtime without the capability gained one through the gate")
 	}
 }
