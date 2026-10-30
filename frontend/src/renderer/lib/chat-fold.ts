@@ -8,6 +8,7 @@ import {
 	type Origin,
 	type TaskEvent,
 	type TaskState,
+	type TaskUsage,
 	type Usage,
 	isObject,
 	unfinished,
@@ -63,8 +64,8 @@ export type NoticeItem = { kind: "notice"; notice: NoticeKind; text: string; ts:
 
 export type ChatItem =
 	| UserItem
-	| { kind: "assistant_text"; messageId: string; text: string }
-	| { kind: "thinking"; text: string }
+	| { kind: "assistant_text"; messageId: string; text: string; parentToolUseId: string }
+	| { kind: "thinking"; text: string; parentToolUseId: string }
 	| ToolCallItem
 	| TurnEndItem
 	| NoticeItem;
@@ -75,6 +76,12 @@ export type BackgroundTask = {
 	description: string;
 	taskType: string;
 	state: TaskState;
+	/** False for a foreground Bash; absent when the log does not say. */
+	background?: boolean;
+	exitCode?: number;
+	/** The task_notification summary: for an agent, its final text. */
+	summary?: string;
+	usage?: TaskUsage;
 };
 
 export type PendingKind = "permission" | "question" | "plan";
@@ -118,6 +125,8 @@ export type Transcript = {
 	/** In use: the spawn's --model, then system/init or an accepted set_model. */
 	model: string;
 	tasks: BackgroundTask[];
+	/** The size of the context the latest top-level response saw, known before the turn's result. */
+	contextTokens?: number;
 	lastSeq: number;
 };
 
@@ -198,6 +207,7 @@ export class ChatFolder {
 	private model = "";
 	private tasks = new Map<string, BackgroundTask>();
 	private ts = "";
+	private context: number | undefined;
 
 	get lastSeq(): number {
 		return this.last;
@@ -245,6 +255,7 @@ export class ChatFolder {
 			models: [...this.models],
 			model: this.model,
 			tasks: [...this.tasks.values()],
+			contextTokens: this.context,
 			lastSeq: this.last,
 		};
 	}
@@ -263,12 +274,14 @@ export class ChatFolder {
 				break;
 			case "assistant":
 				this.applyAssistant(event.messageId, event.parentToolUseId, event.blocks);
+				if (event.parentToolUseId === "" && event.contextTokens !== undefined) this.context = event.contextTokens;
 				break;
 			case "user":
 				if (!event.isReplay) this.applyToolResults(event.blocks);
 				break;
 			case "result":
 				this.cost = event.totalCostUsd;
+				if (event.contextTokens !== undefined) this.context = event.contextTokens;
 				this.items.push({
 					kind: "turn_end",
 					subtype: event.subtype,
@@ -322,9 +335,9 @@ export class ChatFolder {
 	private applyAssistant(messageId: string, parentToolUseId: string, blocks: Block[]): void {
 		for (const block of blocks) {
 			if (block.type === "text") {
-				this.items.push({ kind: "assistant_text", messageId, text: block.text });
+				this.items.push({ kind: "assistant_text", messageId, text: block.text, parentToolUseId });
 			} else if (block.type === "thinking") {
-				this.items.push({ kind: "thinking", text: block.text });
+				this.items.push({ kind: "thinking", text: block.text, parentToolUseId });
 			} else if (block.type === "tool_use" && !this.tools.has(block.id)) {
 				this.tools.set(block.id, this.items.length);
 				this.items.push({ kind: "tool_call", id: block.id, name: block.name, parentToolUseId, input: block.input });
@@ -445,6 +458,10 @@ export class ChatFolder {
 			description: prev?.description || event.description,
 			taskType: event.taskType || prev?.taskType || "",
 			state: event.state ?? prev?.state ?? "running",
+			background: event.background ?? prev?.background,
+			exitCode: event.exitCode ?? prev?.exitCode,
+			summary: event.summary ?? prev?.summary,
+			usage: event.usage ?? prev?.usage,
 		});
 	}
 

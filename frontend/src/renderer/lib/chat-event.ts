@@ -34,12 +34,34 @@ export function unfinished(state: TaskState): boolean {
 	return state === "pending" || state === "running" || state === "paused";
 }
 
-export type TaskEvent = { taskId: string; toolUseId: string; description: string; taskType: string; state?: TaskState };
+export type TaskUsage = { totalTokens: number; toolUses: number; durationMs: number };
+
+export type TaskEvent = {
+	taskId: string;
+	toolUseId: string;
+	description: string;
+	taskType: string;
+	state?: TaskState;
+	/** claude's is_backgrounded: false for a foreground Bash, which it registers as a task too. */
+	background?: boolean;
+	/** From a task_notification summary such as "... failed with exit code 1". */
+	exitCode?: number;
+	/** A task_notification's summary, which for an agent is its final text. */
+	summary?: string;
+	usage?: TaskUsage;
+};
 
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
 	| { type: "system"; subtype: string; permissionMode: string; task?: TaskEvent }
-	| { type: "assistant"; messageId: string; parentToolUseId: string; blocks: Block[] }
+	| {
+			type: "assistant";
+			messageId: string;
+			parentToolUseId: string;
+			blocks: Block[];
+			/** input + cache read + cache creation of message.usage: the context this response saw. */
+			contextTokens?: number;
+	  }
 	| { type: "user"; uuid: string; isReplay: boolean; blocks: Block[] }
 	| {
 			type: "result";
@@ -137,6 +159,13 @@ function decodeContext(raw: unknown): number | undefined {
 	return inputTokens + cacheReadTokens + cacheCreationTokens;
 }
 
+function decodeMessageContext(raw: unknown): number | undefined {
+	if (!isObject(raw)) return undefined;
+	const { inputTokens, cacheReadTokens, cacheCreationTokens } = decodeUsage(raw);
+	const total = inputTokens + cacheReadTokens + cacheCreationTokens;
+	return total > 0 ? total : undefined;
+}
+
 function decodeWindows(raw: unknown): Record<string, number> {
 	const windows: Record<string, number> = {};
 	if (!isObject(raw)) return windows;
@@ -165,13 +194,26 @@ function decodeTask(line: Obj): TaskEvent | undefined {
 	const patch = isObject(line.patch) ? line.patch : {};
 	const status = subtype === "task_updated" ? str(patch.status) : str(line.status);
 	const started = subtype === "task_started" || subtype === "task_progress";
-	return {
+	const summary = subtype === "task_notification" ? str(line.summary) : "";
+	const exit = /exit code (\d+)/.exec(summary);
+	const event: TaskEvent = {
 		taskId,
 		toolUseId: str(line.tool_use_id),
 		description: str(line.description) || str(patch.description) || str(line.summary),
-		taskType: str(line.task_type) || str(line.subagent_type),
+		taskType: str(line.task_type),
 		state: started ? "running" : TASK_STATES[status],
 	};
+	if (typeof line.is_backgrounded === "boolean") event.background = line.is_backgrounded;
+	if (exit) event.exitCode = Number(exit[1]);
+	if (summary !== "") event.summary = summary;
+	if (isObject(line.usage)) {
+		event.usage = {
+			totalTokens: num(line.usage.total_tokens),
+			toolUses: num(line.usage.tool_uses),
+			durationMs: num(line.usage.duration_ms),
+		};
+	}
+	return event;
 }
 
 function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
@@ -198,6 +240,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				messageId: str(message.id),
 				parentToolUseId: str(line.parent_tool_use_id),
 				blocks: decodeBlocks(message.content),
+				contextTokens: decodeMessageContext(message.usage),
 			};
 		case "user":
 			return {
