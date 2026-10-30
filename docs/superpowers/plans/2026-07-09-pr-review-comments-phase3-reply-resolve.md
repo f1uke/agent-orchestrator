@@ -24,12 +24,14 @@
 ### Task 1: GitHub write methods + shared capability contract
 
 **Files:**
+
 - Modify: `backend/internal/ports/scm_observations.go` (add `ErrSCMForbidden`)
 - Create: `backend/internal/observe/scm/thread_writer.go` (the `ReviewThreadWriter` interface)
 - Create: `backend/internal/adapters/scm/github/write.go`
 - Test: `backend/internal/adapters/scm/github/write_test.go`
 
 **Interfaces:**
+
 - Produces (consumed by Tasks 2–4):
   ```go
   // internal/observe/scm/thread_writer.go
@@ -52,6 +54,7 @@
 - [ ] **Step 2: Run tests to verify they fail** — `go test ./internal/adapters/scm/github/ -run 'ReplyToThread|ResolveThread'` → FAIL (methods undefined).
 
 - [ ] **Step 3: Add `ports.ErrSCMForbidden`** to `scm_observations.go` next to `ErrSCMNotFound`:
+
   ```go
   // ErrSCMForbidden is the provider-neutral sentinel for a write the token is
   // not permitted to make (missing write scope / insufficient permission).
@@ -61,6 +64,7 @@
 - [ ] **Step 4: Create `thread_writer.go`** with the `ReviewThreadWriter` interface above (package `scm`, imports `context` + `ports`).
 
 - [ ] **Step 5: Implement `write.go`:**
+
   ```go
   package github
 
@@ -103,6 +107,7 @@
       return err
   }
   ```
+
   Add a `var _ scmobserve.ReviewThreadWriter = (*Provider)(nil)` in write.go too (import alias `scmobserve "…/internal/observe/scm"`).
 
 - [ ] **Step 6: Run tests to verify they pass** — `go test ./internal/adapters/scm/github/ -run 'ReplyToThread|ResolveThread'` → PASS. Then `go build ./... && gofmt -l internal/adapters/scm/github/` (expect no output).
@@ -114,10 +119,12 @@
 ### Task 2: GitLab write methods
 
 **Files:**
+
 - Create: `backend/internal/adapters/scm/gitlab/write.go`
 - Test: `backend/internal/adapters/scm/gitlab/write_test.go`
 
 **Interfaces:**
+
 - Produces: `gitlab.Provider` satisfies `scmobserve.ReviewThreadWriter`.
 - Consumes: `gitlab.Client.doRESTWithETagAndMethod(ctx, method, path string, q url.Values, etag string, body any) (restResponse, error)` (client.go:87); `restResponse{Body []byte; Status int}` (client.go:66); `restNote` (observer_provider.go:529); `projectID(repo ports.SCMRepo) string` (observer_provider.go:88); `isBotUsername` (observer_provider.go:682); `gitlab.ErrAuthFailed` (client.go:197); GitLab's `classifyError` maps 404 → the package `ErrNotFound`. Verify GitLab's not-found sentinel: `grep -n "ErrNotFound" internal/adapters/scm/gitlab/*.go`. If GitLab does NOT already alias `ports.ErrSCMNotFound`, translate 404 explicitly in `classifyGitlabWriteErr` (below) by checking `resp.Status == 404`.
 
@@ -131,6 +138,7 @@
 - [ ] **Step 2: Run tests to verify they fail** — `go test ./internal/adapters/scm/gitlab/ -run 'ReplyToThread|ResolveThread'` → FAIL.
 
 - [ ] **Step 3: Implement `write.go`:**
+
   ```go
   package gitlab
 
@@ -175,6 +183,7 @@
       return err
   }
   ```
+
   Add `var _ scmobserve.ReviewThreadWriter = (*Provider)(nil)`.
 
 - [ ] **Step 4: Run tests to verify they pass** — `go test ./internal/adapters/scm/gitlab/ -run 'ReplyToThread|ResolveThread'` → PASS. Then `go build ./... && gofmt -l internal/adapters/scm/gitlab/`.
@@ -186,10 +195,12 @@
 ### Task 3: Composite routing for the write capability
 
 **Files:**
+
 - Modify: `backend/internal/adapters/scm/composite/provider.go`
 - Test: `backend/internal/adapters/scm/composite/provider_test.go` (add cases)
 
 **Interfaces:**
+
 - Produces: `composite.Provider` satisfies `scmobserve.ReviewThreadWriter`, routing by `ref.Repo.Provider`.
 - Consumes: `p.lookup(name)` (provider.go:42); `scmobserve.ReviewThreadWriter` (Task 1).
 
@@ -201,6 +212,7 @@
 - [ ] **Step 2: Run to verify fail** — `go test ./internal/adapters/scm/composite/ -run 'ReplyToThread|ResolveThread'` → FAIL.
 
 - [ ] **Step 3: Implement** in provider.go:
+
   ```go
   func (p *Provider) ReplyToThread(ctx context.Context, ref ports.SCMPRRef, threadID, body string) (ports.SCMReviewCommentObservation, error) {
       child, err := p.lookup(ref.Repo.Provider)
@@ -226,6 +238,7 @@
       return w.ResolveThread(ctx, ref, threadID)
   }
   ```
+
   Add `var _ scmobserve.ReviewThreadWriter = (*Provider)(nil)` near the existing `var _ scmobserve.Provider` line (provider.go:28).
 
 - [ ] **Step 4: Run to verify pass** — `go test ./internal/adapters/scm/composite/` → PASS. `go build ./... && gofmt -l internal/adapters/scm/composite/`.
@@ -237,14 +250,17 @@
 ### Task 4: Session service `ReplyToThread` + `ResolveThread`
 
 **Files:**
+
 - Modify: `backend/internal/service/session/service.go` (extend `scmProvider` interface, add `ErrSCMWriteForbidden`)
 - Create: `backend/internal/service/session/comment_write.go`
 - Test: `backend/internal/service/session/comment_write_test.go`
 - Modify: `backend/internal/service/session/service_test.go` (extend `fakeSCM` at :728)
 
 **Interfaces:**
+
 - Consumes: `scmRepoForClaim(provider scmProvider, projectOrigin, prURL string) (ports.SCMRepo, error)` (claim_pr.go:176); `s.store.GetSession`, `s.store.ListPRsBySession` (returns `[]domain.PullRequest` with `.URL`, `.Number`), `s.store.GetProject(ctx, string(projectID)) (Project, bool, error)` where `Project.RepoOriginURL` is the git origin; `s.clock() time.Time`; `PRThreadComment{ID, Author, Body, URL, Resolved, IsBot, CreatedAt}` (pr_comments.go); `apierr`, `ports.ErrSCMNotFound`, `ports.ErrSCMForbidden`; existing `ErrSCMUnavailable`.
 - Produces (consumed by Task 5):
+
   ```go
   func (s *Service) ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (PRThreadComment, error)
   func (s *Service) ResolveThread(ctx context.Context, id domain.SessionID, prURL, threadID string) error
@@ -252,13 +268,16 @@
   ```
 
 - [ ] **Step 1: Extend the `scmProvider` interface** in service.go (:85) with the two write methods:
+
   ```go
   ReplyToThread(ctx context.Context, ref ports.SCMPRRef, threadID, body string) (ports.SCMReviewCommentObservation, error)
   ResolveThread(ctx context.Context, ref ports.SCMPRRef, threadID string) error
   ```
+
   Add `var ErrSCMWriteForbidden = errors.New("scm write forbidden")` alongside `ErrSCMUnavailable`.
 
 - [ ] **Step 2: Extend `fakeSCM`** (service_test.go:728) with configurable fields + the two methods (value receiver, matching the existing style):
+
   ```go
   // add fields:
   replyComment ports.SCMReviewCommentObservation
@@ -292,6 +311,7 @@
 - [ ] **Step 4: Run to verify fail** — `go test ./internal/service/session/ -run 'ReplyToThread|ResolveThread'` → FAIL.
 
 - [ ] **Step 5: Implement `comment_write.go`.** Factor the shared authz+ref building into one helper, then the two public methods:
+
   ```go
   package session
 
@@ -379,6 +399,7 @@
       return mapThreadWriteErr(s.scm.ResolveThread(ctx, ref, threadID))
   }
   ```
+
   Confirm `PRThreadComment` field names against `pr_comments.go` (`CreatedAt` may be `time.Time`; if the type uses different casing, match it). If `Service` has no `clock` when built in a test, the existing tests set it — verify `s.clock` is non-nil in the test service construction (claim_pr tests set a clock; reuse that).
 
 - [ ] **Step 6: Run to verify pass** — `go test ./internal/service/session/ -run 'ReplyToThread|ResolveThread'` → PASS, then the whole package `go test ./internal/service/session/`. `go build ./... && gofmt -l internal/service/session/`.
@@ -390,6 +411,7 @@
 ### Task 5: HTTP endpoints + DTOs + OpenAPI
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go` (request/response DTOs)
 - Modify: `backend/internal/httpd/controllers/sessions.go` (routes, handlers, `SessionService` interface, error mapping)
 - Modify: `backend/internal/httpd/apispec/specgen/build.go` (operation registry + schemaNames)
@@ -398,10 +420,12 @@
 - Test: `backend/internal/httpd/controllers/sessions_test.go` (or the existing controller test file) + the fake SessionService used there
 
 **Interfaces:**
+
 - Consumes: `sessionsvc.Service.ReplyToThread`/`ResolveThread` (Task 4); `sessionsvc.ErrSCMWriteForbidden`, `sessionsvc.ErrSCMUnavailable`; `domain.SanitizeControlChars`; `envelope.WriteError`/`WriteAPIError`.
 - Produces (consumed by Task 6): OpenAPI schemas `ReplyCommentRequest`, `ReplyCommentResponse`, `ResolveThreadRequest`, `ResolveThreadResponse`; routes `/api/v1/sessions/{sessionId}/comment-reply`, `/comment-resolve`.
 
 - [ ] **Step 1: Add DTOs** to dto.go (mirror `DispatchCommentRequest`/`DispatchCommentResponse` — same file, same json-tag style):
+
   ```go
   type ReplyCommentRequest struct {
       PrURL    string `json:"prUrl"`
@@ -422,15 +446,18 @@
       Resolved  bool             `json:"resolved"`
   }
   ```
+
   (`SessionPRThreadComment` already exists from Phase 2 — reuse it; find its constructor/mapper `sessionPRThreadComment(...)` and reuse to map the service `PRThreadComment`.)
 
 - [ ] **Step 2: Extend `SessionService` interface** (sessions.go:34) with:
+
   ```go
   ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
   ResolveThread(ctx context.Context, id domain.SessionID, prURL, threadID string) error
   ```
 
 - [ ] **Step 3: Register routes** in `Register` (after the `comment-dispatch` line, :92):
+
   ```go
   r.Post("/sessions/{sessionId}/comment-reply", c.commentReply)
   r.Post("/sessions/{sessionId}/comment-resolve", c.commentResolve)
@@ -439,6 +466,7 @@
 - [ ] **Step 4: Write failing controller tests** first (mirror the `comment-dispatch` controller test). Build the router with a fake `SessionService` whose `ReplyToThread`/`ResolveThread` are stubbable. Cases: 200 reply returns the comment JSON; 400 when `prUrl`/`threadId` missing; 400 when body empty for reply; 403 when service returns `ErrSCMWriteForbidden`; 503 when `ErrSCMUnavailable`; 404 when service returns `apierr.NotFound("THREAD_NOT_FOUND",…)`. Update the fake SessionService in the test file to implement the two new interface methods. Run → FAIL.
 
 - [ ] **Step 5: Implement handlers** in sessions.go:
+
   ```go
   func (c *SessionsController) commentReply(w http.ResponseWriter, r *http.Request) {
       if c.Svc == nil {
@@ -506,6 +534,7 @@
       }
   }
   ```
+
   Find the Phase-2 mapper that converts `sessionsvc.PRThreadComment` → `SessionPRThreadComment` (grep `SessionPRThreadComment` in dto.go/sessions.go) and use it as `newSessionPRThreadComment`; if none exists, add a small mapper.
 
 - [ ] **Step 6: Register OpenAPI operations** in specgen/build.go. Find `sessionOperations()` and the `comment-dispatch` operation registration; add two entries for the new POST routes with their request/response bodies, and add the four new DTO type names to the `schemaNames` map (keys prefixed `Controllers…`, e.g. `ControllersReplyCommentRequest`). Mirror the exact shape of the `comment-dispatch` operation entry.
@@ -513,6 +542,7 @@
 - [ ] **Step 7: Regenerate + verify drift** — from repo root run `npm run api`. Then `go test ./internal/httpd/...` (runs `TestBuild_MatchesEmbedded` + `parity_test`) → PASS. If drift fails, re-run `npm run api` and re-check; never hand-edit generated files.
 
 - [ ] **Step 8: Add routes to `ROUTE_TEMPLATES`** in api-client.ts (next to `/comment-dispatch`, :68):
+
   ```ts
   "/api/v1/sessions/{sessionId}/comment-reply",
   "/api/v1/sessions/{sessionId}/comment-resolve",
@@ -527,19 +557,22 @@
 ### Task 6: Frontend mutation hooks with optimistic cache update
 
 **Files:**
+
 - Create: `frontend/src/renderer/hooks/useThreadActions.ts`
 - Test: `frontend/src/renderer/hooks/useThreadActions.test.ts`
 
 **Interfaces:**
+
 - Consumes: `apiClient.POST("/api/v1/sessions/{sessionId}/comment-reply" | "/comment-resolve")`; `useQueryClient`; the `["session-pr-comments", sessionId]` cache shape = `PRCommentGroup[]` (each group `{prUrl, threads:[{threadId, resolved, comments:[…]}]}`).
 - Produces (consumed by Task 7): `useReplyToThread(sessionId)` and `useResolveThread(sessionId)` returning TanStack mutations.
 
-- [ ] **Step 1: Write failing tests.** Using a `QueryClient` seeded with a `["session-pr-comments", sessionId]` value of one group/one thread/one comment: 
+- [ ] **Step 1: Write failing tests.** Using a `QueryClient` seeded with a `["session-pr-comments", sessionId]` value of one group/one thread/one comment:
   - reply mutation success appends the returned comment to the matching thread's `comments` (patch via `setQueryData`, do NOT invalidate);
-  - resolve mutation success sets the matching thread's `resolved` to `true`. 
-  Mock `apiClient.POST` (mirror how existing hook tests mock it). Run → FAIL.
+  - resolve mutation success sets the matching thread's `resolved` to `true`.
+    Mock `apiClient.POST` (mirror how existing hook tests mock it). Run → FAIL.
 
 - [ ] **Step 2: Implement `useThreadActions.ts`:**
+
   ```ts
   import { useMutation, useQueryClient } from "@tanstack/react-query";
   import type { components } from "../../api/schema";
@@ -549,58 +582,57 @@
   type ThreadComment = PRCommentGroup["threads"][number]["comments"][number];
 
   function patchGroups(
-      groups: PRCommentGroup[] | undefined,
-      prUrl: string,
-      threadId: string,
-      fn: (thread: PRCommentGroup["threads"][number]) => PRCommentGroup["threads"][number],
+  	groups: PRCommentGroup[] | undefined,
+  	prUrl: string,
+  	threadId: string,
+  	fn: (thread: PRCommentGroup["threads"][number]) => PRCommentGroup["threads"][number],
   ): PRCommentGroup[] {
-      return (groups ?? []).map((g) =>
-          g.prUrl !== prUrl
-              ? g
-              : { ...g, threads: g.threads.map((t) => (t.threadId === threadId ? fn(t) : t)) },
-      );
+  	return (groups ?? []).map((g) =>
+  		g.prUrl !== prUrl ? g : { ...g, threads: g.threads.map((t) => (t.threadId === threadId ? fn(t) : t)) },
+  	);
   }
 
   export function useReplyToThread(sessionId: string) {
-      const qc = useQueryClient();
-      return useMutation({
-          mutationFn: async (vars: { prUrl: string; threadId: string; body: string }) => {
-              const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/comment-reply", {
-                  params: { path: { sessionId } },
-                  body: vars,
-              });
-              if (error) throw new Error(apiErrorMessage(error, "Unable to reply"));
-              return data!;
-          },
-          onSuccess: (data, vars) => {
-              qc.setQueryData<PRCommentGroup[]>(["session-pr-comments", sessionId], (groups) =>
-                  patchGroups(groups, vars.prUrl, vars.threadId, (t) => ({
-                      ...t,
-                      comments: [...t.comments, data.comment as ThreadComment],
-                  })),
-              );
-          },
-      });
+  	const qc = useQueryClient();
+  	return useMutation({
+  		mutationFn: async (vars: { prUrl: string; threadId: string; body: string }) => {
+  			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/comment-reply", {
+  				params: { path: { sessionId } },
+  				body: vars,
+  			});
+  			if (error) throw new Error(apiErrorMessage(error, "Unable to reply"));
+  			return data!;
+  		},
+  		onSuccess: (data, vars) => {
+  			qc.setQueryData<PRCommentGroup[]>(["session-pr-comments", sessionId], (groups) =>
+  				patchGroups(groups, vars.prUrl, vars.threadId, (t) => ({
+  					...t,
+  					comments: [...t.comments, data.comment as ThreadComment],
+  				})),
+  			);
+  		},
+  	});
   }
 
   export function useResolveThread(sessionId: string) {
-      const qc = useQueryClient();
-      return useMutation({
-          mutationFn: async (vars: { prUrl: string; threadId: string }) => {
-              const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/comment-resolve", {
-                  params: { path: { sessionId } },
-                  body: vars,
-              });
-              if (error) throw new Error(apiErrorMessage(error, "Unable to resolve"));
-          },
-          onSuccess: (_data, vars) => {
-              qc.setQueryData<PRCommentGroup[]>(["session-pr-comments", sessionId], (groups) =>
-                  patchGroups(groups, vars.prUrl, vars.threadId, (t) => ({ ...t, resolved: true })),
-              );
-          },
-      });
+  	const qc = useQueryClient();
+  	return useMutation({
+  		mutationFn: async (vars: { prUrl: string; threadId: string }) => {
+  			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/comment-resolve", {
+  				params: { path: { sessionId } },
+  				body: vars,
+  			});
+  			if (error) throw new Error(apiErrorMessage(error, "Unable to resolve"));
+  		},
+  		onSuccess: (_data, vars) => {
+  			qc.setQueryData<PRCommentGroup[]>(["session-pr-comments", sessionId], (groups) =>
+  				patchGroups(groups, vars.prUrl, vars.threadId, (t) => ({ ...t, resolved: true })),
+  			);
+  		},
+  	});
   }
   ```
+
   Confirm the cache key `["session-pr-comments", sessionId]` matches `useSessionPRComments.ts` exactly.
 
 - [ ] **Step 3: Run tests to verify pass** — `cd frontend && npx vitest run src/renderer/hooks/useThreadActions.test.ts`.
@@ -612,25 +644,28 @@
 ### Task 7: Reply box + Resolve button in `ThreadCard`
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/CommentsView.tsx` (extend `ThreadCard`)
 - Create: `frontend/src/renderer/components/ThreadActions.tsx`
 - Test: `frontend/src/renderer/components/ThreadActions.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `useReplyToThread`, `useResolveThread` (Task 6); `Button`, `Textarea` (`components/ui/*`); `Loader2` from lucide-react; `Thread` type from CommentsView.
 
 - [ ] **Step 1: Write failing tests** (`ThreadActions.test.tsx`, render within a `QueryClientProvider`): typing in the reply textarea + clicking "Reply" calls the reply mutation with `{prUrl, threadId, body}`; the Resolve button is rendered when `!thread.resolved` and hidden/disabled when `thread.resolved`; clicking Resolve calls the resolve mutation. Mock the hooks. Run → FAIL.
 
 - [ ] **Step 2: Implement `ThreadActions.tsx`** — a reply `Textarea` + "Reply" `Button` (disabled while pending or empty) and, when `!resolved`, a "Resolve" `Button` (`variant="outline"`, disabled while pending). Show `apiErrorMessage` on error in a `role="alert"` line (hoisted, not nested in any toggle — the Phase-4a lesson). Clear the textarea on reply success.
+
   ```tsx
   export function ThreadActions({ sessionId, prUrl, thread }: { sessionId: string; prUrl: string; thread: Thread }) {
-      const [body, setBody] = useState("");
-      const reply = useReplyToThread(sessionId);
-      const resolve = useResolveThread(sessionId);
-      const busy = reply.isPending || resolve.isPending;
-      // textarea + Reply button (mutate {prUrl, threadId: thread.threadId, body}, clear on success)
-      // Resolve button only when !thread.resolved
-      // error line for reply.isError / resolve.isError
+  	const [body, setBody] = useState("");
+  	const reply = useReplyToThread(sessionId);
+  	const resolve = useResolveThread(sessionId);
+  	const busy = reply.isPending || resolve.isPending;
+  	// textarea + Reply button (mutate {prUrl, threadId: thread.threadId, body}, clear on success)
+  	// Resolve button only when !thread.resolved
+  	// error line for reply.isError / resolve.isError
   }
   ```
 

@@ -24,6 +24,7 @@
 ## File Structure
 
 **Backend — create**
+
 - `backend/internal/reclaimsettings/settings.go` — `Settings` struct, `Default()`, file-backed `Store` (Get/Set) under `~/.ao/reclaim-settings.json`.
 - `backend/internal/reclaimsettings/settings_test.go`
 - `backend/internal/observe/reclaimer/reclaimer.go` — the grace-clock poll loop (`New`, `Tick`, `Start`).
@@ -31,6 +32,7 @@
 - `backend/internal/daemon/reclaim_wiring.go` — construct settings store + reclaimer, start/drain.
 
 **Backend — modify**
+
 - `backend/internal/storage/sqlite/store/session_store.go` — add `PurgeSession`.
 - `backend/internal/session_manager/manager.go` — add `ErrNotTerminal`, `Store.PurgeSession`, `Manager.PurgeSession`.
 - `backend/internal/service/session/service.go` — add `Reclaim`, `ListReclaimable`, `Delete`; extend `commander`; extend `toAPIError`.
@@ -43,6 +45,7 @@
 - Regenerated: `backend/internal/httpd/apispec/openapi.yaml`, `frontend/src/api/schema.ts`.
 
 **Frontend — modify**
+
 - `frontend/src/renderer/lib/api-client.ts` — add DELETE-session + settings routes to `ROUTE_TEMPLATES`.
 - `frontend/src/renderer/components/SessionsBoard.tsx` — per-chip delete + Clear-all.
 - `frontend/src/renderer/components/AutoReclaimSection.tsx` (create) — settings card.
@@ -54,10 +57,12 @@
 ## Task 1: `store.PurgeSession` — hard-delete a session row
 
 **Files:**
+
 - Modify: `backend/internal/storage/sqlite/store/session_store.go`
 - Test: `backend/internal/storage/sqlite/store/session_store_test.go` (add a test; file exists)
 
 **Interfaces:**
+
 - Produces: `func (s *Store) PurgeSession(ctx context.Context, id domain.SessionID) error`
 
 Model on `DeleteSession` (`session_store.go:96-149`) but WITHOUT the seed-state guard. A single `DELETE FROM sessions WHERE id = ?` cascades pr/pr_checks/pr_comment/pr_review_threads/pr_reviews/session_worktrees/notifications/review/review_run; only `change_log` (no cascade) blocks, so delete its rows first. Both statements use raw `tx.ExecContext` (the codebase's documented sqlc-parser workaround).
@@ -160,10 +165,12 @@ git commit -m "feat(store): add PurgeSession hard-delete for terminal sessions"
 ## Task 2: `Manager.PurgeSession` + `ErrNotTerminal`
 
 **Files:**
+
 - Modify: `backend/internal/session_manager/manager.go`
 - Test: `backend/internal/session_manager/manager_test.go`
 
 **Interfaces:**
+
 - Consumes: `Store.PurgeSession` (Task 1), existing `runtimeHandle`/`workspaceInfo` helpers, `ports.ErrWorkspaceDirty`, `workspace.Destroy`/`ForceDestroy`.
 - Produces:
   - `var ErrNotTerminal = errors.New("session: not terminal")`
@@ -330,10 +337,12 @@ git commit -m "feat(session): Manager.PurgeSession teardown+hard-delete, ErrNotT
 ## Task 3: Service `Reclaim`, `ListReclaimable`, `Delete` + error mapping
 
 **Files:**
+
 - Modify: `backend/internal/service/session/service.go`
 - Test: `backend/internal/service/session/service_test.go`
 
 **Interfaces:**
+
 - Consumes: `commander.Kill` (existing), `commander.PurgeSession` (Task 2), `s.store.ListAllSessions`, `s.store.GetSession`, `s.toSession` (existing, returns `domain.Session` with `.Status`), `domain.StatusMerged`/`StatusTerminated`, `domain.KindOrchestrator`.
 - Produces:
   - `func (s *Service) Reclaim(ctx context.Context, id domain.SessionID) error`
@@ -509,10 +518,12 @@ git commit -m "feat(session-svc): Reclaim, ListReclaimable, Delete + error mappi
 ## Task 4: `reclaimsettings` package — file-backed settings under `~/.ao`
 
 **Files:**
+
 - Create: `backend/internal/reclaimsettings/settings.go`
 - Test: `backend/internal/reclaimsettings/settings_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `type Settings struct { Enabled bool json:"enabled"; GraceMinutes int json:"graceMinutes" }`
   - `func Default() Settings` → `{Enabled: true, GraceMinutes: 15}`
@@ -668,10 +679,12 @@ git commit -m "feat(reclaimsettings): file-backed auto-reclaim settings under ~/
 ## Task 5: `reclaimer` poll loop with in-memory grace clock
 
 **Files:**
+
 - Create: `backend/internal/observe/reclaimer/reclaimer.go`
 - Test: `backend/internal/observe/reclaimer/reclaimer_test.go`
 
 **Interfaces:**
+
 - Consumes: `reclaimService` (satisfied by `*session.Service`: `ListReclaimable`, `Reclaim`), `settingsReader` (satisfied by `*reclaimsettings.Store`: `Get() reclaimsettings.Settings`), `observe.StartPollLoop` (for `Start`).
 - Produces:
   - `func New(svc reclaimService, settings settingsReader, cfg Config) *Reclaimer`
@@ -907,11 +920,13 @@ git commit -m "feat(reclaimer): grace-clock poll loop for auto-reclaim"
 ## Task 6: OpenAPI operations — DELETE session + settings GET/PUT
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go` (add response/request/param types)
 - Modify: `backend/internal/httpd/apispec/specgen/build.go` (operations + `schemaNames`)
 - Regenerated: `backend/internal/httpd/apispec/openapi.yaml`, `frontend/src/api/schema.ts`
 
 **Interfaces:**
+
 - Produces (DTOs): `DeleteSessionResponse{OK bool; SessionID domain.SessionID}`, `DeleteSessionQuery{Force bool}` (query param), `ReclaimSettingsResponse{Enabled bool; GraceMinutes int}`, `SetReclaimSettingsRequest{Enabled bool; GraceMinutes int}`.
 - Produces (spec op ids): `deleteSession`, `getReclaimSettings`, `setReclaimSettings`.
 
@@ -1020,10 +1035,12 @@ git commit -m "feat(api): OpenAPI ops for deleteSession + reclaim settings"
 ## Task 7: `SessionsController.delete` handler + route
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/sessions.go`
 - Test: `backend/internal/httpd/controllers/sessions_test.go` (mirror the `kill` handler test)
 
 **Interfaces:**
+
 - Consumes: `Service.Delete(ctx, id, force)` (Task 3), `DeleteSessionResponse` (Task 6).
 - Produces: `SessionService` interface gains `Delete(ctx context.Context, id domain.SessionID, force bool) error`; route `DELETE /sessions/{sessionId}`.
 
@@ -1108,11 +1125,13 @@ git commit -m "feat(api): DELETE /sessions/{id} handler for finished-session del
 ## Task 8: `SettingsController` + registration
 
 **Files:**
+
 - Create: `backend/internal/httpd/controllers/settings.go`
 - Test: `backend/internal/httpd/controllers/settings_test.go`
 - Modify: `backend/internal/httpd/api.go`
 
 **Interfaces:**
+
 - Consumes: `reclaimsettings.Settings`, `ReclaimSettingsResponse`/`SetReclaimSettingsRequest` DTOs (Task 6).
 - Produces:
   - `type SettingsService interface { Get() reclaimsettings.Settings; Set(reclaimsettings.Settings) error }`
@@ -1250,10 +1269,12 @@ git commit -m "feat(api): SettingsController for reclaim settings GET/PUT"
 ## Task 9: Daemon wiring — settings store, reclaimer loop, Settings dep
 
 **Files:**
+
 - Create: `backend/internal/daemon/reclaim_wiring.go`
 - Modify: `backend/internal/daemon/daemon.go`
 
 **Interfaces:**
+
 - Consumes: `reclaimsettings.NewStore`, `reclaimer.New(...).Start`, `sessionSvc` (*session.Service), `httpd.APIDeps.Settings`.
 - Produces: `func startReclaimer(ctx, sessionSvc, settings, log) <-chan struct{}`.
 
@@ -1328,9 +1349,11 @@ git commit -m "feat(daemon): wire reclaim settings store + auto-reclaim loop"
 ## Task 10: Frontend api-client route templates
 
 **Files:**
+
 - Modify: `frontend/src/renderer/lib/api-client.ts`
 
 **Interfaces:**
+
 - Consumes: regenerated `paths` in `schema.ts` (Task 6).
 - Produces: telemetry-safe route labels for the new endpoints.
 
@@ -1363,10 +1386,12 @@ git commit -m "chore(web): register reclaim-settings route template"
 ## Task 11: Board — per-chip delete with inline confirm
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/SessionsBoard.tsx`
 - Test: `frontend/src/renderer/components/SessionsBoard.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `apiClient.DELETE`, `apiErrorMessage`, `workspaceQueryKey`, `useMutation`/`useQueryClient`.
 - Produces: a `DoneChip` component replacing the inline `done.map` button; deletes via the DELETE endpoint and invalidates the board query.
 
@@ -1511,10 +1536,12 @@ git commit -m "feat(web): delete finished sessions from the Done bar"
 ## Task 12: Board — "Clear all" for the Done bucket
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/SessionsBoard.tsx`
 - Test: `frontend/src/renderer/components/SessionsBoard.test.tsx`
 
 **Interfaces:**
+
 - Consumes: the same DELETE mutation, `done` list.
 - Produces: a "Clear all" button in the done-bar header that deletes every done session (iterated DELETE; there is no bulk endpoint) behind a confirm.
 
@@ -1631,11 +1658,13 @@ git commit -m "feat(web): Clear-all for the Done/Terminated bar"
 ## Task 13: Settings — `AutoReclaimSection` card
 
 **Files:**
+
 - Create: `frontend/src/renderer/components/AutoReclaimSection.tsx`
 - Test: `frontend/src/renderer/components/AutoReclaimSection.test.tsx`
 - Modify: `frontend/src/renderer/components/GlobalSettingsForm.tsx`
 
 **Interfaces:**
+
 - Consumes: `apiClient.GET/PUT("/api/v1/settings/reclaim")`, `apiErrorMessage`, react-query.
 - Produces: a settings card with an Enabled toggle + a grace-minutes number input, saved via PUT. Mirrors `UpdatesSection` (toggle + Save) and `ProjectSettingsForm`'s daemon-backed mutation, but hits the daemon via `apiClient` (not `aoBridge`).
 
@@ -1741,8 +1770,8 @@ export function AutoReclaimSection() {
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				<p className="text-[12px] text-muted-foreground">
-					When a session is merged or terminated, AO tears down its tmux and worktree after the grace period. The git branch
-					is kept, so the session can still be restored.
+					When a session is merged or terminated, AO tears down its tmux and worktree after the grace period. The git
+					branch is kept, so the session can still be restored.
 				</p>
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="reclaimEnabled" className="text-[12px] text-muted-foreground">

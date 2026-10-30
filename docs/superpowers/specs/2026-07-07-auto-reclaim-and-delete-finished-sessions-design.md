@@ -175,6 +175,7 @@ each tick; setting off makes every tick a no-op.
 ## Testing
 
 **Backend**
+
 - `Reclaim`: clean worktree → teardown, branch ref still present, record
   terminated, restore marker deleted; dirty worktree → skipped (`freed=false`),
   worktree intact.
@@ -187,6 +188,7 @@ each tick; setting off makes every tick a no-op.
 - Post-reclaim `Restore` still relaunches from the branch.
 
 **Frontend**
+
 - `SessionsBoard.test.tsx`: delete chip + confirm calls `DELETE`; Clear-all
   deletes the bucket; a reclaimed merged session still renders a "merged" badge;
   dirty-refusal surfaces the force path.

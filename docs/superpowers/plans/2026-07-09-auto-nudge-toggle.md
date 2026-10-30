@@ -24,6 +24,7 @@
 ### Task 1: Global default — `autonudge` settings store + settings API
 
 **Files:**
+
 - Create: `backend/internal/autonudge/settings.go` (+ `settings_test.go`)
 - Modify: `backend/internal/daemon/daemon.go` (build store + wire dep)
 - Modify: `backend/internal/httpd/controllers/settings.go` (+ interface, routes, handlers)
@@ -33,6 +34,7 @@
 - Regenerate: `openapi.yaml`, `frontend/src/api/schema.ts`
 
 **Interfaces:**
+
 - Produces: `autonudge.Store` with `Get() Settings` / `Set(Settings) error`, `Settings{ Enabled bool }`, `NewStore(dir string) (*Store, error)`. Consumed by Task 4 (lifecycle) and the settings API.
 
 - [ ] **Step 1: Copy `spawnconfirm/settings.go` → `autonudge/settings.go`**, verbatim in structure, changing: package `autonudge`; file name const → `"auto-nudge-settings.json"`; `Settings{ Enabled bool }` with `Default()` returning `{Enabled: false}`. Copy its `settings_test.go` too (Get default, Set+Get roundtrip, persistence across NewStore). Run `go test ./internal/autonudge/` → PASS.
@@ -57,6 +59,7 @@
 ### Task 2: Per-session override persistence (migration + sqlc + store)
 
 **Files:**
+
 - Create: `backend/internal/storage/sqlite/migrations/0024_add_session_auto_nudge.sql`
 - Modify: `backend/internal/storage/sqlite/queries/sessions.sql`
 - Regenerate: `backend/internal/storage/sqlite/gen/*` (sqlc)
@@ -65,9 +68,11 @@
 - Test: `backend/internal/storage/sqlite/store/session_store_test.go` (roundtrip)
 
 **Interfaces:**
+
 - Produces: `domain.SessionRecord.AutoNudgeComments *bool` (json `autoNudgeComments`); store setter `SetSessionAutoNudge(ctx, id domain.SessionID, override *bool) (bool, error)` (returns found).
 
 - [ ] **Step 1: Migration** `0024_add_session_auto_nudge.sql` (goose):
+
   ```sql
   -- +goose Up
   -- +goose StatementBegin
@@ -78,18 +83,22 @@
   ALTER TABLE sessions DROP COLUMN auto_nudge_comments;
   -- +goose StatementEnd
   ```
+
   (Nullable: NULL = inherit. No CDC trigger change needed — the setter returns the value directly.)
 
 - [ ] **Step 2: sqlc queries** in `sessions.sql` — add `auto_nudge_comments` to the column lists of `InsertSession`, `UpdateSession` (SET), `GetSession`, `ListSessionsByProject`, `ListAllSessions`. Add a dedicated setter mirroring `SetSessionPreviewURL` (42-46):
+
   ```sql
   -- name: SetSessionAutoNudge :execrows
   UPDATE sessions SET auto_nudge_comments = ?, updated_at = ? WHERE id = ?;
   ```
+
   Regenerate sqlc (find the generate command: `grep -rn "sqlc" Makefile* backend/**/*.go` — likely `go generate ./...` or a `sqlc generate`). The generated `Session` row gains `AutoNudgeComments sql.NullInt64`.
 
 - [ ] **Step 3: Domain field** — `SessionRecord.AutoNudgeComments *bool json:"autoNudgeComments"` (near the Metadata field, session.go:67). Exposed in the API read model automatically (SessionRecord is embedded in `domain.Session`).
 
 - [ ] **Step 4: Bridge helpers + mapping** in `session_store.go` (next to `nullTimeToTime`/`timeToNullTime`, 305-317):
+
   ```go
   func nullInt64ToBoolPtr(n sql.NullInt64) *bool {
       if !n.Valid { return nil }
@@ -103,6 +112,7 @@
       return sql.NullInt64{Int64: v, Valid: true}
   }
   ```
+
   Wire into `rowToRecord` (set `AutoNudgeComments: nullInt64ToBoolPtr(row.AutoNudgeComments)`), `recordToInsert`, `recordToUpdate` (use `boolPtrToNullInt64(rec.AutoNudgeComments)`). Add the store method `SetSessionAutoNudge(ctx, id, override *bool) (bool, error)` calling the sqlc `SetSessionAutoNudge` (rows affected → found), mirroring `SetSessionPreviewURL` (63-75).
 
 - [ ] **Step 5: Test** roundtrip in `session_store_test.go`: insert a session (AutoNudgeComments nil), read back → nil; `SetSessionAutoNudge` true → read back `*v==true`; set false → false; set nil → nil. Run `go test ./internal/storage/sqlite/...` → PASS. `go build ./... && gofmt -l internal/`.
@@ -114,6 +124,7 @@
 ### Task 3: Session setter service + API + read-model exposure
 
 **Files:**
+
 - Modify: `backend/internal/service/session/service.go` (`SetAutoNudge` + interface `sessionStore` gains `SetSessionAutoNudge`)
 - Test: `backend/internal/service/session/*_test.go`
 - Modify: `backend/internal/httpd/controllers/sessions.go` (route + handler + `SessionService` iface)
@@ -123,6 +134,7 @@
 - Regenerate: `openapi.yaml`, `schema.ts`
 
 **Interfaces:**
+
 - Consumes: `store.SetSessionAutoNudge` (Task 2); the preview-setter pattern (`SetPreview`).
 - Produces: `Service.SetAutoNudge(ctx, id domain.SessionID, override *bool) (domain.Session, error)`; endpoint `PUT /sessions/{sessionId}/auto-nudge` `{override *bool}` → `SessionResponse`.
 
@@ -143,6 +155,7 @@
 ### Task 4: Lifecycle gate — restore the gated nudge
 
 **Files:**
+
 - Modify: `backend/internal/lifecycle/manager.go` (Option + field)
 - Modify: `backend/internal/lifecycle/reactions.go` (gated nudge block + helpers)
 - Modify: `backend/internal/daemon/lifecycle_wiring.go` (thread the default getter)
@@ -150,6 +163,7 @@
 - Test: `backend/internal/lifecycle/manager_test.go`
 
 **Interfaces:**
+
 - Consumes: `rec.AutoNudgeComments` (Task 2), `autonudge` getter (Task 1). Restores `hasUnresolvedComments`, `reviewContent`.
 
 - [ ] **Step 1: Manager DI** — add field `autoNudgeDefault func() bool` and `Option` `WithAutoNudgeDefault(fn func() bool) Option { return func(m *Manager){ m.autoNudgeDefault = fn } }` (mirror `WithMessageRenderer`, manager.go:52-54). In `New`, default it (like the renderer default ~82): `m.autoNudgeDefault = func() bool { return false }` unless overridden.
@@ -157,6 +171,7 @@
 - [ ] **Step 2: Write failing test** in manager_test.go (invert the current `TestPRObservation_UnresolvedReviewCommentsDoNotNudgeAgent`, or add new): with a session whose `AutoNudgeComments = ptr(true)` (or default getter returns true), an observation with an unresolved comment DOES nudge (msg captured). With override `ptr(false)` (default true) → NO nudge. With override nil + default false → NO nudge. Use the existing fake messenger/store harness. Run → FAIL.
 
 - [ ] **Step 3: Restore the gated nudge** in `ApplyPRObservation` (reactions.go, at the placeholder comment ~160-164, between CI and merge-conflict blocks):
+
   ```go
   effective := m.autoNudgeDefault()
   if rec.AutoNudgeComments != nil {
@@ -171,7 +186,9 @@
       return m.sendOnce(ctx, id, o.URL, "review:"+o.URL, sig, msg, reviewMaxNudge)
   }
   ```
+
   Re-add the helpers verbatim from fb18eb2a:
+
   ```go
   func hasUnresolvedComments(comments []ports.PRCommentObservation) bool {
       for _, c := range comments {
@@ -190,6 +207,7 @@
       return strings.Join(bodies, "\n\n"), strings.Join(ids, ",")
   }
   ```
+
   (Ensure `strings` import is present.)
 
 - [ ] **Step 4: Wire the getter** — `startLifecycle` (lifecycle_wiring.go:54-59) gains a `autoNudgeDefault func() bool` param and passes `lifecycle.WithAutoNudgeDefault(autoNudgeDefault)`. `daemon.go` (call at ~136) passes `func() bool { return autoNudge.Get().Enabled }`. Update `startLifecycle`'s other callers/tests for the new param (e.g. `wiring_test.go`).
@@ -203,11 +221,13 @@
 ### Task 5: Frontend — Switch primitive + settings-page global toggle
 
 **Files:**
+
 - Create: `frontend/src/renderer/components/ui/switch.tsx` (+ `switch.test.tsx`)
 - Create: `frontend/src/renderer/components/AutoNudgeSection.tsx` (+ test)
 - Modify: `frontend/src/renderer/components/GlobalSettingsForm.tsx` (render the section)
 
 **Interfaces:**
+
 - Consumes: `GET/PUT /api/v1/settings/auto-nudge` (Task 1, now in schema.ts). Produces: `Switch` ui primitive.
 
 - [ ] **Step 1: `switch.tsx`** — mirror `ui/select.tsx`'s structure: `import { Switch as SwitchPrimitive } from "radix-ui"`, `cn`, `data-slot`, forwardRef, styled with tokens (track `bg-input` off / `bg-primary` on, thumb `bg-background`, focus ring). Export `Switch`. Small test: renders, toggles `onCheckedChange` on click, reflects `checked`.
@@ -225,11 +245,13 @@
 ### Task 6: Frontend — per-session switch in the Comments tab
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/CommentsView.tsx` (header switch)
 - Create: `frontend/src/renderer/hooks/useAutoNudge.ts` (read effective + set override) — or inline
 - Test: `frontend/src/renderer/components/CommentsView.test.tsx`
 
 **Interfaces:**
+
 - Consumes: session read model `autoNudgeComments` (`*bool` → `boolean|null`), `GET /settings/auto-nudge` (global default), `PUT /sessions/{id}/auto-nudge`.
 
 - [ ] **Step 1: Effective value + mutation.** In CommentsView, fetch the global default (`useQuery ["settings","autoNudge"]` GET `/settings/auto-nudge`) and read the session's override. The session's `autoNudgeComments` is available via the sessions read model — fetch it with a `useQuery` on `GET /sessions/{sessionId}` (or reuse an existing session query if one is in scope) and read `data.session.autoNudgeComments`. Compute `effective = override ?? globalDefault.enabled`. A mutation PUTs `/sessions/{sessionId}/auto-nudge` `{override: nextValue}` and invalidates the session query + `["session-pr-comments", sessionId]` is unaffected.
@@ -245,12 +267,14 @@
 ---
 
 ## Final verification
+
 - [ ] Backend: `go build ./... && go test ./internal/autonudge/... ./internal/storage/sqlite/... ./internal/service/session/... ./internal/httpd/... ./internal/lifecycle/... ./internal/daemon/... && go vet ./... && gofmt -l internal/`
 - [ ] Frontend: `cd frontend && npm run typecheck && npx vitest run`
 - [ ] `npm run api` produced no unexpected drift; no `routeTree.gen.ts`/lockfile churn committed.
 - [ ] Manual (post-reinstall): global default toggle in Settings persists; per-session switch in Comments tab reflects the default, overrides it, and "Reset to default" clears the override; with the toggle ON, an unresolved comment nudges the worker; OFF → no nudge.
 
 ## Self-Review notes
+
 - Effective-value logic (`override ?? default`) appears in exactly two places — the lifecycle gate (Task 4) and the Comments-tab switch (Task 6); keep them consistent.
 - The nudge restoration is a faithful revert of fb18eb2a's removed block + helpers, differing only by the `effective &&` gate — do not "improve" the condition.
 - `AutoNudgeComments` is `*bool` end to end (NULL/nil = inherit); the migration column is nullable INTEGER; never coerce nil to false in the store.

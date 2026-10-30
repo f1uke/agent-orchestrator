@@ -26,25 +26,25 @@ Traced from `session_manager/manager.go:buildSystemPrompt` and `review/prompt.go
 
 ### Editable kinds (get global base + per-project addition)
 
-| Kind | Built-in default source | Notes |
-|---|---|---|
-| **Orchestrator** | `orchestratorPrompt(project)` | Role/dispatcher text. Weaves the project id in via `%s` → becomes a `{{.ProjectID}}` placeholder (see "Project-id placeholder"). |
-| **Worker** | `workerMultiPRPrompt()` | The PR/branch-namespace rules. Fully editable per the user decision; its invariant is re-guaranteed by the floor. |
-| **Reviewer** | `review/prompt.go` `reviewTexts` `systemPrompt` | Standing reviewer role. Assembled in the review engine (has the worker's `ProjectID`). |
+| Kind             | Built-in default source                         | Notes                                                                                                                            |
+| ---------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Orchestrator** | `orchestratorPrompt(project)`                   | Role/dispatcher text. Weaves the project id in via `%s` → becomes a `{{.ProjectID}}` placeholder (see "Project-id placeholder"). |
+| **Worker**       | `workerMultiPRPrompt()`                         | The PR/branch-namespace rules. Fully editable per the user decision; its invariant is re-guaranteed by the floor.                |
+| **Reviewer**     | `review/prompt.go` `reviewTexts` `systemPrompt` | Standing reviewer role. Assembled in the review engine (has the worker's `ProjectID`).                                           |
 
 ### Non-editable pieces (dynamic injections — automatic)
 
 Structurally outside the editable base, so editing/clearing a base cannot remove
 them. Composed as an **ordered list** appended after `base + addition + floor`.
 
-| Injection | Source | Trigger |
-|---|---|---|
-| Worker → orchestrator `ao send` coordination | `workerOrchestratorPrompt(orchestratorID)` | only when an active orchestrator exists; carries a live session id |
-| Orchestrator git convention | `orchestratorGitConventionPrompt()` (PR #24) | project sets a convention |
-| Worker git convention | `workerGitConventionPrompt()` (PR #24) | project sets a convention |
-| Spawn-confirm gate | `orchestratorSpawnConfirmPrompt()` (PR #25) | global spawn-confirm toggle ON |
-| AO skill pointer | `aoSkillPointer()` | always (data-dir path) |
-| Project id | woven into orchestrator base via placeholder substitution | always |
+| Injection                                    | Source                                                    | Trigger                                                            |
+| -------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
+| Worker → orchestrator `ao send` coordination | `workerOrchestratorPrompt(orchestratorID)`                | only when an active orchestrator exists; carries a live session id |
+| Orchestrator git convention                  | `orchestratorGitConventionPrompt()` (PR #24)              | project sets a convention                                          |
+| Worker git convention                        | `workerGitConventionPrompt()` (PR #24)                    | project sets a convention                                          |
+| Spawn-confirm gate                           | `orchestratorSpawnConfirmPrompt()` (PR #25)               | global spawn-confirm toggle ON                                     |
+| AO skill pointer                             | `aoSkillPointer()`                                        | always (data-dir path)                                             |
+| Project id                                   | woven into orchestrator base via placeholder substitution | always                                                             |
 
 ### Protected floor (always injected, non-editable)
 

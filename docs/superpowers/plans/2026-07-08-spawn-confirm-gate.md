@@ -41,10 +41,12 @@
 ### Task 1: Global spawn-confirm settings store
 
 **Files:**
+
 - Create: `backend/internal/spawnconfirm/settings.go`
 - Test: `backend/internal/spawnconfirm/settings_test.go`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `spawnconfirm.Settings{ Enabled bool }`; `spawnconfirm.Default() Settings`; `spawnconfirm.NewStore(dir string) (*Store, error)`; `(*Store).Get() Settings`; `(*Store).Set(Settings) error`.
 
@@ -197,10 +199,12 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 2: Inject the confirm gate into the orchestrator prompt
 
 **Files:**
+
 - Modify: `backend/internal/session_manager/manager.go`
 - Test: `backend/internal/session_manager/manager_test.go`
 
 **Interfaces:**
+
 - Consumes: existing `orchestratorGitConventionPrompt`, `domain.GitConventionConfig.Active()`, `ProjectConfig.DefaultBranch`.
 - Produces: `Deps.SpawnConfirmEnabled func() bool`; Manager method `confirmBeforeSpawn() bool` (nil getter → true); `orchestratorSpawnConfirmPrompt(enabled bool, conv domain.GitConventionConfig, baseBranch string) string`.
 
@@ -383,6 +387,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 3: REST surface + OpenAPI for spawn-confirm settings
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/dto.go`
 - Modify: `backend/internal/httpd/controllers/settings.go`
 - Modify: `backend/internal/httpd/api.go`
@@ -391,6 +396,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Regenerated: `backend/internal/httpd/apispec/openapi.yaml`, `frontend/src/api/schema.ts`
 
 **Interfaces:**
+
 - Consumes: `spawnconfirm.Settings` (Task 1); existing `SettingsController`, `envelope`, `apispec.NotImplemented`, `decodeJSON`.
 - Produces: `controllers.SpawnConfirmService` interface (`Get() spawnconfirm.Settings`, `Set(spawnconfirm.Settings) error`); `SpawnConfirmSettingsResponse{ Enabled bool }`; `SetSpawnConfirmSettingsRequest{ Enabled bool }`; `APIDeps.SpawnConfirm`; routes `GET/PUT /api/v1/settings/spawn-confirm`.
 
@@ -649,10 +655,12 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 4: Daemon wiring — construct the store and thread the getter
 
 **Files:**
+
 - Modify: `backend/internal/daemon/daemon.go`
 - Modify: `backend/internal/daemon/lifecycle_wiring.go`
 
 **Interfaces:**
+
 - Consumes: `spawnconfirm.NewStore` (Task 1); `sessionmanager.Deps.SpawnConfirmEnabled` (Task 2); `httpd.APIDeps.SpawnConfirm` (Task 3).
 - Produces: a live daemon whose Manager reads the store and whose `SettingsController` edits it.
 
@@ -741,11 +749,13 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 5: Global Settings card
 
 **Files:**
+
 - Create: `frontend/src/renderer/components/SpawnConfirmSection.tsx`
 - Test: `frontend/src/renderer/components/SpawnConfirmSection.test.tsx`
 - Modify: `frontend/src/renderer/components/GlobalSettingsForm.tsx`
 
 **Interfaces:**
+
 - Consumes: `/api/v1/settings/spawn-confirm` (Task 3), `apiClient`, shadcn `Card`/`Select`/`Label`/`Button`.
 - Produces: `SpawnConfirmSection` React component rendered in `GlobalSettingsForm`.
 
@@ -960,6 +970,7 @@ Expected: `{"enabled":false}` after toggling off (or `{"enabled":true}` after to
 - [ ] **Step 5: Open the PR (do NOT auto-merge)**
 
 Target `main-fluke`. In the PR body, document:
+
 - The prompt-injection point: `buildSystemPrompt` → `orchestratorSpawnConfirmPrompt(m.confirmBeforeSpawn(), conv, cfg.DefaultBranch)`.
 - The toggle wiring: `spawnconfirm.Store` (file under `~/.ao`) → Manager `SpawnConfirmEnabled` getter + `SettingsController` `/settings/spawn-confirm`.
 - The exact confirmation-summary text the orchestrator produces (paste the ON-state section).
@@ -970,6 +981,7 @@ Target `main-fluke`. In the PR body, document:
 ## Self-Review
 
 **Spec coverage:**
+
 - Requirement 1 (orchestrator prompt behavior: confirm summary with task / source / new-branch-with-prefix / PR target, conversational) → Task 2 (`orchestratorSpawnConfirmPrompt`, convention clause) + test.
 - Requirement 2 (global toggle, default ON, conditions prompt ON/OFF) → Task 1 (store, default ON), Task 2 (OFF returns ""), Tasks 3–4 (persistence + wiring).
 - Requirement 3 (wire into prompt assembly + tests: prompt branching, persistence, settings UI) → Task 2 (prompt test), Task 1 + Task 3 (persistence tests), Task 5 (UI + test).

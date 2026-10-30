@@ -4,7 +4,7 @@
 
 **Goal:** Let each GitLab project require a minimum number of MR approvals (default 3) before AO treats the MR as `approved`, applied only when the GitLab repo has no approval rule of its own.
 
-**Architecture:** Adapters stay dumb fact-reporters. The GitLab adapter reports two new raw facts per MR — the approval count and whether GitLab enforces an approval rule — persisted on the `pr` row. The min-approvals *policy* is applied at status-derivation time in the session service, where the per-project config is available. No GitHub behaviour changes.
+**Architecture:** Adapters stay dumb fact-reporters. The GitLab adapter reports two new raw facts per MR — the approval count and whether GitLab enforces an approval rule — persisted on the `pr` row. The min-approvals _policy_ is applied at status-derivation time in the session service, where the per-project config is available. No GitHub behaviour changes.
 
 **Tech Stack:** Go backend (SQLite via sqlc), GitLab REST v4, React/TypeScript renderer with an OpenAPI-generated client.
 
@@ -42,6 +42,7 @@
 ## Task 1: Persist approval facts on the PR row
 
 **Files:**
+
 - Create: `backend/internal/storage/sqlite/migrations/0022_pr_approvals.sql`
 - Modify: `backend/internal/domain/pr.go` (add fields to `PullRequest` and `PRFacts`)
 - Modify: `backend/internal/storage/sqlite/queries/pr.sql` (UpsertPR + the two PRFacts SELECTs)
@@ -51,6 +52,7 @@
 - Test: `backend/internal/storage/sqlite/store/pr_facts_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `domain.PullRequest.ApprovalsCount int`, `domain.PullRequest.ApprovalRuleConfigured bool`
   - `domain.PRFacts.ApprovalsCount int`, `domain.PRFacts.ApprovalRuleConfigured bool`
@@ -202,10 +204,12 @@ git commit -m "feat(scm): persist MR approval count and rule-configured facts on
 ## Task 2: Per-project MinApprovals config
 
 **Files:**
+
 - Modify: `backend/internal/domain/projectconfig.go`
 - Test: `backend/internal/domain/projectconfig_test.go`
 
 **Interfaces:**
+
 - Produces:
   - `domain.ProjectConfig.MinApprovals int` (json `minApprovals,omitempty`)
   - `const domain.DefaultMinApprovals = 3`
@@ -292,12 +296,14 @@ git commit -m "feat(config): add per-project minApprovals with default 3"
 ## Task 3: GitLab adapter reports the approval facts
 
 **Files:**
+
 - Modify: `backend/internal/ports/scm_observations.go` (`SCMReviewObservation`)
 - Modify: `backend/internal/adapters/scm/gitlab/observer_provider.go` (`restApprovals`, `approvalDecision`, `FetchReviewThreads`)
 - Modify: `backend/internal/observe/scm/observer.go` (`reviewSemanticHash`, the `domain.PullRequest` mapping)
 - Test: `backend/internal/adapters/scm/gitlab/observer_provider_test.go`
 
 **Interfaces:**
+
 - Consumes: `SCMReviewObservation` (from Task 1/existing).
 - Produces:
   - `ports.SCMReviewObservation.ApprovalsCount int`, `ports.SCMReviewObservation.ApprovalRuleConfigured bool`
@@ -481,11 +487,13 @@ git commit -m "feat(gitlab): report approval count and rule presence; defer no-r
 ## Task 4: Apply the threshold in status derivation
 
 **Files:**
+
 - Modify: `backend/internal/service/session/status.go` (`deriveStatus`, `aggregatePRStatus`, `prPipelineStatus`)
 - Modify: `backend/internal/service/session/service.go:588` (`toSession`)
 - Test: `backend/internal/service/session/status_test.go`
 
 **Interfaces:**
+
 - Consumes: `domain.PRFacts.ApprovalsCount`, `domain.PRFacts.ApprovalRuleConfigured` (Task 1); `ProjectConfig.ResolveMinApprovals` (Task 2); `Store.GetProject` (existing).
 - Produces:
   - `deriveStatus(rec, prs, now, signalCapable, minApprovals int)`
@@ -633,10 +641,12 @@ git commit -m "feat(session): apply per-project minApprovals floor to no-rule Gi
 ## Task 5: Provider-aware UI field in project settings
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/ProjectSettingsForm.tsx`
 - Test: `frontend/src/renderer/components/ProjectSettingsForm.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `ProjectConfig.minApprovals` from the regenerated `components["schemas"]["ProjectConfig"]` (Task 2).
 
 - [ ] **Step 1: Confirm the provider signal**
@@ -668,21 +678,23 @@ In the `next: ProjectConfig` object built on submit (line ~127), add:
 After the "Session prefix" `Field` block (around line 217–224), add:
 
 ```tsx
-				{isGitLab && (
-					<Field label="Minimum approvals" htmlFor="minApprovals">
-						<Input
-							id="minApprovals"
-							type="number"
-							min={1}
-							placeholder="3"
-							value={form.minApprovals}
-							onChange={(e) => setForm((f) => ({ ...f, minApprovals: e.target.value }))}
-						/>
-						<p className="text-[11px] text-muted-foreground">
-							Applies only when the GitLab repo has no approval rule of its own. Default 3.
-						</p>
-					</Field>
-				)}
+{
+	isGitLab && (
+		<Field label="Minimum approvals" htmlFor="minApprovals">
+			<Input
+				id="minApprovals"
+				type="number"
+				min={1}
+				placeholder="3"
+				value={form.minApprovals}
+				onChange={(e) => setForm((f) => ({ ...f, minApprovals: e.target.value }))}
+			/>
+			<p className="text-[11px] text-muted-foreground">
+				Applies only when the GitLab repo has no approval rule of its own. Default 3.
+			</p>
+		</Field>
+	);
+}
 ```
 
 > Match `Field`/`Input` usage and class names to the existing fields in this file.

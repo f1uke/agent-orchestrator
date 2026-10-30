@@ -32,14 +32,14 @@ Replace the immediate boot-time reap with a **time-based idle close**:
 
 ## Decisions (locked with the user)
 
-| Decision | Choice |
-|---|---|
-| Which sessions are eligible | **All** sessions idle beyond the TTL — no exceptions (terminated leftovers, idle-but-alive agents, and waiting-for-input sessions all qualify). Basis: `Activity.LastActivityAt`. |
-| What "close" does | Destroy tmux + `MarkTerminated` + clear the restore marker. **Keep the worktree** (do not call `workspace.Destroy`). Uncommitted work stays on disk; no capture/preserve-ref dance needed. |
-| Restore | Reuse existing machinery. Keeping the worktree makes `manager.Restore` adopt it losslessly and `--resume` the agent. |
-| Where the TTL lives | **Env var** `AO_SESSION_IDLE_CLOSE` (Go duration), read at daemon launch. No UI, no backend settings store. |
-| When the sweep runs | **Boot pass + periodic ticker (~5 min)** — auto-closes over time while the app stays open, and also on each reopen. |
-| Default | Enabled by default at **24h**. `AO_SESSION_IDLE_CLOSE=0` (or negative) disables. |
+| Decision                    | Choice                                                                                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Which sessions are eligible | **All** sessions idle beyond the TTL — no exceptions (terminated leftovers, idle-but-alive agents, and waiting-for-input sessions all qualify). Basis: `Activity.LastActivityAt`.          |
+| What "close" does           | Destroy tmux + `MarkTerminated` + clear the restore marker. **Keep the worktree** (do not call `workspace.Destroy`). Uncommitted work stays on disk; no capture/preserve-ref dance needed. |
+| Restore                     | Reuse existing machinery. Keeping the worktree makes `manager.Restore` adopt it losslessly and `--resume` the agent.                                                                       |
+| Where the TTL lives         | **Env var** `AO_SESSION_IDLE_CLOSE` (Go duration), read at daemon launch. No UI, no backend settings store.                                                                                |
+| When the sweep runs         | **Boot pass + periodic ticker (~5 min)** — auto-closes over time while the app stays open, and also on each reopen.                                                                        |
+| Default                     | Enabled by default at **24h**. `AO_SESSION_IDLE_CLOSE=0` (or negative) disables.                                                                                                           |
 
 ## Non-goals
 
@@ -204,4 +204,7 @@ manager.Restore: adopt existing worktree + --resume  ──► live again
   TTL is closed.
 - Ticker: covered indirectly via `CloseIdleSessions`; a light daemon test can
   assert the goroutine starts only when the TTL is positive.
+
+```
+
 ```
