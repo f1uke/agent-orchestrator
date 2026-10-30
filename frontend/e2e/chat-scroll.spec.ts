@@ -2,7 +2,8 @@ import { expect, type Page, test } from "@playwright/test";
 
 // What the stream looked like in each animation frame: the on-screen rows by key and where
 // they sat. The last sample of a frame comes from a ResizeObserver made after the list's own
-// (lazily, on the first row), so it runs after the list has repositioned its rows: what was painted.
+// (on the first row of each new stream), so it runs after the list has repositioned its rows:
+// what was painted.
 type Row = { key: string; top: number; bottom: number };
 type Sample = { frame: number; scrollTop: number; fromEnd: number; rows: Row[] };
 
@@ -12,6 +13,7 @@ function recordFrames() {
 	w.__mark = 0;
 	let frame = 0;
 	let rowObserver: ResizeObserver | null = null;
+	let observed: Element | null = null;
 	const sample = () => {
 		const sc = document.querySelector<HTMLElement>('[data-testid="chat-stream"]');
 		if (!sc) return;
@@ -38,8 +40,13 @@ function recordFrames() {
 		for (const record of records)
 			record.addedNodes.forEach((node) => {
 				if (!(node instanceof HTMLElement) || !node.classList.contains("chat-row")) return;
-				rowObserver ??= new ResizeObserver(sample);
-				rowObserver.observe(node);
+				const owner = node.closest('[data-testid="chat-stream"]');
+				if (owner !== observed) {
+					rowObserver?.disconnect();
+					rowObserver = new ResizeObserver(sample);
+					observed = owner;
+				}
+				rowObserver?.observe(node);
 			});
 	}).observe(document, { childList: true, subtree: true });
 	const tick = () => {
