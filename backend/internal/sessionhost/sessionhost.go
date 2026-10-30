@@ -56,6 +56,7 @@ var protocolFlags = []string{
 	"--replay-user-messages",
 	"--include-partial-messages",
 	"--permission-prompt-tool=stdio",
+	"--allowedTools", mcpAllowedTools(),
 }
 
 var errNotRunning = errors.New("claude is not running")
@@ -269,7 +270,7 @@ func (h *host) start(stdin io.Writer, pid int, argv []string, resume string) {
 	h.stdin, h.pid = stdin, pid
 	h.noteLocked(spawnNote{Kind: chatproto.NoteSpawn, Argv: argv, Resume: resume, PID: pid})
 	h.initID = uuid.NewString()
-	if err := h.writeThenLogLocked(chatproto.Initialize{RequestID: h.initID}); err != nil {
+	if err := h.writeThenLogLocked(chatproto.Initialize{RequestID: h.initID, SDKMCPServers: []string{mcpServerName}}); err != nil {
 		h.pane.line(dim("sessionhost: " + err.Error()))
 	}
 }
@@ -333,8 +334,19 @@ func (h *host) handleLine(line []byte) {
 		h.broadcastLocked(frame("delta", line))
 		return
 	}
-	if err := h.appendLocked(chatproto.DirOut, line); err != nil {
+	mcp, isMCP := mcpRequest(ev)
+	logged := line
+	if isMCP {
+		logged = mcp.logLine
+	}
+	if err := h.appendLocked(chatproto.DirOut, logged); err != nil {
 		h.pane.line(dim("sessionhost: " + err.Error()))
+		return
+	}
+	if isMCP {
+		if err := h.writeThenLogLocked(chatproto.MCPReply{RequestID: mcp.requestID, Message: mcpReply(mcp.server, mcp.message)}); err != nil {
+			h.pane.line(dim("sessionhost: mcp reply: " + err.Error()))
+		}
 		return
 	}
 	r, isResponse := ev.(chatproto.ControlResponse)

@@ -23,8 +23,12 @@ type Image struct {
 	Base64    string
 }
 
-// Initialize is the control request that opens a session.
-type Initialize struct{ RequestID string }
+// Initialize is the control request that opens a session. SDKMCPServers names
+// MCP servers the host serves itself over mcp_message control requests.
+type Initialize struct {
+	RequestID     string
+	SDKMCPServers []string
+}
 
 // Interrupt stops the running turn.
 type Interrupt struct{ RequestID string }
@@ -43,6 +47,12 @@ type SetModel struct {
 	Model     string
 }
 
+// MCPReply answers an mcp_message control request with one JSON-RPC message.
+type MCPReply struct {
+	RequestID string
+	Message   json.RawMessage
+}
+
 // PermissionAnswer answers a can_use_tool request.
 type PermissionAnswer struct {
 	RequestID string
@@ -55,6 +65,7 @@ func (Interrupt) isOutbound()         {}
 func (SetPermissionMode) isOutbound() {}
 func (SetModel) isOutbound()          {}
 func (PermissionAnswer) isOutbound()  {}
+func (MCPReply) isOutbound()          {}
 
 // Decision is the verdict in a PermissionAnswer.
 type Decision interface{ isDecision() }
@@ -103,7 +114,11 @@ func Encode(o Outbound) ([]byte, error) {
 	case UserInput:
 		return encodeUserInput(m)
 	case Initialize:
-		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "initialize"})
+		req := map[string]any{"subtype": "initialize"}
+		if len(m.SDKMCPServers) > 0 {
+			req["sdkMcpServers"] = m.SDKMCPServers
+		}
+		return encodeControlRequest(m.RequestID, req)
 	case Interrupt:
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "interrupt"})
 	case SetPermissionMode:
@@ -119,6 +134,8 @@ func Encode(o Outbound) ([]byte, error) {
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "set_model", "model": m.Model})
 	case PermissionAnswer:
 		return encodePermissionAnswer(m)
+	case MCPReply:
+		return encodeMCPReply(m)
 	}
 	return nil, fmt.Errorf("chatproto: cannot encode %T", o)
 }
@@ -195,6 +212,23 @@ func encodePermissionAnswer(m PermissionAnswer) ([]byte, error) {
 			"subtype":    "success",
 			"request_id": m.RequestID,
 			"response":   body,
+		},
+	})
+}
+
+func encodeMCPReply(m MCPReply) ([]byte, error) {
+	if m.RequestID == "" {
+		return nil, errors.New("chatproto: mcp reply needs a request id")
+	}
+	if !json.Valid(m.Message) {
+		return nil, errors.New("chatproto: mcp reply message is not JSON")
+	}
+	return json.Marshal(map[string]any{
+		"type": "control_response",
+		"response": map[string]any{
+			"subtype":    "success",
+			"request_id": m.RequestID,
+			"response":   map[string]any{"mcp_response": m.Message},
 		},
 	})
 }
