@@ -168,7 +168,7 @@ func Run() error {
 	// into — or submits — the line the user is mid-typing in the shared pane.
 	inputGate := inputgate.New()
 	gatedRuntime := newGatedRuntime(runtimeAdapter, inputGate, &hostRouter{sessions: store, dataDir: cfg.DataDir, journal: journalOrNil(deliveryJournal)})
-	termMgr := terminal.NewManager(runtimeAdapter, cdcPipe.Broadcaster, log, terminal.WithInputRecorder(inputGate))
+	termMgr := terminal.NewManager(runtimeAdapter, cdcPipe.Broadcaster, log, terminal.WithInputRecorder(inputGate), terminal.WithChat(store, cfg.DataDir))
 	defer termMgr.Close()
 
 	// The simulator screen surface behind the desktop app's Simulator tab.
