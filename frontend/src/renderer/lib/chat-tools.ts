@@ -62,16 +62,7 @@ export function shortenPaths(text: string, root: string | undefined): string {
 }
 
 export type ProcessKind =
-	| "commands"
-	| "reads"
-	| "searches"
-	| "edits"
-	| "writes"
-	| "agents"
-	| "skills"
-	| "web"
-	| "todos"
-	| "tools";
+	"commands" | "reads" | "searches" | "edits" | "writes" | "agents" | "skills" | "web" | "todos" | "tools";
 
 const PROCESS_KIND: Record<string, ProcessKind> = {
 	Bash: "commands",
