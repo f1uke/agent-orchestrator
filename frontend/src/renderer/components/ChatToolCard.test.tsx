@@ -1,24 +1,46 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { Pending, PermissionOutcome, ToolCallItem } from "../lib/chat-fold";
+import type { BackgroundTask, Pending, PermissionOutcome, ToolCallItem } from "../lib/chat-fold";
 import { PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 
 const call = (name: string, input: unknown, result?: ToolCallItem["result"], permission?: PermissionOutcome) =>
 	({ kind: "tool_call", id: `t-${name}`, name, parentToolUseId: "", input, result, permission }) satisfies ToolCallItem;
 
-function card(item: ToolCallItem, { open, subagentTools = 0 }: { open?: boolean; subagentTools?: number } = {}) {
+function card(
+	item: ToolCallItem,
+	{
+		open,
+		subagentTools = 0,
+		root = "",
+		task,
+	}: { open?: boolean; subagentTools?: number; root?: string; task?: BackgroundTask } = {},
+) {
 	const onToggle = vi.fn();
-	render(<ToolCard call={item} onToggle={onToggle} open={open} subagentTools={subagentTools} theme="dark" />);
+	render(
+		<ToolCard
+			call={item}
+			onToggle={onToggle}
+			open={open}
+			root={root}
+			subagentTools={subagentTools}
+			task={task}
+			theme="dark"
+		/>,
+	);
 	return { head: screen.getByRole("button"), onToggle };
 }
 
 describe("ToolCard", () => {
-	it("shows a failed Bash call open, with its exit code, command and output", () => {
-		const { head } = card(
-			call("Bash", { command: "go test ./..." }, { isError: true, content: "Exit code 1\n--- FAIL: TestX\nok  \tpkg" }),
+	it("keeps a failed Bash call shut, with its exit code on the head, and shows the command and output once opened", () => {
+		const failed = call(
+			"Bash",
+			{ command: "go test ./..." },
+			{ isError: true, content: "Exit code 1\n--- FAIL: TestX\nok  \tpkg" },
 		);
-		expect(head).toHaveAttribute("aria-expanded", "true");
+		expect(card(failed).head).toHaveAttribute("aria-expanded", "false");
+		cleanup();
+		const { head } = card(failed, { open: true });
 		expect(head).toHaveTextContent("go test ./...");
 		expect(head).toHaveTextContent("exit 1");
 		expect(screen.getByText("$ go test ./...")).toBeInTheDocument();
@@ -34,9 +56,16 @@ describe("ToolCard", () => {
 		expect(onToggle).toHaveBeenCalledWith(true);
 	});
 
-	it("draws an Edit as a diff of old and new strings, open, with its counts", () => {
+	it("keeps an Edit shut until it is toggled", () => {
+		const { head } = card(call("Edit", { file_path: "a.go", old_string: "one", new_string: "two" }));
+		expect(head).toHaveAttribute("aria-expanded", "false");
+		expect(document.querySelector(".chat-tool__body")).toBeNull();
+	});
+
+	it("draws an Edit as a diff of old and new strings, with its counts", () => {
 		const { head } = card(
 			call("Edit", { file_path: "a.go", old_string: "one\ntwo\nthree", new_string: "one\n2\nthree\nfour" }),
+			{ open: true },
 		);
 		expect(head).toHaveTextContent("a.go");
 		expect(head).toHaveTextContent("+2");
@@ -75,10 +104,55 @@ describe("ToolCard", () => {
 		expect(head).toHaveTextContent("done · 9 tool uses");
 	});
 
+	it("shortens the worktree root out of the head and the command", () => {
+		const { head } = card(call("Bash", { command: "cd /work/project && go test ./..." }), { root: "/work/project" });
+		expect(head).toHaveTextContent("cd . && go test ./...");
+		expect(head).not.toHaveTextContent("/work/project");
+	});
+
+	it("tells a background Bash call's progress from its task, not from its instant result", () => {
+		const bash = call(
+			"Bash",
+			{ command: "./slow.sh", run_in_background: true },
+			{ isError: false, content: "Command running in background" },
+		);
+		const running = card(bash, {
+			task: { id: "t", toolUseId: bash.id, description: "", taskType: "local_bash", state: "running" },
+		});
+		expect(running.head).toHaveTextContent("running in background");
+		cleanup();
+		const done = card(bash, {
+			task: { id: "t", toolUseId: bash.id, description: "", taskType: "local_bash", state: "done", exitCode: 0 },
+		});
+		expect(done.head).toHaveTextContent("done · exit 0");
+	});
+
+	it("keeps an Agent running until its task ends, then shows the task's final text", () => {
+		const agent = call(
+			"Agent",
+			{ subagent_type: "Explore", description: "docs" },
+			{ isError: false, content: "Async agent launched successfully." },
+		);
+		const base = { id: "t", toolUseId: agent.id, description: "", taskType: "local_agent" };
+		const running = card(agent, { task: { ...base, state: "running" } });
+		expect(running.head).toHaveTextContent("running");
+		cleanup();
+		const done = card(agent, {
+			open: true,
+			subagentTools: 2,
+			task: { ...base, state: "done", summary: "Two short files." },
+		});
+		expect(done.head).toHaveTextContent("done · 2 tool uses");
+		expect(screen.getByText("Two short files.")).toBeInTheDocument();
+		expect(screen.queryByText(/Async agent launched/)).toBeNull();
+	});
+
 	it("shows any other tool as a generic card with its JSON input", () => {
-		card(call("TodoWrite", { todos: [{ content: "ship it" }] }, { isError: false, content: "ok" }), { open: true });
+		card(call("WebFetch", { url: "https://example.com", note: "ship it" }, { isError: false, content: "ok" }), {
+			open: true,
+		});
 		const body = document.querySelector(".chat-tool__body")!;
-		expect(body).toHaveTextContent('"content": "ship it"');
+		expect(body).toHaveTextContent('"note": "ship it"');
 		expect(body).toHaveTextContent("Result");
 	});
 

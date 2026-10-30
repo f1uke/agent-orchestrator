@@ -56,7 +56,7 @@ beforeEach(() => {
 	vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
 	listeners = undefined;
 	seq = 0;
-	useUiStore.setState({ chatViews: {} });
+	useUiStore.setState({ chatViews: {}, inspectorViewRequest: null });
 	return () => vi.useRealTimers();
 });
 
@@ -72,9 +72,9 @@ function fakeApi() {
 	};
 }
 
-function renderPane(view: "chat" | "events" = "chat", api = fakeApi()) {
+function renderPane(view: "chat" | "events" = "chat", api = fakeApi(), who: WorkspaceSession = session) {
 	const utils = render(
-		<ChatPane chatApi={api} createMux={createMux} daemonReady session={session} theme="dark" view={view} />,
+		<ChatPane chatApi={api} createMux={createMux} daemonReady session={who} theme="dark" view={view} />,
 	);
 	const feed = (...entries: ChatEntry[]) =>
 		act(() => {
@@ -145,7 +145,8 @@ describe("ChatPane", () => {
 		const orchestrator = document.querySelector(".chat-peer--orchestrator")!;
 		expect(orchestrator).toHaveTextContent("orchestrator · orchestrator message");
 
-		expect(screen.getByText("plan it").closest("details")).not.toHaveAttribute("open");
+		expect(screen.getByRole("button", { name: /Thought/ })).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByText("plan it")).toBeNull();
 		expect(screen.getByText("now").tagName).toBe("STRONG");
 		expect(screen.getByText("Turn complete · $0.044 this session")).toBeInTheDocument();
 		expect(screen.getByText("Claude exited · exit code 0")).toBeInTheDocument();
@@ -453,5 +454,169 @@ describe("ChatViewToggle", () => {
 		expect(container).toBeEmptyDOMElement();
 		const legacy = render(<ChatViewToggle session={{ ...session, transport: undefined }} />);
 		expect(legacy.container).toBeEmptyDOMElement();
+	});
+});
+
+const toolUse = (id: string, name: string, input: object, parent: string | null = null) =>
+	out({
+		type: "assistant",
+		parent_tool_use_id: parent,
+		message: { id: `m-${id}`, content: [{ type: "tool_use", id, name, input }] },
+	});
+const toolDone = (id: string, content = "ok", isError = false) =>
+	out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content, is_error: isError }] } });
+const saying = (text: string, parent: string | null = null) =>
+	out({
+		type: "assistant",
+		parent_tool_use_id: parent,
+		message: { id: `m-${text}`, content: [{ type: "text", text }] },
+	});
+const rooted = { ...session, workspacePath: "/work/project" };
+
+describe("ChatPane calm view", () => {
+	it("opens the whole Thought row on a click and never draws an empty one", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			out({ type: "assistant", message: { id: "e", content: [{ type: "thinking", thinking: "" }] } }),
+			out({ type: "assistant", message: { id: "m1", content: [{ type: "thinking", thinking: "plan it" }] } }),
+		);
+		expect(screen.getAllByRole("button", { name: /Thought/ })).toHaveLength(1);
+		await user.click(screen.getByRole("button", { name: /Thought/ }));
+		expect(screen.getByText("plan it")).toBeInTheDocument();
+	});
+
+	it("shows the latest line of a thinking stream on the closed row", () => {
+		const { delta } = renderPane();
+		delta(
+			{ type: "message_start", message: { id: "m1" } },
+			{
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "thinking_delta", thinking: "first idea\n\nsecond idea\n" },
+			},
+		);
+		const row = screen.getByRole("button", { name: /Thinking/ });
+		expect(row).toHaveTextContent("second idea");
+		expect(row).not.toHaveTextContent("first idea");
+	});
+
+	it("groups the tool calls between replies behind one counted line", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "fix it"),
+			saying("looking"),
+			toolUse("a", "Read", { file_path: "a.go" }),
+			toolDone("a"),
+			toolUse("b", "Bash", { command: "go test" }),
+			toolDone("b"),
+			toolUse("c", "Bash", { command: "go vet" }),
+			toolDone("c"),
+		);
+		const head = document.querySelector("[data-group] .chat-group__head")!;
+		expect(head).toHaveTextContent("Ran 2 commands · read 1 file");
+		expect(head).toHaveAttribute("aria-expanded", "false");
+		expect(document.querySelector("[data-tool]")).toBeNull();
+		await user.click(head);
+		expect(document.querySelectorAll("[data-tool]")).toHaveLength(3);
+	});
+
+	it("keeps a failed call visible under a closed group header and counts it", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "fix it"),
+			toolUse("a", "Read", { file_path: "a.go" }),
+			toolDone("a"),
+			toolUse("b", "Bash", { command: "go test" }),
+			toolDone("b", "Exit code 1\nFAIL", true),
+		);
+		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent("1 failed");
+		const shown = document.querySelectorAll("[data-tool]");
+		expect(shown).toHaveLength(1);
+		expect(shown[0]).toHaveAttribute("data-tool", "Bash");
+	});
+
+	it("names the running call on the header with the worktree root cut away", () => {
+		const { feed } = renderPane("chat", fakeApi(), rooted);
+		feed(
+			userIn("u1", "go"),
+			toolUse("a", "Read", { file_path: "/work/project/a.go" }),
+			toolDone("a"),
+			toolUse("b", "Bash", { command: "cd /work/project && go test ./..." }),
+		);
+		expect(document.querySelector(".chat-group__live")).toHaveTextContent("cd . && go test ./...");
+	});
+
+	it("folds a finished turn's work between the user's message and the last reply", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "fix it"),
+			lifecycle("u1", "started"),
+			saying("on it"),
+			toolUse("a", "Bash", { command: "go test" }),
+			toolDone("a"),
+			toolUse("b", "Bash", { command: "go vet" }),
+			toolDone("b"),
+			saying("all fixed"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		const head = document.querySelector("[data-turn] .chat-group__head")!;
+		expect(head).toHaveTextContent("Worked · ran 2 commands · 1 message");
+		expect(screen.getByText("all fixed")).toBeInTheDocument();
+		expect(screen.queryByText("on it")).toBeNull();
+		await user.click(head);
+		expect(screen.getByText("on it")).toBeInTheDocument();
+		expect(document.querySelector("[data-group]")).not.toBeNull();
+	});
+
+	it("leaves a subagent's text and thinking out of the main column", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			toolUse("agent", "Agent", { description: "look" }),
+			out({
+				type: "assistant",
+				parent_tool_use_id: "agent",
+				message: { id: "s", content: [{ type: "thinking", thinking: "sub thought" }] },
+			}),
+			saying("sub answer", "agent"),
+			saying("main answer"),
+		);
+		expect(screen.getByText("main answer")).toBeInTheDocument();
+		expect(screen.queryByText("sub answer")).toBeNull();
+		expect(screen.queryByRole("button", { name: /Thought/ })).toBeNull();
+	});
+
+	it("reads a background command from its task, and counts it on the status line", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			toolUse("bg", "Bash", { command: "./slow.sh", run_in_background: true }),
+			out({
+				type: "system",
+				subtype: "task_started",
+				task_id: "k1",
+				tool_use_id: "bg",
+				task_type: "local_bash",
+				is_backgrounded: true,
+			}),
+			toolDone("bg", "Command running in background with ID: k1"),
+		);
+		expect(document.querySelector('[data-tool="Bash"]')).toHaveTextContent("running in background");
+		const chip = screen.getByRole("button", { name: /1 running in background/ });
+		await user.click(chip);
+		expect(useUiStore.getState().inspectorViewRequest).toBe("session");
+
+		feed(
+			out({
+				type: "system",
+				subtype: "task_notification",
+				task_id: "k1",
+				tool_use_id: "bg",
+				status: "completed",
+				summary: "Background command completed (exit code 0)",
+			}),
+		);
+		expect(document.querySelector('[data-tool="Bash"]')).toHaveTextContent("done · exit 0");
+		expect(screen.queryByRole("button", { name: /running in background/ })).toBeNull();
 	});
 });

@@ -57,6 +57,8 @@ for (const viewport of VIEWPORTS) {
 			await shot("permission");
 			await permission.getByRole("button", { name: /Always allow/ }).click();
 			await expect(stream.locator('[data-pending="permission"]')).toHaveCount(0);
+			const closedGroups = stream.locator('[data-group] .chat-group__head[aria-expanded="false"]');
+			if ((await closedGroups.count()) > 0) await closedGroups.last().click();
 			await expect(stream.locator('[data-resolved="allowed"]').last()).toContainText(
 				"Always allowed Bash with Bash(go test:*)",
 			);

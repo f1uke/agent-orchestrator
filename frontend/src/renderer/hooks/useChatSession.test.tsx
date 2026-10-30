@@ -177,6 +177,8 @@ describe("useChatSession", () => {
 		send((l) => l.entry(assistant(1, "m1", "Hello")));
 		frame();
 		expect(view.result.current.overlay.blocks).toEqual([]);
-		expect(view.result.current.transcript.items).toEqual([{ kind: "assistant_text", messageId: "m1", text: "Hello" }]);
+		expect(view.result.current.transcript.items).toEqual([
+			{ kind: "assistant_text", messageId: "m1", text: "Hello", parentToolUseId: "" },
+		]);
 	});
 });

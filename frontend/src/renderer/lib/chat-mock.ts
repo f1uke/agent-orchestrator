@@ -450,24 +450,29 @@ function toolOutcome(request: Pending, body: AnswerBody): Step {
 
 type StubSession = { log: ChatEntry[]; folder: ChatFolder; sent: number };
 
+/** The preview session that replays long_session.jsonl, a real recording with many tool calls. */
+export const MOCK_LONG_CHAT_SESSION = "demo-chat-long";
+
 const stubSessions = new Map<string, Promise<StubSession>>();
 const stubListeners = new Map<string, Set<ChatMuxListeners>>();
 
 function stubSession(id: string): Promise<StubSession> {
 	let session = stubSessions.get(id);
 	if (!session) {
-		session = import("../../../../backend/internal/chatproto/testdata/first_session.jsonl?raw").then(
-			({ default: raw }) => {
-				const fixture = raw
-					.split("\n")
-					.filter((line) => line.trim() !== "")
-					.map((line) => JSON.parse(line) as ChatEntry);
-				const log = mockChatEntries(fixture);
-				const folder = new ChatFolder();
-				log.forEach((entry) => folder.apply(entry));
-				return { log, folder, sent: 0 };
-			},
-		);
+		const long = id === MOCK_LONG_CHAT_SESSION;
+		const raw = long
+			? import("../../../../backend/internal/chatproto/testdata/long_session.jsonl?raw")
+			: import("../../../../backend/internal/chatproto/testdata/first_session.jsonl?raw");
+		session = raw.then(({ default: text }) => {
+			const fixture = text
+				.split("\n")
+				.filter((line) => line.trim() !== "")
+				.map((line) => JSON.parse(line) as ChatEntry);
+			const log = long ? fixture : mockChatEntries(fixture);
+			const folder = new ChatFolder();
+			log.forEach((entry) => folder.apply(entry));
+			return { log, folder, sent: 0 };
+		});
 		stubSessions.set(id, session);
 	}
 	return session;

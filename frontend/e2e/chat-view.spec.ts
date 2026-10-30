@@ -19,7 +19,7 @@ for (const viewport of VIEWPORTS) {
 	test.describe(`chat view at ${viewport.width}x${viewport.height}`, () => {
 		test.use({ viewport, colorScheme: "dark" });
 
-		test("shows the stream, an expanded diff, a pending question and the events", async ({ page }, info) => {
+		test("shows the stream, a diff opened by click, a pending question and the events", async ({ page }, info) => {
 			const shot = (name: string) => page.screenshot({ path: info.outputPath(`chat-${name}-${viewport.width}.png`) });
 
 			const stream = await openChat(page);
@@ -41,8 +41,14 @@ for (const viewport of VIEWPORTS) {
 			await shot("question");
 
 			const edit = stream.locator('[data-tool="Edit"]');
-			for (let i = 0; i < 40 && (await edit.count()) === 0; i++) await stream.evaluate((el) => el.scrollBy(0, -400));
+			const closedGroups = stream.locator('[data-group] .chat-group__head[aria-expanded="false"]');
+			for (let i = 0; i < 40 && (await edit.count()) === 0; i++) {
+				if ((await closedGroups.count()) > 0) await closedGroups.first().click();
+				else await stream.evaluate((el) => el.scrollBy(0, -400));
+			}
 			await edit.scrollIntoViewIfNeeded();
+			await expect(edit.getByRole("button", { expanded: false })).toBeVisible();
+			await edit.getByRole("button").click();
 			await expect(edit.getByRole("button", { expanded: true })).toBeVisible();
 			await expect(edit).toContainText("internal/webhook/sender.go");
 			await expect(edit).toContainText("sleepCtx(ctx, s.budget.Delay(attempt))");
@@ -51,6 +57,7 @@ for (const viewport of VIEWPORTS) {
 
 			await stream.evaluate((el) => el.scrollTo(0, 0));
 			await expect(stream.locator('[data-notice="spawn"]')).toBeVisible();
+			await stream.locator("[data-turn] .chat-group__head").first().click();
 			await expect(stream.locator('[data-resolved="allowed"]').first()).toContainText("Allowed Write");
 			await shot("top");
 

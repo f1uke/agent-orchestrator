@@ -437,8 +437,8 @@ describe("chat fold rules", () => {
 			synth(3, "out", json(`{"type":"result","subtype":"success","num_turns":1,"total_cost_usd":0.25}`)),
 		]);
 		expect(tr.items).toEqual([
-			{ kind: "thinking", text: "" },
-			{ kind: "assistant_text", messageId: "m1", text: "hello" },
+			{ kind: "thinking", text: "", parentToolUseId: "" },
+			{ kind: "assistant_text", messageId: "m1", text: "hello", parentToolUseId: "" },
 			{
 				kind: "turn_end",
 				subtype: "success",
@@ -668,5 +668,48 @@ describe("chat fold parity: commands, models and the model in use", () => {
 			synth(2, "host", { kind: "spawn", resume: "", argv }),
 		]);
 		expect(tr.model).toBe(want);
+	});
+});
+
+describe("chat fold: long_session.jsonl", () => {
+	const tr = foldEntries(loadFixture("long_session.jsonl"));
+	const task = (id: string) => tr.tasks.find((t) => t.id === id);
+
+	it("marks a foreground Bash task not backgrounded and a run_in_background one backgrounded", () => {
+		expect(task("b9xi92xsa")?.background).toBe(false);
+		expect(task("blaf8bxvg")?.background).toBe(true);
+	});
+
+	it("reads the exit code out of a task_notification summary", () => {
+		expect(task("blaf8bxvg")).toMatchObject({ state: "error", exitCode: 1 });
+		expect(task("b9xi92xsa")?.exitCode).toBeUndefined();
+	});
+
+	it("keeps an agent task's final text and progress usage", () => {
+		const agent = task("a5108821f9804b8ee");
+		expect(agent).toMatchObject({ taskType: "local_agent", state: "done", background: true });
+		expect(agent?.summary).toMatch(/^The `docs\/` directory has two short Markdown files/);
+		expect(agent?.usage).toEqual({ totalTokens: 10471, toolUses: 2, durationMs: 11524 });
+	});
+
+	it("carries the parent tool use id on assistant text and thinking", () => {
+		const texts = tr.items.filter((i) => i.kind === "assistant_text");
+		const sub = texts.filter((i) => i.parentToolUseId !== "");
+		expect(sub.map((i) => i.parentToolUseId)).toEqual(["toolu_01VtE9LeMfgpamXthC5tr7da"]);
+		expect(texts.length).toBeGreaterThan(sub.length);
+		expect(tr.items.filter((i) => i.kind === "thinking").every((i) => i.parentToolUseId === "")).toBe(true);
+	});
+
+	it("knows the context size from the latest top-level assistant usage, before any result", () => {
+		const before = foldEntries(loadFixture("long_session.jsonl").filter((e) => e.seq < 99));
+		expect(before.items.some((i) => i.kind === "turn_end")).toBe(false);
+		expect(before.contextTokens).toBeGreaterThan(14000);
+	});
+
+	it("ignores a subagent's usage for the context size", () => {
+		const entries = loadFixture("long_session.jsonl");
+		const withSub = foldEntries(entries.filter((e) => e.seq <= 26));
+		const without = foldEntries(entries.filter((e) => e.seq <= 25));
+		expect(withSub.contextTokens).toBe(without.contextTokens);
 	});
 });

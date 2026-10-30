@@ -1,14 +1,15 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Brain, ChevronRight, Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
+import { Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
 import type { ChatEntry } from "../lib/chat-event";
-import { isObject } from "../lib/chat-event";
+import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
-import type { ChatItem, Pending, UserItem } from "../lib/chat-fold";
-import { type ChatRow, chatRows, itemRowKey } from "../lib/chat-rows";
+import type { BackgroundTask, ChatItem, Pending, UserItem } from "../lib/chat-fold";
+import { sessionActivity } from "../lib/chat-inspect";
+import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
@@ -16,6 +17,7 @@ import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/u
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatComposer } from "./ChatComposer";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
+import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow } from "./ChatProcessRows";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
 
@@ -83,7 +85,16 @@ export function ChatPane({
 		() => transcript.items.filter((i): i is UserItem => i.kind === "user" && queuedIds.has(i.uuid)),
 		[transcript.items, queuedIds],
 	);
-	const rows = useMemo(() => chatRows(transcript, chat.overlay, queuedIds), [transcript, chat.overlay, queuedIds]);
+	const root = session.workspacePath ?? "";
+	const rows = useMemo(
+		() => chatRows(transcript, chat.overlay, queuedIds, root),
+		[transcript, chat.overlay, queuedIds, root],
+	);
+	const runningInBackground = useMemo(
+		() => sessionActivity(transcript).filter((a) => unfinished(a.state)).length,
+		[transcript],
+	);
+	const requestInspectorView = useUiStore((state) => state.requestInspectorView);
 
 	useEffect(() => {
 		const open = new Set(transcript.pending.map((p) => p.requestId));
@@ -138,6 +149,7 @@ export function ChatPane({
 					onJumped={onJumped}
 					pending={transcript.pending}
 					requests={requests}
+					root={root}
 					rows={rows}
 					theme={theme}
 				/>
@@ -165,6 +177,12 @@ export function ChatPane({
 				<div className="chat-statusline">
 					<ConnectionLabel connection={chat.connection} error={chat.error} />
 					{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+					{runningInBackground > 0 ? (
+						<button className="chat-statusline__bg" onClick={() => requestInspectorView("session")} type="button">
+							<span className="chat-statusline__dot chat-statusline__dot--live" />
+							{runningInBackground} running in background
+						</button>
+					) : null}
 					<span className="chat-statusline__grow" />
 					{view === "chat" ? <span>Enter sends · Shift+Enter newline · Esc interrupts</span> : null}
 				</div>
@@ -238,6 +256,7 @@ const STICK_TO_BOTTOM_PX = 48;
 
 type StreamProps = {
 	rows: ChatRow[];
+	root: string;
 	pending: Pending[];
 	theme: Theme;
 	requests: RequestStates;
@@ -247,10 +266,10 @@ type StreamProps = {
 	onJumped?: () => void;
 };
 
-function ChatStream({ rows, pending, theme, requests, disabled, onAnswer, jumpTo, onJumped }: StreamProps) {
+function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, jumpTo, onJumped }: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const atBottomRef = useRef(true);
-	const [openTools, setOpenTools] = useState<Readonly<Record<string, boolean>>>({});
+	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
 	const sessionNames = useSessionNames();
 	const answers = useMemo(() => ({ requests, disabled, onAnswer }), [requests, disabled, onAnswer]);
@@ -267,8 +286,8 @@ function ChatStream({ rows, pending, theme, requests, disabled, onAnswer, jumpTo
 		useFlushSync: false,
 	});
 
-	const toggleTool = useCallback((id: string, open: boolean) => {
-		setOpenTools((prev) => ({ ...prev, [id]: open }));
+	const toggleRow = useCallback<ToggleRow>((key, open) => {
+		setOpenRows((prev) => ({ ...prev, [key]: open }));
 	}, []);
 
 	useLayoutEffect(() => {
@@ -277,7 +296,7 @@ function ChatStream({ rows, pending, theme, requests, disabled, onAnswer, jumpTo
 
 	useLayoutEffect(() => {
 		if (!jumpTo) return;
-		const index = rows.findIndex((row) => row.key === itemRowKey(jumpTo.itemIndex));
+		const index = rowIndexOfItem(rows, jumpTo.itemIndex);
 		if (index < 0) return;
 		atBottomRef.current = false;
 		virtualizer.scrollToIndex(index, { align: "start" });
@@ -314,12 +333,13 @@ function ChatStream({ rows, pending, theme, requests, disabled, onAnswer, jumpTo
 						>
 							<ChatRowView
 								answers={answers}
-								openTools={openTools}
+								openRows={openRows}
 								pendingByRequest={pendingByRequest}
+								root={root}
 								row={row}
 								sessionNames={sessionNames}
 								theme={theme}
-								toggleTool={toggleTool}
+								toggleRow={toggleRow}
 							/>
 						</div>
 					);
@@ -335,8 +355,9 @@ type RowProps = {
 	row: ChatRow;
 	answers: CardAnswers;
 	theme: Theme;
-	openTools: Readonly<Record<string, boolean>>;
-	toggleTool: (id: string, open: boolean) => void;
+	root: string;
+	openRows: OpenRows;
+	toggleRow: ToggleRow;
 	pendingByRequest: ReadonlyMap<string, Pending>;
 	sessionNames: ReadonlyMap<string, string>;
 };
@@ -354,38 +375,50 @@ function RequestCard({ request, theme, answers }: { request: Pending; theme: The
 	);
 }
 
-const ChatRowView = memo(function ChatRowView({
-	row,
-	answers,
-	theme,
-	openTools,
-	toggleTool,
-	pendingByRequest,
-	sessionNames,
-}: RowProps) {
+const ChatRowView = memo(function ChatRowView(props: RowProps) {
+	const { row, answers, theme, openRows, toggleRow, pendingByRequest, root } = props;
 	switch (row.kind) {
 		case "pending":
 			return <RequestCard answers={answers} request={row.pending} theme={theme} />;
 		case "streaming":
 			return row.block.kind === "thinking" ? (
-				<ThinkingRow streaming text={row.block.text} />
+				<ThinkingRow
+					onToggle={(open) => toggleRow(row.key, open)}
+					open={openRows[row.key]}
+					streaming
+					text={row.block.text}
+				/>
 			) : (
 				<div className="chat-stream-text" data-streaming>
 					{row.block.text}
 					{row.caret ? <span aria-hidden="true" className="chat-caret" /> : null}
 				</div>
 			);
+		case "group":
+			return <GroupRow openRows={openRows} root={root} row={row} theme={theme} toggleRow={toggleRow} />;
+		case "turn":
+			return (
+				<TurnRow
+					openRows={openRows}
+					renderRow={(inner) => <ChatRowView {...props} row={inner} />}
+					row={row}
+					toggleRow={toggleRow}
+				/>
+			);
 		case "item":
 			return (
 				<ItemRow
 					answers={answers}
 					item={row.item}
-					openTools={openTools}
+					openRows={openRows}
 					pendingByRequest={pendingByRequest}
-					sessionNames={sessionNames}
+					root={root}
+					rowKey={row.key}
+					sessionNames={props.sessionNames}
 					subagentTools={row.subagentTools}
+					task={row.task}
 					theme={theme}
-					toggleTool={toggleTool}
+					toggleRow={toggleRow}
 				/>
 			);
 	}
@@ -394,13 +427,16 @@ const ChatRowView = memo(function ChatRowView({
 function ItemRow({
 	answers,
 	item,
+	rowKey,
 	subagentTools,
+	task,
 	theme,
-	openTools,
-	toggleTool,
+	root,
+	openRows,
+	toggleRow,
 	pendingByRequest,
 	sessionNames,
-}: Omit<RowProps, "row"> & { item: ChatItem; subagentTools: number }) {
+}: Omit<RowProps, "row"> & { item: ChatItem; rowKey: string; subagentTools: number; task?: BackgroundTask }) {
 	switch (item.kind) {
 		case "user":
 			return item.origin ? (
@@ -415,7 +451,7 @@ function ItemRow({
 				</div>
 			);
 		case "thinking":
-			return <ThinkingRow text={item.text} />;
+			return <ThinkingRow onToggle={(open) => toggleRow(rowKey, open)} open={openRows[rowKey]} text={item.text} />;
 		case "tool_call": {
 			const permission = item.permission;
 			if (permission?.status === "pending") {
@@ -427,9 +463,11 @@ function ItemRow({
 				<>
 					<ToolCard
 						call={item}
-						onToggle={(open) => toggleTool(item.id, open)}
-						open={openTools[item.id]}
+						onToggle={(open) => toggleRow(item.id, open)}
+						open={openRows[item.id]}
+						root={root}
 						subagentTools={subagentTools}
+						task={task}
 						theme={theme}
 					/>
 					<ResolvedLine call={item} />
@@ -510,30 +548,6 @@ function PeerMessage({
 				<NoteMarkdown source={body} theme={theme} />
 			</div>
 		</div>
-	);
-}
-
-function ThinkingRow({ text, streaming = false }: { text: string; streaming?: boolean }) {
-	const label = streaming ? "Thinking…" : "Thought";
-	if (text.trim() === "") {
-		return (
-			<div className="chat-think">
-				<span className="inline-flex items-center gap-1.5">
-					<Brain className="chat-icon" aria-hidden="true" />
-					{label}
-				</span>
-			</div>
-		);
-	}
-	return (
-		<details className="chat-think">
-			<summary>
-				<ChevronRight className="chat-chev" aria-hidden="true" />
-				<Brain className="chat-icon" aria-hidden="true" />
-				{label}
-			</summary>
-			<div className="chat-think__body">{text}</div>
-		</details>
 	);
 }
 

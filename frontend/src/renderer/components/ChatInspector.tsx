@@ -1,4 +1,4 @@
-import { Bot, History, ListTodo } from "lucide-react";
+import { Bot, ChevronRight, History, ListTodo } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { type TaskState, unfinished } from "../lib/chat-event";
 import type { Transcript } from "../lib/chat-fold";
@@ -17,6 +17,7 @@ import {
 	type UsageSummary,
 	usageSummary,
 } from "../lib/chat-inspect";
+import { TASK_STATE_LABEL } from "../lib/chat-tools";
 import { formatCost } from "./ChatPane";
 
 type Tone = "working" | "done" | "error" | "idle";
@@ -28,15 +29,6 @@ const STATE_TONE: Record<TaskState, Tone> = {
 	done: "done",
 	error: "error",
 	stopped: "idle",
-};
-
-const STATE_LABEL: Record<TaskState, string> = {
-	pending: "pending",
-	running: "running",
-	paused: "paused",
-	done: "done",
-	error: "failed",
-	stopped: "stopped",
 };
 
 export function ChatInspector({ transcript, onJump }: { transcript: Transcript; onJump: (itemIndex: number) => void }) {
@@ -116,34 +108,56 @@ function TodoSection({ todos }: { todos: Todo[] | undefined }) {
 }
 
 function activityStatus(a: Activity): string {
-	const label = STATE_LABEL[a.state];
+	const label = TASK_STATE_LABEL[a.state];
 	if (a.kind !== "agent" || a.tools === 0) return label;
 	return `${label} · ${a.tools} ${a.tools === 1 ? "tool" : "tools"}`;
 }
 
+function ActivityItem({ a }: { a: Activity }) {
+	return (
+		<div className="chat-insp__task" data-kind={a.kind} data-state={a.state}>
+			<div className="chat-insp__task-top">
+				<span aria-hidden="true" className="chat-insp__dot" data-tone={STATE_TONE[a.state]} />
+				<b>{a.title}</b>
+				<span className="chat-insp__task-state">{activityStatus(a)}</span>
+			</div>
+			{a.detail ? (
+				<div className="chat-insp__task-detail" title={a.detail}>
+					{a.detail}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
 function ActivitySection({ activity }: { activity: Activity[] }) {
-	const running = activity.filter((a) => unfinished(a.state)).length;
+	const running = activity.filter((a) => unfinished(a.state));
+	const finished = activity.filter((a) => !unfinished(a.state));
+	const failed = finished.filter((a) => a.state === "error").length;
 	return (
 		<Section
-			aside={running ? `${running} running` : undefined}
+			aside={running.length ? `${running.length} running` : undefined}
 			icon={<Bot aria-hidden="true" className="chat-insp__icon" />}
 			title="Subagents & background"
 		>
 			{activity.length ? (
-				activity.map((a) => (
-					<div className="chat-insp__task" data-kind={a.kind} data-state={a.state} key={a.key}>
-						<div className="chat-insp__task-top">
-							<span aria-hidden="true" className="chat-insp__dot" data-tone={STATE_TONE[a.state]} />
-							<b>{a.title}</b>
-							<span className="chat-insp__task-state">{activityStatus(a)}</span>
-						</div>
-						{a.detail ? (
-							<div className="chat-insp__task-detail" title={a.detail}>
-								{a.detail}
-							</div>
-						) : null}
-					</div>
-				))
+				<>
+					{running.map((a) => (
+						<ActivityItem a={a} key={a.key} />
+					))}
+					{finished.length ? (
+						<details className="chat-insp__fold">
+							<summary>
+								<ChevronRight aria-hidden="true" className="chat-insp__fold-chev" />
+								{finished.length} done
+								{failed ? <span className="chat-insp__fold-failed">{failed} failed</span> : null}
+							</summary>
+							{finished.map((a) => (
+								<ActivityItem a={a} key={a.key} />
+							))}
+						</details>
+					) : null}
+				</>
 			) : (
 				<Empty>No subagents or background commands in this session.</Empty>
 			)}
@@ -155,7 +169,7 @@ function ContextSection({ context }: { context: ContextUsage | undefined }) {
 	if (!context) {
 		return (
 			<Section title="Context">
-				<Empty>Known after the first turn completes.</Empty>
+				<Empty>Known after Claude's first response.</Empty>
 			</Section>
 		);
 	}
@@ -180,7 +194,7 @@ function ContextSection({ context }: { context: ContextUsage | undefined }) {
 			>
 				<span style={{ width: `${percent}%` }} />
 			</div>
-			<p className="chat-insp__note">{percent}% of the window, as of the last turn</p>
+			<p className="chat-insp__note">{percent}% of the window, as of the last response</p>
 		</Section>
 	);
 }

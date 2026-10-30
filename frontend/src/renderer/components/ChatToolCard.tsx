@@ -5,6 +5,7 @@ import {
 	FilePlus,
 	FileText,
 	ListChecks,
+	ListTodo,
 	Loader2,
 	type LucideIcon,
 	MessageSquare,
@@ -29,7 +30,7 @@ import {
 	questionAnswer,
 	replyInChat,
 } from "../lib/chat-answers";
-import type { Pending, ToolCallItem } from "../lib/chat-fold";
+import type { BackgroundTask, Pending, ToolCallItem } from "../lib/chat-fold";
 import { isObject } from "../lib/chat-event";
 import {
 	type Question,
@@ -55,6 +56,7 @@ const FAMILY_ICON: Record<ToolView["family"], LucideIcon> = {
 	read: FileText,
 	search: Search,
 	agent: Bot,
+	todo: ListTodo,
 	plan: ListChecks,
 	question: MessageSquare,
 	other: Wrench,
@@ -67,9 +69,11 @@ function Status({ view }: { view: ToolView }) {
 			return (
 				<span className="chat-tool__status">
 					<Loader2 className="chat-icon animate-spin" aria-hidden="true" />
-					running
+					{status.text ?? "running"}
 				</span>
 			);
+		case "idle":
+			return <span className="chat-tool__status">{status.text}</span>;
 		case "diff":
 			return (
 				<span className="chat-tool__status">
@@ -150,18 +154,22 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 export function ToolCard({
 	call,
 	subagentTools,
+	task,
+	root,
 	open,
 	onToggle,
 	theme,
 }: {
 	call: ToolCallItem;
 	subagentTools: number;
+	task?: BackgroundTask;
+	root: string;
 	open: boolean | undefined;
 	onToggle: (open: boolean) => void;
 	theme: Theme;
 }) {
-	const view = describeTool(call, subagentTools);
-	const isOpen = open ?? view.defaultOpen;
+	const view = describeTool(call, { root, subagentTools, task });
+	const isOpen = open ?? false;
 	const Icon = FAMILY_ICON[view.family];
 	return (
 		<div
