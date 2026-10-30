@@ -215,13 +215,9 @@ func releaseWebPorts(dataDir string) func(port int) bool {
 	}
 }
 
-// previewOriginOnlyServesPreviews confines a request addressed to a session's
-// preview origin (<session>.preview.localhost) to that session's preview files.
-// A preview page is agent-made HTML; anything else on its origin, the API,
-// /mux and /shutdown included, would be a same-origin call the CORS check
-// never sees. A module script sends an Origin header even to its own origin,
-// so a same-origin Origin is dropped before the CORS check, which would
-// otherwise refuse the preview origin.
+// previewOriginOnlyServesPreviews confines a <session>.preview.localhost request
+// to that session's preview files: a call from an agent-made page to any other
+// route on its own origin is same-origin, so the CORS check never sees it.
 func previewOriginOnlyServesPreviews(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, ok := preview.HostSession(r.Host)
@@ -236,6 +232,8 @@ func previewOriginOnlyServesPreviews(next http.Handler) http.Handler {
 			notFoundJSON(w, r)
 			return
 		}
+		// Browsers send Origin on same-origin module-script fetches; the CORS
+		// check would refuse it.
 		if strings.EqualFold(r.Header.Get("Origin"), "http://"+r.Host) {
 			r.Header.Del("Origin")
 		}

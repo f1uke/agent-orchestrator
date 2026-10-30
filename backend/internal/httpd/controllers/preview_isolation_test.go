@@ -11,10 +11,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
-// previewWorkspace points the fake session ao-1 at a fresh workspace and
-// returns it with a request helper in front of the real router. host, when
-// set, is the Host header, so a test can address the preview origin without
-// DNS.
 func previewWorkspace(t *testing.T) (string, func(method, host, path, origin string) ([]byte, int, http.Header)) {
 	t.Helper()
 	svc := newFakeSessionService()
@@ -66,11 +62,6 @@ func writeFile(t *testing.T, path, content string) {
 
 const previewHost = "ao-1.preview.localhost"
 
-// A preview page is agent-made HTML, and the daemon has no auth. Served on the
-// daemon's own origin, its scripts could call the whole API: send messages,
-// answer permission cards, kill sessions. Preview files therefore live on a
-// per-session origin, which serves nothing else and whose cross-origin calls
-// the daemon refuses.
 func TestPreviewPageCannotCallTheDaemonAPI(t *testing.T) {
 	workspace, do := previewWorkspace(t)
 	writeFile(t, filepath.Join(workspace, "page.html"), `<script>fetch("/api/v1/sessions")</script>`)
@@ -90,8 +81,6 @@ func TestPreviewPageCannotCallTheDaemonAPI(t *testing.T) {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
 
-	// A module script is fetched in CORS mode, so the browser sends the page's
-	// own origin; the page must still load it.
 	writeFile(t, filepath.Join(workspace, "app.js"), "export {}")
 	if body, status, _ := do(http.MethodGet, previewHost, "/api/v1/sessions/ao-1/preview/files/app.js", "http://"+previewHost); status != http.StatusOK {
 		t.Fatalf("module script on the preview origin = %d, want 200; body=%s", status, body)
@@ -119,7 +108,6 @@ func TestPreviewPageCannotCallTheDaemonAPI(t *testing.T) {
 	}
 }
 
-// A symlink inside the workspace must not serve a file outside it.
 func TestPreviewFilesRefusesSymlinksThatLeaveTheWorkspace(t *testing.T) {
 	workspace, do := previewWorkspace(t)
 	outside := t.TempDir()

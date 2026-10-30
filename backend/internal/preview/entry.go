@@ -254,11 +254,8 @@ func ConfinedPath(workspacePath, assetPath string) (string, bool) {
 	return absFile, true
 }
 
-// hostSuffix names the per-session preview origins. A preview page is
-// agent-made HTML and the daemon has no auth, so the page must not share the
-// daemon's origin: on <session>.preview.localhost its calls to the API are
-// cross-origin, and the daemon serves that host nothing but the session's own
-// preview files. Browsers resolve every *.localhost name to loopback.
+// hostSuffix names the per-session preview origins, which keep agent-made pages
+// off the daemon's origin. Browsers resolve every *.localhost name to loopback.
 const hostSuffix = ".preview.localhost"
 
 // Host is the preview origin's host name for a session.
