@@ -1,9 +1,10 @@
-import { isObject } from "./chat-event";
+import { isObject, type TaskState } from "./chat-event";
 import { type DiffLine, diffCounts, lineDiff, newFileDiff } from "./chat-diff";
-import type { PermissionOutcome, ToolCallItem, ToolResult } from "./chat-fold";
+import type { BackgroundTask, PermissionOutcome, ToolCallItem, ToolResult } from "./chat-fold";
 
 export type ToolStatus =
-	| { tone: "running" }
+	| { tone: "running"; text?: string }
+	| { tone: "idle"; text: string }
 	| { tone: "ok"; text: string }
 	| { tone: "error"; text: string }
 	| { tone: "diff"; added: number; removed: number; newFile: boolean };
@@ -23,14 +24,120 @@ export type ToolBody =
 	| { kind: "generic"; input: string; output: string };
 
 export type ToolView = {
-	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "plan" | "question" | "other";
+	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "todo" | "plan" | "question" | "other";
 	title: string;
 	arg: string;
 	status: ToolStatus;
 	body: ToolBody;
 	compact: boolean;
-	defaultOpen: boolean;
 };
+
+/** What a card needs beyond the call: the worktree root to shorten paths against, and the call's task. */
+export type ToolContext = { root?: string; subagentTools?: number; task?: BackgroundTask };
+
+const TASK_TYPE_LABEL: Record<string, string> = { local_bash: "Bash · background", local_agent: "Agent" };
+
+/** The name for a task in the inspector, whatever claude's raw task_type. */
+export const taskLabel = (taskType: string) => TASK_TYPE_LABEL[taskType] ?? "Task";
+
+export const TASK_STATE_LABEL: Record<TaskState, string> = {
+	pending: "pending",
+	running: "running",
+	paused: "paused",
+	done: "done",
+	error: "failed",
+	stopped: "stopped",
+};
+
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** `<root>/x` becomes `x` and a bare `<root>` becomes `.`. A longer path that merely starts with root is left alone. */
+export function shortenPaths(text: string, root: string | undefined): string {
+	const base = (root ?? "").replace(/\/+$/, "");
+	if (base === "") return text;
+	const pattern = new RegExp(`(?<![\\w.~/-])${escapeRegExp(base)}(/|(?![\\w./-]))`, "g");
+	return text.replace(pattern, (_, tail: string) => (tail === "/" ? "" : "."));
+}
+
+export type ProcessKind = "commands" | "reads" | "searches" | "edits" | "writes" | "agents" | "web" | "todos" | "tools";
+
+const PROCESS_KIND: Record<string, ProcessKind> = {
+	Bash: "commands",
+	Read: "reads",
+	Grep: "searches",
+	Glob: "searches",
+	Edit: "edits",
+	MultiEdit: "edits",
+	NotebookEdit: "edits",
+	Write: "writes",
+	Agent: "agents",
+	Task: "agents",
+	WebFetch: "web",
+	WebSearch: "web",
+	TodoWrite: "todos",
+	TaskCreate: "todos",
+	TaskUpdate: "todos",
+};
+
+export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolName] ?? "tools";
+
+export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; failed: number; live?: string };
+
+const PHRASE: Record<ProcessKind, (n: number) => string> = {
+	commands: (n) => `ran ${plural(n, "command")}`,
+	reads: (n) => `read ${plural(n, "file")}`,
+	searches: (n) => `searched ${plural(n, "time")}`,
+	edits: (n) => `edited ${plural(n, "file")}`,
+	writes: (n) => `wrote ${plural(n, "file")}`,
+	agents: (n) => `started ${plural(n, "agent")}`,
+	web: (n) => `made ${plural(n, "web request")}`,
+	todos: () => "updated todos",
+	tools: (n) => `used ${plural(n, "other tool")}`,
+};
+
+/** The lowercase phrases of a summary, such as `ran 6 commands`, in a fixed kind order. */
+export function processPhrases(summary: ProcessSummary): string[] {
+	return summary.counts.map(({ kind, count }) => PHRASE[kind](count));
+}
+
+/** A tool that did not run to success: its result errored, or the user denied it. */
+export function toolFailed(call: ToolCallItem): boolean {
+	return call.result?.isError === true || call.permission?.status === "denied";
+}
+
+/** What a call touches, so that three edits of one file count as one file. */
+function countKey(call: ToolCallItem): string {
+	const input = isObject(call.input) ? call.input : {};
+	const kind = processKind(call.name);
+	const path = kind === "reads" || kind === "edits" || kind === "writes" ? str(input.file_path) : "";
+	return path === "" ? call.id : `${kind}:${path}`;
+}
+
+const KIND_ORDER: ProcessKind[] = [
+	"commands",
+	"reads",
+	"searches",
+	"edits",
+	"writes",
+	"agents",
+	"web",
+	"todos",
+	"tools",
+];
+
+export function summarizeTools(calls: readonly ToolCallItem[]): ProcessSummary {
+	const seen = new Map<ProcessKind, Set<string>>();
+	let failed = 0;
+	for (const call of calls) {
+		const kind = processKind(call.name);
+		seen.set(kind, (seen.get(kind) ?? new Set()).add(countKey(call)));
+		if (toolFailed(call)) failed += 1;
+	}
+	const counts = KIND_ORDER.filter((kind) => seen.has(kind)).map((kind) => ({ kind, count: seen.get(kind)!.size }));
+	return { counts, failed };
+}
 
 const NEW_FILE_PREVIEW_LINES = 40;
 
@@ -90,21 +197,68 @@ function editDiff(input: Record<string, unknown>): DiffLine[] | undefined {
 	return undefined;
 }
 
-export function describeTool(call: ToolCallItem, subagentTools = 0): ToolView {
+function backgroundStatus(call: ToolCallItem, task: BackgroundTask | undefined): ToolStatus {
+	if (!call.result) return { tone: "running" };
+	if (call.result.isError) return { tone: "error", text: "error" };
+	if (!task) return { tone: "ok", text: "started in background" };
+	const exit = task.exitCode === undefined ? "" : ` · exit ${task.exitCode}`;
+	switch (task.state) {
+		case "done":
+			return { tone: "ok", text: `done${exit}` };
+		case "error":
+			return { tone: "error", text: `failed${exit}` };
+		case "stopped":
+			return { tone: "idle", text: "stopped" };
+		default:
+			return { tone: "running", text: "running in background" };
+	}
+}
+
+function agentStatus(call: ToolCallItem, ctx: ToolContext): ToolStatus {
+	const { task } = ctx;
+	if (!task) return outcome(call, () => `done · ${plural(ctx.subagentTools ?? 0, "tool use")}`);
+	switch (task.state) {
+		case "done":
+			return { tone: "ok", text: `done · ${plural(ctx.subagentTools || task.usage?.toolUses || 0, "tool use")}` };
+		case "error":
+			return { tone: "error", text: TASK_STATE_LABEL.error };
+		case "stopped":
+			return { tone: "idle", text: TASK_STATE_LABEL.stopped };
+		default:
+			return { tone: "running" };
+	}
+}
+
+function todoArg(call: ToolCallItem, input: Record<string, unknown>): string {
+	if (call.name === "TaskCreate") return str(input.subject);
+	if (call.name === "TaskUpdate") {
+		const id = str(input.taskId);
+		return `${id ? `#${id} ` : ""}${str(input.status) || str(input.subject)}`.trim();
+	}
+	return Array.isArray(input.todos) ? plural(input.todos.length, "item") : "";
+}
+
+const TODO_TITLE: Record<string, string> = { TaskCreate: "Add todo", TaskUpdate: "Update todo", TodoWrite: "Todos" };
+
+export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolView {
 	const input = isObject(call.input) ? call.input : {};
 	const output = resultText(call.result);
-	const base = { title: call.name, compact: false, defaultOpen: false };
+	const base = { title: call.name, compact: false };
+	const short = (text: string) => shortenPaths(text, ctx.root);
 
 	switch (call.name) {
 		case "Bash": {
-			const command = str(input.command);
+			const command = short(str(input.command));
 			const exit = /^Exit code (\d+)/.exec(output);
 			const failed = call.result?.isError === true;
-			const status: ToolStatus = !call.result
-				? { tone: "running" }
-				: failed
-					? { tone: "error", text: exit ? `exit ${exit[1]}` : "error" }
-					: { tone: "ok", text: "done" };
+			const status: ToolStatus =
+				input.run_in_background === true
+					? backgroundStatus(call, ctx.task)
+					: !call.result
+						? { tone: "running" }
+						: failed
+							? { tone: "error", text: exit ? `exit ${exit[1]}` : "error" }
+							: { tone: "ok", text: "done" };
 			return {
 				...base,
 				family: "bash",
@@ -116,7 +270,6 @@ export function describeTool(call: ToolCallItem, subagentTools = 0): ToolView {
 					output: exit ? output.slice(exit[0].length).replace(/^\n/, "") : output,
 					failed,
 				},
-				defaultOpen: failed,
 			};
 		}
 		case "Edit":
@@ -130,10 +283,9 @@ export function describeTool(call: ToolCallItem, subagentTools = 0): ToolView {
 			return {
 				...base,
 				family: "edit",
-				arg: str(input.file_path),
+				arg: short(str(input.file_path)),
 				status,
 				body: { kind: "diff", lines, hidden: 0 },
-				defaultOpen: true,
 			};
 		}
 		case "Write": {
@@ -142,20 +294,26 @@ export function describeTool(call: ToolCallItem, subagentTools = 0): ToolView {
 			const status: ToolStatus = call.result?.isError
 				? { tone: "error", text: "error" }
 				: { tone: "diff", added: lineCount(input.content), removed: 0, newFile: true };
-			return { ...base, family: "write", arg: str(input.file_path), status, body: { kind: "diff", lines, hidden } };
+			return {
+				...base,
+				family: "write",
+				arg: short(str(input.file_path)),
+				status,
+				body: { kind: "diff", lines, hidden },
+			};
 		}
 		case "Read":
 			return {
 				...base,
 				family: "read",
-				arg: str(input.file_path),
+				arg: short(str(input.file_path)),
 				status: outcome(call, () => plural(lineCount(output), "line")),
 				body: { kind: "output", text: output },
 				compact: true,
 			};
 		case "Grep": {
 			const pattern = str(input.pattern);
-			const where = str(input.path) || str(input.glob);
+			const where = short(str(input.path) || str(input.glob));
 			const found = /^Found \d+ (?:files?|match(?:es)?|lines?)/.exec(output);
 			return {
 				...base,
@@ -170,7 +328,7 @@ export function describeTool(call: ToolCallItem, subagentTools = 0): ToolView {
 			return {
 				...base,
 				family: "search",
-				arg: str(input.path) ? `${str(input.pattern)} in ${str(input.path)}` : str(input.pattern),
+				arg: str(input.path) ? `${str(input.pattern)} in ${short(str(input.path))}` : str(input.pattern),
 				status: outcome(call, () => plural(lineCount(output), "file")),
 				body: { kind: "output", text: output },
 				compact: true,
@@ -184,11 +342,23 @@ export function describeTool(call: ToolCallItem, subagentTools = 0): ToolView {
 				title: "Agent",
 				family: "agent",
 				arg: description ? `${kind} · "${description}"` : kind,
-				status: outcome(call, () => `done · ${plural(subagentTools, "tool use")}`),
-				body: { kind: "output", text: output },
+				status: agentStatus(call, ctx),
+				body: { kind: "output", text: ctx.task?.summary || output },
 				compact: true,
 			};
 		}
+		case "TaskCreate":
+		case "TaskUpdate":
+		case "TodoWrite":
+			return {
+				...base,
+				title: TODO_TITLE[call.name],
+				family: "todo",
+				arg: todoArg(call, input),
+				status: outcome(call, () => "done"),
+				body: { kind: "generic", input: JSON.stringify(call.input ?? null, null, 2), output },
+				compact: true,
+			};
 		case "ExitPlanMode":
 			return {
 				...base,

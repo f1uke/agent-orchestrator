@@ -429,6 +429,7 @@ function ItemRow({
 						call={item}
 						onToggle={(open) => toggleTool(item.id, open)}
 						open={openTools[item.id]}
+						root=""
 						subagentTools={subagentTools}
 						theme={theme}
 					/>

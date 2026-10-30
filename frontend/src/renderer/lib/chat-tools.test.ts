@@ -1,0 +1,227 @@
+import { describe, expect, it } from "vitest";
+import type { TaskState } from "./chat-event";
+import type { BackgroundTask, ToolCallItem } from "./chat-fold";
+import {
+	describeTool,
+	processKind,
+	processPhrases,
+	shortenPaths,
+	summarizeTools,
+	taskLabel,
+	toolFailed,
+} from "./chat-tools";
+
+const ROOT = "/work/project";
+
+function call(
+	name: string,
+	input: unknown,
+	result?: { isError?: boolean; content?: unknown },
+	id = name,
+): ToolCallItem {
+	return {
+		kind: "tool_call",
+		id,
+		name,
+		parentToolUseId: "",
+		input,
+		result: result ? { isError: result.isError ?? false, content: result.content ?? "" } : undefined,
+	};
+}
+
+function task(state: TaskState, extra: Partial<BackgroundTask> = {}): BackgroundTask {
+	return { id: "t1", toolUseId: "tu", description: "", taskType: "local_bash", state, ...extra };
+}
+
+describe("shortenPaths", () => {
+	it.each([
+		["/work/project/src/a.go", "src/a.go"],
+		["/work/project", "."],
+		["cd /work/project && go test ./...", "cd . && go test ./..."],
+		['grep -n x "/work/project/a b.go"', 'grep -n x "a b.go"'],
+		["/work/project-two/src/a.go", "/work/project-two/src/a.go"],
+		["/other/work/project/src/a.go", "/other/work/project/src/a.go"],
+		["/work/projects", "/work/projects"],
+		["/work/project.", "/work/project."],
+	])("%s becomes %s", (text, want) => {
+		expect(shortenPaths(text, ROOT)).toBe(want);
+	});
+
+	it("tolerates a trailing slash on the root and leaves text alone without one", () => {
+		expect(shortenPaths("/work/project/x", `${ROOT}/`)).toBe("x");
+		expect(shortenPaths("/work/project/x", "")).toBe("/work/project/x");
+		expect(shortenPaths("/work/project/x", undefined)).toBe("/work/project/x");
+	});
+});
+
+describe("describeTool path shortening", () => {
+	it("shortens a Bash command in the head and the body", () => {
+		const view = describeTool(call("Bash", { command: "cd /work/project && go test ./..." }), { root: ROOT });
+		expect(view.arg).toBe("cd . && go test ./...");
+		expect(view.body).toMatchObject({ kind: "bash", command: "cd . && go test ./..." });
+	});
+
+	it.each([
+		["Read", { file_path: "/work/project/ledger/ledger.go" }, "ledger/ledger.go"],
+		["Edit", { file_path: "/work/project/a.go", old_string: "a", new_string: "b" }, "a.go"],
+		["Write", { file_path: "/work/project/new.go", content: "x" }, "new.go"],
+		["Grep", { pattern: "Transfer", path: "/work/project/ledger" }, '"Transfer" in ledger'],
+		["Glob", { pattern: "*.go", path: "/work/project" }, "*.go in ."],
+	])("shortens the %s argument", (name, input, want) => {
+		expect(describeTool(call(name, input), { root: ROOT }).arg).toBe(want);
+	});
+
+	it("keeps an absolute path when no root is given", () => {
+		expect(describeTool(call("Read", { file_path: "/work/project/a.go" })).arg).toBe("/work/project/a.go");
+	});
+});
+
+describe("describeTool background Bash", () => {
+	const bg = (result?: boolean) =>
+		call(
+			"Bash",
+			{ command: "./slow.sh", run_in_background: true },
+			result ? { content: "Command running in background" } : undefined,
+		);
+
+	it("is running while its result has not come", () => {
+		expect(describeTool(bg(false), { task: task("running") }).status).toEqual({ tone: "running" });
+	});
+
+	it.each<[TaskState, number | undefined, object]>([
+		["running", undefined, { tone: "running", text: "running in background" }],
+		["done", 0, { tone: "ok", text: "done · exit 0" }],
+		["done", undefined, { tone: "ok", text: "done" }],
+		["error", 1, { tone: "error", text: "failed · exit 1" }],
+		["stopped", undefined, { tone: "idle", text: "stopped" }],
+	])("takes its task's %s state (exit %s)", (state, exitCode, want) => {
+		expect(describeTool(bg(true), { task: task(state, { exitCode }) }).status).toEqual(want);
+	});
+
+	it("does not claim it is running without a task", () => {
+		expect(describeTool(bg(true)).status).toEqual({ tone: "ok", text: "started in background" });
+	});
+
+	it("leaves a foreground Bash reading done once it has a result", () => {
+		const view = describeTool(call("Bash", { command: "ls" }, { content: "x" }), { task: task("running") });
+		expect(view.status).toEqual({ tone: "ok", text: "done" });
+	});
+});
+
+describe("describeTool Agent with a task", () => {
+	const agent = call(
+		"Agent",
+		{ subagent_type: "Explore", description: "docs" },
+		{ content: "Async agent launched successfully." },
+	);
+
+	it("is running until its task ends, though the launch result came at once", () => {
+		expect(describeTool(agent, { task: task("running", { taskType: "local_agent" }) }).status).toEqual({
+			tone: "running",
+		});
+	});
+
+	it("is done with the task's tool count and shows the task's final text", () => {
+		const view = describeTool(agent, {
+			task: task("done", {
+				taskType: "local_agent",
+				summary: "Two files.",
+				usage: { totalTokens: 1, toolUses: 2, durationMs: 3 },
+			}),
+		});
+		expect(view.status).toEqual({ tone: "ok", text: "done · 2 tool uses" });
+		expect(view.body).toEqual({ kind: "output", text: "Two files." });
+	});
+
+	it.each<[TaskState, object]>([
+		["error", { tone: "error", text: "failed" }],
+		["stopped", { tone: "idle", text: "stopped" }],
+	])("takes %s from its task", (state, want) => {
+		expect(describeTool(agent, { task: task(state, { taskType: "local_agent" }) }).status).toEqual(want);
+	});
+
+	it("falls back to the result and the counted tools without a task", () => {
+		const view = describeTool(agent, { subagentTools: 3 });
+		expect(view.status).toEqual({ tone: "ok", text: "done · 3 tool uses" });
+		expect(view.body).toEqual({ kind: "output", text: "Async agent launched successfully." });
+	});
+});
+
+describe("describeTool todo tools", () => {
+	it("titles TaskCreate and TaskUpdate as todos with a short argument", () => {
+		const create = describeTool(call("TaskCreate", { subject: "Find failing tests", description: "d" }));
+		expect(create).toMatchObject({ family: "todo", title: "Add todo", arg: "Find failing tests" });
+		const update = describeTool(call("TaskUpdate", { taskId: "1", status: "completed" }));
+		expect(update).toMatchObject({ family: "todo", title: "Update todo", arg: "#1 completed" });
+	});
+
+	it("titles TodoWrite as todos with the item count", () => {
+		const view = describeTool(call("TodoWrite", { todos: [{}, {}] }));
+		expect(view).toMatchObject({ family: "todo", title: "Todos", arg: "2 items" });
+	});
+});
+
+describe("process summaries", () => {
+	const calls = [
+		call("Bash", { command: "a" }, { content: "" }, "b1"),
+		call("Bash", { command: "b" }, { isError: true, content: "" }, "b2"),
+		call("Read", { file_path: "/x/a.go" }, undefined, "r1"),
+		call("Read", { file_path: "/x/a.go" }, undefined, "r2"),
+		call("Edit", { file_path: "/x/a.go" }, undefined, "e1"),
+		call("Edit", { file_path: "/x/a.go" }, undefined, "e2"),
+		call("TaskUpdate", { taskId: "1" }, undefined, "u1"),
+		call("TaskUpdate", { taskId: "2" }, undefined, "u2"),
+		call("ToolSearch", {}, undefined, "s1"),
+	];
+
+	it("counts each kind once per command and once per file", () => {
+		const summary = summarizeTools(calls);
+		expect(summary.counts).toEqual([
+			{ kind: "commands", count: 2 },
+			{ kind: "reads", count: 1 },
+			{ kind: "edits", count: 1 },
+			{ kind: "todos", count: 2 },
+			{ kind: "tools", count: 1 },
+		]);
+		expect(summary.failed).toBe(1);
+	});
+
+	it("words the counts, with todos unnumbered", () => {
+		expect(processPhrases(summarizeTools(calls))).toEqual([
+			"ran 2 commands",
+			"read 1 file",
+			"edited 1 file",
+			"updated todos",
+			"used 1 other tool",
+		]);
+	});
+
+	it("counts a denied tool as failed", () => {
+		const denied: ToolCallItem = {
+			...call("Bash", { command: "rm" }),
+			permission: { requestId: "r", status: "denied", message: "", updatedPermissions: [] },
+		};
+		expect(toolFailed(denied)).toBe(true);
+		expect(summarizeTools([denied]).failed).toBe(1);
+	});
+
+	it.each([
+		["WebFetch", "web"],
+		["Glob", "searches"],
+		["Task", "agents"],
+		["Mystery", "tools"],
+	])("files %s under %s", (name, kind) => {
+		expect(processKind(name)).toBe(kind);
+	});
+});
+
+describe("taskLabel", () => {
+	it.each([
+		["local_bash", "Bash · background"],
+		["local_agent", "Agent"],
+		["something_new", "Task"],
+		["", "Task"],
+	])("%j reads %j", (type, want) => {
+		expect(taskLabel(type)).toBe(want);
+	});
+});
