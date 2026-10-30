@@ -548,7 +548,6 @@ function liveEntries(): ChatEntry[] {
 
 const liveTails = new Set<string>();
 
-/** Runs a command for a few seconds, then ends the turn with a background task still running. */
 function playLiveTail(id: string, session: StubSession): void {
 	if (liveTails.has(id)) return;
 	liveTails.add(id);
