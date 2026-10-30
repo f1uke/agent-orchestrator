@@ -321,11 +321,7 @@ export const MOCK_STREAMED_TEXT = STREAMED;
 
 const DELTA_INTERVAL_MS = 30;
 
-/**
- * The control_response line the daemon writes to claude for an answer body:
- * an allow without updatedInput reuses the request's own input, as the
- * session host does.
- */
+/** An allow without updatedInput reuses the request's own input, as the session host does. */
 export function encodeAnswer(body: AnswerBody, request: Pending): object {
 	const response =
 		body.behavior === "allow"
@@ -394,7 +390,6 @@ function append(id: string, session: StubSession, steps: Step[]): void {
 
 const OK: ChatResult = { ok: true };
 
-/** Plays the session host and claude for the dev:web preview: each call logs what the real pair would. */
 export const stubChatApi: ChatApi = {
 	send: async (id, text, images) => {
 		const session = await stubSession(id);
@@ -432,7 +427,10 @@ export const stubChatApi: ChatApi = {
 		if (running?.kind !== "user") return OK;
 		const next = tr.queued[0];
 		append(id, session, [
-			["in", { type: "control_request", request_id: `stub-interrupt-${tr.lastSeq}`, request: { subtype: "interrupt" } }],
+			[
+				"in",
+				{ type: "control_request", request_id: `stub-interrupt-${tr.lastSeq}`, request: { subtype: "interrupt" } },
+			],
 			[
 				"out",
 				{

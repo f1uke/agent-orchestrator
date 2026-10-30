@@ -1,10 +1,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Brain, ChevronRight, Code, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
+import { Brain, ChevronRight, Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
 import type { ChatEntry } from "../lib/chat-event";
 import { isObject } from "../lib/chat-event";
+import type { ChatApi } from "../lib/chat-api";
 import type { ChatItem, Pending, UserItem } from "../lib/chat-fold";
 import { type ChatRow, chatRows } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
@@ -12,7 +14,8 @@ import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
 import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
-import { PendingRequestCard, ResolvedLine, ToolCard } from "./ChatToolCard";
+import { ChatComposer } from "./ChatComposer";
+import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
 
@@ -24,30 +27,131 @@ type ChatPaneProps = {
 	theme: Theme;
 	daemonReady: boolean;
 	createMux?: () => ChatMux;
+	chatApi?: ChatApi;
 };
 
-export function ChatPane({ session, view, theme, daemonReady, createMux }: ChatPaneProps) {
+type RequestStates = Readonly<Record<string, RequestState>>;
+
+const TOAST_MS = 4000;
+
+function useToast(): [string | null, (message: string) => void] {
+	const [toast, setToast] = useState<string | null>(null);
+	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(
+		() => () => {
+			if (timer.current) clearTimeout(timer.current);
+		},
+		[],
+	);
+	const show = useCallback((message: string) => {
+		setToast(message);
+		if (timer.current) clearTimeout(timer.current);
+		timer.current = setTimeout(() => setToast(null), TOAST_MS);
+	}, []);
+	return [toast, show];
+}
+
+export function ChatPane({ session, view, theme, daemonReady, createMux, chatApi }: ChatPaneProps) {
 	const chat = useChatSession(session.id, {
 		daemonReady,
 		sessionLive: session.status !== "terminated",
 		createMux,
 	});
-	const rows = useMemo(() => chatRows(chat.transcript, chat.overlay), [chat.transcript, chat.overlay]);
+	const actions = useChatActions(session.id, chat.connection, chatApi);
+	const [requests, setRequests] = useState<RequestStates>({});
+	const [toast, showToast] = useToast();
+	const { transcript } = chat;
+
+	const queuedIds = useMemo(() => new Set(transcript.queued.filter((uuid) => uuid !== "")), [transcript.queued]);
+	const queued = useMemo(
+		() => transcript.items.filter((i): i is UserItem => i.kind === "user" && queuedIds.has(i.uuid)),
+		[transcript.items, queuedIds],
+	);
+	const rows = useMemo(() => chatRows(transcript, chat.overlay, queuedIds), [transcript, chat.overlay, queuedIds]);
+
+	useEffect(() => {
+		const open = new Set(transcript.pending.map((p) => p.requestId));
+		setRequests((prev) => {
+			const kept = Object.entries(prev).filter(([id]) => open.has(id));
+			return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
+		});
+	}, [transcript.pending]);
+
+	const { answer: sendAnswer, setMode } = actions;
+	const onAnswer = useCallback<AnswerHandler>(
+		(body, then) => {
+			const id = body.requestId;
+			setRequests((prev) => ({ ...prev, [id]: { phase: "sending" } }));
+			void sendAnswer(body).then(async (result) => {
+				if (!result.ok) {
+					setRequests((prev) => {
+						const { [id]: _, ...rest } = prev;
+						return result.error.kind === "host_not_running"
+							? rest
+							: { ...rest, [id]: { phase: "failed", message: result.error.message } };
+					});
+					return;
+				}
+				if (!then) return;
+				const moded = await setMode(then);
+				if (!moded.ok && moded.error.kind !== "host_not_running") showToast(moded.error.message);
+			});
+		},
+		[sendAnswer, setMode, showToast],
+	);
+
+	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		if (e.key !== "Escape" || e.defaultPrevented || !transcript.busy || actions.hostDown) return;
+		const target = e.target as Element;
+		if (!e.currentTarget.contains(target) || target.closest("[data-pending]")) return;
+		e.preventDefault();
+		void actions.interrupt().then((result) => {
+			if (!result.ok && result.error.kind !== "host_not_running") showToast(result.error.message);
+		});
+	};
+
 	return (
-		<div className="chat-pane" data-testid="chat-pane">
+		<div className="chat-pane" data-testid="chat-pane" onKeyDown={onKeyDown}>
 			{view === "events" ? (
 				<ChatEvents entries={chat.entries} />
 			) : (
-				<ChatStream rows={rows} pending={chat.transcript.pending} theme={theme} />
+				<ChatStream
+					disabled={actions.hostDown}
+					onAnswer={onAnswer}
+					pending={transcript.pending}
+					requests={requests}
+					rows={rows}
+					theme={theme}
+				/>
 			)}
-			<footer className="chat-footer">
-				<span>
-					Read-only view. Send with <code>ao send</code> for now.
-				</span>
-				<span className="chat-footer__grow" />
-				<ConnectionLabel connection={chat.connection} error={chat.error} />
-				{chat.transcript.costUsd > 0 ? <span>{formatCost(chat.transcript.costUsd)} this session</span> : null}
-			</footer>
+			<div className="chat-bottom">
+				{actions.hostDown ? (
+					<div className="chat-banner" role="alert">
+						<CloudOff className="chat-icon" aria-hidden="true" />
+						Session is asleep or restarting. Sending and answering resume once it is back.
+					</div>
+				) : null}
+				{view === "chat" ? (
+					<ChatComposer
+						actions={actions}
+						busy={transcript.busy}
+						onToast={showToast}
+						permissionMode={transcript.permissionMode}
+						queued={queued}
+					/>
+				) : null}
+				<div className="chat-statusline">
+					<ConnectionLabel connection={chat.connection} error={chat.error} />
+					{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+					<span className="chat-statusline__grow" />
+					{view === "chat" ? <span>Enter sends · Shift+Enter newline · Esc interrupts</span> : null}
+				</div>
+			</div>
+			{toast ? (
+				<div className="chat-toast" role="status">
+					{toast}
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -94,9 +198,9 @@ function ConnectionLabel({ connection, error }: { connection: ChatConnection; er
 		<span data-connection={connection} title={error}>
 			<span
 				className={cn(
-					"chat-footer__dot",
-					connection === "live" && "chat-footer__dot--live",
-					connection === "error" && "chat-footer__dot--error",
+					"chat-statusline__dot",
+					connection === "live" && "chat-statusline__dot--live",
+					connection === "error" && "chat-statusline__dot--error",
 				)}
 			/>
 			{connection === "error" && error ? `Stream error: ${error}` : CONNECTION_LABEL[connection]}
@@ -110,12 +214,22 @@ export function formatCost(usd: number): string {
 
 const STICK_TO_BOTTOM_PX = 48;
 
-function ChatStream({ rows, pending, theme }: { rows: ChatRow[]; pending: Pending[]; theme: Theme }) {
+type StreamProps = {
+	rows: ChatRow[];
+	pending: Pending[];
+	theme: Theme;
+	requests: RequestStates;
+	disabled: boolean;
+	onAnswer: AnswerHandler;
+};
+
+function ChatStream({ rows, pending, theme, requests, disabled, onAnswer }: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const atBottomRef = useRef(true);
 	const [openTools, setOpenTools] = useState<Readonly<Record<string, boolean>>>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
 	const sessionNames = useSessionNames();
+	const answers = useMemo(() => ({ requests, disabled, onAnswer }), [requests, disabled, onAnswer]);
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
@@ -163,6 +277,7 @@ function ChatStream({ rows, pending, theme }: { rows: ChatRow[]; pending: Pendin
 							style={{ transform: `translateY(${v.start}px)` }}
 						>
 							<ChatRowView
+								answers={answers}
 								openTools={openTools}
 								pendingByRequest={pendingByRequest}
 								row={row}
@@ -178,8 +293,11 @@ function ChatStream({ rows, pending, theme }: { rows: ChatRow[]; pending: Pendin
 	);
 }
 
+type CardAnswers = { requests: RequestStates; disabled: boolean; onAnswer: AnswerHandler };
+
 type RowProps = {
 	row: ChatRow;
+	answers: CardAnswers;
 	theme: Theme;
 	openTools: Readonly<Record<string, boolean>>;
 	toggleTool: (id: string, open: boolean) => void;
@@ -187,8 +305,22 @@ type RowProps = {
 	sessionNames: ReadonlyMap<string, string>;
 };
 
+function RequestCard({ request, theme, answers }: { request: Pending; theme: Theme; answers: CardAnswers }) {
+	return (
+		<PendingRequestCard
+			disabled={answers.disabled}
+			key={request.requestId}
+			onAnswer={answers.onAnswer}
+			request={request}
+			state={answers.requests[request.requestId]}
+			theme={theme}
+		/>
+	);
+}
+
 const ChatRowView = memo(function ChatRowView({
 	row,
+	answers,
 	theme,
 	openTools,
 	toggleTool,
@@ -197,7 +329,7 @@ const ChatRowView = memo(function ChatRowView({
 }: RowProps) {
 	switch (row.kind) {
 		case "pending":
-			return <PendingRequestCard request={row.pending} theme={theme} />;
+			return <RequestCard answers={answers} request={row.pending} theme={theme} />;
 		case "streaming":
 			return row.block.kind === "thinking" ? (
 				<ThinkingRow streaming text={row.block.text} />
@@ -210,6 +342,7 @@ const ChatRowView = memo(function ChatRowView({
 		case "item":
 			return (
 				<ItemRow
+					answers={answers}
 					item={row.item}
 					openTools={openTools}
 					pendingByRequest={pendingByRequest}
@@ -223,6 +356,7 @@ const ChatRowView = memo(function ChatRowView({
 });
 
 function ItemRow({
+	answers,
 	item,
 	subagentTools,
 	theme,
@@ -250,7 +384,7 @@ function ItemRow({
 			const permission = item.permission;
 			if (permission?.status === "pending") {
 				const request = pendingByRequest.get(permission.requestId);
-				if (request) return <PendingRequestCard request={request} theme={theme} />;
+				if (request) return <RequestCard answers={answers} request={request} theme={theme} />;
 			}
 			if (item.name === "AskUserQuestion" && permission) return <ResolvedLine call={item} />;
 			return (

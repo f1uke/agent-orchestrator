@@ -139,6 +139,15 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   a dashed one-line outcome. Chat | Terminal | Events is a segmented control in
   the shell topbar, shown only for chat sessions. No new tokens: every tint is a
   `color-mix` of an existing one.
+  Interactive (2026-10-30, `ChatComposer.tsx`): the composer is a 12px-radius
+  `--bg-1` box under the column (accent-tinted border on focus) with image
+  thumbnails above the text, and a row of mode picker (ghost), Stop (`--bg-3`,
+  shown only while busy) and a 32px `--accent` send square; input sent but not
+  started sits above it as dashed "Queued" rows. Request cards answer in place:
+  primary / outline / red-outline buttons with mono key hints, "Sending…" in the
+  bar until the log settles the request, the host's refusal in `--red` under the
+  actions, and an amber `--amber` banner while the session host is down. Same
+  tokens, no new ones.
   No decision is final (2026-10-04): a snoozed proposal keeps the whole decide
   bar plus Unsnooze; a rejected one has Reopen; an approved one has Edit
   (the file as it is now, same gates) and Undo; a settled conflict has Undo.

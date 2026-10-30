@@ -2,8 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Pending, PermissionOutcome, ToolCallItem } from "../lib/chat-fold";
-import { PendingRequestCard, READ_ONLY_HINT, ResolvedLine, ToolCard } from "./ChatToolCard";
-import { TooltipProvider } from "./ui/tooltip";
+import { PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 
 const call = (name: string, input: unknown, result?: ToolCallItem["result"], permission?: PermissionOutcome) =>
 	({ kind: "tool_call", id: `t-${name}`, name, parentToolUseId: "", input, result, permission }) satisfies ToolCallItem;
@@ -134,74 +133,256 @@ describe("ResolvedLine", () => {
 	});
 });
 
-const pending = (kind: Pending["kind"], toolName: string, input: unknown, suggestions: unknown[] = []): Pending => ({
+const pending = (
+	kind: Pending["kind"],
+	toolName: string,
+	input: unknown,
+	suggestions: unknown[] = [],
+	defaultToNo = false,
+): Pending => ({
 	requestId: "r1",
 	toolName,
 	toolUseId: "t1",
 	kind,
 	input,
 	suggestions,
-	defaultToNo: false,
+	defaultToNo,
 });
 
-function renderPending(request: Pending) {
-	render(
-		<TooltipProvider delayDuration={0}>
-			<PendingRequestCard request={request} theme="dark" />
-		</TooltipProvider>,
+const GO_TEST_RULE = {
+	type: "addRules",
+	rules: [{ toolName: "Bash", ruleContent: "go test:*" }],
+	behavior: "allow",
+	destination: "localSettings",
+};
+
+function renderPending(
+	request: Pending,
+	{ state, disabled = false }: { state?: RequestState; disabled?: boolean } = {},
+) {
+	const onAnswer = vi.fn();
+	const utils = render(
+		<PendingRequestCard disabled={disabled} onAnswer={onAnswer} request={request} state={state} theme="dark" />,
 	);
+	return { ...utils, onAnswer };
 }
 
-describe("PendingRequestCard", () => {
-	it("shows a permission waiting for an answer, with every answer button disabled and explained", async () => {
-		renderPending(
-			pending("permission", "Bash", { command: "go test -race ./...", description: "Run the suite" }, [
-				{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "go test:*" }] },
-			]),
-		);
+const bash = (suggestions: unknown[] = [GO_TEST_RULE], defaultToNo = false) =>
+	pending(
+		"permission",
+		"Bash",
+		{ command: "go test -race ./...", description: "Run the suite" },
+		suggestions,
+		defaultToNo,
+	);
+
+describe("PermissionCard", () => {
+	it("shows the command, why, and the rule Always allow adds", () => {
+		renderPending(bash());
 		expect(screen.getByText("Permission needed · Bash")).toBeInTheDocument();
 		expect(screen.getByText("go test -race ./...")).toBeInTheDocument();
 		expect(screen.getByText("Run the suite")).toBeInTheDocument();
-		expect(screen.getByText("Bash(go test:*)")).toBeInTheDocument();
-		for (const name of ["Allow once", "Always allow", "Deny"]) {
+		expect(screen.getByTestId("chat-always-rule")).toHaveTextContent(
+			"Always adds Bash(go test:*) to .claude/settings.local.json",
+		);
+	});
+
+	it("reads every kind of suggestion into the rule line", () => {
+		renderPending(
+			bash([
+				{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "rm hello.txt" }], destination: "localSettings" },
+				{ type: "addDirectories", directories: ["/work/project"], destination: "session" },
+				{ type: "setMode", mode: "acceptEdits", destination: "session" },
+			]),
+		);
+		expect(screen.getByTestId("chat-always-rule")).toHaveTextContent(
+			"Always adds Bash(rm hello.txt) to .claude/settings.local.json; adds the directory /work/project for this session; switches to acceptEdits mode for this session",
+		);
+	});
+
+	it("answers Allow once, Always allow and Deny with the matching bodies", async () => {
+		const { onAnswer } = renderPending(bash());
+		await userEvent.click(screen.getByRole("button", { name: /Allow once/ }));
+		await userEvent.click(screen.getByRole("button", { name: /Always allow/ }));
+		await userEvent.type(screen.getByRole("textbox", { name: "Reason for denying" }), "use -short");
+		await userEvent.click(screen.getByRole("button", { name: /Deny/ }));
+		expect(onAnswer.mock.calls).toEqual([
+			[{ requestId: "r1", behavior: "allow" }],
+			[{ requestId: "r1", behavior: "allow", updatedPermissions: [GO_TEST_RULE] }],
+			[{ requestId: "r1", behavior: "deny", message: "use -short" }],
+		]);
+	});
+
+	it("offers no Always allow when the request suggests nothing", () => {
+		renderPending(bash([]));
+		expect(screen.queryByRole("button", { name: /Always allow/ })).toBeNull();
+		expect(screen.queryByTestId("chat-always-rule")).toBeNull();
+	});
+
+	it("takes Enter, Cmd+Enter and Esc only while the card has focus", async () => {
+		const { onAnswer } = renderPending(bash());
+		await userEvent.keyboard("{Enter}{Escape}");
+		expect(onAnswer).not.toHaveBeenCalled();
+
+		const card = screen.getByRole("group", { name: "Permission needed: Bash" });
+		card.focus();
+		await userEvent.keyboard("{Enter}");
+		await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+		await userEvent.keyboard("{Escape}");
+		expect(onAnswer.mock.calls).toEqual([
+			[{ requestId: "r1", behavior: "allow" }],
+			[{ requestId: "r1", behavior: "allow", updatedPermissions: [GO_TEST_RULE] }],
+			[{ requestId: "r1", behavior: "deny", message: "" }],
+		]);
+	});
+
+	it("honours default_to_no: nothing preselects Allow and Enter does not allow", async () => {
+		const { onAnswer } = renderPending(bash([GO_TEST_RULE], true));
+		const card = screen.getByRole("group", { name: "Permission needed: Bash" });
+		expect(card).not.toContainElement(document.activeElement as HTMLElement);
+		expect(screen.getByRole("button", { name: /Allow once/ })).not.toHaveTextContent("↵");
+		card.focus();
+		await userEvent.keyboard("{Enter}");
+		await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+		expect(onAnswer).not.toHaveBeenCalled();
+		await userEvent.keyboard("{Escape}");
+		expect(onAnswer).toHaveBeenCalledWith({ requestId: "r1", behavior: "deny", message: "" });
+	});
+
+	it("never focuses Allow on its own, even without default_to_no", () => {
+		renderPending(bash());
+		expect(document.activeElement).toBe(document.body);
+	});
+
+	it("holds Sending… with every input locked while the answer is in flight", async () => {
+		const { onAnswer } = renderPending(bash(), { state: { phase: "sending" } });
+		expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+		for (const name of [/Allow once/, /Always allow/, /Deny/]) {
 			expect(screen.getByRole("button", { name })).toBeDisabled();
 		}
-		await userEvent.hover(screen.getByTestId("chat-request-actions"));
-		expect(await screen.findByRole("tooltip")).toHaveTextContent(READ_ONLY_HINT);
+		screen.getByRole("group", { name: "Permission needed: Bash" }).focus();
+		await userEvent.keyboard("{Enter}{Escape}");
+		expect(onAnswer).not.toHaveBeenCalled();
 	});
 
-	it("shows a question with its options, one question per tab, and a disabled submit", async () => {
-		renderPending(
-			pending("question", "AskUserQuestion", {
-				questions: [
-					{ question: "Which colour?", header: "Colour", options: [{ label: "Red", description: "warm" }] },
-					{
-						question: "Which snacks?",
-						header: "Snacks",
-						multiSelect: true,
-						options: [{ label: "Nuts", description: "" }],
-					},
-				],
-			}),
-		);
+	it("shows why the host refused the answer and lets it be answered again", () => {
+		renderPending(bash(), { state: { phase: "failed", message: "request r1 is not pending" } });
+		expect(screen.getByRole("alert")).toHaveTextContent("request r1 is not pending");
+		expect(screen.getByRole("button", { name: /Allow once/ })).toBeEnabled();
+	});
+
+	it("locks while the session host is down", () => {
+		renderPending(bash(), { disabled: true });
+		expect(screen.getByRole("button", { name: /Allow once/ })).toBeDisabled();
+		expect(screen.getByRole("textbox", { name: "Reason for denying" })).toBeDisabled();
+	});
+});
+
+const QUESTIONS = {
+	questions: [
+		{
+			question: "Which colour?",
+			header: "Colour",
+			options: [
+				{ label: "Red", description: "warm", preview: "#f00 swatch" },
+				{ label: "Blue", description: "cool", preview: "#00f swatch" },
+			],
+		},
+		{
+			question: "Which snacks?",
+			header: "Snacks",
+			multiSelect: true,
+			options: [
+				{ label: "Chips", description: "" },
+				{ label: "Fruit", description: "" },
+				{ label: "Nuts", description: "" },
+			],
+		},
+	],
+};
+
+describe("QuestionCard", () => {
+	it("submits one answer per question, a multi-select one joined in option order", async () => {
+		const { onAnswer } = renderPending(pending("question", "AskUserQuestion", QUESTIONS));
+		const submit = screen.getByRole("button", { name: "Submit answers" });
 		expect(screen.getByText("Claude is asking · 2 questions")).toBeInTheDocument();
-		expect(screen.getByText("Which colour?")).toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("radio", { name: /Blue/ }));
+		expect(submit).toBeDisabled();
+		expect(screen.getByRole("tab", { name: "Colour" })).toHaveClass("chat-qtab--done");
+
 		await userEvent.click(screen.getByRole("tab", { name: "Snacks" }));
 		expect(screen.getByText("Which snacks?")).toBeInTheDocument();
-		expect(screen.getByText("Nuts").closest(".chat-opt")).toHaveClass("chat-opt--multi");
-		expect(screen.getByRole("button", { name: "Submit answers" })).toBeDisabled();
-		expect(screen.getByRole("textbox", { name: "Other answer" })).toBeDisabled();
+		await userEvent.click(screen.getByRole("checkbox", { name: /Nuts/ }));
+		await userEvent.click(screen.getByRole("checkbox", { name: /Chips/ }));
+		expect(screen.getByRole("checkbox", { name: /Chips/ })).toHaveAttribute("aria-checked", "true");
+		await userEvent.click(submit);
+
+		expect(onAnswer).toHaveBeenCalledWith({
+			requestId: "r1",
+			behavior: "allow",
+			updatedInput: { ...QUESTIONS, answers: { "Which colour?": "Blue", "Which snacks?": "Chips, Nuts" } },
+		});
 	});
 
-	it("shows a plan with its markdown and disabled approvals", () => {
-		renderPending(
-			pending("plan", "ExitPlanMode", { plan: "# Retry budget\n\n1. Add Budget", planFilePath: "~/plans/p.md" }),
-		);
-		const card = screen.getByText("Plan ready for review").closest(".chat-ask") as HTMLElement;
-		expect(within(card).getByText("ExitPlanMode · ~/plans/p.md")).toBeInTheDocument();
+	it("takes the Other text as the answer and drops the picked option of a single-select question", async () => {
+		const { onAnswer } = renderPending(pending("question", "AskUserQuestion", { questions: [QUESTIONS.questions[0]] }));
+		await userEvent.click(screen.getByRole("radio", { name: /Red/ }));
+		await userEvent.type(screen.getByRole("textbox", { name: "Other answer" }), "Teal");
+		expect(screen.getByRole("radio", { name: /Red/ })).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+		expect(onAnswer.mock.calls[0][0].updatedInput.answers).toEqual({ "Which colour?": "Teal" });
+	});
+
+	it("shows the preview of the option picked, beside the options", async () => {
+		renderPending(pending("question", "AskUserQuestion", QUESTIONS));
+		const preview = screen.getByTestId("chat-option-preview");
+		expect(preview).toHaveTextContent("#f00 swatch");
+		await userEvent.click(screen.getByRole("radio", { name: /Blue/ }));
+		await userEvent.unhover(screen.getByRole("radio", { name: /Blue/ }));
+		expect(preview).toHaveTextContent("Preview · Blue#00f swatch");
+		await userEvent.click(screen.getByRole("tab", { name: "Snacks" }));
+		expect(screen.queryByTestId("chat-option-preview")).toBeNull();
+	});
+
+	it("Reply in chat instead declines with the fixed message", async () => {
+		const { onAnswer } = renderPending(pending("question", "AskUserQuestion", QUESTIONS));
+		await userEvent.click(screen.getByRole("button", { name: "Reply in chat instead" }));
+		expect(onAnswer).toHaveBeenCalledWith({
+			requestId: "r1",
+			behavior: "deny",
+			message: "The user will answer in chat.",
+		});
+	});
+});
+
+describe("PlanCard", () => {
+	const plan = () =>
+		pending("plan", "ExitPlanMode", { plan: "# Retry budget\n\n1. Add Budget", planFilePath: "~/p.md" });
+
+	it("shows the plan's markdown and where it lives", () => {
+		renderPending(plan());
+		const card = screen.getByRole("group", { name: "Plan ready for review" });
+		expect(within(card).getByText("ExitPlanMode · ~/p.md")).toBeInTheDocument();
 		expect(within(card).getByText("Retry budget")).toBeInTheDocument();
-		for (const name of ["Approve · auto-accept edits", "Approve · ask before edits", "Keep planning…"]) {
-			expect(within(card).getByRole("button", { name })).toBeDisabled();
-		}
+	});
+
+	it.each([
+		["Approve · auto-accept edits", "acceptEdits"],
+		["Approve · ask before edits", "default"],
+	])("%s allows the plan, then asks for %s mode", async (name, mode) => {
+		const { onAnswer } = renderPending(plan());
+		await userEvent.click(screen.getByRole("button", { name }));
+		expect(onAnswer).toHaveBeenCalledWith({ requestId: "r1", behavior: "allow" }, mode);
+	});
+
+	it("Keep planning… sends the feedback as a deny, and only once there is some", async () => {
+		const { onAnswer } = renderPending(plan());
+		await userEvent.click(screen.getByRole("button", { name: "Keep planning…" }));
+		const send = screen.getByRole("button", { name: "Send feedback" });
+		expect(send).toBeDisabled();
+		await userEvent.type(screen.getByRole("textbox", { name: "Plan feedback" }), "Name it goodbye.txt");
+		await userEvent.click(send);
+		expect(onAnswer).toHaveBeenCalledWith({ requestId: "r1", behavior: "deny", message: "Name it goodbye.txt" });
 	});
 });

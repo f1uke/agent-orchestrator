@@ -6,7 +6,11 @@ export type ChatRow =
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean };
 
-export function chatRows(transcript: Transcript, overlay: StreamOverlay): ChatRow[] {
+export function chatRows(
+	transcript: Transcript,
+	overlay: StreamOverlay,
+	queued: ReadonlySet<string> = new Set(),
+): ChatRow[] {
 	const subagentTools = new Map<string, number>();
 	const toolIds = new Set<string>();
 	for (const item of transcript.items) {
@@ -21,6 +25,7 @@ export function chatRows(transcript: Transcript, overlay: StreamOverlay): ChatRo
 	transcript.items.forEach((item, index) => {
 		if (item.kind === "tool_call" && item.parentToolUseId !== "") return;
 		if (item.kind === "assistant_text" && item.text.trim() === "") return;
+		if (item.kind === "user" && queued.has(item.uuid)) return;
 		const count = item.kind === "tool_call" ? (subagentTools.get(item.id) ?? 0) : 0;
 		rows.push({ key: `i${index}`, kind: "item", item, subagentTools: count });
 	});
