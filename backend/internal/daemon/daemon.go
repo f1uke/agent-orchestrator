@@ -756,6 +756,7 @@ func Run() error {
 		queueRec.Tick()
 		return messageQueue.Drain(ctx)
 	}, log)
+	chatWatchDone := startChatWatch(ctx, store, cfg.DataDir, lcStack.LCM, activityHub, loopReg, log)
 
 	restartRec := loopReg.Register(looptelemetry.Spec{
 		Name:        "claude-profile-restart",
@@ -867,6 +868,7 @@ func Run() error {
 	<-idleSweepDone
 	<-scriptsRefreshDone
 	<-queueSweepDone
+	<-chatWatchDone
 	<-restartPendingDone
 	<-simOwnerSyncDone
 	<-simCloneSweepDone

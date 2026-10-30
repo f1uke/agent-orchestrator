@@ -308,6 +308,41 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 	return items, nil
 }
 
+const listLiveSessionActivityByTransport = `-- name: ListLiveSessionActivityByTransport :many
+SELECT id, activity_state FROM sessions
+WHERE transport = ? AND is_terminated = 0 AND is_suspended = 0
+`
+
+type ListLiveSessionActivityByTransportRow struct {
+	ID            domain.SessionID
+	ActivityState domain.ActivityState
+}
+
+// The sessions a transport drives that are neither terminated nor suspended,
+// with their activity state.
+func (q *Queries) ListLiveSessionActivityByTransport(ctx context.Context, transport domain.Transport) ([]ListLiveSessionActivityByTransportRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveSessionActivityByTransport, transport)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLiveSessionActivityByTransportRow{}
+	for rows.Next() {
+		var i ListLiveSessionActivityByTransportRow
+		if err := rows.Scan(&i.ID, &i.ActivityState); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,

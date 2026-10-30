@@ -66,6 +66,12 @@ WHERE runtime_handle_id = ? AND is_terminated = 0
 ORDER BY updated_at DESC
 LIMIT 1;
 
+-- name: ListLiveSessionActivityByTransport :many
+-- The sessions a transport drives that are neither terminated nor suspended,
+-- with their activity state.
+SELECT id, activity_state FROM sessions
+WHERE transport = ? AND is_terminated = 0 AND is_suspended = 0;
+
 -- name: RenameSession :execrows
 UPDATE sessions SET display_name = ?, updated_at = ? WHERE id = ?;
 

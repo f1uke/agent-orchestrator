@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"maps"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -73,5 +74,35 @@ func TestLiveSessionTransportByRuntimeHandle(t *testing.T) {
 	}
 	if _, _, ok, _ := s.LiveSessionTransportByRuntimeHandle(ctx, "review-mer-1"); ok {
 		t.Fatal("an unknown handle resolved to a session")
+	}
+}
+
+func TestLiveChatSessions(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+	create := func(transport domain.Transport, state domain.ActivityState, terminated, suspended bool) domain.SessionID {
+		t.Helper()
+		r := sampleRecord("mer")
+		r.Transport, r.Activity.State, r.IsTerminated, r.IsSuspended = transport, state, terminated, suspended
+		rec, err := s.CreateSession(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec.ID
+	}
+	waiting := create(domain.TransportChat, domain.ActivityWaitingInput, false, false)
+	idle := create(domain.TransportChat, domain.ActivityIdle, false, false)
+	create(domain.TransportChat, domain.ActivityIdle, true, false)
+	create(domain.TransportChat, domain.ActivityIdle, false, true)
+	create(domain.TransportTerminal, domain.ActivityIdle, false, false)
+
+	live, err := s.LiveChatSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[domain.SessionID]domain.ActivityState{waiting: domain.ActivityWaitingInput, idle: domain.ActivityIdle}
+	if !maps.Equal(live, want) {
+		t.Fatalf("LiveChatSessions = %v, want %v", live, want)
 	}
 }

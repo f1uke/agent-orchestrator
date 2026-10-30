@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
@@ -1411,7 +1412,7 @@ func (c *SessionsController) activity(w http.ResponseWriter, r *http.Request) {
 	if in.End != nil && state == domain.ActivityExited {
 		signal.End = &ports.SessionEnd{Reason: in.End.Reason}
 	}
-	if err := c.Activity.ApplyActivitySignal(r.Context(), sessionID(r), signal); err != nil {
+	if err := activity.Signal(r.Context(), c.Activity, c.Feed, sessionID(r), signal, in.Detail); err != nil {
 		if errors.Is(err, ports.ErrSessionNotFound) {
 			envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SESSION_NOT_FOUND", "Unknown session", nil)
 			return
@@ -1419,9 +1420,6 @@ func (c *SessionsController) activity(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	// Publish only AFTER the signal is accepted: the feed reports facts, and a
-	// rejected signal is not one. Publishing is lossy and never fails a request.
-	c.publishActivity(r.Context(), activityEventFromSignal(sessionID(r), state, in.Detail))
 	envelope.WriteJSON(w, http.StatusOK, SetActivityResponse{OK: true, SessionID: sessionID(r), State: in.State})
 }
 

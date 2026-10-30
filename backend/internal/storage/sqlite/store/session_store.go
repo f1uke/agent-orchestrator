@@ -450,6 +450,20 @@ func (s *Store) LiveSessionTransportByRuntimeHandle(ctx context.Context, handleI
 	return row.ID, row.Transport, true, nil
 }
 
+// LiveChatSessions returns the activity state of every chat session that is
+// neither terminated nor suspended, keyed by session id.
+func (s *Store) LiveChatSessions(ctx context.Context) (map[domain.SessionID]domain.ActivityState, error) {
+	rows, err := s.qr.ListLiveSessionActivityByTransport(ctx, domain.TransportChat)
+	if err != nil {
+		return nil, fmt.Errorf("list live chat sessions: %w", err)
+	}
+	live := make(map[domain.SessionID]domain.ActivityState, len(rows))
+	for _, r := range rows {
+		live[r.ID] = r.ActivityState
+	}
+	return live, nil
+}
+
 // ListSessions returns every session in a project, ordered by num.
 func (s *Store) ListSessions(ctx context.Context, project domain.ProjectID) ([]domain.SessionRecord, error) {
 	rows, err := s.qr.ListSessionsByProject(ctx, project)
