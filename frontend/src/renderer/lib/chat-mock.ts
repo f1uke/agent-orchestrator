@@ -401,14 +401,18 @@ export function mockChatEntries(fixture: readonly ChatEntry[]): ChatEntry[] {
 	return [...replay, ...scripted];
 }
 
-export function mockChatDeltas(): unknown[] {
+function textDeltas(messageId: string, text: string): unknown[] {
 	const event = (e: object) => ({ type: "stream_event", session_id: SESSION, parent_tool_use_id: null, event: e });
-	const words = STREAMED.match(/\S+\s*/g) ?? [];
+	const words = text.match(/\S+\s*/g) ?? [];
 	return [
-		event({ type: "message_start", message: { id: "msg_m22" } }),
+		event({ type: "message_start", message: { id: messageId } }),
 		event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
 		...words.map((w) => event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: w } })),
 	];
+}
+
+export function mockChatDeltas(): unknown[] {
+	return textDeltas("msg_m22", STREAMED);
 }
 
 export const MOCK_STREAMED_TEXT = STREAMED;
@@ -453,6 +457,87 @@ type StubSession = { log: ChatEntry[]; folder: ChatFolder; sent: number };
 /** The preview session that replays long_session.jsonl, a real recording with many tool calls. */
 export const MOCK_LONG_CHAT_SESSION = "demo-chat-long";
 
+/**
+ * The preview session with many finished turns, each ending in a reply far
+ * taller than a row's estimate, that keeps streaming new turns once it is open.
+ * Its log arrives over many frames, as a real session's replay does.
+ */
+export const MOCK_TALL_CHAT_SESSION = "demo-chat-tall";
+
+const TALL_TURNS = 40;
+const TALL_LIVE_TURNS = 3;
+const TALL_LIVE_PAUSE_MS = 600;
+
+const tallReply = (turn: number, paragraphs: number) =>
+	Array.from(
+		{ length: paragraphs },
+		(_, p) =>
+			`Paragraph ${p + 1} of reply ${turn}. The retry budget caps the backoff at thirty seconds, and the sender logs each parked event once with its delivery id so the operator can replay it from the dead-letter table without guessing.`,
+	).join("\n\n");
+
+function tallTurn(turn: number): { open: Step[]; reply: Step; close: Step[] } {
+	const uuid = `tall-${turn}`;
+	const calls = [0, 1, 2].flatMap((k): Step[] => {
+		const id = `t-tall-${turn}-${k}`;
+		return [
+			tool(id, `msg_t${turn}_${k}`, "Bash", { command: `go test ./internal/step${turn}/... -run Case${k}` }),
+			result(id, `ok  \tbilling/internal/step${turn}\t0.0${k}s`),
+		];
+	});
+	return {
+		open: [
+			sent(uuid, `Step ${turn}: run the checks for this package and summarise.`),
+			lifecycle(uuid, "started"),
+			...calls,
+		],
+		reply: say(`msg_t${turn}_r`, tallReply(turn, 8)),
+		close: [
+			["out", { type: "result", subtype: "success", is_error: false, num_turns: 4, total_cost_usd: 0.01 * turn }],
+			lifecycle(uuid, "completed"),
+		],
+	};
+}
+
+function tallEntries(): ChatEntry[] {
+	const steps = Array.from({ length: TALL_TURNS }, (_, i) => tallTurn(i + 1)).flatMap((t) => [
+		...t.open,
+		t.reply,
+		...t.close,
+	]);
+	return steps.map(([dir, payload], i) => ({
+		seq: i + 1,
+		ts: new Date(START + i * 1_000).toISOString(),
+		dir,
+		payload,
+	}));
+}
+
+const tallTails = new Set<string>();
+
+/** Plays the tall session's live turns once per page: each streams its reply word by word, then settles. */
+function playTallTail(id: string, session: StubSession): void {
+	if (tallTails.has(id)) return;
+	tallTails.add(id);
+	const play = (n: number) => {
+		if (n > TALL_LIVE_TURNS) return;
+		const turn = tallTurn(TALL_TURNS + n);
+		append(id, session, turn.open);
+		const [, reply] = turn.reply as [Direction, { message: { id: string; content: Array<{ text: string }> } }];
+		const deltas = textDeltas(reply.message.id, reply.message.content[0].text);
+		deltas.forEach((delta, i) =>
+			setTimeout(() => stubListeners.get(id)?.forEach((l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS),
+		);
+		setTimeout(
+			() => {
+				append(id, session, [turn.reply, ...turn.close]);
+				setTimeout(() => play(n + 1), TALL_LIVE_PAUSE_MS);
+			},
+			(deltas.length + 1) * DELTA_INTERVAL_MS,
+		);
+	};
+	setTimeout(() => play(1), TALL_LIVE_PAUSE_MS);
+}
+
 const stubSessions = new Map<string, Promise<StubSession>>();
 const stubListeners = new Map<string, Set<ChatMuxListeners>>();
 
@@ -468,7 +553,7 @@ function stubSession(id: string): Promise<StubSession> {
 				.split("\n")
 				.filter((line) => line.trim() !== "")
 				.map((line) => JSON.parse(line) as ChatEntry);
-			const log = long ? fixture : mockChatEntries(fixture);
+			const log = id === MOCK_TALL_CHAT_SESSION ? tallEntries() : long ? fixture : mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -576,6 +661,11 @@ export const stubChatApi: ChatApi = {
 	},
 };
 
+// The daemon replays a session's log over its websocket, so a long log lands
+// across many frames, with live entries arriving once the replay catches up.
+const REPLAY_CHUNK = 20;
+const REPLAY_TICK_MS = 16;
+
 export function createStubChatMux(): ChatMux {
 	const connection = new Set<(state: MuxConnectionState) => void>();
 	const mine = new Map<string, Set<ChatMuxListeners>>();
@@ -583,27 +673,43 @@ export function createStubChatMux(): ChatMux {
 	let disposed = false;
 
 	const each = (id: string, fn: (l: ChatMuxListeners) => void) => mine.get(id)?.forEach(fn);
+	const later = (fn: () => void, ms: number) => timers.push(setTimeout(fn, ms));
+
+	const goLive = (id: string, session: StubSession) => {
+		const live = stubListeners.get(id) ?? new Set<ChatMuxListeners>();
+		mine.get(id)?.forEach((l) => live.add(l));
+		stubListeners.set(id, live);
+		each(id, (l) => l.live());
+		connection.forEach((l) => l("open"));
+		if (id === MOCK_TALL_CHAT_SESSION) playTallTail(id, session);
+		else if (session.folder.transcript().busy) {
+			mockChatDeltas().forEach((delta, i) => later(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));
+		}
+	};
 
 	return {
 		open: (id, fromSeq) => {
 			void stubSession(id).then((session) => {
-				if (disposed) return;
-				for (const entry of session.log) if (entry.seq > fromSeq) each(id, (l) => l.entry(entry));
-				each(id, (l) => l.live());
-				connection.forEach((l) => l("open"));
-				if (!session.folder.transcript().busy) return;
-				mockChatDeltas().forEach((delta, i) => {
-					timers.push(setTimeout(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));
-				});
+				let next = session.log.findIndex((entry) => entry.seq > fromSeq);
+				if (next < 0) next = session.log.length;
+				const replay = () => {
+					if (disposed) return;
+					const end = Math.min(next + REPLAY_CHUNK, session.log.length);
+					for (; next < end; next++) {
+						const entry = session.log[next];
+						each(id, (l) => l.entry(entry));
+					}
+					if (next < session.log.length) later(replay, REPLAY_TICK_MS);
+					else goLive(id, session);
+				};
+				replay();
 			});
 		},
 		close: () => undefined,
 		listen: (id, listeners) => {
-			for (const map of [mine, stubListeners]) {
-				const set = map.get(id) ?? new Set<ChatMuxListeners>();
-				set.add(listeners);
-				map.set(id, set);
-			}
+			const set = mine.get(id) ?? new Set<ChatMuxListeners>();
+			set.add(listeners);
+			mine.set(id, set);
 			return () => {
 				mine.get(id)?.delete(listeners);
 				stubListeners.get(id)?.delete(listeners);

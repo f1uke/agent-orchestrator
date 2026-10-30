@@ -138,7 +138,7 @@ export function ChatPane({
 	};
 
 	return (
-		<div className="chat-pane" data-testid="chat-pane" onKeyDown={onKeyDown}>
+		<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
 			{view === "events" ? (
 				<ChatEvents entries={chat.entries} />
 			) : (
@@ -326,6 +326,7 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 						<div
 							className="chat-row"
 							data-index={v.index}
+							data-key={v.key}
 							data-row={row.kind === "item" ? row.item.kind : row.kind}
 							key={v.key}
 							ref={virtualizer.measureElement}
