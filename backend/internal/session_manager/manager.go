@@ -780,7 +780,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
-	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, withPreloadedSkill(ctx, agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole, prompt))
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, cfg.Transport, id, withPreloadedSkill(ctx, agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole, prompt))
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
@@ -808,6 +808,12 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 	// tmux happily creates a session+pane around a missing command, so an
 	// unresolved binary would leak through as a "live" session that never ran.
 	if err := m.validateAgentBinary(argv); err != nil {
+		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
+		disposeSeed()
+		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
+	}
+	argv, stdinFile, err = m.wrapForTransport(cfg.Transport, id, argv, stdinFile)
+	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
@@ -2094,6 +2100,10 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
 	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec, ws.Path, systemPrompt, systemPromptFile, settingsFile, agentConfig)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
+	}
+	argv, stdinFile, err = m.wrapForTransport(rec.Transport, rec.ID, argv, stdinFile)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
@@ -4247,20 +4257,22 @@ func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, rec domain
 		WorkspacePath: workspacePath,
 		Metadata:      map[string]string{ports.MetadataKeyAgentSessionID: meta.AgentSessionID},
 	}
-	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, SettingsFile: settingsFile, Config: agentConfig, Permissions: agentConfig.Permissions})
-	if err != nil {
-		return nil, "", fmt.Errorf("restore command: %w", err)
+	if rec.Transport != domain.TransportChat {
+		cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, SettingsFile: settingsFile, Config: agentConfig, Permissions: agentConfig.Permissions})
+		if err != nil {
+			return nil, "", fmt.Errorf("restore command: %w", err)
+		}
+		if ok {
+			return cmd, "", nil
+		}
+		// Adapter cannot resume. A saved prompt is replayed fresh. An orchestrator is
+		// promptless by design and relaunches with the system prompt only. A promptless
+		// WORKER has no task and no session id to restore from: do not blank-relaunch it.
+		if meta.Prompt == "" && kind != domain.KindOrchestrator {
+			return nil, "", ErrNotResumable
+		}
 	}
-	if ok {
-		return cmd, "", nil
-	}
-	// Adapter cannot resume. A saved prompt is replayed fresh. An orchestrator is
-	// promptless by design and relaunches with the system prompt only. A promptless
-	// WORKER has no task and no session id to restore from: do not blank-relaunch it.
-	if meta.Prompt == "" && kind != domain.KindOrchestrator {
-		return nil, "", ErrNotResumable
-	}
-	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, withPreloadedSkill(ctx, agent, kind, rec.TaskSize, rec.CrewRole, meta.Prompt))
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, rec.Transport, id, withPreloadedSkill(ctx, agent, kind, rec.TaskSize, rec.CrewRole, meta.Prompt))
 	if err != nil {
 		return nil, "", err
 	}

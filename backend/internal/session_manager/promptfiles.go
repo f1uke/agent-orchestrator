@@ -99,19 +99,21 @@ func withPROpenGate(ctx context.Context, env map[string]string, agent ports.Agen
 // command line: argv is what `pkill -f <word>` matches, and a task brief that
 // names a command made the agent killable by anyone who pattern-kills it.
 // Otherwise the prompt stays in the command (inCommand), as it always has.
-func (m *Manager) deliverInitialPrompt(ctx context.Context, agent ports.Agent, id domain.SessionID, prompt string) (inCommand, stdinFile string, err error) {
+func (m *Manager) deliverInitialPrompt(ctx context.Context, agent ports.Agent, t domain.Transport, id domain.SessionID, prompt string) (inCommand, stdinFile string, err error) {
 	if prompt == "" || m.dataDir == "" {
 		return prompt, "", nil
 	}
-	if c, ok := m.runtime.(ports.StdinFileConnector); !ok || !c.ConnectsStdinFile() {
-		return prompt, "", nil
-	}
-	strategy, err := agent.GetPromptDeliveryStrategy(ctx, ports.LaunchConfig{SessionID: string(id), Prompt: prompt})
-	if err != nil {
-		return "", "", fmt.Errorf("prompt delivery: %w", err)
-	}
-	if strategy != ports.PromptDeliveryStdin {
-		return prompt, "", nil
+	if t != domain.TransportChat {
+		if c, ok := m.runtime.(ports.StdinFileConnector); !ok || !c.ConnectsStdinFile() {
+			return prompt, "", nil
+		}
+		strategy, err := agent.GetPromptDeliveryStrategy(ctx, ports.LaunchConfig{SessionID: string(id), Prompt: prompt})
+		if err != nil {
+			return "", "", fmt.Errorf("prompt delivery: %w", err)
+		}
+		if strategy != ports.PromptDeliveryStdin {
+			return prompt, "", nil
+		}
 	}
 	path, err := promptfile.Write(m.dataDir, id, promptfile.InitialPrompt, prompt)
 	if err != nil {
