@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { ChatEntry, Direction } from "./chat-event";
 import { foldEntries } from "./chat-fold";
+import { mockChatEntries } from "./chat-mock";
 import {
 	addedRules,
 	contextUsage,
@@ -24,7 +25,6 @@ function loadFixture(name: string): ChatEntry[] {
 
 const first = loadFixture("first_session.jsonl");
 const resumed = loadFixture("resumed_session.jsonl");
-// One AO session's log: the resumed process's entries follow the first's.
 const both = [...first, ...resumed.map((e) => ({ ...e, seq: e.seq + first.length }))];
 const SESSION = "12e38fc9-a4a5-4819-b046-4107629b2c8b";
 
@@ -92,6 +92,11 @@ describe("usage and context from the fixtures' results", () => {
 		const twoModels = { "claude-a": { contextWindow: 200_000 }, "claude-b": { contextWindow: 1_000_000 } };
 		expect(contextUsage(foldEntries([result({})]))).toEqual({ tokens: 10 });
 		expect(contextUsage(foldEntries([result(twoModels)]))).toEqual({ tokens: 10 });
+		const switched = foldEntries([
+			at("out", { type: "system", subtype: "init", session_id: "s", model: "claude-c" }),
+			result({ "claude-a": { contextWindow: 200_000 } }),
+		]);
+		expect(contextUsage(switched)).toEqual({ tokens: 10 });
 		const named = foldEntries([
 			at("out", { type: "system", subtype: "init", session_id: "s", model: "claude-a" }),
 			result(twoModels),
@@ -262,4 +267,22 @@ it("formats token counts the way the rail shows them", () => {
 		"1.9M",
 		"2M",
 	]);
+});
+
+it("gives the dev:web stub's session a todo list, running background work and a known window", () => {
+	const tr = foldEntries(mockChatEntries(first));
+	expect(latestTodos(tr)?.map((t) => t.status)).toEqual([
+		"completed",
+		"completed",
+		"completed",
+		"in_progress",
+		"pending",
+		"pending",
+	]);
+	expect(sessionActivity(tr).map((a) => [a.title, a.state, a.tools])).toEqual([
+		["Bash · background", "running", 0],
+		["Explore", "done", 3],
+	]);
+	expect(contextUsage(tr)).toEqual({ tokens: 124_000, window: 200_000 });
+	expect(usageSummary(tr)).toMatchObject({ costUsd: 1.84, outputTokens: 31_212, cacheReadTokens: 1_899_000 });
 });
