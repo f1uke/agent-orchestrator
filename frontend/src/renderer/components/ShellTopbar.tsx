@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { GitBranch, PanelRightClose, PanelRightOpen, Plus } from "lucide-react";
 import { useState } from "react";
+import { ChatViewToggle } from "./ChatPane";
 import { NotificationCenter } from "./NotificationCenter";
 import { isOrchestratorSession, type SessionActivityState, type WorkspaceSession } from "../types/workspace";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
@@ -235,6 +236,7 @@ export function ShellTopbar() {
 						New task
 					</button>
 				) : null}
+				{isSessionRoute && session ? <ChatViewToggle session={session} style={noDragStyle} /> : null}
 				<NotificationCenter style={noDragStyle} />
 				{/* Worker sessions keep only the inspector toggle after the bell. Kill
 				    moved to the terminal toolbar (icon-only, beside Restart); the

@@ -2,7 +2,7 @@
 // block typechecks; vitest itself must be pointed at this file explicitly
 // (package.json test script) because it only auto-discovers vite.config.*.
 import { defineConfig } from "vitest/config";
-import type { Plugin } from "vite";
+import { type Plugin, searchForWorkspaceRoot } from "vite";
 import { fileURLToPath, URL } from "node:url";
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
@@ -63,6 +63,12 @@ export default defineConfig({
 	// to the daemon so the renderer can be tested against a running daemon from
 	// a plain browser without an Electron shell.
 	server: {
+		fs: {
+			allow: [
+				searchForWorkspaceRoot(process.cwd()),
+				fileURLToPath(new URL("../backend/internal/chatproto/testdata", import.meta.url)),
+			],
+		},
 		proxy: {
 			"/api": {
 				target: process.env.AO_DEV_API_TARGET ?? "http://127.0.0.1:3001",

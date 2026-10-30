@@ -73,6 +73,13 @@ const { workspaces, panels } = vi.hoisted(() => {
 		branch: "ao/crew",
 		crew: { id: "crew-dev", role: "qa" as const, hasRun: true },
 	} satisfies WorkspaceSession;
+	const chat = {
+		...worker,
+		id: "sess-chat",
+		title: "chat thing",
+		branch: "ao/chat",
+		transport: "chat" as const,
+	} satisfies WorkspaceSession;
 	const workspaces: WorkspaceSummary[] = [
 		{
 			id: "proj-1",
@@ -80,7 +87,7 @@ const { workspaces, panels } = vi.hoisted(() => {
 			path: "/p",
 			type: "main",
 			hasWebUI: true,
-			sessions: [worker, worker2, worker3, orchestrator, todo, crewDev, crewQa, ...extraWorkers],
+			sessions: [worker, worker2, worker3, orchestrator, todo, crewDev, crewQa, ...extraWorkers, chat],
 		},
 	];
 	return { workspaces, panels: new Map<string, PanelEntry>() };
@@ -120,6 +127,11 @@ vi.mock("./CenterPane", () => ({
 			</button>
 			{splitControls}
 		</div>
+	),
+}));
+vi.mock("./ChatPane", () => ({
+	ChatPane: ({ session, view }: { session: { id: string }; view: string }) => (
+		<div data-testid={`chat-${session.id}`}>chat pane: {view}</div>
 	),
 }));
 vi.mock("./TodoSessionPane", () => ({
@@ -925,6 +937,41 @@ describe("SessionView — the center pane draws no member switcher, at any pane 
 		expect(screen.getByTestId("center-sess-1")).toBeInTheDocument();
 		expect(screen.getByTestId("center-sess-2")).toBeInTheDocument();
 		expect(container.querySelectorAll("[data-crew-switcher]")).toHaveLength(0);
+	});
+});
+
+describe("SessionView — chat sessions", () => {
+	beforeEach(() => {
+		useUiStore.setState({ isInspectorOpen: true, splitLayouts: {}, chatViews: {} });
+		panels.clear();
+		wakeMock.mockReset().mockResolvedValue({ error: undefined });
+	});
+
+	it("renders a terminal session's terminal, and no chat pane, whatever views are stored", () => {
+		useUiStore.setState({ chatViews: { "sess-1": "events" } });
+		render(<SessionView sessionId="sess-1" />);
+		expect(screen.getByTestId("center-sess-1")).toBeInTheDocument();
+		expect(screen.queryByTestId("chat-sess-1")).toBeNull();
+	});
+
+	it("opens a chat session on Chat and follows the stored view to Events and Terminal", () => {
+		render(<SessionView sessionId="sess-chat" />);
+		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: chat");
+		expect(screen.queryByTestId("center-sess-chat")).toBeNull();
+
+		act(() => useUiStore.getState().setChatView("sess-chat", "events"));
+		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: events");
+
+		act(() => useUiStore.getState().setChatView("sess-chat", "terminal"));
+		expect(screen.queryByTestId("chat-sess-chat")).toBeNull();
+		expect(screen.getByTestId("center-sess-chat")).toBeInTheDocument();
+	});
+
+	it("shows an unfocused chat pane in a split as chat too", () => {
+		useUiStore.setState({ splitLayouts: { "proj-1": splitPane(leaf("sess-1"), "sess-1", "right", "sess-chat") } });
+		render(<SessionView sessionId="sess-1" />);
+		expect(screen.getByTestId("center-sess-1")).toBeInTheDocument();
+		expect(screen.getByTestId("chat-sess-chat")).toBeInTheDocument();
 	});
 });
 

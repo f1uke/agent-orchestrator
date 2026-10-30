@@ -260,6 +260,7 @@ export type PullRequestFacts = {
 export type WorkspaceSession = {
 	id: string;
 	terminalHandleId?: string;
+	transport?: "terminal" | "chat";
 	workspaceId: string;
 	workspaceName: string;
 	title: string;
