@@ -381,7 +381,7 @@ func TestAnswer(t *testing.T) {
 	cfg, _ := fakeConfig(t, dir, fixturePath(t, "first_session.jsonl"))
 	cfg.PromptFile = writePrompt(t, dir, fixture)
 	startHost(t, cfg)
-	var pending pendingJSON
+	var pending PendingRequest
 	eventually(t, "the Write permission request", func() bool {
 		st := state(t, cfg.SocketPath)
 		if len(st.Pending) == 1 {
