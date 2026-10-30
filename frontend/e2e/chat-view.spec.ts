@@ -26,7 +26,7 @@ for (const viewport of VIEWPORTS) {
 			const toggle = page.getByRole("group", { name: "Session view" });
 			await expect(toggle.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-pressed", "true");
 			await expect(page.locator(".chat-caret")).toBeVisible();
-			await expect(page.getByText("Read-only view. Send with")).toBeVisible();
+			await expect(page.getByRole("textbox", { name: "Message Claude" })).toBeVisible();
 
 			const question = stream.locator('[data-pending="question"]');
 			await expect(question).toBeVisible();
