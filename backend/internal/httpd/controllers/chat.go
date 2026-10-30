@@ -19,6 +19,7 @@ type ChatService interface {
 	Answer(ctx context.Context, id domain.SessionID, requestID string, d chatproto.Decision) error
 	Interrupt(ctx context.Context, id domain.SessionID) error
 	SetMode(ctx context.Context, id domain.SessionID, mode chatproto.PermissionMode) error
+	SetModel(ctx context.Context, id domain.SessionID, model string) error
 }
 
 // ChatController owns the routes the chat view drives a session with.
@@ -32,6 +33,7 @@ func (c *ChatController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/chat/answers", c.answer)
 	r.Post("/sessions/{sessionId}/chat/interrupt", c.interrupt)
 	r.Put("/sessions/{sessionId}/chat/mode", c.setMode)
+	r.Put("/sessions/{sessionId}/chat/model", c.setModel)
 }
 
 func chatBadRequest(w http.ResponseWriter, r *http.Request, code, message string) {
@@ -127,6 +129,28 @@ func (c *ChatController) setMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.Svc.SetMode(r.Context(), sessionID(r), mode); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+func (c *ChatController) setModel(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/chat/model")
+		return
+	}
+	var body SetChatModelRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	model := strings.TrimSpace(body.Model)
+	if model == "" {
+		chatBadRequest(w, r, "MODEL_REQUIRED", "model is required")
+		return
+	}
+	if err := c.Svc.SetModel(r.Context(), sessionID(r), model); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}

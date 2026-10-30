@@ -68,6 +68,16 @@ func (s *Service) SetMode(ctx context.Context, id domain.SessionID, mode chatpro
 	return hostError(id, c.SetMode(ctx, mode))
 }
 
+// SetModel switches the session's claude to model. Claude checks the model, so
+// one it does not know comes back as CHAT_REQUEST_REJECTED with its reason.
+func (s *Service) SetModel(ctx context.Context, id domain.SessionID, model string) error {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hostError(id, c.SetModel(ctx, model))
+}
+
 func (s *Service) client(ctx context.Context, id domain.SessionID) (sessionhost.Client, error) {
 	rec, ok, err := s.sessions.GetSession(ctx, id)
 	switch {
