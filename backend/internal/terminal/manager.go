@@ -53,6 +53,7 @@ type Manager struct {
 	log       *slog.Logger
 	heartbeat time.Duration
 	inputRec  InputRecorder // may be nil: input recency is simply not tracked
+	chat      *chatConfig
 
 	// ctx scopes every attachment's PTY lifetime; cancelled by Close.
 	ctx    context.Context
@@ -145,9 +146,11 @@ func (m *Manager) Serve(ctx context.Context, conn wsConn) {
 	c := &connState{
 		mgr:    m,
 		conn:   conn,
+		ctx:    ctx,
 		cancel: cancel,
 		out:    make(chan serverMsg, defaultWriteBuffer),
 		terms:  map[string]*attachment{},
+		chats:  map[string]*chatStream{},
 	}
 	defer c.cleanup()
 
@@ -170,11 +173,13 @@ func (m *Manager) Serve(ctx context.Context, conn wsConn) {
 type connState struct {
 	mgr    *Manager
 	conn   wsConn
+	ctx    context.Context
 	cancel context.CancelFunc
 	out    chan serverMsg
 
 	mu        sync.Mutex
 	terms     map[string]*attachment // terminal id -> this conn's own attach PTY
+	chats     map[string]*chatStream // session id -> this conn's chat stream
 	unsubEvts func()
 	closed    bool
 }
@@ -185,6 +190,8 @@ func (c *connState) handle(msg clientMsg) {
 		c.handleTerminal(msg)
 	case chSubscribe:
 		c.handleSubscribe(msg)
+	case chChat:
+		c.handleChat(msg)
 	case chSystem:
 		if msg.Type == msgPing {
 			c.enqueue(serverMsg{Ch: chSystem, Type: msgPong})
@@ -383,12 +390,20 @@ func (c *connState) cleanup() {
 		attachments = append(attachments, a)
 	}
 	c.terms = map[string]*attachment{}
+	chats := c.chats
+	c.chats = map[string]*chatStream{}
 	unsubEvts := c.unsubEvts
 	c.unsubEvts = nil
 	c.mu.Unlock()
 
 	for _, a := range attachments {
 		a.close()
+	}
+	for _, s := range chats {
+		s.cancel()
+	}
+	for _, s := range chats {
+		<-s.done
 	}
 	if unsubEvts != nil {
 		unsubEvts()
