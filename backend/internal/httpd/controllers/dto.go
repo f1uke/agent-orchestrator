@@ -233,6 +233,9 @@ type SessionView struct {
 	// dev + qa), so the board can say which choice was made on a card whose crew
 	// it is already drawing. Empty for a row that predates the field.
 	TaskSize domain.TaskSize `json:"taskSize,omitempty" enum:"mechanical,standard,deep"`
+	// Transport is how the agent is driven, fixed at spawn. The renderer reads
+	// it to pick a session's default view: the terminal, or the chat.
+	Transport domain.Transport `json:"transport" enum:"terminal,chat" description:"How the agent is driven, fixed at spawn: its own TUI in the terminal pane, or a headless chat session behind ao session-host."`
 	// RuntimeTouch is what this session DID with the running app: it took the
 	// simulator lease, or it pointed `ao preview` at what it built. Omitted for
 	// every session that never drove one - which is most of them, and is why the

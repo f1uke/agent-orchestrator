@@ -1648,7 +1648,7 @@ func sessionView(s domain.Session) SessionView {
 	if s.IsTodo {
 		prompt = s.Metadata.Prompt
 	}
-	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s), Crew: sessionCrew(s), TaskSize: s.TaskSize, RuntimeTouch: s.RuntimeTouch, CrewRun: s.CrewRun, CrewRunDiscards: s.CrewRunDiscards, Children: s.Children, ScriptsStore: sessionScriptsStore(s.ScriptsStore)}
+	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s), Crew: sessionCrew(s), TaskSize: s.TaskSize, Transport: s.Transport.WithDefault(), RuntimeTouch: s.RuntimeTouch, CrewRun: s.CrewRun, CrewRunDiscards: s.CrewRunDiscards, Children: s.Children, ScriptsStore: sessionScriptsStore(s.ScriptsStore)}
 }
 
 // sessionScriptsStore is the chip's summary of a store worktree, or nil.

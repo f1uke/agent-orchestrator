@@ -11443,6 +11443,13 @@ components:
           $ref: '#/components/schemas/SessionTermination'
         tokenUsage:
           $ref: '#/components/schemas/SessionTokenUsage'
+        transport:
+          description: 'How the agent is driven, fixed at spawn: its own TUI in the
+            terminal pane, or a headless chat session behind ao session-host.'
+          enum:
+          - terminal
+          - chat
+          type: string
         updatedAt:
           format: date-time
           type: string
@@ -11460,6 +11467,7 @@ components:
       - updatedAt
       - status
       - prs
+      - transport
       type: object
     ControllersSetSessionBranchRequest:
       properties:
