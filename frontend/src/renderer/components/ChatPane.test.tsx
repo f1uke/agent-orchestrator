@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatApi, ChatResult } from "../lib/chat-api";
 import type { ChatEntry } from "../lib/chat-event";
+import { foldEntries } from "../lib/chat-fold";
 import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
+import { emptyOverlay } from "../lib/chat-stream";
 import { useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatPane, ChatViewToggle } from "./ChatPane";
@@ -92,6 +94,30 @@ const settle = () => act(async () => undefined);
 const rowOf = (kind: string) => document.querySelectorAll(`[data-row="${kind}"]`);
 
 describe("ChatPane", () => {
+	it("draws the chat state it is given and opens no subscription of its own", () => {
+		const mux = vi.fn(createMux);
+		const chat = {
+			transcript: foldEntries([{ seq: 1, ts: "", dir: "host", payload: { kind: "spawn", resume: "" } }]),
+			overlay: emptyOverlay,
+			entries: [],
+			connection: "live" as const,
+		};
+		render(
+			<ChatPane
+				chat={chat}
+				chatApi={fakeApi()}
+				createMux={mux}
+				daemonReady
+				session={session}
+				theme="dark"
+				view="chat"
+			/>,
+		);
+		expect(screen.getByText("Session started")).toBeInTheDocument();
+		expect(screen.getByText("Live")).toBeInTheDocument();
+		expect(mux).not.toHaveBeenCalled();
+	});
+
 	it("draws user input, peer and orchestrator messages, notices and the turn's cost", () => {
 		const { feed } = renderPane();
 		feed(

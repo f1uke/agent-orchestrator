@@ -148,6 +148,16 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   bar until the log settles the request, the host's refusal in `--red` under the
   actions, and an amber `--amber` banner while the session host is down. Same
   tokens, no new ones.
+  Session tab (2026-10-30, `ChatInspector.tsx`; `.chat-insp*`): a chat session's
+  rail opens on a first **Session** tab, from the mockup's right rail. Hairline
+  `--border` sections run edge to edge with 11px uppercase `--fg-passive` heads:
+  Todo (15px checkboxes, done filled `--green` and struck through, in progress
+  ringed `--lane-working`), Subagents & background (`--bg-1` 8px cards with a
+  status dot: `--lane-working` glowing, `--lane-merge` done, `--red` failed,
+  `--fg-passive` stopped), Context (a 6px `--bg-3` track with one `--accent` fill,
+  shown only when the log names the window), Cost & usage and Permissions as a
+  mono key-value grid (rules `--green` allow, `--amber` ask, `--red` deny), and a
+  read-only History list. Terminal sessions do not get the tab. No new tokens.
   No decision is final (2026-10-04): a snoozed proposal keeps the whole decide
   bar plus Unsnooze; a rejected one has Reopen; an approved one has Edit
   (the file as it is now, same gates) and Undo; a settled conflict has Undo.

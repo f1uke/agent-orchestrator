@@ -32,12 +32,23 @@ import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { cn } from "../lib/utils";
 import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
+import { ChatInspector } from "./ChatInspector";
+import type { Transcript } from "../lib/chat-fold";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "files" | "testiny" | "browser" | "simulator";
+export type InspectorView = "session" | "summary" | "reviews" | "files" | "testiny" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
+	{
+		id: "session",
+		label: "Session",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+			</svg>
+		),
+	},
 	{
 		id: "summary",
 		label: "Summary",
@@ -117,7 +128,7 @@ const prStateTone: Record<SessionPRSummary["state"], string> = {
 };
 
 /**
- * Tabbed inspector rail beside the terminal (Summary · Reviews · Files · Testiny · Device · Browser).
+ * Tabbed inspector rail beside the terminal (Session · Summary · Reviews · Files · Testiny · Device · Browser).
  */
 export function SessionInspector({
 	session,
@@ -140,6 +151,8 @@ export function SessionInspector({
 	selectedFileLine,
 	searchRequest,
 	revealInTree,
+	chat,
+	onJumpToChat,
 }: {
 	session?: WorkspaceSession;
 	onOpenReviewerTerminal?: OpenReviewerTerminal;
@@ -188,6 +201,8 @@ export function SessionInspector({
 	searchRequest?: { nonce: number; seed?: string } | null;
 	/** A terminal ref to reveal in the Files tree (path + re-click nonce). */
 	revealInTree?: { path: string; nonce: number; focus?: boolean } | null;
+	chat?: Transcript;
+	onJumpToChat?: (itemIndex: number) => void;
 }) {
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const requestedView = viewProp ?? internalView;
@@ -202,6 +217,7 @@ export function SessionInspector({
 	// A project with no web UI has nothing to preview, so the Browser tab is not
 	// offered at all — an always-empty tab is worse than one tab fewer.
 	const views = VIEWS.filter((v) => {
+		if (v.id === "session") return session?.transport === "chat" && chat !== undefined;
 		if (v.id === "files") return showFiles;
 		if (v.id === "browser") return hasWebUI;
 		if (v.id === "simulator") return hasIOSSimulator;
@@ -212,7 +228,7 @@ export function SessionInspector({
 	// Browser tab in a project that has since switched the web UI off, or Files on
 	// an orchestrator. Without this the strip would render with nothing selected
 	// above an empty body.
-	const view = views.some((v) => v.id === requestedView) ? requestedView : "summary";
+	const view = views.some((v) => v.id === requestedView) ? requestedView : views[0].id;
 
 	if (!session) {
 		return (
@@ -267,8 +283,12 @@ export function SessionInspector({
 					// The Simulator tab owns its own full-height layout (picker,
 					// screen, controls), so it renders flush.
 					view === "simulator" && "session-inspector__body--simulator",
+					view === "session" && "session-inspector__body--session",
 				)}
 			>
+				{view === "session" && chat ? (
+					<ChatInspector onJump={(itemIndex) => onJumpToChat?.(itemIndex)} transcript={chat} />
+				) : null}
 				{view === "summary" ? <SummaryView session={session} /> : null}
 				{view === "reviews" ? (
 					<ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} onOpenFile={onOpenFile} session={session} />
