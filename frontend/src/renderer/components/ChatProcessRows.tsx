@@ -91,7 +91,7 @@ function Member({ member, openRows, toggleRow, theme, root }: MembersProps & { m
 export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow, { kind: "group" }> }) {
 	const open = rest.openRows[row.key] ?? false;
 	const { summary } = row;
-	const shown = open ? row.members : row.members.filter((m) => m.kind === "tool" && toolFailed(m.call));
+	const shown = open ? row.members : row.members.filter((m) => m.kind === "tool" && toolFailed(m.call, m.task));
 	return (
 		<div className="chat-group" data-group>
 			<Head onToggle={(next) => rest.toggleRow(row.key, next)} open={open}>

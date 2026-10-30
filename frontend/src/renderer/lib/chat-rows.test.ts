@@ -214,6 +214,14 @@ describe("chatRows errored tools", () => {
 		expect(group(rows).summary.failed).toBe(1);
 		expect(group(rows).members[0]).toMatchObject({ kind: "tool" });
 	});
+
+	it("counts a background command whose task failed, though its tool result was fine", () => {
+		const bash = tool("Bash", { command: "scripts/slow-check.sh", run_in_background: true });
+		const task = { id: "t1", toolUseId: bash.id, description: "", taskType: "local_bash", state: "error" as const };
+		const rows = rowsOf([user(), bash, tool("Read"), say("done"), turnEnd()], { tasks: [task] });
+		const turn = rows.find((r) => r.kind === "turn");
+		expect(turn?.kind === "turn" && turn.summary.failed).toBe(1);
+	});
 });
 
 describe("chatRows background tasks", () => {

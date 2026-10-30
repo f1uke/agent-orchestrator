@@ -102,9 +102,9 @@ export function processPhrases(summary: ProcessSummary): string[] {
 	return summary.counts.map(({ kind, count }) => PHRASE[kind](count));
 }
 
-/** A tool that did not run to success: its result errored, or the user denied it. */
-export function toolFailed(call: ToolCallItem): boolean {
-	return call.result?.isError === true || call.permission?.status === "denied";
+/** A tool that did not run to success: its result errored, the user denied it, or its background task failed. */
+export function toolFailed(call: ToolCallItem, task?: BackgroundTask): boolean {
+	return call.result?.isError === true || call.permission?.status === "denied" || task?.state === "error";
 }
 
 /** What a call touches, so that three edits of one file count as one file. */
@@ -127,13 +127,16 @@ const KIND_ORDER: ProcessKind[] = [
 	"tools",
 ];
 
-export function summarizeTools(calls: readonly ToolCallItem[]): ProcessSummary {
+export function summarizeTools(
+	calls: readonly ToolCallItem[],
+	taskOf: (toolUseId: string) => BackgroundTask | undefined = () => undefined,
+): ProcessSummary {
 	const seen = new Map<ProcessKind, Set<string>>();
 	let failed = 0;
 	for (const call of calls) {
 		const kind = processKind(call.name);
 		seen.set(kind, (seen.get(kind) ?? new Set()).add(countKey(call)));
-		if (toolFailed(call)) failed += 1;
+		if (toolFailed(call, taskOf(call.id))) failed += 1;
 	}
 	const counts = KIND_ORDER.filter((kind) => seen.has(kind)).map((kind) => ({ kind, count: seen.get(kind)!.size }));
 	return { counts, failed };

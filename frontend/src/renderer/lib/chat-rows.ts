@@ -64,8 +64,21 @@ function callsOf(rows: readonly ChatRow[]): ToolCallItem[] {
 	});
 }
 
+function tasksOf(rows: readonly ChatRow[]): Map<string, BackgroundTask> {
+	const tasks = new Map<string, BackgroundTask>();
+	for (const row of rows) {
+		const linked = row.kind === "group" ? row.members : [row];
+		for (const r of linked) {
+			if (r.kind === "tool" && r.task) tasks.set(r.call.id, r.task);
+			if (r.kind === "item" && r.item.kind === "tool_call" && r.task) tasks.set(r.item.id, r.task);
+		}
+	}
+	return tasks;
+}
+
 function turnRow(userKey: string, rows: ChatRow[]): ChatRow | undefined {
-	const summary = summarizeTools(callsOf(rows));
+	const tasks = tasksOf(rows);
+	const summary = summarizeTools(callsOf(rows), (id) => tasks.get(id));
 	if (summary.counts.length === 0) return undefined;
 	const messages = rows.filter((row) => isItem(row, "assistant_text")).length;
 	return { key: `t${userKey}`, kind: "turn", rows, summary, messages };
@@ -133,7 +146,7 @@ export function chatRows(
 	const flush = (atTail: boolean) => {
 		const calls = run.flatMap((m) => (m.kind === "tool" ? [m.call] : []));
 		if (calls.length >= 2) {
-			const summary = summarizeTools(calls);
+			const summary = summarizeTools(calls, (id) => taskByToolUse.get(id));
 			if (atTail) summary.live = liveDetail(calls, root);
 			rows.push({ key: `g${run[0].itemIndex}`, kind: "group", members: run, summary });
 		} else {

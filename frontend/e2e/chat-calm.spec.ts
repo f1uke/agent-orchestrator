@@ -29,7 +29,9 @@ for (const viewport of VIEWPORTS) {
 			await expect(first).toHaveAttribute("aria-expanded", "true");
 			const group = stream.locator("[data-group] .chat-group__head").first();
 			await expect(group).toContainText(/(Ran|Read|Edited|Searched) \d+/);
-			await expect(stream.locator('[data-tool="Bash"]')).toHaveCount(0);
+			const bash = stream.locator('[data-tool="Bash"]');
+			await expect(bash).toHaveCount(1);
+			await expect(bash).toContainText("failed · exit 1");
 			await group.click();
 			await expect(stream.locator("[data-tool]").first()).toBeVisible();
 			await shot("turn-open");
