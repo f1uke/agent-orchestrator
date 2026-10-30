@@ -6782,6 +6782,8 @@ export interface components {
             startImmediately?: null | boolean;
             /** @enum {string} */
             taskSize?: "mechanical" | "standard" | "deep";
+            /** @enum {string} */
+            transport?: "terminal" | "chat";
         };
         StartCrewRunInput: {
             /**

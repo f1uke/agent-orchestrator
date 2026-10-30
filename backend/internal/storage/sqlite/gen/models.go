@@ -550,6 +550,7 @@ type Session struct {
 	CrewRoundStartedAt        sql.NullTime
 	ClaudeProfile             string
 	RestartPending            bool
+	Transport                 domain.Transport
 }
 
 type SessionChild struct {

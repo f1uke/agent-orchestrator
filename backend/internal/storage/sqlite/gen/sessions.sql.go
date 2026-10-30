@@ -13,6 +13,27 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
+const getLiveSessionTransportByRuntimeHandle = `-- name: GetLiveSessionTransportByRuntimeHandle :one
+SELECT id, transport FROM sessions
+WHERE runtime_handle_id = ? AND is_terminated = 0
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+type GetLiveSessionTransportByRuntimeHandleRow struct {
+	ID        domain.SessionID
+	Transport domain.Transport
+}
+
+// The live session a runtime handle belongs to, and how it is driven. A handle
+// can outlive its session on a terminated row, so only live rows count.
+func (q *Queries) GetLiveSessionTransportByRuntimeHandle(ctx context.Context, runtimeHandleID string) (GetLiveSessionTransportByRuntimeHandleRow, error) {
+	row := q.db.QueryRowContext(ctx, getLiveSessionTransportByRuntimeHandle, runtimeHandleID)
+	var i GetLiveSessionTransportByRuntimeHandleRow
+	err := row.Scan(&i.ID, &i.Transport)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
@@ -21,7 +42,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
-    claude_profile, restart_pending
+    claude_profile, restart_pending, transport
 FROM sessions WHERE id = ?
 `
 
@@ -81,6 +102,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.CrewRoundStartedAt,
 		&i.ClaudeProfile,
 		&i.RestartPending,
+		&i.Transport,
 	)
 	return i, err
 }
@@ -94,8 +116,8 @@ INSERT INTO sessions (
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
     crew_id, crew_role, crew_join_reason, runtime_touch, sleep_reason, woken_by,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    created_at, updated_at, claude_profile
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    created_at, updated_at, claude_profile, transport
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -143,6 +165,7 @@ type InsertSessionParams struct {
 	CreatedAt                 time.Time
 	UpdatedAt                 time.Time
 	ClaudeProfile             string
+	Transport                 domain.Transport
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -191,6 +214,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.ClaudeProfile,
+		arg.Transport,
 	)
 	return err
 }
@@ -203,7 +227,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
-    claude_profile, restart_pending
+    claude_profile, restart_pending, transport
 FROM sessions ORDER BY project_id, num
 `
 
@@ -269,6 +293,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.CrewRoundStartedAt,
 			&i.ClaudeProfile,
 			&i.RestartPending,
+			&i.Transport,
 		); err != nil {
 			return nil, err
 		}
@@ -291,7 +316,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
-    claude_profile, restart_pending
+    claude_profile, restart_pending, transport
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -357,6 +382,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.CrewRoundStartedAt,
 			&i.ClaudeProfile,
 			&i.RestartPending,
+			&i.Transport,
 		); err != nil {
 			return nil, err
 		}

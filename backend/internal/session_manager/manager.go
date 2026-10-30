@@ -71,6 +71,9 @@ var (
 	// ErrMissingHarness means neither the spawn request nor the project's role
 	// config selected an agent. Worker/orchestrator spawns must be explicit.
 	ErrMissingHarness = errors.New("session: agent harness required")
+	// ErrTransportUnsupported means a chat transport was asked of an agent that
+	// is not claude-code. The API maps it to a 400.
+	ErrTransportUnsupported = errors.New("session: transport not supported by the agent")
 	// ErrNotTodo means a start/spec-edit targeted a session that is not a
 	// prepared TODO (already started, or never was one). The API maps it to 409.
 	ErrNotTodo = errors.New("session: not a prepared TODO")
@@ -567,6 +570,9 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w: %q", ErrUnknownHarness, cfg.Harness)
 	}
+	if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
+	}
 	cfg.ClaudeProfile, err = m.spawnClaudeProfile(cfg.Harness, cfg.ClaudeProfile, project)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
@@ -853,6 +859,9 @@ func (m *Manager) PrepareTodo(ctx context.Context, cfg ports.SpawnConfig) (domai
 		if _, ok := m.agents.Agent(cfg.Harness); !ok {
 			return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w: %q", ErrUnknownHarness, cfg.Harness)
 		}
+		if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w", err)
+		}
 	}
 	profile, err := m.todoClaudeProfile(cfg.ClaudeProfile)
 	if err != nil {
@@ -900,7 +909,8 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 		// TaskSize must be replayed from the persisted TODO so a task staged with
 		// `ao spawn --todo --task-size mechanical` builds the mechanical worker
 		// prompt when it is Started (the system prompt is derived from cfg below).
-		TaskSize: row.TaskSize,
+		TaskSize:  row.TaskSize,
+		Transport: row.Transport,
 	}
 	cfg.Harness = effectiveHarness(cfg.Harness, cfg.Kind, project.Config)
 	if cfg.Harness == "" {
@@ -908,6 +918,9 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	}
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w: %q", id, ErrUnknownHarness, cfg.Harness)
+	}
+	if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
 	cfg.ClaudeProfile, err = m.spawnClaudeProfile(cfg.Harness, row.ClaudeProfile, project)
 	if err != nil {
@@ -3390,6 +3403,7 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
 		ClaudeProfile:   cfg.ClaudeProfile,
+		Transport:       cfg.Transport.WithDefault(),
 	}
 }
 
@@ -3443,6 +3457,7 @@ func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
 		ClaudeProfile:   cfg.ClaudeProfile,
+		Transport:       cfg.Transport.WithDefault(),
 		Metadata:        domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
 	}
 }

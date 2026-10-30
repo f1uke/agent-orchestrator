@@ -1523,6 +1523,8 @@ func toAPIError(err error) error {
 		return apierr.Invalid("UNKNOWN_HARNESS", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrMissingHarness):
 		return apierr.Invalid("AGENT_REQUIRED", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrTransportUnsupported):
+		return apierr.Invalid("TRANSPORT_UNSUPPORTED", err.Error(), nil)
 	case errors.Is(err, claudeprofile.ErrUnknownProfile):
 		var unknown *claudeprofile.UnknownProfileError
 		if errors.As(err, &unknown) {

@@ -68,6 +68,7 @@ type SpawnConfig struct {
 	// claude-code session (`ao spawn --claude-profile`). Ignored for any other
 	// agent; empty inherits the project default, else Subscription.
 	ClaudeProfile string
+	Transport     domain.Transport
 }
 
 // TodoSpecPatch carries the editable fields of a prepared TODO. A nil pointer

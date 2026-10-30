@@ -18551,6 +18551,11 @@ components:
           - standard
           - deep
           type: string
+        transport:
+          enum:
+          - terminal
+          - chat
+          type: string
       required:
       - projectId
       type: object

@@ -19,6 +19,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 // maxDisplayNameLen caps the sidebar label set by `--name`. Mirrored by the
@@ -45,6 +46,7 @@ type spawnOptions struct {
 	keepWarm       bool
 	taskSize       string
 	claudeProfile  string
+	transport      string
 }
 
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
@@ -85,6 +87,7 @@ type spawnRequest struct {
 	// ClaudeProfile names the Claude profile a claude-code worker launches with
 	// (`--claude-profile`). Empty inherits the project default.
 	ClaudeProfile string `json:"claudeProfile,omitempty"`
+	Transport     string `json:"transport,omitempty"`
 }
 
 type spawnResult struct {
@@ -131,6 +134,13 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			opts.taskSize = strings.ToLower(strings.TrimSpace(opts.taskSize))
 			if opts.taskSize != "" && !validTaskSize(opts.taskSize) {
 				return usageError{fmt.Errorf("--task-size must be one of mechanical, standard, deep")}
+			}
+			transport, err := domain.ParseTransport(strings.TrimSpace(opts.transport))
+			if err != nil {
+				return usageError{fmt.Errorf("--transport must be terminal or chat, not %q", opts.transport)}
+			}
+			if harness := strings.TrimSpace(opts.harness); transport == domain.TransportChat && harness != "" && harness != string(domain.HarnessClaudeCode) {
+				return usageError{fmt.Errorf("--transport %s needs --harness %s, not %s", transport, domain.HarnessClaudeCode, harness)}
 			}
 			// --from is required and names the branch the worktree is created from
 			// (the UI "Start from" field). Reject a missing base fast, before any
@@ -194,6 +204,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 				KeepWarmOnMerge: opts.keepWarm,
 				TaskSize:        opts.taskSize,
 				ClaudeProfile:   strings.TrimSpace(opts.claudeProfile),
+				Transport:       strings.TrimSpace(opts.transport),
 			}
 			if opts.todo {
 				// --todo stages a prepared TODO (no branch/worktree/tmux until
@@ -269,6 +280,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until ao session start <id>)")
 	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker running on the board when its PR merges instead of archiving it to Done: its tmux, and any build or test in it, carries on (it still sleeps after the idle window like any worker) - for a worker that will open more PRs")
 	f.StringVar(&opts.claudeProfile, "claude-profile", "", "Claude profile (a named Claude Code settings file, see ao claude-profile ls) a claude-code worker launches with (default: the project's, else Subscription); ignored for other agents")
+	f.StringVar(&opts.transport, "transport", "", "How the agent is driven: terminal (default) runs its TUI in the pane, chat runs a headless claude under the session host (claude-code only)")
 	f.StringVar(&opts.taskSize, "task-size", "", "How big the task is - it decides both the ceremony AND how many agents work it.\n"+
 		"  mechanical  ONE agent. Skips the up-front requirements/plan/test-first ceremony and goes\n"+
 		"              straight to edit + verify.\n"+
