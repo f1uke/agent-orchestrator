@@ -137,6 +137,10 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--testiny-skill", "~/.claude/skills/managing-testiny-qa"},
 		want: domain.ProjectConfig{TestinySkill: "~/.claude/skills/managing-testiny-qa"},
 	},
+	"worker-transport": {
+		args: []string{"--worker-transport", "terminal"},
+		want: domain.ProjectConfig{WorkerTransport: domain.TransportTerminal},
+	},
 	"claude-profile": {
 		args: []string{"--claude-profile", "OmniRoute"},
 		want: domain.ProjectConfig{ClaudeProfile: "OmniRoute"},

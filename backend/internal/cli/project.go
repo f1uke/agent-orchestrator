@@ -110,6 +110,7 @@ type projectSetConfigOptions struct {
 	usesTestiny       bool
 	testinySkill      string
 	claudeProfile     string
+	workerTransport   string
 	configJSON        string
 	clear             bool
 	json              bool
@@ -319,6 +320,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.testinySkill, "testiny-skill", "", "With --testiny: the folder (absolute or ~/) of the skill holding the team's Testiny conventions (case standard, case language, plans, runs, evidence folder). Agents are pointed at it once it holds a SKILL.md; without one they ask the human. \"\" clears it")
 	f.BoolVar(&opts.usesTestiny, "testiny", false, "This project keeps its manual test cases in Testiny, so its tasks get the Testiny tab and its agents the Testiny guidance. Not tied to one Testiny project: each linked run carries its own")
 	f.StringVar(&opts.claudeProfile, "claude-profile", "", "Claude profile (see ao claude-profile ls) this project's claude-code sessions and reviewers launch with unless a spawn names another; \"\" goes back to Subscription")
+	f.StringVar(&opts.workerTransport, "worker-transport", "", "How this project's new claude-code workers are driven unless a spawn says otherwise: chat (a headless claude behind the chat view) or terminal (the agent's own TUI). \"\" inherits the global setting (ao settings worker-transport). Existing sessions keep theirs; orchestrators and other agents are always terminal")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
@@ -378,6 +380,7 @@ var setConfigFieldFlags = []struct {
 	{flag: "testiny", path: "usesTestiny"},
 	{flag: "testiny-skill", path: "testinySkill"},
 	{flag: "claude-profile", path: "claudeProfile"},
+	{flag: "worker-transport", path: "workerTransport"},
 }
 
 // resolveSetConfigWrite decides what this invocation writes and how: the config
@@ -441,15 +444,20 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 	if err != nil {
 		return domain.ProjectConfig{}, err
 	}
+	workerTransport, err := domain.ParseTransport(strings.TrimSpace(opts.workerTransport))
+	if err != nil {
+		return domain.ProjectConfig{}, usageError{fmt.Errorf("--worker-transport must be terminal or chat, not %q", opts.workerTransport)}
+	}
 	cfg := domain.ProjectConfig{
-		DefaultBranch: opts.defaultBranch,
-		SessionPrefix: opts.sessionPrefix,
-		Env:           env,
-		Symlinks:      opts.symlink,
-		PostCreate:    opts.postCreate,
-		AgentConfig:   domain.AgentConfig{Model: opts.model, Permissions: domain.PermissionMode(opts.permission)},
-		Worker:        domain.RoleOverride{Harness: domain.AgentHarness(opts.workerAgent)},
-		Orchestrator:  domain.RoleOverride{Harness: domain.AgentHarness(opts.orchestratorAgent)},
+		WorkerTransport: workerTransport,
+		DefaultBranch:   opts.defaultBranch,
+		SessionPrefix:   opts.sessionPrefix,
+		Env:             env,
+		Symlinks:        opts.symlink,
+		PostCreate:      opts.postCreate,
+		AgentConfig:     domain.AgentConfig{Model: opts.model, Permissions: domain.PermissionMode(opts.permission)},
+		Worker:          domain.RoleOverride{Harness: domain.AgentHarness(opts.workerAgent)},
+		Orchestrator:    domain.RoleOverride{Harness: domain.AgentHarness(opts.orchestratorAgent)},
 		TrackerIntake: domain.TrackerIntakeConfig{
 			Enabled:  opts.trackerIntake,
 			Provider: domain.TrackerProvider(trackerProvider),
