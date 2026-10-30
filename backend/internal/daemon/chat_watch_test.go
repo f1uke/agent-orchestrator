@@ -172,7 +172,7 @@ func (h *fakeChatHost) State(context.Context) (sessionhost.State, error) {
 	return st, nil
 }
 
-func (h *fakeChatHost) Subscribe(ctx context.Context, from uint64, fn func(sessionhost.Frame) error) error {
+func (h *fakeChatHost) Subscribe(ctx context.Context, from uint64, _ func(), fn func(sessionhost.Frame) error) error {
 	h.mu.Lock()
 	if h.down {
 		h.mu.Unlock()
