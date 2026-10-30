@@ -16,15 +16,29 @@ import {
 	X,
 } from "lucide-react";
 import { useState } from "react";
+import {
+	type AnswerBody,
+	allowOnce,
+	alwaysAllow,
+	answerQuestions,
+	approvePlan,
+	deny,
+	keepPlanning,
+	type PermissionMode,
+	type QuestionChoice,
+	questionAnswer,
+	replyInChat,
+} from "../lib/chat-answers";
 import type { Pending, ToolCallItem } from "../lib/chat-fold";
 import { isObject } from "../lib/chat-event";
 import {
+	type Question,
 	type Settled,
 	type ToolBody,
 	type ToolView,
 	describeSettled,
+	describeSuggestions,
 	describeTool,
-	describeUpdates,
 	parsePlan,
 	parseQuestions,
 } from "../lib/chat-tools";
@@ -33,7 +47,6 @@ import type { Theme } from "../stores/ui-store";
 import { DiffRows } from "./DiffRows";
 import { NoteMarkdown } from "./NoteMarkdown";
 import { Button } from "./ui/button";
-import { SimpleTooltip } from "./ui/tooltip";
 
 const FAMILY_ICON: Record<ToolView["family"], LucideIcon> = {
 	bash: SquareTerminal,
@@ -46,8 +59,6 @@ const FAMILY_ICON: Record<ToolView["family"], LucideIcon> = {
 	question: MessageSquare,
 	other: Wrench,
 };
-
-export const READ_ONLY_HINT = "Answering arrives in the next version";
 
 function Status({ view }: { view: ToolView }) {
 	const { status } = view;
@@ -197,17 +208,50 @@ export function ResolvedLine({ call }: { call: ToolCallItem }) {
 	);
 }
 
-function DisabledActions({ children }: { children: React.ReactNode }) {
+export type RequestState = { phase: "sending" } | { phase: "failed"; message: string };
+
+export type AnswerHandler = (body: AnswerBody, then?: PermissionMode) => void;
+
+type CardProps = {
+	request: Pending;
+	theme: Theme;
+	state: RequestState | undefined;
+	disabled: boolean;
+	onAnswer: AnswerHandler;
+};
+
+function Kbd({ children }: { children: React.ReactNode }) {
 	return (
-		<SimpleTooltip label={READ_ONLY_HINT}>
-			<span className="chat-ask__buttons" data-testid="chat-request-actions" tabIndex={0}>
-				{children}
-			</span>
-		</SimpleTooltip>
+		<span aria-hidden="true" className="chat-kbd">
+			{children}
+		</span>
 	);
 }
 
-function PermissionCard({ request, theme }: { request: Pending; theme: Theme }) {
+function CardStatus({ state, idle }: { state: RequestState | undefined; idle: string }) {
+	if (state?.phase === "sending") {
+		return (
+			<span className="chat-ask__key" role="status">
+				<Loader2 className="chat-icon animate-spin" aria-hidden="true" />
+				Sending…
+			</span>
+		);
+	}
+	return <span className="chat-ask__key">{idle}</span>;
+}
+
+function CardError({ state }: { state: RequestState | undefined }) {
+	if (state?.phase !== "failed") return null;
+	return (
+		<div className="chat-ask__error" role="alert">
+			<X className="chat-icon" aria-hidden="true" />
+			{state.message}
+		</div>
+	);
+}
+
+function PermissionCard({ request, theme, state, disabled, onAnswer }: CardProps) {
+	const [reason, setReason] = useState("");
 	const input = isObject(request.input) ? request.input : {};
 	const preview = describeTool({
 		kind: "tool_call",
@@ -217,13 +261,33 @@ function PermissionCard({ request, theme }: { request: Pending; theme: Theme }) 
 		input: request.input,
 	});
 	const command = typeof input.command === "string" ? input.command : preview.arg;
-	const { rules, mode } = describeUpdates(request.suggestions);
+	const suggestions = describeSuggestions(request.suggestions);
+	const locked = disabled || state?.phase === "sending";
+
+	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		if (locked) return;
+		if (e.key === "Escape") {
+			e.preventDefault();
+			onAnswer(deny(request, reason));
+		} else if (e.key === "Enter" && e.target === e.currentTarget && !request.defaultToNo) {
+			e.preventDefault();
+			onAnswer((e.metaKey || e.ctrlKey) && suggestions.length ? alwaysAllow(request) : allowOnce(request));
+		}
+	};
+
 	return (
-		<div className="chat-ask" data-pending="permission">
+		<div
+			aria-label={`Permission needed: ${request.toolName}`}
+			className="chat-ask"
+			data-pending="permission"
+			onKeyDown={onKeyDown}
+			role="group"
+			tabIndex={0}
+		>
 			<div className="chat-ask__bar">
 				<Shield className="chat-icon" aria-hidden="true" />
 				Permission needed · {request.toolName}
-				<span className="chat-ask__key">waiting for an answer</span>
+				<CardStatus idle="waiting for an answer" state={state} />
 			</div>
 			<div className="chat-ask__inner">
 				{command ? <div className="chat-ask__cmd">{command}</div> : null}
@@ -237,54 +301,148 @@ function PermissionCard({ request, theme }: { request: Pending; theme: Theme }) 
 				) : null}
 				{preview.body.kind === "generic" ? <div className="chat-ask__cmd">{preview.body.input}</div> : null}
 				<div className="chat-ask__actions">
-					<DisabledActions>
-						<Button disabled size="sm">
-							Allow once
+					<Button disabled={locked} onClick={() => onAnswer(allowOnce(request))} size="sm">
+						Allow once
+						{request.defaultToNo ? null : <Kbd>↵</Kbd>}
+					</Button>
+					{suggestions.length ? (
+						<Button disabled={locked} onClick={() => onAnswer(alwaysAllow(request))} size="sm" variant="outline">
+							Always allow
+							{request.defaultToNo ? null : <Kbd>⌘↵</Kbd>}
 						</Button>
-						{rules.length || mode ? (
-							<Button disabled size="sm" variant="outline">
-								Always allow
-							</Button>
-						) : null}
-						<Button className="chat-danger" disabled size="sm" variant="outline">
-							Deny
-						</Button>
-					</DisabledActions>
-					{rules.length ? (
-						<span className="chat-ask__rule">
-							Always adds <code>{rules.join(", ")}</code>
-						</span>
-					) : mode ? (
-						<span className="chat-ask__rule">
-							Always switches to <code>{mode}</code> mode
+					) : null}
+					<Button
+						className="chat-danger"
+						disabled={locked}
+						onClick={() => onAnswer(deny(request, reason))}
+						size="sm"
+						variant="outline"
+					>
+						Deny
+						<Kbd>esc</Kbd>
+					</Button>
+					{suggestions.length ? (
+						<span className="chat-ask__rule" data-testid="chat-always-rule">
+							Always{" "}
+							{suggestions.map((s, i) => (
+								<span key={i}>
+									{i > 0 ? "; " : null}
+									{s.verb} <code>{s.code}</code>
+									{s.after}
+									{s.file ? (
+										<>
+											{" "}
+											to <code>{s.file}</code>
+										</>
+									) : null}
+								</span>
+							))}
 						</span>
 					) : null}
 				</div>
+				<input
+					aria-label="Reason for denying"
+					className="chat-other"
+					disabled={locked}
+					onChange={(e) => setReason(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key !== "Enter" || reason.trim() === "" || locked) return;
+						e.preventDefault();
+						onAnswer(deny(request, reason));
+					}}
+					placeholder="Reason, if you deny (optional). Claude reads it."
+					value={reason}
+				/>
+				<CardError state={state} />
 			</div>
 		</div>
 	);
 }
 
-function QuestionCard({ request }: { request: Pending }) {
+function OptionButton({
+	option,
+	multi,
+	checked,
+	disabled,
+	onPick,
+	onFocusPreview,
+}: {
+	option: Question["options"][number];
+	multi: boolean;
+	checked: boolean;
+	disabled: boolean;
+	onPick: () => void;
+	onFocusPreview: () => void;
+}) {
+	return (
+		<button
+			aria-checked={checked}
+			className={cn("chat-opt", multi && "chat-opt--multi", checked && "chat-opt--on")}
+			disabled={disabled}
+			onClick={onPick}
+			onFocus={onFocusPreview}
+			onMouseEnter={onFocusPreview}
+			role={multi ? "checkbox" : "radio"}
+			type="button"
+		>
+			<span aria-hidden="true" className="chat-opt__mark" />
+			<span>
+				<span className="chat-opt__label">{option.label}</span>
+				<span className="chat-opt__desc">{option.description}</span>
+			</span>
+		</button>
+	);
+}
+
+const EMPTY_CHOICE: QuestionChoice = { picked: [], other: "" };
+
+function QuestionCard({ request, state, disabled, onAnswer }: CardProps) {
 	const questions = parseQuestions(request.input);
 	const [tab, setTab] = useState(0);
-	const current = questions[Math.min(tab, questions.length - 1)];
+	const [choices, setChoices] = useState<QuestionChoice[]>(() => questions.map(() => EMPTY_CHOICE));
+	const [peek, setPeek] = useState<string | undefined>(undefined);
+	const index = Math.min(tab, questions.length - 1);
+	const current = questions[index];
+	const choice = choices[index] ?? EMPTY_CHOICE;
+	const locked = disabled || state?.phase === "sending";
+	const complete = questions.length > 0 && questions.every((q, i) => questionAnswer(q, choices[i]) !== "");
+
+	const update = (next: QuestionChoice) => setChoices((prev) => prev.map((c, i) => (i === index ? next : c)));
+	const pick = (label: string) => {
+		if (!current.multiSelect) return update({ picked: [label], other: "" });
+		const picked = choice.picked.includes(label)
+			? choice.picked.filter((l) => l !== label)
+			: current.options.map((o) => o.label).filter((l) => l === label || choice.picked.includes(l));
+		update({ ...choice, picked });
+	};
+	const setOther = (other: string) => update(current.multiSelect ? { ...choice, other } : { picked: [], other });
+	const showTab = (i: number) => {
+		setTab(i);
+		setPeek(undefined);
+	};
+
+	const withPreview = current?.options.filter((o) => o.preview !== "") ?? [];
+	const shown =
+		current?.options.find((o) => o.label === peek && o.preview !== "") ??
+		current?.options.find((o) => o.label === choice.picked[0] && o.preview !== "") ??
+		withPreview[0];
+
 	return (
-		<div className="chat-ask" data-pending="question">
+		<div aria-label="Claude is asking" className="chat-ask" data-pending="question" role="group">
 			<div className="chat-ask__bar">
 				<MessageSquare className="chat-icon" aria-hidden="true" />
 				Claude is asking · {questions.length === 1 ? "1 question" : `${questions.length} questions`}
-				<span className="chat-ask__key">AskUserQuestion</span>
+				<CardStatus idle="AskUserQuestion" state={state} />
 			</div>
 			<div className="chat-ask__inner">
 				{questions.length > 1 ? (
 					<div className="chat-qtabs" role="tablist">
 						{questions.map((q, i) => (
 							<button
-								aria-selected={i === tab}
-								className="chat-qtab"
+								aria-selected={i === index}
+								className={cn("chat-qtab", questionAnswer(q, choices[i]) !== "" && "chat-qtab--done")}
 								key={`${i}:${q.header}`}
-								onClick={() => setTab(i)}
+								onClick={() => showTab(i)}
 								role="tab"
 								type="button"
 							>
@@ -295,37 +453,74 @@ function QuestionCard({ request }: { request: Pending }) {
 				) : null}
 				{current ? (
 					<>
-						<div className="chat-question">{current.question}</div>
-						<div className="chat-opts">
-							{current.options.map((o) => (
-								<div className={cn("chat-opt", current.multiSelect && "chat-opt--multi")} key={o.label}>
-									<span aria-hidden="true" className="chat-opt__mark" />
-									<span>
-										<span className="chat-opt__label">{o.label}</span>
-										<span className="chat-opt__desc">{o.description}</span>
-									</span>
+						<div className="chat-question">
+							{current.question}
+							{current.multiSelect ? <span className="chat-question__hint"> (choose any)</span> : null}
+						</div>
+						<div className={cn("chat-qwrap", shown && "chat-qwrap--preview")}>
+							<div
+								aria-label={current.question}
+								className="chat-opts"
+								role={current.multiSelect ? "group" : "radiogroup"}
+							>
+								{current.options.map((o) => (
+									<OptionButton
+										checked={choice.picked.includes(o.label)}
+										disabled={locked}
+										key={o.label}
+										multi={current.multiSelect}
+										onFocusPreview={() => setPeek(o.label)}
+										onPick={() => pick(o.label)}
+										option={o}
+									/>
+								))}
+							</div>
+							{shown ? (
+								<div className="chat-preview" data-testid="chat-option-preview">
+									<span className="chat-preview__label">Preview · {shown.label}</span>
+									{shown.preview}
 								</div>
-							))}
+							) : null}
 						</div>
 					</>
 				) : null}
 				<div className="chat-ask__actions">
-					<input aria-label="Other answer" className="chat-other" disabled placeholder="Other: type your own answer" />
-					<DisabledActions>
-						<Button disabled size="sm">
-							Submit answers
-						</Button>
-					</DisabledActions>
+					<input
+						aria-label="Other answer"
+						className="chat-other"
+						disabled={locked}
+						onChange={(e) => setOther(e.target.value)}
+						placeholder="Other: type your own answer"
+						value={choice.other}
+					/>
+					<Button
+						disabled={locked || !complete}
+						onClick={() => onAnswer(answerQuestions(request, questions, choices))}
+						size="sm"
+						title={complete ? undefined : "Answer every question first"}
+					>
+						Submit answers
+					</Button>
+					<Button disabled={locked} onClick={() => onAnswer(replyInChat(request))} size="sm" variant="ghost">
+						Reply in chat instead
+					</Button>
 				</div>
+				<CardError state={state} />
 			</div>
 		</div>
 	);
 }
 
-function PlanCard({ request, theme }: { request: Pending; theme: Theme }) {
+function PlanCard({ request, theme, state, disabled, onAnswer }: CardProps) {
 	const { plan, path } = parsePlan(request.input);
+	const [feedback, setFeedback] = useState<string | undefined>(undefined);
+	const locked = disabled || state?.phase === "sending";
+	const approve = (mode: "acceptEdits" | "default") => {
+		const { answer, mode: then } = approvePlan(request, mode);
+		onAnswer(answer, then);
+	};
 	return (
-		<div className="chat-ask chat-ask--plan" data-pending="plan">
+		<div aria-label="Plan ready for review" className="chat-ask chat-ask--plan" data-pending="plan" role="group">
 			<div className="chat-ask__bar">
 				<ListChecks className="chat-icon" aria-hidden="true" />
 				Plan ready for review
@@ -334,31 +529,59 @@ function PlanCard({ request, theme }: { request: Pending; theme: Theme }) {
 			<div className="chat-plan-body note-prose chat-md">
 				<NoteMarkdown source={plan} theme={theme} />
 			</div>
-			<div className="chat-ask__foot chat-ask__actions">
-				<DisabledActions>
-					<Button disabled size="sm">
+			<div className="chat-ask__foot">
+				<div className="chat-ask__actions">
+					<Button disabled={locked} onClick={() => approve("acceptEdits")} size="sm">
 						Approve · auto-accept edits
 					</Button>
-					<Button disabled size="sm" variant="outline">
+					<Button disabled={locked} onClick={() => approve("default")} size="sm" variant="outline">
 						Approve · ask before edits
 					</Button>
-					<Button disabled size="sm" variant="ghost">
+					<Button
+						aria-expanded={feedback !== undefined}
+						disabled={locked}
+						onClick={() => setFeedback((f) => (f === undefined ? "" : undefined))}
+						size="sm"
+						variant="ghost"
+					>
 						Keep planning…
 					</Button>
-				</DisabledActions>
-				<span className="chat-ask__waiting">waiting for an answer</span>
+					<CardStatus idle="waiting for an answer" state={state} />
+				</div>
+				{feedback !== undefined ? (
+					<div className="chat-plan-feedback">
+						<textarea
+							aria-label="Plan feedback"
+							autoFocus
+							className="chat-plan-feedback__input"
+							disabled={locked}
+							onChange={(e) => setFeedback(e.target.value)}
+							placeholder="What should change? Claude revises the plan and asks again."
+							value={feedback}
+						/>
+						<Button
+							disabled={locked || feedback.trim() === ""}
+							onClick={() => onAnswer(keepPlanning(request, feedback))}
+							size="sm"
+							variant="outline"
+						>
+							Send feedback
+						</Button>
+					</div>
+				) : null}
+				<CardError state={state} />
 			</div>
 		</div>
 	);
 }
 
-export function PendingRequestCard({ request, theme }: { request: Pending; theme: Theme }) {
-	switch (request.kind) {
+export function PendingRequestCard(props: CardProps) {
+	switch (props.request.kind) {
 		case "question":
-			return <QuestionCard request={request} />;
+			return <QuestionCard {...props} />;
 		case "plan":
-			return <PlanCard request={request} theme={theme} />;
+			return <PlanCard {...props} />;
 		case "permission":
-			return <PermissionCard request={request} theme={theme} />;
+			return <PermissionCard {...props} />;
 	}
 }

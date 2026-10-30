@@ -117,6 +117,7 @@ describe("chat fold parity: first_session.jsonl", () => {
 			toolUseId: "toolu_01Rcbbfzp9t7Z51pRQtCMHpY",
 			input: { file_path: "/work/project/hello.txt", content: "hi" },
 			suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
+			defaultToNo: false,
 		});
 		const calls = toolCalls(prefix, "Write");
 		expect(calls[0].permission).toMatchObject({ status: "pending", requestId: p.requestId });
@@ -172,10 +173,10 @@ describe("chat fold parity: resumed_session.jsonl", () => {
 	});
 
 	it.each([
-		[19, "default"],
-		[20, "plan"],
-		[54, "plan"],
-		[59, "default"],
+		[16, "default"],
+		[17, "plan"],
+		[43, "plan"],
+		[44, "default"],
 		[91, "default"],
 	])("permission mode after seq %i is %s", (seq, mode) => {
 		expect(foldEntries(upTo(entries, seq)).permissionMode).toBe(mode);
@@ -354,6 +355,26 @@ describe("chat fold rules", () => {
 			});
 		const tr = foldEntries([req(1, "a"), req(2, "b"), req(3, "c"), answer(4, "b")]);
 		expect(tr.pending.map((p) => p.requestId)).toEqual(["a", "c"]);
+	});
+
+	it("carries a request's default_to_no onto its pending entry", () => {
+		const tr = foldEntries([
+			synth(1, "out", {
+				type: "control_request",
+				request_id: "r",
+				request: { subtype: "can_use_tool", tool_name: "Bash", tool_use_id: "t", input: {}, default_to_no: true },
+			}),
+		]);
+		expect(tr.pending[0].defaultToNo).toBe(true);
+	});
+
+	it("follows the mode a status event reports", () => {
+		const tr = foldEntries([
+			synth(1, "out", { type: "system", subtype: "init", session_id: "s", permissionMode: "default" }),
+			synth(2, "out", { type: "system", subtype: "status", status: null, permissionMode: "plan" }),
+			synth(3, "out", { type: "system", subtype: "status", status: "compacting" }),
+		]);
+		expect(tr.permissionMode).toBe("plan");
 	});
 
 	it("attaches tool results by id and treats a repeated tool_use id as the same call", () => {

@@ -60,6 +60,7 @@ export type Pending = {
 	kind: PendingKind;
 	input: unknown;
 	suggestions: unknown[];
+	defaultToNo: boolean;
 };
 
 export type Transcript = {
@@ -155,6 +156,7 @@ export class ChatFolder {
 				if (event.permissionMode !== "") this.mode = event.permissionMode;
 				break;
 			case "system":
+				if (event.permissionMode !== "") this.mode = event.permissionMode;
 				if (event.subtype === "compact_boundary") this.items.push({ kind: "notice", notice: "compacted", text: "" });
 				break;
 			case "assistant":
@@ -260,6 +262,7 @@ export class ChatFolder {
 			kind: pendingKind(request.toolName),
 			input: request.input,
 			suggestions: request.suggestions,
+			defaultToNo: request.defaultToNo,
 		});
 		if (attached) this.updateTool(request.toolUseId, { permission: out });
 	}

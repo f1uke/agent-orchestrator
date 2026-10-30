@@ -12,7 +12,7 @@ export type Question = {
 	question: string;
 	header: string;
 	multiSelect: boolean;
-	options: Array<{ label: string; description: string }>;
+	options: Array<{ label: string; description: string; preview: string }>;
 };
 
 export type ToolBody =
@@ -72,7 +72,7 @@ export function parseQuestions(input: unknown): Question[] {
 		multiSelect: q.multiSelect === true,
 		options: (Array.isArray(q.options) ? q.options : [])
 			.filter(isObject)
-			.map((o) => ({ label: str(o.label), description: str(o.description) })),
+			.map((o) => ({ label: str(o.label), description: str(o.description), preview: str(o.preview) })),
 	}));
 }
 
@@ -234,6 +234,34 @@ export function describeUpdates(updates: readonly unknown[]): { rules: string[];
 		}
 	}
 	return { rules, mode };
+}
+
+const SETTINGS_FILE: Record<string, string> = {
+	localSettings: ".claude/settings.local.json",
+	projectSettings: ".claude/settings.json",
+	userSettings: "~/.claude/settings.json",
+};
+
+export type SuggestionView = { verb: string; code: string; after: string; file?: string };
+
+export function describeSuggestions(suggestions: readonly unknown[]): SuggestionView[] {
+	const views: SuggestionView[] = [];
+	for (const s of suggestions) {
+		if (!isObject(s)) continue;
+		const destination = str(s.destination);
+		const file = SETTINGS_FILE[destination];
+		const scope = destination === "session" ? " for this session" : "";
+		if (s.type === "addRules") {
+			const { rules } = describeUpdates([s]);
+			if (rules.length) views.push({ verb: "adds", code: rules.join(", "), after: scope, file });
+		} else if (s.type === "setMode" && typeof s.mode === "string") {
+			views.push({ verb: "switches to", code: s.mode, after: ` mode${scope}`, file });
+		} else if (s.type === "addDirectories" && Array.isArray(s.directories)) {
+			const dirs = s.directories.filter((d): d is string => typeof d === "string");
+			if (dirs.length) views.push({ verb: "adds the directory", code: dirs.join(", "), after: scope, file });
+		}
+	}
+	return views;
 }
 
 export function parseAnswers(call: ToolCallItem): string[] {
