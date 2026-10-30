@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 var wantProtocolFlags = []string{
@@ -215,6 +216,23 @@ func runFirstSession(t *testing.T, dir string) (Config, []chatproto.Entry, strin
 	}
 	socketGone(t, cfg.SocketPath)
 	return cfg, fixture, argvFile
+}
+
+func TestClaudeSeesHostAsAgentParent(t *testing.T) {
+	dir := shortDir(t)
+	parentFile := filepath.Join(dir, "parent")
+	t.Setenv(ports.EnvAgentParentPID, "1")
+	t.Setenv(envFakeParent, parentFile)
+	runFirstSession(t, dir)
+
+	b, err := os.ReadFile(parentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ppid, _ := strings.Cut(string(b), " ")
+	if got != ppid || got != strconv.Itoa(os.Getpid()) {
+		t.Errorf("claude saw %s=%q with parent pid %s, want both %d", ports.EnvAgentParentPID, got, ppid, os.Getpid())
+	}
 }
 
 func TestFreshSessionEndToEnd(t *testing.T) {

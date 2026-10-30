@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	envFakeStubborn = "SESSIONHOST_FAKE_STUBBORN"
 	envFakeChildPID = "SESSIONHOST_FAKE_CHILD"
 	envFakeSleeper  = "SESSIONHOST_FAKE_SLEEPER"
+	envFakeParent   = "SESSIONHOST_FAKE_PARENT"
 )
 
 func TestMain(m *testing.M) {
@@ -44,6 +46,12 @@ func fakeClaude(fixture string) int {
 		b, _ := json.Marshal(os.Args[1:])
 		if err := os.WriteFile(p, b, 0o600); err != nil {
 			return fail("write argv: %v", err)
+		}
+	}
+	if p := os.Getenv(envFakeParent); p != "" {
+		line := os.Getenv(ports.EnvAgentParentPID) + " " + strconv.Itoa(os.Getppid())
+		if err := os.WriteFile(p, []byte(line), 0o600); err != nil {
+			return fail("write parent: %v", err)
 		}
 	}
 	stubborn := os.Getenv(envFakeStubborn) == "1"

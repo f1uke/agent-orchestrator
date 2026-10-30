@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
 
@@ -166,6 +168,7 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume stri
 	cmd := process.Command(argv[0], argv[1:]...)
 	process.Detach(cmd)
 	cmd.Dir = cfg.Dir
+	cmd.Env = append(os.Environ(), ports.EnvAgentParentPID+"="+strconv.Itoa(os.Getpid()))
 	cmd.Stderr = h.pane
 	cmd.WaitDelay = stdoutDrain
 	stdin, err := cmd.StdinPipe()
