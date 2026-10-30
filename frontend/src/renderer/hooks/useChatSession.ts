@@ -7,12 +7,7 @@ import { type ChatMux, createChatMux } from "../lib/chat-mux";
 import { applyDelta, emptyOverlay, settleOverlay, type StreamOverlay } from "../lib/chat-stream";
 import { muxUrlFromApiBase } from "../lib/terminal-mux";
 
-export type ChatConnection =
-	| "connecting"
-	| "live"
-	| "offline"
-	| "reconnecting"
-	| "error";
+export type ChatConnection = "connecting" | "live" | "offline" | "reconnecting" | "error";
 
 export type ChatSessionState = {
 	transcript: Transcript;

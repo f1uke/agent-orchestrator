@@ -117,8 +117,7 @@ export function createChatMux(url: string, WebSocketImpl: typeof WebSocket = Web
 			connectionListeners.clear();
 			try {
 				socket.close();
-			} catch {
-			}
+			} catch {}
 		},
 	};
 }
