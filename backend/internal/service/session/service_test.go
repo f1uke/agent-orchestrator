@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
+	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
 )
 
 type fakeTelemetrySink struct{ events []ports.TelemetryEvent }
@@ -1069,6 +1070,31 @@ func TestToAPIError_NotDelivered(t *testing.T) {
 	}
 	if !strings.Contains(e.Message, "no-descriptor") {
 		t.Fatalf("message = %q, want the transport's own reason in it", e.Message)
+	}
+}
+
+func TestToAPIError_ChatHostNotReachable(t *testing.T) {
+	err := fmt.Errorf("session mer-1: session host: %w", fmt.Errorf("sessionhost: dial /tmp/h.sock: %w: %w", sessionhost.ErrNotReachable, errors.New("connect: no such file or directory")))
+	mapped := toAPIError(err)
+	var e *apierr.Error
+	if !errors.As(mapped, &e) || e.Kind != apierr.KindConflict || e.Code != "SESSION_HOST_NOT_RUNNING" {
+		t.Fatalf("mapped = %v, want Conflict SESSION_HOST_NOT_RUNNING", mapped)
+	}
+	if strings.Contains(e.Message, "/tmp/h.sock") {
+		t.Fatalf("message = %q leaks the socket path", e.Message)
+	}
+}
+
+func TestSendFromChatHostNotReachableIsAConflict(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Transport: domain.TransportChat}
+	unreachable := fmt.Errorf("deliver to mer-1: session mer-1: session host: %w", sessionhost.ErrNotReachable)
+	svc := &Service{store: st, manager: &fakeCommander{sendErr: unreachable}, clock: time.Now}
+
+	_, err := svc.SendFrom(context.Background(), "mer-1", "hi", CrewTalk{})
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Kind != apierr.KindConflict || e.Code != "SESSION_HOST_NOT_RUNNING" {
+		t.Fatalf("err = %v, want Conflict SESSION_HOST_NOT_RUNNING", err)
 	}
 }
 

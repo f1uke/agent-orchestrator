@@ -18,8 +18,10 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/chat"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/scriptstore"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
+	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
 )
 
@@ -1512,6 +1514,8 @@ func toAPIError(err error) error {
 		// breath - the reason is the only thing that makes a refused send
 		// actionable, and it came from the transport that refused it.
 		return apierr.Conflict("MESSAGE_NOT_DELIVERED", err.Error(), nil)
+	case errors.Is(err, sessionhost.ErrNotReachable):
+		return chat.HostNotRunning()
 	case errors.Is(err, sessionmanager.ErrIncompleteHandle):
 		return apierr.Conflict("SESSION_INCOMPLETE_HANDLE", "Session is missing runtime or workspace handles", nil)
 	case errors.Is(err, sessionmanager.ErrNotResumable):

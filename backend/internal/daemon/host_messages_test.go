@@ -247,8 +247,8 @@ func TestChatSession_UnreachableHostFailsWithoutTyping(t *testing.T) {
 	rec := w.session(t, "p-chat", domain.TransportChat)
 
 	_, err := newSessionMessenger(w.store, w.rt, nil, nil).Send(context.Background(), rec.ID, "hi")
-	if err == nil || !strings.Contains(err.Error(), "session host") {
-		t.Fatalf("err = %v, want the host's dial failure", err)
+	if !errors.Is(err, sessionhost.ErrNotReachable) || !strings.Contains(err.Error(), "session host") {
+		t.Fatalf("err = %v, want the host's dial failure as ErrNotReachable", err)
 	}
 	if w.inner.sentCount() != 0 {
 		t.Fatal("an unreachable host fell back to typing into the pane")
