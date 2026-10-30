@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
+import { ChatPane } from "./ChatPane";
 import { neverStarted } from "../lib/crew";
 import { useSessionTask } from "../hooks/useSessionTask";
 import { CrewMemberNotStartedPane } from "./CrewMemberNotStartedPane";
@@ -26,7 +27,7 @@ import { SplitSessionPicker } from "./SplitSessionPicker";
 import { SplitTreeView } from "./SplitTreeView";
 import { Toast } from "./inbox-ui";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resizable";
-import { useUiStore } from "../stores/ui-store";
+import { centerViewOf, useUiStore } from "../stores/ui-store";
 import { useShell } from "../lib/shell-context";
 import { useBrowserView } from "../hooks/useBrowserView";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
@@ -83,6 +84,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const workspaceQuery = useWorkspaceQuery();
 	const workspaces = workspaceQuery.data ?? [];
 	const { theme } = useUiStore();
+	const chatViews = useUiStore((state) => state.chatViews);
 	const isInspectorOpen = useUiStore((state) => state.isInspectorOpen);
 	const toggleInspector = useUiStore((state) => state.toggleInspector);
 	const { daemonStatus } = useShell();
@@ -753,6 +755,18 @@ export function SessionView({ sessionId }: SessionViewProps) {
 			// refetch flips isTodo off, swapping in the terminal below.
 			return <TodoSessionPane session={session} />;
 		}
+		const centerView = centerViewOf(session, chatViews);
+		if (session && centerView !== "terminal") {
+			return (
+				<ChatPane
+					daemonReady={daemonStatus.state === "ready"}
+					key={session.id}
+					session={session}
+					theme={theme}
+					view={centerView}
+				/>
+			);
+		}
 		return (
 			<CenterPane
 				active
@@ -780,6 +794,18 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		if (paneSession && neverStarted(paneSession) && paneSession.isSuspended)
 			return <CrewMemberNotStartedPane session={paneSession} />;
 		if (paneSession?.isTodo) return <TodoSessionPane session={paneSession} />;
+		const paneView = centerViewOf(paneSession, chatViews);
+		if (paneSession && paneView !== "terminal") {
+			return (
+				<ChatPane
+					daemonReady={daemonStatus.state === "ready"}
+					key={paneSession.id}
+					session={paneSession}
+					theme={theme}
+					view={paneView}
+				/>
+			);
+		}
 		return (
 			<CenterPane
 				active={false}
