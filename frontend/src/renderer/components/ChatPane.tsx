@@ -135,9 +135,13 @@ export function ChatPane({ session, view, theme, daemonReady, createMux, chatApi
 					<ChatComposer
 						actions={actions}
 						busy={transcript.busy}
+						commands={transcript.commands}
+						model={transcript.model}
+						models={transcript.models}
 						onToast={showToast}
 						permissionMode={transcript.permissionMode}
 						queued={queued}
+						sessionId={session.id}
 					/>
 				) : null}
 				<div className="chat-statusline">

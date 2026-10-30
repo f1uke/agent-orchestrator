@@ -203,6 +203,36 @@ const PLAN = {
 	planFilePath: "~/.claude/plans/webhook-retry-budget.md",
 };
 
+const MOCK_COMMANDS = [
+	{
+		name: "compact",
+		description: "Summarise the conversation to free context",
+		argumentHint: "<instructions>",
+		builtin: true,
+	},
+	{ name: "clear", description: "Start a fresh Claude session in this worktree", argumentHint: "", builtin: true },
+	{ name: "review", description: "Review the branch diff", argumentHint: "[pr]", builtin: true },
+	{ name: "tdd", description: "Write the failing test first", argumentHint: "", builtin: false },
+	{ name: "deslop", description: "Remove AI slop from the diff", argumentHint: "", builtin: false },
+	{ name: "open-pr", description: "Open the PR against the session target", argumentHint: "", builtin: false },
+];
+
+function initialize(fixture: readonly ChatEntry[]): Step[] {
+	const answer = fixture.find((e) => e.dir === "out" && isObject(e.payload) && e.payload.type === "control_response")
+		?.payload as { response?: { response?: Record<string, unknown> } } | undefined;
+	const { account: _, ...body } = answer?.response?.response ?? {};
+	return [
+		["in", { type: "control_request", request_id: "demo-init", request: { subtype: "initialize" } }],
+		[
+			"out",
+			{
+				type: "control_response",
+				response: { subtype: "success", request_id: "demo-init", response: { ...body, commands: MOCK_COMMANDS } },
+			},
+		],
+	];
+}
+
 const SCRIPT: Step[] = [
 	origin("brief-1", "ao-demo-orchestrator"),
 	sent(
@@ -210,7 +240,10 @@ const SCRIPT: Step[] = [
 		"[from @ao-demo-orchestrator] Add a retry budget to the webhook sender: at most 5 attempts per event with exponential backoff, and park the event in the dead-letter table after the last one. Keep the public API unchanged. Open the PR against `main` when tests pass.",
 	),
 	lifecycle("brief-1", "started"),
-	["out", { type: "system", subtype: "init", session_id: SESSION, permissionMode: "default" }],
+	[
+		"out",
+		{ type: "system", subtype: "init", session_id: SESSION, permissionMode: "default", model: "claude-opus-5-5" },
+	],
 	thinking(
 		"msg_m10",
 		"The sender lives in internal/webhook. I should find where attempts are counted today, then check whether the dead-letter table already exists before adding a migration.",
@@ -300,7 +333,7 @@ const SCRIPT: Step[] = [
 export function mockChatEntries(fixture: readonly ChatEntry[]): ChatEntry[] {
 	const replay = fixture.filter((e) => !(e.dir === "host" && (e.payload as { kind?: string }).kind === "exit"));
 	let seq = replay.at(-1)?.seq ?? 0;
-	const scripted = SCRIPT.map(([dir, payload], i) => {
+	const scripted = [...initialize(fixture), ...SCRIPT].map(([dir, payload], i) => {
 		seq += 1;
 		return { seq, ts: new Date(START + i * 7_000).toISOString(), dir, payload };
 	});
@@ -455,6 +488,23 @@ export const stubChatApi: ChatApi = {
 			["in", { type: "control_request", request_id: requestId, request: { subtype: "set_permission_mode", mode } }],
 			["out", { type: "control_response", response: { subtype: "success", request_id: requestId, response: {} } }],
 			["out", { type: "system", subtype: "status", status: null, permissionMode: mode, session_id: SESSION }],
+		]);
+		return OK;
+	},
+	setModel: async (id, model) => {
+		const session = await stubSession(id);
+		const known = session.folder.transcript().models.find((m) => m.value === model);
+		if (!known) return { ok: false, error: { kind: "rejected", message: `Model '${model}' not found` } };
+		const requestId = `stub-model-${session.folder.lastSeq}`;
+		append(id, session, [
+			["in", { type: "control_request", request_id: requestId, request: { subtype: "set_model", model } }],
+			[
+				"out",
+				{
+					type: "control_response",
+					response: { subtype: "success", request_id: requestId, response: { model: known.resolvedModel } },
+				},
+			],
 		]);
 		return OK;
 	},
