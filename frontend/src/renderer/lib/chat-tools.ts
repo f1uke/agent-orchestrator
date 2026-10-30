@@ -12,7 +12,7 @@ export type Question = {
 	question: string;
 	header: string;
 	multiSelect: boolean;
-	options: Array<{ label: string; description: string }>;
+	options: Array<{ label: string; description: string; preview: string }>;
 };
 
 export type ToolBody =
@@ -72,7 +72,7 @@ export function parseQuestions(input: unknown): Question[] {
 		multiSelect: q.multiSelect === true,
 		options: (Array.isArray(q.options) ? q.options : [])
 			.filter(isObject)
-			.map((o) => ({ label: str(o.label), description: str(o.description) })),
+			.map((o) => ({ label: str(o.label), description: str(o.description), preview: str(o.preview) })),
 	}));
 }
 
