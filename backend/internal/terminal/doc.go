@@ -1,7 +1,7 @@
 // Package terminal is the live-terminal streaming feature: each WebSocket
 // client that opens a pane gets its OWN attach Stream, piped over a
 // ch-tagged wire protocol, alongside a session-state channel fed by the CDC
-// broadcaster.
+// broadcaster, and a chat channel that streams a chat session's event log.
 //
 // The runtime is selected by runtimeselect: tmux on Darwin/Linux, conpty on
 // Windows. On unix, tmux spawns an attach CLI (`tmux attach`) on a local PTY

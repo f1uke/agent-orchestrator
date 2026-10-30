@@ -19,7 +19,7 @@ type clientSub struct {
 func subscribeClient(ctx context.Context, c Client, from uint64) *clientSub {
 	s := &clientSub{frames: make(chan Frame, 4096), done: make(chan error, 1)}
 	go func() {
-		s.done <- c.Subscribe(ctx, from, func(f Frame) error {
+		s.done <- c.Subscribe(ctx, from, nil, func(f Frame) error {
 			s.frames <- f
 			return nil
 		})
@@ -113,7 +113,7 @@ func TestClientSubscribe(t *testing.T) {
 	}
 
 	stop := errors.New("stop")
-	if err := c.Subscribe(ctx, 0, func(Frame) error { return stop }); !errors.Is(err, stop) {
+	if err := c.Subscribe(ctx, 0, nil, func(Frame) error { return stop }); !errors.Is(err, stop) {
 		t.Errorf("Subscribe with a failing fn returned %v, want fn's error", err)
 	}
 	cctx, cancel := context.WithCancel(ctx)
@@ -131,5 +131,34 @@ func TestClientSubscribe(t *testing.T) {
 	}
 	if err := later.end(t); err != nil {
 		t.Errorf("the later Subscribe returned %v when the host exited, want nil", err)
+	}
+}
+
+func TestClientSubscribeReportsAttachBeforeTheFirstFrame(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir))
+	r := startHost(t, cfg)
+	eventually(t, "initialize answered", func() bool { return state(t, cfg.SocketPath).LastSeq == 3 })
+
+	attached := 0
+	stop := errors.New("stop")
+	err := NewClient(cfg.SocketPath).Subscribe(context.Background(), 0, func() { attached++ }, func(Frame) error {
+		if attached != 1 {
+			t.Errorf("the first frame came with attached called %d times, want 1", attached)
+		}
+		return stop
+	})
+	if !errors.Is(err, stop) {
+		t.Fatalf("Subscribe returned %v, want fn's error", err)
+	}
+
+	r.cancel()
+	r.wait(t)
+	attached = 0
+	if err := NewClient(cfg.SocketPath).Subscribe(context.Background(), 0, func() { attached++ }, func(Frame) error { return nil }); err == nil {
+		t.Fatal("Subscribe to a host that has exited returned nil")
+	}
+	if attached != 0 {
+		t.Errorf("attached was called %d times with no host, want 0", attached)
 	}
 }

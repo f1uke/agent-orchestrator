@@ -3901,6 +3901,11 @@ export interface components {
             terminalHandleId?: string;
             termination?: components["schemas"]["SessionTermination"];
             tokenUsage?: components["schemas"]["SessionTokenUsage"];
+            /**
+             * @description How the agent is driven, fixed at spawn: its own TUI in the terminal pane, or a headless chat session behind ao session-host.
+             * @enum {string}
+             */
+            transport: "terminal" | "chat";
             /** Format: date-time */
             updatedAt: string;
             workspacePath?: string;

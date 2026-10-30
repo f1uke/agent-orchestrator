@@ -79,7 +79,7 @@ func dropPending(p pendingSet, id string) pendingSet {
 
 type chatHost interface {
 	State(ctx context.Context) (sessionhost.State, error)
-	Subscribe(ctx context.Context, fromSeq uint64, fn func(sessionhost.Frame) error) error
+	Subscribe(ctx context.Context, fromSeq uint64, attached func(), fn func(sessionhost.Frame) error) error
 }
 
 type liveChatSessions interface {
@@ -219,7 +219,7 @@ func (c *chatWatcher) follow(ctx context.Context) (connected bool, err error) {
 	}
 	c.pending = pendingFromState(st)
 	c.reportWaitingChange(ctx)
-	return true, c.host.Subscribe(ctx, st.LastSeq, func(f sessionhost.Frame) error {
+	return true, c.host.Subscribe(ctx, st.LastSeq, nil, func(f sessionhost.Frame) error {
 		if f.Entry != nil {
 			c.pending = foldPending(c.pending, *f.Entry)
 			c.reportWaitingChange(ctx)

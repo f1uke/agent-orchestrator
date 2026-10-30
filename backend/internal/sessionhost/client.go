@@ -81,9 +81,11 @@ type Frame struct {
 }
 
 // Subscribe passes fn every log entry after fromSeq, then every entry and
-// delta as the host makes it. It returns nil when the host ends the stream,
-// ctx's error when ctx ends, and fn's error when fn returns one.
-func (c Client) Subscribe(ctx context.Context, fromSeq uint64, fn func(Frame) error) error {
+// delta as the host makes it. attached, when set, is called once the host has
+// accepted the subscription, before the first frame. It returns nil when the
+// host ends the stream, ctx's error when ctx ends, and fn's error when fn
+// returns one.
+func (c Client) Subscribe(ctx context.Context, fromSeq uint64, attached func(), fn func(Frame) error) error {
 	conn, br, done, err := c.open(ctx, map[string]any{"op": "subscribe", "from_seq": fromSeq})
 	if err != nil {
 		return err
@@ -93,6 +95,9 @@ func (c Client) Subscribe(ctx context.Context, fromSeq uint64, fn func(Frame) er
 		return err
 	}
 	_ = conn.SetDeadline(time.Time{})
+	if attached != nil {
+		attached()
+	}
 	for {
 		line, err := br.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
