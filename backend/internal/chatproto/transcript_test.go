@@ -654,3 +654,85 @@ func TestUnknownEventsChangeNothing(t *testing.T) {
 		t.Errorf("unknown events changed the transcript:\n got %+v\nwant %+v", got, base)
 	}
 }
+
+func TestFoldKeepsCommandsModelsAndTheModelInUse(t *testing.T) {
+	builtin, skill := true, false
+	wantCommands := []Command{
+		{Name: "compact", Description: "Clear history but keep a summary in context", Builtin: &builtin},
+		{Name: "review", Description: "Review a pull request", Builtin: &builtin},
+		{Name: "tdd", Description: "Write the failing test first", Builtin: &skill},
+	}
+	wantOpus := Model{
+		Value: "opus", ResolvedModel: "claude-opus-5-5", DisplayName: "Opus 5.5",
+		Description: "For complex work and everyday tasks", SupportsEffort: true,
+		SupportedEffortLevels: []string{"low", "medium", "high", "xhigh", "max"},
+	}
+	for _, name := range []string{"first_session.jsonl", "resumed_session.jsonl"} {
+		t.Run(name, func(t *testing.T) {
+			entries := loadFixture(t, name)
+			if tr := foldEntries(t, upTo(entries, 2)); tr.Model != "sonnet" || tr.Commands != nil || tr.Models != nil {
+				t.Errorf("before initialize answers: Model=%q Commands=%v Models=%v, want the spawn's --model and no lists", tr.Model, tr.Commands, tr.Models)
+			}
+			tr := foldEntries(t, entries)
+			if !reflect.DeepEqual(tr.Commands, wantCommands) {
+				t.Errorf("Commands = %+v, want %+v", tr.Commands, wantCommands)
+			}
+			if len(tr.Models) != 13 || !reflect.DeepEqual(tr.Models[1], wantOpus) {
+				t.Errorf("Models = %d, [1] = %+v, want 13 with opus second", len(tr.Models), tr.Models)
+			}
+			if tr.Model != "claude-sonnet-5-5" {
+				t.Errorf("Model = %q, want system/init's claude-sonnet-5-5", tr.Model)
+			}
+		})
+	}
+}
+
+func TestFoldFollowsAnAcceptedSetModel(t *testing.T) {
+	entries := loadFixture(t, "set_model.jsonl")
+	if tr := foldEntries(t, upTo(entries, 2)); tr.Model != "claude-sonnet-5-5" {
+		t.Errorf("after the accepted set_model Model = %q, want the resolved claude-sonnet-5-5", tr.Model)
+	}
+	if tr := foldEntries(t, entries); tr.Model != "claude-sonnet-5-5" {
+		t.Errorf("after the refused set_model Model = %q, want it unchanged", tr.Model)
+	}
+
+	unasked := foldEntries(t, []Entry{
+		synth(1, DirOut, `{"type":"control_response","response":{"subtype":"success","request_id":"x","response":{"model":"claude-haiku-5-5"}}}`),
+	})
+	if unasked.Model != "" {
+		t.Errorf("a response to no host request set Model = %q", unasked.Model)
+	}
+}
+
+func TestFoldKeepsTheLastAcceptedInitialize(t *testing.T) {
+	initialize := func(seq uint64, id string) Entry {
+		return synth(seq, DirIn, `{"type":"control_request","request_id":"`+id+`","request":{"subtype":"initialize"}}`)
+	}
+	tr := foldEntries(t, []Entry{
+		initialize(1, "a"),
+		synth(2, DirOut, `{"type":"control_response","response":{"subtype":"success","request_id":"a","response":{"commands":[{"name":"compact","description":"d","argumentHint":"<what>"}],"models":[{"value":"haiku","displayName":"Haiku"}],"account":{"email":"x@example.com"}}}}`),
+		initialize(3, "b"),
+		synth(4, DirOut, `{"type":"control_response","response":{"subtype":"error","request_id":"b","error":"boom"}}`),
+	})
+	want := []Command{{Name: "compact", Description: "d", ArgumentHint: "<what>"}}
+	if !reflect.DeepEqual(tr.Commands, want) || len(tr.Models) != 1 || tr.Models[0].Value != "haiku" {
+		t.Errorf("Commands=%+v Models=%+v, want the accepted initialize's lists kept over the failed one", tr.Commands, tr.Models)
+	}
+}
+
+func TestSpawnTakesTheModelFromItsCommandLine(t *testing.T) {
+	for _, tt := range []struct{ argv, want string }{
+		{`["claude","--model","opus"]`, "opus"},
+		{`["claude","--model=haiku"]`, "haiku"},
+		{`["claude","--","--model","opus"]`, ""},
+		{`["claude","--model"]`, ""},
+	} {
+		tr := foldEntries(t, []Entry{
+			synth(1, DirOut, `{"type":"system","subtype":"init","session_id":"s","model":"claude-sonnet-5-5"}`),
+			synth(2, DirHost, `{"kind":"spawn","resume":"","argv":`+tt.argv+`}`),
+		})
+		if tr.Model != tt.want {
+			t.Errorf("spawn %s: Model = %q, want %q", tt.argv, tr.Model, tt.want)
+		}
+	}
+}

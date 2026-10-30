@@ -106,7 +106,7 @@ func TestParseHostNote(t *testing.T) {
 		want    HostNote
 		wantErr bool
 	}{
-		{"spawn", `{"kind":"spawn","resume":"sess-1","argv":["claude"]}`, HostNote{Kind: NoteSpawn, Resume: "sess-1"}, false},
+		{"spawn", `{"kind":"spawn","resume":"sess-1","argv":["claude"]}`, HostNote{Kind: NoteSpawn, Resume: "sess-1", Argv: []string{"claude"}}, false},
 		{"exit", `{"kind":"exit","code":0,"signal":null}`, HostNote{Kind: NoteExit, Code: &zero}, false},
 		{"exit on signal", `{"kind":"exit","code":null,"signal":"SIGKILL"}`, HostNote{Kind: NoteExit}, false},
 		{"user origin", `{"kind":"user_origin","uuid":"u1","origin":{"via":"ao_send","from":"w-1"}}`, HostNote{Kind: NoteUserOrigin, UUID: "u1", Origin: &Origin{Via: "ao_send", From: "w-1"}}, false},

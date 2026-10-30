@@ -1,0 +1,4 @@
+{"seq":1,"ts":"2026-10-30T06:40:00.000Z","dir":"in","payload":{"type":"control_request","request_id":"sm-1","request":{"subtype":"set_model","model":"sonnet"}}}
+{"seq":2,"ts":"2026-10-30T06:40:00.050Z","dir":"out","payload":{"type":"control_response","response":{"subtype":"success","request_id":"sm-1","response":{"model":"claude-sonnet-5-5"}}}}
+{"seq":3,"ts":"2026-10-30T06:40:05.000Z","dir":"in","payload":{"type":"control_request","request_id":"sm-2","request":{"subtype":"set_model","model":"not-a-model"}}}
+{"seq":4,"ts":"2026-10-30T06:40:05.050Z","dir":"out","payload":{"type":"control_response","response":{"subtype":"error","request_id":"sm-2","error":"Model 'not-a-model' not found","error_code":"not_found","model":"claude-sonnet-5-5"}}}

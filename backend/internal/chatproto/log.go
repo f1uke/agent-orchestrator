@@ -81,10 +81,11 @@ type Origin struct {
 // HostNote is the parsed payload of a DirHost entry.
 type HostNote struct {
 	Kind   HostNoteKind
-	UUID   string  // user_origin: the user input the origin belongs to
-	Origin *Origin // user_origin
-	Resume string  // spawn: the claude session id resumed, or empty
-	Code   *int    // exit: the exit code, nil when claude died on a signal
+	UUID   string
+	Origin *Origin
+	Resume string
+	Argv   []string
+	Code   *int // nil when claude died on a signal
 	Raw    json.RawMessage
 }
 
@@ -95,6 +96,7 @@ func ParseHostNote(payload json.RawMessage) (HostNote, error) {
 		UUID   string       `json:"uuid"`
 		Origin *Origin      `json:"origin"`
 		Resume string       `json:"resume"`
+		Argv   []string     `json:"argv"`
 		Code   *int         `json:"code"`
 	}
 	if err := json.Unmarshal(payload, &w); err != nil {
@@ -103,5 +105,5 @@ func ParseHostNote(payload json.RawMessage) (HostNote, error) {
 	if w.Kind == "" {
 		return HostNote{}, errors.New("chatproto: parse host note: missing kind")
 	}
-	return HostNote{Kind: w.Kind, UUID: w.UUID, Origin: w.Origin, Resume: w.Resume, Code: w.Code, Raw: bytes.Clone(payload)}, nil
+	return HostNote{Kind: w.Kind, UUID: w.UUID, Origin: w.Origin, Resume: w.Resume, Argv: w.Argv, Code: w.Code, Raw: bytes.Clone(payload)}, nil
 }

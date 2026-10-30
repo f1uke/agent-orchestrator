@@ -16,7 +16,29 @@ type Transcript struct {
 	Busy             bool      // some command started and has not finished
 	PermissionMode   string    // latest system/init value
 	CostUSD          float64   // latest result.total_cost_usd, cumulative for the claude process
+	Commands         []Command // from the latest initialize response
+	Models           []Model   // from the latest initialize response
+	Model            string    // in use: the spawn's --model, then system/init or an accepted set_model
 	LastSeq          uint64
+}
+
+// Command is a slash command or skill claude offers.
+type Command struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argumentHint"`
+	Builtin      *bool  `json:"builtin"` // nil when claude does not say
+}
+
+// Model is a model the session can switch to. Value is what set_model takes:
+// an alias such as "sonnet", or a full model id.
+type Model struct {
+	Value                 string   `json:"value"`
+	ResolvedModel         string   `json:"resolvedModel"`
+	DisplayName           string   `json:"displayName"`
+	Description           string   `json:"description"`
+	SupportsEffort        bool     `json:"supportsEffort"`
+	SupportedEffortLevels []string `json:"supportedEffortLevels"`
 }
 
 // Item is one row of the transcript. The concrete types are the structs below,
@@ -159,6 +181,12 @@ type Folder struct {
 	pending  []Pending
 	mode     string
 	cost     float64
+	// controls maps the id of a host's initialize or set_model request to its
+	// subtype, because claude's response does not repeat it.
+	controls map[string]string
+	slash    []Command
+	models   []Model
+	model    string
 }
 
 // NewFolder returns an empty Folder.
@@ -169,6 +197,7 @@ func NewFolder() *Folder {
 		origins:  map[string]Origin{},
 		commands: map[string]CommandState{},
 		perms:    map[string]*permission{},
+		controls: map[string]string{},
 	}
 }
 
@@ -212,6 +241,9 @@ func (f *Folder) applyOut(ev Event) {
 		if ev.PermissionMode != "" {
 			f.mode = ev.PermissionMode
 		}
+		if ev.Model != "" {
+			f.model = ev.Model
+		}
 	case System:
 		if ev.PermissionMode != "" {
 			f.mode = ev.PermissionMode
@@ -234,6 +266,7 @@ func (f *Folder) applyOut(ev Event) {
 		}
 	case ControlResponse:
 		f.answerPermission(ev)
+		f.answerControl(ev)
 	case ControlCancel:
 		f.settle(ev.RequestID, PermissionCancelled, "", nil)
 	case CommandLifecycle:
@@ -245,8 +278,40 @@ func (f *Folder) applyIn(ev Event) {
 	switch ev := ev.(type) {
 	case User:
 		f.addUserInput(ev)
+	case ControlRequest:
+		if c, ok := ev.Body.(OtherControl); ok && (c.Subtype == "initialize" || c.Subtype == "set_model") {
+			f.controls[ev.RequestID] = c.Subtype
+		}
 	case ControlResponse:
 		f.answerPermission(ev)
+	}
+}
+
+func (f *Folder) answerControl(r ControlResponse) {
+	subtype, ok := f.controls[r.RequestID]
+	if !ok {
+		return
+	}
+	delete(f.controls, r.RequestID)
+	if !r.OK {
+		return
+	}
+	switch subtype {
+	case "initialize":
+		var body struct {
+			Commands []Command `json:"commands"`
+			Models   []Model   `json:"models"`
+		}
+		if json.Unmarshal(r.Response, &body) == nil {
+			f.slash, f.models = body.Commands, body.Models
+		}
+	case "set_model":
+		var body struct {
+			Model string `json:"model"`
+		}
+		if json.Unmarshal(r.Response, &body) == nil && body.Model != "" {
+			f.model = body.Model
+		}
 	}
 }
 
@@ -381,6 +446,7 @@ func (f *Folder) applyHost(n HostNote) {
 	switch n.Kind {
 	case NoteSpawn:
 		f.endProcess()
+		f.model = modelFlag(n.Argv)
 		if n.Resume != "" {
 			f.items = append(f.items, Notice{Kind: NoticeResumed, Text: n.Resume})
 		} else {
@@ -399,6 +465,21 @@ func (f *Folder) applyHost(n HostNote) {
 			item.Origin = &o
 		}
 	}
+}
+
+func modelFlag(argv []string) string {
+	for i, a := range argv {
+		if a == "--" {
+			break
+		}
+		if v, ok := strings.CutPrefix(a, "--model="); ok {
+			return v
+		}
+		if a == "--model" && i+1 < len(argv) {
+			return argv[i+1]
+		}
+	}
+	return ""
 }
 
 func exitText(code *int) string {
@@ -437,6 +518,9 @@ func (f *Folder) Transcript() Transcript {
 		Pending:          make([]Pending, 0, len(f.pending)),
 		PermissionMode:   f.mode,
 		CostUSD:          f.cost,
+		Commands:         slices.Clone(f.slash),
+		Models:           slices.Clone(f.models),
+		Model:            f.model,
 		LastSeq:          f.last,
 	}
 	for _, it := range f.items {
