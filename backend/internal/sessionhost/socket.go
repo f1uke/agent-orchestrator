@@ -20,6 +20,7 @@ const (
 	subscriberBuffer = 256
 	requestTimeout   = 30 * time.Second
 	writeTimeout     = 10 * time.Second
+	subscriberFlush  = 2 * time.Second
 )
 
 type request interface{ isRequest() }
@@ -202,15 +203,27 @@ func (s *server) untrack(c net.Conn) {
 	_ = c.Close()
 }
 
+// close lets subscribers flush the frames already queued for them, the exit
+// note last among them, before it cuts off connections that are still open.
 func (s *server) close() {
 	_ = s.ln.Close()
 	s.mu.Lock()
 	s.closed = true
+	s.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	if waitFor(done, subscriberFlush) {
+		return
+	}
+	s.mu.Lock()
 	for c := range s.conns {
 		_ = c.Close()
 	}
 	s.mu.Unlock()
-	s.wg.Wait()
+	<-done
 }
 
 func (h *host) handleConn(conn net.Conn) {
