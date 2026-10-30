@@ -410,6 +410,18 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 		if (el.scrollTop > 0) setFollowing(false);
 	};
 
+	// React's wheel listener is passive and can run after the browser has already scrolled and the
+	// stream has pinned back to the end; a capturing native listener sees the wheel first.
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const onWheel = (e: WheelEvent) => {
+			if (e.deltaY < 0) leaveEnd(el);
+		};
+		el.addEventListener("wheel", onWheel, { capture: true, passive: true });
+		return () => el.removeEventListener("wheel", onWheel, { capture: true });
+	});
+
 	const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
 		const el = e.currentTarget;
 		findActiveTurn();
@@ -435,9 +447,6 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 				}}
 				onPointerDown={onPointerDown}
 				onScroll={onScroll}
-				onWheel={(e) => {
-					if (e.deltaY < 0) leaveEnd(e.currentTarget);
-				}}
 				ref={scrollRef}
 			>
 				{rows.length === 0 ? <div className="chat-empty">Nothing in this session's log yet.</div> : null}
