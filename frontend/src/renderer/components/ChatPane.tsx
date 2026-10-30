@@ -23,15 +23,9 @@ type ChatPaneProps = {
 	view: ChatPaneView;
 	theme: Theme;
 	daemonReady: boolean;
-	/** Test seam, passed through to useChatSession. */
 	createMux?: () => ChatMux;
 };
 
-/**
- * A chat session's transcript, read-only. Only the rows on screen are mounted:
- * a long session folds into thousands of rows, and each tool card can hold a
- * diff, so rendering them all would make every new entry cost the whole log.
- */
 export function ChatPane({ session, view, theme, daemonReady, createMux }: ChatPaneProps) {
 	const chat = useChatSession(session.id, {
 		daemonReady,
@@ -64,7 +58,6 @@ const VIEW_OPTIONS: Array<{ view: ChatView; label: string; Icon: LucideIcon }> =
 	{ view: "events", label: "Events", Icon: Code },
 ];
 
-/** Chat | Terminal | Events for a chat session; terminal sessions get no toggle. */
 export function ChatViewToggle({ session, style }: { session: WorkspaceSession; style?: React.CSSProperties }) {
 	const chatViews = useUiStore((state) => state.chatViews);
 	const setChatView = useUiStore((state) => state.setChatView);
@@ -120,8 +113,6 @@ const STICK_TO_BOTTOM_PX = 48;
 function ChatStream({ rows, pending, theme }: { rows: ChatRow[]; pending: Pending[]; theme: Theme }) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const atBottomRef = useRef(true);
-	// Open/shut per tool card, kept here because a row's own state would reset
-	// every time it scrolls out of the window and back.
 	const [openTools, setOpenTools] = useState<Readonly<Record<string, boolean>>>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
 	const sessionNames = useSessionNames();
@@ -261,7 +252,6 @@ function ItemRow({
 				const request = pendingByRequest.get(permission.requestId);
 				if (request) return <PendingRequestCard request={request} theme={theme} />;
 			}
-			// A settled question reads as its answer; the card would only repeat the question.
 			if (item.name === "AskUserQuestion" && permission) return <ResolvedLine call={item} />;
 			return (
 				<>
@@ -335,7 +325,6 @@ function PeerMessage({
 	theme: Theme;
 }) {
 	const origin = item.origin!;
-	// The same rule isOrchestratorSession applies to a session id.
 	const orchestrator = origin.from.endsWith("-orchestrator");
 	const name = orchestrator ? "orchestrator" : (sessionNames.get(origin.from) ?? `@${origin.from}`);
 	const body = item.text.replace(/^\[from @[^\]]*\]\s*/, "");
@@ -398,7 +387,6 @@ function formatTime(ts: string): string {
 	return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
-/** The raw log, one entry per line, in the terminal font. */
 function ChatEvents({ entries }: { entries: readonly ChatEntry[] }) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const virtualizer = useVirtualizer({
@@ -408,11 +396,16 @@ function ChatEvents({ entries }: { entries: readonly ChatEntry[] }) {
 		overscan: 20,
 		observeElementRect: measuredOrFallbackRect,
 	});
+	const atBottomRef = useRef(true);
 	useEffect(() => {
-		if (entries.length > 0) virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+		if (entries.length > 0 && atBottomRef.current) virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
 	}, [entries.length, virtualizer]);
+	const onScroll = () => {
+		const el = scrollRef.current;
+		if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_PX;
+	};
 	return (
-		<div className="chat-events" data-testid="chat-events" ref={scrollRef}>
+		<div className="chat-events" data-testid="chat-events" onScroll={onScroll} ref={scrollRef}>
 			<div className="relative" style={{ height: virtualizer.getTotalSize() }}>
 				{virtualizer.getVirtualItems().map((v) => {
 					const entry = entries[v.index];
