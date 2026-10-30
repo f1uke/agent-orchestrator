@@ -85,7 +85,7 @@ func TestClientSubscribe(t *testing.T) {
 		t.Fatalf("replay from 2 starts at seq %d, want 3", got[0].Seq)
 	}
 
-	if _, err := c.Send(ctx, "first", nil); err != nil {
+	if _, err := c.Send(ctx, chatproto.UserInput{Text: "first"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var live []chatproto.Entry

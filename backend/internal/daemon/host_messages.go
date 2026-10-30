@@ -39,7 +39,7 @@ func (r *hostRouter) route(ctx context.Context, handle ports.RuntimeHandle, mess
 		err = fmt.Errorf("%w: %s refused: session %s is a chat session, which has no pane to type into", msgdelivery.ErrNotDelivered, wire.Flag(), id)
 	} else {
 		_, socket := sessionhost.Paths(r.dataDir, string(id))
-		report.MsgID, err = sessionhost.NewClient(socket).Send(ctx, message, &chatproto.Origin{Via: "ao_send", From: sender})
+		report.MsgID, err = sessionhost.NewClient(socket).Send(ctx, chatproto.UserInput{Text: message}, &chatproto.Origin{Via: "ao_send", From: sender})
 		if err != nil {
 			err = fmt.Errorf("session %s: session host: %w", id, err)
 		}

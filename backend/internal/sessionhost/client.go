@@ -36,6 +36,22 @@ func PreparePaths(dataDir, sessionID string) (logPath, socketPath string, err er
 	return logPath, socketPath, nil
 }
 
+// ErrNotReachable means no host answered on the session's socket: the session
+// is asleep, restarting, or its host has gone.
+var ErrNotReachable = errors.New("session host is not reachable")
+
+// ErrRefused means the host got the request and turned it down, for example
+// answering a request that is no longer pending. The host's reason is in the
+// *RefusedError that wraps it.
+var ErrRefused = errors.New("session host refused the request")
+
+// RefusedError carries the reason a host gave for turning a request down.
+type RefusedError struct{ Reason string }
+
+func (e *RefusedError) Error() string { return "sessionhost: " + e.Reason }
+
+func (e *RefusedError) Unwrap() error { return ErrRefused }
+
 // Client talks to one session host. Every call is its own connection, because
 // the host answers one request per connection.
 type Client struct {
@@ -51,17 +67,63 @@ func NewClient(socketPath string) Client {
 type sendWire struct {
 	Op     string            `json:"op"`
 	Text   string            `json:"text"`
+	Images []imageWire       `json:"images,omitempty"`
 	Origin *chatproto.Origin `json:"origin,omitempty"`
 }
 
-// Send hands text to claude as the next user message and returns the uuid the
-// host gave it. origin, when set, says the message did not come from the chat.
-func (c Client) Send(ctx context.Context, text string, origin *chatproto.Origin) (string, error) {
+type imageWire struct {
+	MediaType string `json:"media_type"`
+	Base64    string `json:"base64"`
+}
+
+// Send hands in to claude as the next user message and returns the uuid the
+// host gave it; in.UUID is ignored. origin, when set, says the message did not
+// come from the chat.
+func (c Client) Send(ctx context.Context, in chatproto.UserInput, origin *chatproto.Origin) (string, error) {
+	req := sendWire{Op: "send", Text: in.Text, Origin: origin}
+	for _, img := range in.Images {
+		req.Images = append(req.Images, imageWire{MediaType: img.MediaType, Base64: img.Base64})
+	}
 	var resp sendResponse
-	if err := c.call(ctx, sendWire{Op: "send", Text: text, Origin: origin}, &resp); err != nil {
+	if err := c.call(ctx, req, &resp); err != nil {
 		return "", err
 	}
 	return resp.UUID, nil
+}
+
+type answerWire struct {
+	Op                 string            `json:"op"`
+	RequestID          string            `json:"request_id"`
+	Behavior           string            `json:"behavior"`
+	UpdatedInput       json.RawMessage   `json:"updated_input,omitempty"`
+	UpdatedPermissions []json.RawMessage `json:"updated_permissions,omitempty"`
+	Message            string            `json:"message,omitempty"`
+	Interrupt          bool              `json:"interrupt,omitempty"`
+}
+
+// Answer settles the pending request requestID with d. The host refuses a
+// request that is not pending, which includes one already answered.
+func (c Client) Answer(ctx context.Context, requestID string, d chatproto.Decision) error {
+	req := answerWire{Op: "answer", RequestID: requestID}
+	switch d := d.(type) {
+	case chatproto.Allow:
+		req.Behavior, req.UpdatedInput, req.UpdatedPermissions = "allow", d.UpdatedInput, d.UpdatedPermissions
+	case chatproto.Deny:
+		req.Behavior, req.Message, req.Interrupt = "deny", d.Message, d.Interrupt
+	default:
+		return fmt.Errorf("sessionhost: unknown decision %T", d)
+	}
+	return c.call(ctx, req, &okResponse{})
+}
+
+// Interrupt stops the turn claude is running.
+func (c Client) Interrupt(ctx context.Context) error {
+	return c.call(ctx, map[string]string{"op": "interrupt"}, &okResponse{})
+}
+
+// SetMode changes the permission mode of the running claude.
+func (c Client) SetMode(ctx context.Context, mode chatproto.PermissionMode) error {
+	return c.call(ctx, map[string]string{"op": "set_mode", "mode": string(mode)}, &okResponse{})
 }
 
 // State reports what the host knows about its session right now.
@@ -146,7 +208,10 @@ func (c Client) open(ctx context.Context, req any) (conn net.Conn, br *bufio.Rea
 	var d net.Dialer
 	conn, err = d.DialContext(ctx, "unix", c.socketPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("sessionhost: dial %s: %w", c.socketPath, err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, nil, fmt.Errorf("sessionhost: dial %s: %w", c.socketPath, ctxErr)
+		}
+		return nil, nil, nil, fmt.Errorf("sessionhost: dial %s: %w: %w", c.socketPath, ErrNotReachable, err)
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	done = func() {
@@ -180,7 +245,7 @@ func readHead(ctx context.Context, br *bufio.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("sessionhost: bad response %q: %w", line, err)
 	}
 	if !head.OK {
-		return nil, fmt.Errorf("sessionhost: %s", head.Error)
+		return nil, &RefusedError{Reason: head.Error}
 	}
 	return line, nil
 }
