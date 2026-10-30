@@ -121,7 +121,7 @@ func (h *chatHost) waitForSeq(t *testing.T, seq uint64) {
 
 func (h *chatHost) send(t *testing.T, text string) {
 	t.Helper()
-	if _, err := h.client.Send(context.Background(), text, nil); err != nil {
+	if _, err := h.client.Send(context.Background(), chatproto.UserInput{Text: text}, nil); err != nil {
 		t.Fatal(err)
 	}
 }

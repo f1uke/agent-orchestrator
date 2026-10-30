@@ -50,6 +50,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
+	chatsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/chat"
 	childrensvc "github.com/aoagents/agent-orchestrator/backend/internal/service/children"
 	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
@@ -567,6 +568,7 @@ func Run() error {
 		Testiny: testinysvc.New(testinyadapter.New(testinyadapter.Options{}), store, store, testinysvc.Options{
 			Drive: rcloneadapter.New(rcloneadapter.Options{}), Evidence: qaEvidenceSettings,
 		}),
+		Chat:               chatsvc.New(store, cfg.DataDir),
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
 		Scripts:            scriptsSvc,

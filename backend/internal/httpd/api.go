@@ -35,6 +35,7 @@ type APIDeps struct {
 	Projects projectsvc.Manager
 	Sessions controllers.SessionService
 	Activity controllers.ActivityRecorder
+	Chat     controllers.ChatService
 	Jira     controllers.JiraService
 	PRs      prsvc.ActionManager
 	Reviews  reviewsvc.Manager
@@ -140,6 +141,7 @@ type API struct {
 	agents         *controllers.AgentsController
 	projects       *controllers.ProjectsController
 	sessions       *controllers.SessionsController
+	chat           *controllers.ChatController
 	jira           *controllers.JiraController
 	prs            *controllers.PRsController
 	reviews        *controllers.ReviewsController
@@ -195,6 +197,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 			Activity: deps.Activity,
 			Feed:     deps.ActivityFeed,
 		},
+		chat:           &controllers.ChatController{Svc: deps.Chat},
 		jira:           &controllers.JiraController{Svc: deps.Jira},
 		prs:            &controllers.PRsController{Svc: deps.PRs},
 		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},
@@ -254,6 +257,7 @@ func (a *API) Register(root chi.Router) {
 			a.agents.Register(r)
 			a.projects.Register(r)
 			a.sessions.Register(r)
+			a.chat.Register(r)
 			a.jira.Register(r)
 			a.prs.Register(r)
 			a.crewRuns.Register(r)

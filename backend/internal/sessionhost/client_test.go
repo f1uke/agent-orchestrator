@@ -28,7 +28,7 @@ func TestClient(t *testing.T) {
 	}
 
 	origin := &chatproto.Origin{Via: "ao_send", From: "mer-2"}
-	id, err := c.Send(ctx, "[from @mer-2] hello", origin)
+	id, err := c.Send(ctx, chatproto.UserInput{Text: "[from @mer-2] hello"}, origin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,14 +52,14 @@ func TestClient(t *testing.T) {
 		t.Errorf("log: origin noted %v, message sent %v; want both under uuid %s", noted, sent, id)
 	}
 
-	if _, err := c.Send(ctx, "", nil); err == nil || !strings.Contains(err.Error(), "send needs text or images") {
+	if _, err := c.Send(ctx, chatproto.UserInput{}, nil); err == nil || !strings.Contains(err.Error(), "send needs text or images") {
 		t.Errorf("empty Send err = %v, want the host's refusal", err)
 	}
 }
 
 func TestClientWithNoHost(t *testing.T) {
 	c := NewClient(filepath.Join(shortDir(t), "none.sock"))
-	if _, err := c.Send(context.Background(), "hi", nil); err == nil {
+	if _, err := c.Send(context.Background(), chatproto.UserInput{Text: "hi"}, nil); err == nil {
 		t.Fatal("Send to a socket nobody serves succeeded")
 	}
 	if _, err := c.State(context.Background()); err == nil {
