@@ -920,10 +920,29 @@ func TestGetPromptDeliveryStrategyIsStdin(t *testing.T) {
 	}
 }
 
-func TestLaunchEnvTurnsOffTheAgentsView(t *testing.T) {
+func TestLaunchEnvTurnsOffTheAgentsViewAndOnTheTaskTools(t *testing.T) {
+	unsetEnv(t, "CLAUDE_CODE_ENABLE_TODO_TOOLS")
 	got := (&Plugin{}).LaunchEnv()
-	if !reflect.DeepEqual(got, map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}) {
-		t.Fatalf("LaunchEnv() = %v, want CLAUDE_CODE_DISABLE_AGENT_VIEW=1", got)
+	want := map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LaunchEnv() = %v, want %v", got, want)
+	}
+}
+
+func TestLaunchEnvLeavesTheUsersTaskToolsSettingAlone(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_ENABLE_TODO_TOOLS", "0")
+	got := (&Plugin{}).LaunchEnv()
+	if v, ok := got["CLAUDE_CODE_ENABLE_TODO_TOOLS"]; ok {
+		t.Fatalf("LaunchEnv() sets CLAUDE_CODE_ENABLE_TODO_TOOLS=%q over the user's own value", v)
+	}
+}
+
+// unsetEnv removes key for the test and restores it after.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
 	}
 }
 

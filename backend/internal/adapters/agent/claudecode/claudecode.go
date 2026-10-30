@@ -138,9 +138,19 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 // LaunchEnv turns off Claude Code's agent view on every launch and restore.
 // Claude Code 2.1.294 hands an empty-prompt Left arrow to its per-user daemon, which
 // carries another AO session's env; this is the documented equivalent of disableAgentView.
+//
+// It also turns on the task tools (TaskCreate, TaskUpdate), which Claude Code leaves
+// off in a non-interactive or SDK launch; the chat inspector's Todo panel reads them.
+// A value the user set in the daemon's own env wins.
 func (p *Plugin) LaunchEnv() map[string]string {
-	return map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}
+	env := map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}
+	if _, set := os.LookupEnv(enableTodoToolsEnv); !set {
+		env[enableTodoToolsEnv] = "1"
+	}
+	return env
 }
+
+const enableTodoToolsEnv = "CLAUDE_CODE_ENABLE_TODO_TOOLS"
 
 // GetLaunchCommand builds the argv to start an interactive Claude Code
 // session. Shape:
