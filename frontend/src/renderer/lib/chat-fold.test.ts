@@ -765,3 +765,67 @@ describe("chat fold timing", () => {
 		expect(tr.items[0]).toMatchObject({ kind: "turn_end", ts: iso(5), durationMs: undefined });
 	});
 });
+
+describe("chat fold: task messages", () => {
+	const notification = (fields: string) => ({
+		type: "user",
+		isReplay: true,
+		message: { role: "user", content: `<task-notification>\n${fields}\n</task-notification>` },
+	});
+
+	it("folds each task notification claude hands the model into a task message, in place", () => {
+		const tr = foldEntries(loadFixture("long_session.jsonl"));
+		const messages = tr.items.filter((i) => i.kind === "task_message");
+		expect(messages).toEqual([
+			{
+				kind: "task_message",
+				ts: "2026-10-30T10:55:37.624Z",
+				taskId: "blaf8bxvg",
+				toolUseId: "toolu_01DS7U6L1EUCBr5sbc7oukPi",
+				status: "failed",
+				summary: 'Background command "Run slow check script in background" failed with exit code 1',
+				result: "",
+				opensTurn: false,
+			},
+			expect.objectContaining({
+				taskId: "a5108821f9804b8ee",
+				status: "completed",
+				summary: 'Agent "Summarize docs directory" finished',
+				result: expect.stringMatching(/^The `docs\/` directory has two short Markdown files/),
+				opensTurn: false,
+			}),
+		]);
+		const firstReply = tr.items.findIndex((i) => i.kind === "assistant_text");
+		expect(tr.items.findIndex((i) => i.kind === "task_message")).toBeLessThan(firstReply);
+	});
+
+	it("still drops the replay of the user's own input", () => {
+		const tr = foldEntries([
+			synth(1, "in", { type: "user", uuid: "u1", message: { content: "fix it" } }),
+			synth(2, "out", { type: "user", isReplay: true, message: { role: "user", content: "fix it" } }),
+		]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["user"]);
+	});
+
+	it("opens a turn when it arrives after the last turn ended, and times that turn from it", () => {
+		const T0 = Date.parse("2026-10-30T10:00:00.000Z");
+		const at = (seq: number, sec: number, dir: Direction, payload: object): ChatEntry => ({
+			seq,
+			ts: new Date(T0 + sec * 1000).toISOString(),
+			dir,
+			payload,
+		});
+		const done = { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.1 };
+		const tr = foldEntries([
+			at(1, 0, "in", { type: "user", uuid: "u1", message: { content: "start a sleep" } }),
+			at(2, 0, "out", { type: "command_lifecycle", command_uuid: "u1", state: "started" }),
+			at(3, 4, "out", done),
+			at(4, 40, "out", notification("<task-id>k1</task-id>\n<status>completed</status>\n<summary>done</summary>")),
+			at(5, 52, "out", done),
+		]);
+		const message = tr.items.find((i) => i.kind === "task_message");
+		expect(message).toMatchObject({ taskId: "k1", toolUseId: "", opensTurn: true });
+		const ends = tr.items.filter((i) => i.kind === "turn_end");
+		expect(ends.map((e) => e.durationMs)).toEqual([4_000, 12_000]);
+	});
+});

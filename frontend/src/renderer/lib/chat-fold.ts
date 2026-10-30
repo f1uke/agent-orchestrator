@@ -13,6 +13,7 @@ import {
 	isObject,
 	unfinished,
 	parseEvent,
+	parseTaskNotification,
 	parseHostNote,
 } from "./chat-event";
 import { elapsedMs } from "./chat-time";
@@ -70,6 +71,20 @@ export type TurnEndItem = {
 	durationMs?: number;
 };
 
+/** A background task or subagent stopped, and claude told the model so. */
+export type TaskMessageItem = {
+	kind: "task_message";
+	ts: string;
+	taskId: string;
+	toolUseId: string;
+	status: string;
+	summary: string;
+	/** An agent's final text; empty for a command. */
+	result: string;
+	/** It arrived with no turn running, so claude starts a turn to answer it. */
+	opensTurn: boolean;
+};
+
 export type NoticeItem = { kind: "notice"; notice: NoticeKind; text: string; ts: string };
 
 export type ChatItem =
@@ -78,6 +93,7 @@ export type ChatItem =
 	| { kind: "thinking"; text: string; parentToolUseId: string }
 	| ToolCallItem
 	| TurnEndItem
+	| TaskMessageItem
 	| NoticeItem;
 
 export type BackgroundTask = {
@@ -289,7 +305,8 @@ export class ChatFolder {
 				if (event.parentToolUseId === "" && event.contextTokens !== undefined) this.context = event.contextTokens;
 				break;
 			case "user":
-				if (!event.isReplay) this.applyToolResults(event.blocks);
+				if (event.isReplay) this.applyTaskMessage(event.blocks);
+				else this.applyToolResults(event.blocks);
 				break;
 			case "result":
 				this.cost = event.totalCostUsd;
@@ -378,6 +395,15 @@ export class ChatFolder {
 				this.notice("interrupted", "");
 			}
 		}
+	}
+
+	// claude replays the user's own input too; only a task notification is new.
+	private applyTaskMessage(blocks: Block[]): void {
+		const text = blocks.map((b) => (b.type === "text" ? b.text : "")).join("");
+		const note = parseTaskNotification(text);
+		if (!note) return;
+		this.items.push({ kind: "task_message", ts: this.ts, ...note, opensTurn: this.turnStart === undefined });
+		this.turnStart ??= this.ts;
 	}
 
 	private updateTool(id: string, patch: Partial<ToolCallItem>): void {

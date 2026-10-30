@@ -666,6 +666,60 @@ describe("ChatPane calm view", () => {
 		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
 	});
 
+	it("shows a finished agent's task message as a quiet card that opens to its summary", async () => {
+		const { feed, user } = renderPane();
+		const notification = [
+			"<task-notification>",
+			"<task-id>a1</task-id>",
+			"<tool-use-id>agent</tool-use-id>",
+			"<status>completed</status>",
+			'<summary>Agent "Summarize docs directory" finished</summary>',
+			"<result>Two short Markdown files.</result>",
+			"</task-notification>",
+		].join("\n");
+		feed(
+			userIn("u1", "go"),
+			toolUse("agent", "Agent", { description: "Summarize docs directory", subagent_type: "Explore" }),
+			out({
+				type: "system",
+				subtype: "task_started",
+				task_id: "a1",
+				tool_use_id: "agent",
+				task_type: "local_agent",
+				description: "Summarize docs directory",
+			}),
+			toolDone("agent", "Async agent launched"),
+			out({ type: "user", isReplay: true, message: { role: "user", content: notification } }),
+		);
+		const card = document.querySelector("[data-task-message]")!;
+		const head = card.querySelector("button")!;
+		expect(head).toHaveTextContent(/^Agent finished\s*Summarize docs directory\s*\d\d:\d\d$/);
+		expect(head).toHaveAttribute("aria-expanded", "false");
+		expect(card).not.toHaveTextContent("Two short Markdown files.");
+		await user.click(head);
+		expect(card).toHaveTextContent('Agent "Summarize docs directory" finished');
+		expect(card).toHaveTextContent("Two short Markdown files.");
+	});
+
+	it("says a failed background command's task message failed, in red", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			out({
+				type: "user",
+				isReplay: true,
+				message: {
+					role: "user",
+					content:
+						'<task-notification>\n<task-id>k1</task-id>\n<status>failed</status>\n<summary>Background command "Run slow check" failed with exit code 1</summary>\n</task-notification>',
+				},
+			}),
+		);
+		const head = document.querySelector("[data-task-message] button")!;
+		expect(head).toHaveTextContent(/^Task message received\s*Run slow check\s*Failed/);
+		expect(head.querySelector(".chat-task__failed")).toHaveTextContent("Failed");
+	});
+
 	it("leaves a subagent's text and thinking out of the main column", () => {
 		const { feed } = renderPane();
 		feed(

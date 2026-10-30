@@ -42,10 +42,15 @@ function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 			if (item.parentToolUseId !== "") return "skip";
 			return OWN_ROW_TOOLS.has(item.name) || item.permission?.status === "pending" ? "break" : "process";
 		case "turn_end":
+		case "task_message":
 		case "notice":
 			return "break";
 	}
 }
+
+// Where a turn begins: the user's input, or a task message claude woke up to answer.
+const opensTurn = (row: ChatRow) =>
+	row.kind === "item" && (row.item.kind === "user" || (row.item.kind === "task_message" && row.item.opensTurn));
 
 function liveTool(calls: readonly ToolCallItem[]): LiveTool | undefined {
 	const running = calls.filter(toolRunning).at(-1);
@@ -102,11 +107,11 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 	for (let i = 0; i < rows.length; i++) {
 		const row = rows[i];
 		out.push(row);
-		if (!isItem(row, "user")) continue;
+		if (!opensTurn(row)) continue;
 
 		let end = -1;
 		let interrupted = false;
-		for (let j = i + 1; j < rows.length && !isItem(rows[j], "user"); j++) {
+		for (let j = i + 1; j < rows.length && !opensTurn(rows[j]); j++) {
 			const next = rows[j];
 			if (isItem(next, "notice") && next.item.kind === "notice" && next.item.notice === "interrupted")
 				interrupted = true;
@@ -148,6 +153,13 @@ export function chatRows(
 		}
 	}
 	const taskByToolUse = new Map(transcript.tasks.filter((t) => t.toolUseId !== "").map((t) => [t.toolUseId, t]));
+	const taskById = new Map(transcript.tasks.map((t) => [t.id, t]));
+	const taskOf = (item: ChatItem) =>
+		item.kind === "tool_call"
+			? taskByToolUse.get(item.id)
+			: item.kind === "task_message"
+				? taskById.get(item.taskId)
+				: undefined;
 
 	let rows: ChatRow[] = [];
 	let run: ProcessMember[] = [];
@@ -175,7 +187,7 @@ export function chatRows(
 					kind: "item",
 					item,
 					subagentTools: item.kind === "tool_call" ? (subagentTools.get(item.id) ?? 0) : 0,
-					task: item.kind === "tool_call" ? taskByToolUse.get(item.id) : undefined,
+					task: taskOf(item),
 				});
 				return;
 			case "process": {

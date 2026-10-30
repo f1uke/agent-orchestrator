@@ -1,5 +1,14 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
+import {
+	ArrowDown,
+	Bot,
+	ChevronRight,
+	Code,
+	CloudOff,
+	type LucideIcon,
+	MessageSquare,
+	SquareTerminal,
+} from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
@@ -7,8 +16,8 @@ import { useSessionNames } from "../hooks/useSessionNames";
 import type { ChatEntry } from "../lib/chat-event";
 import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
-import type { BackgroundTask, ChatItem, Pending, TurnEndItem, UserItem } from "../lib/chat-fold";
-import { formatDuration } from "../lib/chat-time";
+import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
+import { clockTime, formatDuration } from "../lib/chat-time";
 import { sessionActivity } from "../lib/chat-inspect";
 import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
@@ -575,9 +584,64 @@ function ItemRow({
 					{turnEndText(item)}
 				</div>
 			);
+		case "task_message":
+			return (
+				<TaskMessageCard
+					item={item}
+					onToggle={(open) => toggleRow(rowKey, open)}
+					open={openRows[rowKey] ?? false}
+					task={task}
+					theme={theme}
+				/>
+			);
 		case "notice":
 			return <NoticeRow notice={item} />;
 	}
+}
+
+// The task's own name: its description, or the quoted name claude puts in the summary.
+function taskLabel(item: TaskMessageItem, task: BackgroundTask | undefined): string {
+	return task?.description || /"([^"]+)"/.exec(item.summary)?.[1] || item.summary;
+}
+
+/** A background task or subagent finished: one quiet line that opens to what claude was told. */
+function TaskMessageCard({
+	item,
+	task,
+	theme,
+	open,
+	onToggle,
+}: {
+	item: TaskMessageItem;
+	task?: BackgroundTask;
+	theme: Theme;
+	open: boolean;
+	onToggle: (open: boolean) => void;
+}) {
+	const agent = task?.taskType === "local_agent" || item.summary.startsWith("Agent ");
+	const Icon = agent ? Bot : SquareTerminal;
+	return (
+		<div className="chat-task" data-task-message={item.taskId}>
+			<button aria-expanded={open} className="chat-task__head" onClick={() => onToggle(!open)} type="button">
+				<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
+				<Icon className="chat-icon" aria-hidden="true" />
+				<span className="chat-task__title">{agent ? "Agent finished" : "Task message received"}</span>
+				<span className="chat-task__label">{taskLabel(item, task)}</span>
+				{item.status === "failed" ? <span className="chat-task__failed">Failed</span> : null}
+				<span className="chat-task__time">{clockTime(item.ts)}</span>
+			</button>
+			{open ? (
+				<div className="chat-task__body">
+					<p>{item.summary}</p>
+					{item.result ? (
+						<div className="note-prose chat-md">
+							<NoteMarkdown source={item.result} theme={theme} />
+						</div>
+					) : null}
+				</div>
+			) : null}
+		</div>
+	);
 }
 
 function turnEndText(item: TurnEndItem): string {

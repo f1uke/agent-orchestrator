@@ -8042,6 +8042,65 @@ ol.note-prose__list {
 	}
 }
 
+/* A task message: a background task or subagent finished. Quieter than a tool card. */
+.chat-task {
+	border: 1px solid var(--border-1);
+	border-radius: 8px;
+	color: var(--fg-passive);
+	font-size: 13px;
+}
+
+.chat-task__head {
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	color: inherit;
+	cursor: pointer;
+	text-align: left;
+}
+
+.chat-task__head:hover {
+	color: var(--fg-muted);
+}
+
+.chat-task__title {
+	flex: none;
+	color: var(--fg-muted);
+}
+
+.chat-task__label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-task__failed {
+	flex: none;
+	color: var(--red);
+}
+
+.chat-task__time {
+	flex: none;
+	margin-left: auto;
+	font-variant-numeric: tabular-nums;
+}
+
+.chat-task__body {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 0 10px 10px 30px;
+	color: var(--fg);
+}
+
+.chat-task__body > p {
+	color: var(--fg-muted);
+}
+
 .chat-group__body,
 .chat-turn__body {
 	display: flex;

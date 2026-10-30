@@ -42,6 +42,17 @@ const turnEnd = (isError = false): ChatItem => ({
 	ts: "",
 });
 
+const taskMessage = (opensTurn = false, taskId = "k1"): ChatItem => ({
+	kind: "task_message",
+	ts: "",
+	taskId,
+	toolUseId: "",
+	status: "completed",
+	summary: "done",
+	result: "",
+	opensTurn,
+});
+
 let n = 0;
 function tool(
 	name: string,
@@ -307,6 +318,47 @@ describe("chatRows turn fold", () => {
 		expect(rowIndexOfItem(rows, 3)).toBe(1);
 		expect(rowIndexOfItem(rows, 0)).toBe(0);
 		expect(rowIndexOfItem(rows, 99)).toBe(-1);
+	});
+});
+
+describe("chatRows task messages", () => {
+	it("shows a task message as its own row that breaks the run of calls around it", () => {
+		const rows = rowsOf([user(), tool("Bash"), tool("Bash"), taskMessage(), tool("Read"), tool("Read")]);
+		expect(shape(rows)).toEqual(["user", "group", "task_message", "group"]);
+	});
+
+	it("hands a task message its task", () => {
+		const task = {
+			id: "k1",
+			toolUseId: "",
+			description: "Summarize docs",
+			taskType: "local_agent",
+			state: "done" as const,
+		};
+		const row = rowsOf([user(), taskMessage()], { tasks: [task] })[1];
+		expect(row.kind === "item" && row.task).toEqual(task);
+	});
+
+	it("folds a turn that a task message opened, keeping the message visible", () => {
+		const rows = rowsOf([
+			user(),
+			say("started it"),
+			turnEnd(),
+			taskMessage(true),
+			tool("Bash"),
+			tool("Bash"),
+			say("it passed"),
+			turnEnd(),
+		]);
+		expect(shape(rows)).toEqual([
+			"user",
+			"assistant_text",
+			"turn_end",
+			"task_message",
+			"turn",
+			"assistant_text",
+			"turn_end",
+		]);
 	});
 });
 
