@@ -71,6 +71,9 @@ var (
 	// ErrMissingHarness means neither the spawn request nor the project's role
 	// config selected an agent. Worker/orchestrator spawns must be explicit.
 	ErrMissingHarness = errors.New("session: agent harness required")
+	// ErrTransportUnsupported means a chat transport was asked of an agent that
+	// is not claude-code. The API maps it to a 400.
+	ErrTransportUnsupported = errors.New("session: transport not supported by the agent")
 	// ErrNotTodo means a start/spec-edit targeted a session that is not a
 	// prepared TODO (already started, or never was one). The API maps it to 409.
 	ErrNotTodo = errors.New("session: not a prepared TODO")
@@ -567,6 +570,9 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w: %q", ErrUnknownHarness, cfg.Harness)
 	}
+	if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
+	}
 	cfg.ClaudeProfile, err = m.spawnClaudeProfile(cfg.Harness, cfg.ClaudeProfile, project)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
@@ -774,7 +780,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
-	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, withPreloadedSkill(ctx, agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole, prompt))
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, cfg.Transport, id, withPreloadedSkill(ctx, agent, cfg.Kind, cfg.TaskSize, cfg.CrewRole, prompt))
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
@@ -802,6 +808,12 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 	// tmux happily creates a session+pane around a missing command, so an
 	// unresolved binary would leak through as a "live" session that never ran.
 	if err := m.validateAgentBinary(argv); err != nil {
+		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
+		disposeSeed()
+		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
+	}
+	argv, stdinFile, err = m.wrapForTransport(cfg.Transport, id, argv, stdinFile)
+	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
@@ -853,6 +865,9 @@ func (m *Manager) PrepareTodo(ctx context.Context, cfg ports.SpawnConfig) (domai
 		if _, ok := m.agents.Agent(cfg.Harness); !ok {
 			return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w: %q", ErrUnknownHarness, cfg.Harness)
 		}
+		if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w", err)
+		}
 	}
 	profile, err := m.todoClaudeProfile(cfg.ClaudeProfile)
 	if err != nil {
@@ -900,7 +915,8 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 		// TaskSize must be replayed from the persisted TODO so a task staged with
 		// `ao spawn --todo --task-size mechanical` builds the mechanical worker
 		// prompt when it is Started (the system prompt is derived from cfg below).
-		TaskSize: row.TaskSize,
+		TaskSize:  row.TaskSize,
+		Transport: row.Transport,
 	}
 	cfg.Harness = effectiveHarness(cfg.Harness, cfg.Kind, project.Config)
 	if cfg.Harness == "" {
@@ -908,6 +924,9 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	}
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w: %q", id, ErrUnknownHarness, cfg.Harness)
+	}
+	if err := validateTransport(cfg.Harness, cfg.Transport); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
 	cfg.ClaudeProfile, err = m.spawnClaudeProfile(cfg.Harness, row.ClaudeProfile, project)
 	if err != nil {
@@ -2081,6 +2100,10 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
 	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec, ws.Path, systemPrompt, systemPromptFile, settingsFile, agentConfig)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
+	}
+	argv, stdinFile, err = m.wrapForTransport(rec.Transport, rec.ID, argv, stdinFile)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
@@ -3390,6 +3413,7 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
 		ClaudeProfile:   cfg.ClaudeProfile,
+		Transport:       cfg.Transport.WithDefault(),
 	}
 }
 
@@ -3443,6 +3467,7 @@ func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
 		ClaudeProfile:   cfg.ClaudeProfile,
+		Transport:       cfg.Transport.WithDefault(),
 		Metadata:        domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
 	}
 }
@@ -4232,20 +4257,22 @@ func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, rec domain
 		WorkspacePath: workspacePath,
 		Metadata:      map[string]string{ports.MetadataKeyAgentSessionID: meta.AgentSessionID},
 	}
-	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, SettingsFile: settingsFile, Config: agentConfig, Permissions: agentConfig.Permissions})
-	if err != nil {
-		return nil, "", fmt.Errorf("restore command: %w", err)
+	if rec.Transport != domain.TransportChat {
+		cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, SettingsFile: settingsFile, Config: agentConfig, Permissions: agentConfig.Permissions})
+		if err != nil {
+			return nil, "", fmt.Errorf("restore command: %w", err)
+		}
+		if ok {
+			return cmd, "", nil
+		}
+		// Adapter cannot resume. A saved prompt is replayed fresh. An orchestrator is
+		// promptless by design and relaunches with the system prompt only. A promptless
+		// WORKER has no task and no session id to restore from: do not blank-relaunch it.
+		if meta.Prompt == "" && kind != domain.KindOrchestrator {
+			return nil, "", ErrNotResumable
+		}
 	}
-	if ok {
-		return cmd, "", nil
-	}
-	// Adapter cannot resume. A saved prompt is replayed fresh. An orchestrator is
-	// promptless by design and relaunches with the system prompt only. A promptless
-	// WORKER has no task and no session id to restore from: do not blank-relaunch it.
-	if meta.Prompt == "" && kind != domain.KindOrchestrator {
-		return nil, "", ErrNotResumable
-	}
-	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, withPreloadedSkill(ctx, agent, kind, rec.TaskSize, rec.CrewRole, meta.Prompt))
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, rec.Transport, id, withPreloadedSkill(ctx, agent, kind, rec.TaskSize, rec.CrewRole, meta.Prompt))
 	if err != nil {
 		return nil, "", err
 	}

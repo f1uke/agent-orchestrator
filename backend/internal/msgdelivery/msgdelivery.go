@@ -50,6 +50,9 @@ const (
 	PathSocket Path = "socket"
 	// PathPane means the message was typed into the session's terminal pane.
 	PathPane Path = "pane"
+	// PathHost means a chat session's host accepted the message over its socket:
+	// it wrote it to claude's stdin and to the session's event log.
+	PathHost Path = "host"
 	// PathNone means nothing was delivered. Only strict mode produces this - it
 	// refuses the pane fallback and fails the send instead.
 	PathNone Path = "none"

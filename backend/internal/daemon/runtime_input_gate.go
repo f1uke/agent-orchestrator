@@ -16,7 +16,8 @@ import (
 // the review launcher), which each call SendMessage on the shared runtime.
 type gatedRuntime struct {
 	runtimeselect.Runtime
-	gate *inputgate.Gate
+	gate  *inputgate.Gate
+	hosts *hostRouter
 }
 
 // newGatedRuntime wraps inner so SendMessage defers to the gate. gate may be nil,
@@ -30,8 +31,8 @@ type gatedRuntime struct {
 // reap-safety check a no-op and let Resume adopt a pane whose agent had exited,
 // which is every pane an agent leaves behind (the keep-alive shell outlives it).
 // So when inner has the capability, the wrapper carries it through.
-func newGatedRuntime(inner runtimeselect.Runtime, gate *inputgate.Gate) runtimeselect.Runtime {
-	g := gatedRuntime{Runtime: inner, gate: gate}
+func newGatedRuntime(inner runtimeselect.Runtime, gate *inputgate.Gate, hosts *hostRouter) runtimeselect.Runtime {
+	g := gatedRuntime{Runtime: inner, gate: gate, hosts: hosts}
 	if prober, ok := inner.(ports.AgentLivenessProber); ok {
 		return gatedProbingRuntime{gatedRuntime: g, prober: prober}
 	}
@@ -56,6 +57,9 @@ func (g gatedProbingRuntime) AgentAlive(ctx context.Context, handle ports.Runtim
 // the gate's quiet window — or the max-defer cap elapses, or ctx is cancelled —
 // then injects the message onto what is now the user's empty input line.
 func (g gatedRuntime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error {
+	if routed, err := g.hosts.route(ctx, handle, message); routed {
+		return err
+	}
 	g.gate.WaitForQuiet(ctx, handle.ID)
 	return g.Runtime.SendMessage(ctx, handle, message)
 }

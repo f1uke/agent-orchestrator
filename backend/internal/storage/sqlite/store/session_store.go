@@ -436,6 +436,20 @@ func (s *Store) GetSession(ctx context.Context, id domain.SessionID) (domain.Ses
 	return rowToRecord(row), true, nil
 }
 
+// LiveSessionTransportByRuntimeHandle reports the live session that runtime
+// handle belongs to and how it is driven. ok is false when no live session has
+// the handle.
+func (s *Store) LiveSessionTransportByRuntimeHandle(ctx context.Context, handleID string) (domain.SessionID, domain.Transport, bool, error) {
+	row, err := s.qr.GetLiveSessionTransportByRuntimeHandle(ctx, handleID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("session for runtime handle %s: %w", handleID, err)
+	}
+	return row.ID, row.Transport, true, nil
+}
+
 // ListSessions returns every session in a project, ordered by num.
 func (s *Store) ListSessions(ctx context.Context, project domain.ProjectID) ([]domain.SessionRecord, error) {
 	rows, err := s.qr.ListSessionsByProject(ctx, project)
@@ -492,6 +506,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		TaskSize:           domain.TaskSize(row.TaskSize),
 		ClaudeProfile:      row.ClaudeProfile,
 		RestartPending:     row.RestartPending,
+		Transport:          row.Transport,
 		CrewID:             domain.SessionID(row.CrewID),
 		CrewRole:           domain.CrewRole(row.CrewRole),
 		CrewJoinReason:     domain.CrewJoinReason(row.CrewJoinReason),
@@ -568,6 +583,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		KeepWarmOnMerge:           rec.KeepWarmOnMerge,
 		TaskSize:                  string(rec.TaskSize.WithDefault()),
 		ClaudeProfile:             rec.ClaudeProfile,
+		Transport:                 rec.Transport.WithDefault(),
 		CrewID:                    string(rec.CrewID),
 		CrewRole:                  string(rec.CrewRole),
 		CrewJoinReason:            string(rec.CrewJoinReason),

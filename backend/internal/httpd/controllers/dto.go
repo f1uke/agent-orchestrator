@@ -384,6 +384,11 @@ type SpawnSessionRequest struct {
 	// agent. An unknown name is refused with UNKNOWN_CLAUDE_PROFILE before
 	// anything is created.
 	ClaudeProfile string `json:"claudeProfile,omitempty"`
+	// Transport is how the agent is driven (`ao spawn --transport`): terminal
+	// runs its TUI in the pane, chat runs a headless claude under the session
+	// host. Absent/empty means terminal. chat needs the claude-code agent and is
+	// refused with TRANSPORT_UNSUPPORTED otherwise.
+	Transport string `json:"transport,omitempty" enum:"terminal,chat"`
 }
 
 // UpdateTodoSpecRequest is the body of PATCH /api/v1/sessions/{sessionId}/spec:

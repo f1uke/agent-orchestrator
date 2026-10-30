@@ -133,18 +133,24 @@ type sendResponse struct {
 }
 
 type stateResponse struct {
-	OK              bool          `json:"ok"`
-	ClaudeSessionID string        `json:"claude_session_id"`
-	PID             int           `json:"pid"`
-	Busy            bool          `json:"busy"`
-	Queued          []string      `json:"queued"`
-	Pending         []pendingJSON `json:"pending"`
-	PermissionMode  string        `json:"permission_mode"`
-	CostUSD         float64       `json:"cost_usd"`
-	LastSeq         uint64        `json:"last_seq"`
+	OK bool `json:"ok"`
+	State
 }
 
-type pendingJSON struct {
+// State is the host's answer to the state op.
+type State struct {
+	ClaudeSessionID string           `json:"claude_session_id"`
+	PID             int              `json:"pid"`
+	Busy            bool             `json:"busy"`
+	Queued          []string         `json:"queued"`
+	Pending         []PendingRequest `json:"pending"`
+	PermissionMode  string           `json:"permission_mode"`
+	CostUSD         float64          `json:"cost_usd"`
+	LastSeq         uint64           `json:"last_seq"`
+}
+
+// PendingRequest is a request claude is waiting on an answer for.
+type PendingRequest struct {
 	RequestID   string                `json:"request_id"`
 	ToolName    string                `json:"tool_name"`
 	ToolUseID   string                `json:"tool_use_id"`
@@ -310,21 +316,20 @@ func (h *host) answerLocked(r answerRequest) error {
 
 func (h *host) stateLocked() stateResponse {
 	t := h.folder.Transcript()
-	resp := stateResponse{
-		OK:             true,
+	resp := stateResponse{OK: true, State: State{
 		PID:            h.pid,
 		Busy:           t.Busy,
 		Queued:         append([]string{}, t.Queued...),
-		Pending:        make([]pendingJSON, 0, len(t.Pending)),
+		Pending:        make([]PendingRequest, 0, len(t.Pending)),
 		PermissionMode: t.PermissionMode,
 		CostUSD:        t.CostUSD,
 		LastSeq:        t.LastSeq,
-	}
+	}}
 	if n := len(t.ClaudeSessionIDs); n > 0 {
 		resp.ClaudeSessionID = t.ClaudeSessionIDs[n-1]
 	}
 	for _, p := range t.Pending {
-		resp.Pending = append(resp.Pending, pendingJSON{
+		resp.Pending = append(resp.Pending, PendingRequest{
 			RequestID: p.RequestID, ToolName: p.ToolName, ToolUseID: p.ToolUseID,
 			Kind: p.Kind, Input: p.Input, Suggestions: p.Suggestions,
 		})

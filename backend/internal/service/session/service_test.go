@@ -1044,6 +1044,7 @@ func TestToAPIErrorMapsWorkspaceBranchSentinels(t *testing.T) {
 		{"runtime prerequisite missing", fmt.Errorf("spawn: %w: tmux required on macOS/Linux but not in PATH", ports.ErrRuntimePrerequisite), apierr.KindInvalid, "RUNTIME_PREREQUISITE_MISSING"},
 		{"unknown harness", fmt.Errorf("spawn: %w: %q", sessionmanager.ErrUnknownHarness, "bogus"), apierr.KindInvalid, "UNKNOWN_HARNESS"},
 		{"missing harness", fmt.Errorf("spawn: %w: configure project worker.agent or pass --harness", sessionmanager.ErrMissingHarness), apierr.KindInvalid, "AGENT_REQUIRED"},
+		{"transport unsupported", fmt.Errorf("spawn: %w: transport chat needs harness claude-code, not codex", sessionmanager.ErrTransportUnsupported), apierr.KindInvalid, "TRANSPORT_UNSUPPORTED"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -168,7 +168,8 @@ type SessionRecord struct {
 	// RestartPending marks a profile switch that asked for a restart while the
 	// agent was mid-turn. The daemon restarts the session once it is idle or
 	// parked, and any relaunch clears it.
-	RestartPending bool `json:"restartPending,omitempty"`
+	RestartPending bool      `json:"restartPending,omitempty"`
+	Transport      Transport `json:"-"`
 	// CrewID and CrewRole represent the CREW: the one or two long-lived sessions
 	// that belong to ONE task and share ONE worktree (dev + qa).
 	//

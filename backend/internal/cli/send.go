@@ -246,6 +246,8 @@ func reportDelivery(out io.Writer, res sendAPIResponse) error {
 		}
 	case "pane":
 		line += " (typed into the terminal"
+	case "host":
+		line += " (the chat session's host"
 	default:
 		line += " ("
 	}

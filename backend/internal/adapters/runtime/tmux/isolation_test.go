@@ -17,7 +17,7 @@ import (
 // sessions with it (the 2026-10-01 incident).
 //
 // The directory is made with a short prefix because a socket path has to fit in
-// sun_path (see maxSocketPathLen).
+// sun_path (see sockpath.MaxLen).
 func privateSocketDir(t *testing.T) string {
 	t.Helper()
 	tmuxPath, err := exec.LookPath("tmux")

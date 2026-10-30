@@ -295,7 +295,12 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "TASK_SIZE_INVALID", "taskSize must be one of mechanical, standard, deep", nil)
 		return
 	}
-	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy, KeepWarmOnMerge: in.KeepWarmOnMerge, TaskSize: in.TaskSize.WithDefault(), ClaudeProfile: strings.TrimSpace(in.ClaudeProfile)}
+	transport, err := domain.ParseTransport(strings.TrimSpace(in.Transport))
+	if err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "TRANSPORT_INVALID", err.Error(), nil)
+		return
+	}
+	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy, KeepWarmOnMerge: in.KeepWarmOnMerge, TaskSize: in.TaskSize.WithDefault(), ClaudeProfile: strings.TrimSpace(in.ClaudeProfile), Transport: transport}
 	// startImmediately absent/null/true keeps the current spawn-now behavior;
 	// false stages the worker as a prepared TODO on the board.
 	deferred := in.StartImmediately != nil && !*in.StartImmediately

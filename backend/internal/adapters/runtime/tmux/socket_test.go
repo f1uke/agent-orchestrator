@@ -15,6 +15,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/sockpath"
 )
 
 // -- socket naming --
@@ -34,7 +35,7 @@ func TestSocketDirFallsBackWhenTheDataDirIsTooDeep(t *testing.T) {
 	if strings.HasPrefix(dir, deep) {
 		t.Fatalf("SocketDir(%d-byte dir) = %q, want a short fallback", len(deep), dir)
 	}
-	if len(dir)+1+hashedSocketNameLen > maxSocketPathLen {
+	if len(dir)+1+sockpath.HashedNameLen > sockpath.MaxLen {
 		t.Fatalf("fallback dir %q leaves no room for a socket name", dir)
 	}
 	if other := SocketDir(deep + "x"); other == dir {
@@ -49,8 +50,8 @@ func TestSocketPathInHashesANameThatDoesNotFit(t *testing.T) {
 	dir := "/" + strings.Repeat("d", 60)
 	long := strings.Repeat("n", 64) // branchNameMaxLen
 	p := SocketPathIn(dir, long)
-	if len(p) > maxSocketPathLen {
-		t.Fatalf("socket path %q is %d bytes, over the %d limit", p, len(p), maxSocketPathLen)
+	if len(p) > sockpath.MaxLen {
+		t.Fatalf("socket path %q is %d bytes, over the %d limit", p, len(p), sockpath.MaxLen)
 	}
 	if filepath.Dir(p) != dir {
 		t.Fatalf("socket %q left its dir %q", p, dir)
