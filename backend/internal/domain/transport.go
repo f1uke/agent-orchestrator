@@ -13,23 +13,26 @@ const (
 	// TransportChat runs `ao session-host` in the pane, which owns a headless
 	// claude, and messages go into the host's socket. claude-code only.
 	TransportChat Transport = "chat"
+	// TransportUnresolved means no level named a transport: a spawn or setting
+	// that left it open, or a queued TODO that resolves it when it starts.
+	TransportUnresolved Transport = ""
 )
 
-// ParseTransport reads a transport named at a boundary. Empty means the
-// default, terminal.
+// DefaultWorkerTransport is the transport of a new claude-code worker that nothing configured.
+const DefaultWorkerTransport = TransportChat
+
+// ParseTransport validates a transport named at a boundary; empty stays empty.
 func ParseTransport(s string) (Transport, error) {
 	switch t := Transport(s); t {
-	case "":
-		return TransportTerminal, nil
-	case TransportTerminal, TransportChat:
+	case TransportUnresolved, TransportTerminal, TransportChat:
 		return t, nil
 	}
-	return "", fmt.Errorf("transport must be %s or %s, not %q", TransportTerminal, TransportChat, s)
+	return TransportUnresolved, fmt.Errorf("transport must be %s or %s, not %q", TransportTerminal, TransportChat, s)
 }
 
-// WithDefault returns t, or terminal when t is unset.
+// WithDefault returns t, or terminal when t is unresolved (a row older than transports).
 func (t Transport) WithDefault() Transport {
-	if t == "" {
+	if t == TransportUnresolved {
 		return TransportTerminal
 	}
 	return t

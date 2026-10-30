@@ -68,6 +68,8 @@ type ProjectConfig struct {
 	// Subscription.
 	ClaudeProfile string `json:"claudeProfile,omitempty"`
 
+	WorkerTransport Transport `json:"workerTransport,omitempty" enum:"terminal,chat"`
+
 	// HasWebUI records whether this project renders in a browser. It is the single
 	// fact behind three effects, so they can never contradict each other: the
 	// desktop inspector's Browser tab, the `ao preview` guidance injected into
@@ -312,6 +314,9 @@ func (c ProjectConfig) Validate() error {
 		if !rv.Harness.IsKnown() {
 			return fmt.Errorf("reviewers[%d].harness: unknown harness %q", i, rv.Harness)
 		}
+	}
+	if _, err := ParseTransport(string(c.WorkerTransport)); err != nil {
+		return fmt.Errorf("workerTransport: %w", err)
 	}
 	if err := c.TrackerIntake.Validate(); err != nil {
 		return err

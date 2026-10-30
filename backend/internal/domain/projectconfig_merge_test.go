@@ -32,6 +32,7 @@ func fullProjectConfig() ProjectConfig {
 		SystemPromptAdditions:   SystemPromptAdditions{Orchestrator: "orch", Worker: "work", Reviewer: "rev"},
 		ResponseLanguage:        "Thai",
 		ClaudeProfile:           "OmniRoute",
+		WorkerTransport:         TransportChat,
 		HasWebUI:                true,
 		HasIOSSimulator:         true,
 		SimProfile:              &SimProfileConfig{Keep: []string{"com.apple.backboardd"}},
@@ -70,6 +71,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		UsesTestiny:             false,
 		TestinySkill:            "/skills/other-testiny",
 		ClaudeProfile:           "Work",
+		WorkerTransport:         TransportTerminal,
 		DisableAutoCrew:         false,
 		PauseBeforeImplementing: false,
 	}
@@ -102,6 +104,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		{"learnFromSessions", func(c ProjectConfig) any { return c.LearnFromSessions }},
 		{"responseLanguage", func(c ProjectConfig) any { return c.ResponseLanguage }},
 		{"claudeProfile", func(c ProjectConfig) any { return c.ClaudeProfile }},
+		{"workerTransport", func(c ProjectConfig) any { return c.WorkerTransport }},
 		{"reviewers", func(c ProjectConfig) any { return c.Reviewers }},
 		{"simProfile", func(c ProjectConfig) any { return c.SimProfile }},
 		{"simTrust", func(c ProjectConfig) any { return c.SimTrust }},

@@ -143,6 +143,21 @@ func (s *Store) SetSessionClaudeProfile(ctx context.Context, id domain.SessionID
 	return rows > 0, nil
 }
 
+// SetSessionTransport sets a session's transport; ok is false when the id does not exist.
+func (s *Store) SetSessionTransport(ctx context.Context, id domain.SessionID, transport domain.Transport, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionTransport(ctx, gen.SetSessionTransportParams{
+		ID:        id,
+		Transport: transport,
+		UpdatedAt: updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set transport for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionRestartPending sets or clears the restart a profile switch is
 // waiting to run once the agent is idle. Returns ok=false when the session id
 // does not exist.
@@ -561,6 +576,13 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 	}
 }
 
+func insertTransport(rec domain.SessionRecord) domain.Transport {
+	if rec.IsTodo {
+		return rec.Transport
+	}
+	return rec.Transport.WithDefault()
+}
+
 func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams {
 	activity := normalActivity(rec.Activity, rec.CreatedAt)
 	return gen.InsertSessionParams{
@@ -597,7 +619,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		KeepWarmOnMerge:           rec.KeepWarmOnMerge,
 		TaskSize:                  string(rec.TaskSize.WithDefault()),
 		ClaudeProfile:             rec.ClaudeProfile,
-		Transport:                 rec.Transport.WithDefault(),
+		Transport:                 insertTransport(rec),
 		CrewID:                    string(rec.CrewID),
 		CrewRole:                  string(rec.CrewRole),
 		CrewJoinReason:            string(rec.CrewJoinReason),

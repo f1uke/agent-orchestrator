@@ -782,6 +782,28 @@ func (q *Queries) SetSessionTokenUsage(ctx context.Context, arg SetSessionTokenU
 	return result.RowsAffected()
 }
 
+const setSessionTransport = `-- name: SetSessionTransport :execrows
+UPDATE sessions SET transport = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionTransportParams struct {
+	Transport domain.Transport
+	UpdatedAt time.Time
+	ID        domain.SessionID
+}
+
+// Sole writer of transport after the row is inserted. A queued TODO is inserted
+// with no transport and takes the one it resolved when it starts; a started
+// session's transport never changes. Bumps updated_at so the
+// sessions_cdc_update trigger refreshes the board.
+func (q *Queries) SetSessionTransport(ctx context.Context, arg SetSessionTransportParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionTransport, arg.Transport, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const startCrewRound = `-- name: StartCrewRound :execrows
 UPDATE sessions SET crew_round_started_at = ? WHERE id = ?
 `

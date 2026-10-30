@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
@@ -43,6 +44,34 @@ func TestSessionTransportRoundTripsAndDefaultsToTerminal(t *testing.T) {
 	}
 	if byID[plain.ID] != domain.TransportTerminal || byID[chatRec.ID] != domain.TransportChat {
 		t.Fatalf("ListAllSessions transports = %v", byID)
+	}
+}
+
+func TestQueuedTodoKeepsAnUnsetTransportUntilItIsWritten(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+
+	todo := sampleRecord("mer")
+	todo.IsTodo = true
+	rec, err := s.CreateSession(ctx, todo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ := s.GetSession(ctx, rec.ID)
+	if got.Transport != "" {
+		t.Fatalf("queued TODO with no transport stored as %q, want it left unset", got.Transport)
+	}
+
+	if ok, err := s.SetSessionTransport(ctx, rec.ID, domain.TransportChat, time.Now()); err != nil || !ok {
+		t.Fatalf("SetSessionTransport = %v, %v", ok, err)
+	}
+	got, _, _ = s.GetSession(ctx, rec.ID)
+	if got.Transport != domain.TransportChat {
+		t.Fatalf("after SetSessionTransport = %q, want chat", got.Transport)
+	}
+	if ok, err := s.SetSessionTransport(ctx, "mer-404", domain.TransportChat, time.Now()); err != nil || ok {
+		t.Fatalf("SetSessionTransport on a missing session = %v, %v, want ok=false", ok, err)
 	}
 }
 
