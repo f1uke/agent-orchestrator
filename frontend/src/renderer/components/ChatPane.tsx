@@ -268,7 +268,7 @@ const STICK_TO_BOTTOM_PX = 48;
 
 type StreamProps = {
 	rows: ChatRow[];
-	/** The session's log is still being replayed: the stream lays out at the end, unseen, until it catches up. */
+	/** The session's log is still replaying, so the newest row is not known yet. */
 	replaying: boolean;
 	root: string;
 	pending: Pending[];
