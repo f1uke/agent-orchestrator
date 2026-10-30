@@ -82,6 +82,18 @@ test.describe("releases sources layer", () => {
 		await expect(page).toHaveURL(/sheet=/);
 	});
 
+	test("Esc pressed right after a click keeps the card closed", async ({ page }) => {
+		await open(page, "?layers=llb,cards,src&sheet=version:21-2026:di");
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		const tag = tags(sheet.getByTestId("stage-row").filter({ hasText: "scan" }));
+		await expect(tag).toHaveText("GitLab");
+		await tag.click();
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(400);
+		await expect(card(page), "the card reopened after Esc").toHaveCount(0, { timeout: 100 });
+		await expect(sheet).toBeVisible();
+	});
+
 	test("a tag on a clickable label does not open the label's sheet", async ({ page }) => {
 		await open(page, "?layers=llb,cards,src");
 		await tags(page.getByTestId("label-di").locator(".meta")).first().click();

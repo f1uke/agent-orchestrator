@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
 	systemMeta,
 	tagStale,
@@ -90,10 +90,22 @@ function stopKeys(e: React.KeyboardEvent | React.MouseEvent | React.PointerEvent
 export function SourceTag({ p, wide = false }: { p: Provenance | null; wide?: boolean }) {
 	const s = useSources();
 	const [open, setOpen] = useState(false);
+	// Radix's Escape dismiss leaves the hover-open timer of the pointer's entry
+	// running, so Esc within TAG_DELAY of a click let that timer reopen the card.
+	// After Esc only a fresh pointer entry, a click or a key may open it again.
+	const escaped = useRef(false);
 	if (!s || !p) return null;
 	const text = tagText(p, wide, s.idx);
 	return (
-		<HoverCard open={open} onOpenChange={setOpen} openDelay={TAG_DELAY} closeDelay={120}>
+		<HoverCard
+			open={open}
+			onOpenChange={(next) => {
+				if (next && escaped.current) return;
+				setOpen(next);
+			}}
+			openDelay={TAG_DELAY}
+			closeDelay={120}
+		>
 			<HoverCardTrigger asChild>
 				<span
 					role="button"
@@ -110,6 +122,9 @@ export function SourceTag({ p, wide = false }: { p: Provenance | null; wide?: bo
 						setOpen(true);
 					}}
 					onPointerDown={stopKeys}
+					onPointerEnter={() => {
+						escaped.current = false;
+					}}
 					onKeyDown={(e) => {
 						if (e.key !== "Enter" && e.key !== " ") return;
 						e.preventDefault();
@@ -121,7 +136,10 @@ export function SourceTag({ p, wide = false }: { p: Provenance | null; wide?: bo
 				</span>
 			</HoverCardTrigger>
 			<HoverCardContent
-				onEscapeKeyDown={(e) => e.stopPropagation()}
+				onEscapeKeyDown={(e) => {
+					e.stopPropagation();
+					escaped.current = true;
+				}}
 				onClick={(e) => e.stopPropagation()}
 				className="srcpop"
 			>

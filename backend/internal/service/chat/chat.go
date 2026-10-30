@@ -98,6 +98,12 @@ func HostNotRunning() *apierr.Error {
 		"The session's host is not running: the session is asleep or restarting. Try again once it is awake.", nil)
 }
 
+// HostRefused is the API error for a request the session's host turned down,
+// carrying the host's own reason, such as "claude is not running".
+func HostRefused(refused *sessionhost.RefusedError) *apierr.Error {
+	return apierr.Conflict("CHAT_REQUEST_REJECTED", refused.Reason, nil)
+}
+
 func hostError(id domain.SessionID, err error) error {
 	var refused *sessionhost.RefusedError
 	switch {
@@ -106,7 +112,7 @@ func hostError(id domain.SessionID, err error) error {
 	case errors.Is(err, sessionhost.ErrNotReachable):
 		return HostNotRunning()
 	case errors.As(err, &refused):
-		return apierr.Conflict("CHAT_REQUEST_REJECTED", refused.Reason, nil)
+		return HostRefused(refused)
 	}
 	return fmt.Errorf("chat: session %s: %w", id, err)
 }

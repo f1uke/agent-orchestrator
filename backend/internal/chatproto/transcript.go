@@ -19,6 +19,7 @@ type Transcript struct {
 	Commands         []Command // from the latest initialize response
 	Models           []Model   // from the latest initialize response
 	Model            string    // in use: the spawn's --model, then system/init or an accepted set_model
+	ChosenModel      string    // the latest accepted set_model, which a respawn passes as --model
 	LastSeq          uint64
 }
 
@@ -187,6 +188,7 @@ type Folder struct {
 	slash    []Command
 	models   []Model
 	model    string
+	chosen   string
 }
 
 // NewFolder returns an empty Folder.
@@ -310,7 +312,7 @@ func (f *Folder) answerControl(r ControlResponse) {
 			Model string `json:"model"`
 		}
 		if json.Unmarshal(r.Response, &body) == nil && body.Model != "" {
-			f.model = body.Model
+			f.model, f.chosen = body.Model, body.Model
 		}
 	}
 }
@@ -521,6 +523,7 @@ func (f *Folder) Transcript() Transcript {
 		Commands:         slices.Clone(f.slash),
 		Models:           slices.Clone(f.models),
 		Model:            f.model,
+		ChosenModel:      f.chosen,
 		LastSeq:          f.last,
 	}
 	for _, it := range f.items {

@@ -1495,6 +1495,7 @@ func terminatedMessage(err error) string {
 // toAPIError maps the session engine's sentinel errors to their REST API
 // equivalents; an unrecognized error passes through and surfaces as a 500.
 func toAPIError(err error) error {
+	var refused *sessionhost.RefusedError
 	switch {
 	case err == nil:
 		return nil
@@ -1516,6 +1517,8 @@ func toAPIError(err error) error {
 		return apierr.Conflict("MESSAGE_NOT_DELIVERED", err.Error(), nil)
 	case errors.Is(err, sessionhost.ErrNotReachable):
 		return chat.HostNotRunning()
+	case errors.As(err, &refused):
+		return chat.HostRefused(refused)
 	case errors.Is(err, sessionmanager.ErrIncompleteHandle):
 		return apierr.Conflict("SESSION_INCOMPLETE_HANDLE", "Session is missing runtime or workspace handles", nil)
 	case errors.Is(err, sessionmanager.ErrNotResumable):
