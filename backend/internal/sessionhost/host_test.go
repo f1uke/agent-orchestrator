@@ -23,6 +23,7 @@ import (
 var wantProtocolFlags = []string{
 	"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 	"--replay-user-messages", "--include-partial-messages", "--permission-prompt-tool=stdio",
+	"--allowedTools", "mcp__ao__read_me,mcp__ao__show_widget,mcp__ao__mark_chapter,mcp__ao__wrap_up,mcp__ao__suggest_session,mcp__ao__suggest_skill",
 }
 
 const firstSessionID = "12e38fc9-a4a5-4819-b046-4107629b2c8b"

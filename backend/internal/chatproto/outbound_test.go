@@ -23,6 +23,10 @@ func TestEncode(t *testing.T) {
 		{"image only", UserInput{UUID: "u1", Images: []Image{{MediaType: "image/jpeg", Base64: "BBBB"}}},
 			`{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"BBBB"}}]},"parent_tool_use_id":null,"session_id":""}`},
 		{"initialize", Initialize{RequestID: "r1"}, `{"type":"control_request","request_id":"r1","request":{"subtype":"initialize"}}`},
+		{"initialize with sdk mcp servers", Initialize{RequestID: "r1", SDKMCPServers: []string{"ao"}},
+			`{"type":"control_request","request_id":"r1","request":{"sdkMcpServers":["ao"],"subtype":"initialize"}}`},
+		{"mcp reply", MCPReply{RequestID: "r7", Message: json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{}}`)},
+			`{"type":"control_response","response":{"request_id":"r7","response":{"mcp_response":{"jsonrpc":"2.0","id":1,"result":{}}},"subtype":"success"}}`},
 		{"interrupt", Interrupt{RequestID: "r2"}, `{"type":"control_request","request_id":"r2","request":{"subtype":"interrupt"}}`},
 		{"set permission mode", SetPermissionMode{RequestID: "r3", Mode: ModePlan},
 			`{"type":"control_request","request_id":"r3","request":{"subtype":"set_permission_mode","mode":"plan"}}`},
@@ -69,6 +73,8 @@ func TestEncodeRejects(t *testing.T) {
 		{"answer without id", PermissionAnswer{Decision: Deny{}}},
 		{"answer without decision", PermissionAnswer{RequestID: "r"}},
 		{"allow without input", PermissionAnswer{RequestID: "r", Decision: Allow{}}},
+		{"mcp reply without id", MCPReply{Message: json.RawMessage(`{}`)}},
+		{"mcp reply without message", MCPReply{RequestID: "r"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
