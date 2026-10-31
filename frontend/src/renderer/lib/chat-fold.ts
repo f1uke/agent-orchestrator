@@ -16,6 +16,7 @@ import {
 	parseTaskNotification,
 	parseHostNote,
 } from "./chat-event";
+import { type ChatImage, isImageMime } from "./chat-images";
 import { elapsedMs } from "./chat-time";
 
 export type PermissionStatus = "pending" | "allowed" | "denied" | "cancelled";
@@ -35,7 +36,7 @@ export type UserItem = {
 	kind: "user";
 	uuid: string;
 	text: string;
-	images: number;
+	images: ChatImage[];
 	origin?: Origin;
 	state: CommandState;
 	ts: string;
@@ -409,10 +410,12 @@ export class ChatFolder {
 	private addUserInput(uuid: string, blocks: Block[]): void {
 		if (uuid !== "" && this.users.has(uuid)) return;
 		let text = "";
-		let images = 0;
+		const images: ChatImage[] = [];
 		for (const block of blocks) {
 			if (block.type === "text") text += block.text;
-			else if (block.type === "image") images += 1;
+			else if (block.type === "image" && isImageMime(block.mediaType) && block.data !== "") {
+				images.push({ mediaType: block.mediaType, base64: block.data });
+			}
 		}
 		const item: UserItem = { kind: "user", uuid, text, images, state: this.commands.get(uuid) ?? "sent", ts: this.ts };
 		this.turnStart ??= this.ts;

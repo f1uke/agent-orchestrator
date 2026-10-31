@@ -18,7 +18,7 @@ const user = (uuid = "u1", text = "go"): UserItem => ({
 	kind: "user",
 	uuid,
 	text,
-	images: 0,
+	images: [],
 	state: "completed",
 	ts: "",
 });

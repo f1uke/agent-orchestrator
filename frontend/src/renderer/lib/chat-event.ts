@@ -14,7 +14,7 @@ export type Block =
 	| { type: "thinking"; text: string }
 	| { type: "tool_use"; id: string; name: string; input: unknown }
 	| { type: "tool_result"; toolUseId: string; isError: boolean; content: unknown }
-	| { type: "image"; mediaType: string }
+	| { type: "image"; mediaType: string; data: string }
 	| { type: "other"; blockType: string };
 
 export type CanUseTool = {
@@ -150,8 +150,11 @@ function decodeBlock(raw: unknown): Block {
 				isError: raw.is_error === true,
 				content: raw.content,
 			};
-		case "image":
-			return { type: "image", mediaType: isObject(raw.source) ? str(raw.source.media_type) : "" };
+		case "image": {
+			const source = isObject(raw.source) ? raw.source : {};
+			const base64 = source.type === "base64";
+			return { type: "image", mediaType: base64 ? str(source.media_type) : "", data: base64 ? str(source.data) : "" };
+		}
 	}
 	return { type: "other", blockType: str(raw.type) };
 }

@@ -5,7 +5,7 @@ import type { ChatRow } from "./chat-rows";
 
 const item = (key: string, it: ChatItem): ChatRow => ({ key, kind: "item", item: it, subagentTools: 0 });
 const user = (key: string, text: string): ChatRow =>
-	item(key, { kind: "user", uuid: key, text, images: 0, state: "completed", ts: "" } satisfies UserItem);
+	item(key, { kind: "user", uuid: key, text, images: [], state: "completed", ts: "" } satisfies UserItem);
 const reply = (key: string, text: string): ChatRow =>
 	item(key, { kind: "assistant_text", messageId: key, text, parentToolUseId: "" });
 

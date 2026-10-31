@@ -27,6 +27,7 @@ import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
 import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
+import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
 import { ChatComposer } from "./ChatComposer";
 import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
@@ -832,14 +833,18 @@ const USER_STATE_LABEL: Record<string, string> = {
 };
 
 function UserMessage({ item }: { item: UserItem }) {
-	const meta = [
-		USER_STATE_LABEL[item.state],
-		item.images > 0 ? (item.images === 1 ? "1 image" : `${item.images} images`) : undefined,
-	].filter(Boolean);
+	const state = USER_STATE_LABEL[item.state];
 	return (
 		<div className="chat-user" data-state={item.state}>
-			<div className="chat-user__bubble">{item.text}</div>
-			{meta.length ? <div className="chat-user__meta">{meta.join(" · ")}</div> : null}
+			<div className="chat-user__bubble">
+				{item.images.length ? (
+					<div className="chat-user__images">
+						<ChatImages images={item.images} name={(i) => `Pasted image ${i + 1}`} thumb={BUBBLE_THUMB} />
+					</div>
+				) : null}
+				{item.text}
+			</div>
+			{state ? <div className="chat-user__meta">{state}</div> : null}
 		</div>
 	);
 }

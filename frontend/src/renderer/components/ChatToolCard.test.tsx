@@ -174,6 +174,31 @@ describe("ToolCard", () => {
 		expect(body).toHaveTextContent("Result");
 	});
 
+	it("shows a Read of a PNG as a thumbnail that opens the full image", async () => {
+		const png = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } };
+		const read = call("Read", { file_path: "/work/project/docs/shot.png" }, { isError: false, content: [png] });
+		const user = userEvent.setup();
+		const closed = card(read, { root: "/work/project" }).head;
+		expect(closed).toHaveTextContent("docs/shot.png");
+		expect(closed).toHaveTextContent("image");
+		expect(screen.queryByRole("img")).toBeNull();
+		cleanup();
+
+		card(read, { open: true, root: "/work/project" });
+		const thumb = screen.getByRole("img", { name: "shot.png" });
+		expect(thumb).toHaveAttribute("src", "data:image/png;base64,iVBORw==");
+		expect(screen.queryByText("(no output)")).toBeNull();
+
+		await user.click(screen.getByRole("button", { name: "View shot.png" }));
+		const dialog = await screen.findByRole("dialog");
+		expect(within(dialog).getByRole("img", { name: "shot.png" })).toHaveAttribute(
+			"src",
+			"data:image/png;base64,iVBORw==",
+		);
+		await user.keyboard("{Escape}");
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
 	it("marks a call with no result yet as running", () => {
 		const { head } = card(call("Read", { file_path: "x.go" }));
 		expect(head).toHaveTextContent("running");
