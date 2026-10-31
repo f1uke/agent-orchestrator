@@ -30,7 +30,7 @@ for (const viewport of VIEWPORTS) {
 			const group = stream.locator("[data-group] .chat-group__head").first();
 			if ((await group.count()) > 0 && (await group.getAttribute("aria-expanded")) === "false") await group.click();
 			const read = stream.locator('[data-tool="Read"]');
-			await expect(read).toContainText("docs/export-page.png");
+			await expect(read).toContainText("export-page.png");
 			await read.locator(".chat-tool__head").click();
 			const thumb = read.getByRole("img", { name: "export-page.png" });
 			await expect(thumb).toBeVisible();

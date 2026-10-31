@@ -115,6 +115,16 @@ const result = (id: string, content: string, isError = false, parent: string | n
 		message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content, is_error: isError }] },
 	},
 ];
+const resultWith = (id: string, content: string, toolUseResult: object): Step => [
+	"out",
+	{
+		type: "user",
+		parent_tool_use_id: null,
+		session_id: SESSION,
+		message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content, is_error: false }] },
+		tool_use_result: toolUseResult,
+	},
+];
 const say = (messageId: string, text: string): Step => [
 	"out",
 	{ type: "assistant", session_id: SESSION, message: { id: messageId, content: [{ type: "text", text }] } },
@@ -579,6 +589,110 @@ function imagesEntries(): ChatEntry[] {
 	}));
 }
 
+export const MOCK_CODE_CHAT_SESSION = "demo-chat-code";
+
+const FLOW_SVG = [
+	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" font-family="IBM Plex Sans, sans-serif">',
+	'  <rect width="560" height="120" fill="#ffffff"/>',
+	'  <g font-size="14" fill="#01172b">',
+	'    <rect x="16" y="36" width="140" height="48" rx="12" fill="#f2f2f2"/>',
+	'    <text x="86" y="65" text-anchor="middle">Request</text>',
+	'    <rect x="210" y="36" width="140" height="48" rx="12" fill="#f2f93c"/>',
+	'    <text x="280" y="65" text-anchor="middle">Retry budget</text>',
+	'    <rect x="404" y="36" width="140" height="48" rx="12" fill="#f2f2f2"/>',
+	'    <text x="474" y="65" text-anchor="middle">Dead letter</text>',
+	"  </g>",
+	'  <g stroke="#01172b" stroke-width="2" fill="none">',
+	'    <path d="M160 60 H204"/><path d="M198 54 L204 60 L198 66"/>',
+	'    <path d="M354 60 H398"/><path d="M392 54 L398 60 L392 66"/>',
+	"  </g>",
+	"</svg>",
+].join("\n");
+
+const SUMMARY_PATCH = {
+	oldStart: 456,
+	oldLines: 7,
+	newStart: 456,
+	newLines: 12,
+	lines: [
+		" \tkeys := make([]string, 0, len(balances))",
+		" \tfor k := range balances {",
+		" \t\tkeys = append(keys, k)",
+		" \t}",
+		'-\tfmt.Fprintf(&b, "%s %d.%02d\\n", k, balances[k]/100, balances[k]%100)',
+		"+\tc := balances[k]",
+		'+\tsign := ""',
+		"+\tif c < 0 {",
+		'+\t\tsign, c = "-", -c',
+		"+\t}",
+		'+\tfmt.Fprintf(&b, "%s %s%d.%02d\\n", k, sign, c/100, c%100)',
+		" \treturn b.String()",
+		" }",
+	],
+};
+
+const BUDGET_TS = [
+	"export type Budget = { max: number; baseMs: number; capMs: number };",
+	"",
+	"/** Whether attempt n may run. */",
+	"export function allow(budget: Budget, n: number): boolean {",
+	"\treturn n < budget.max;",
+	"}",
+	"",
+	"/** A random wait in [0, min(cap, base * 2^n)], so retries spread out. */",
+	"export function delay(budget: Budget, n: number): number {",
+	"\tconst ceiling = Math.min(budget.capMs, budget.baseMs * 2 ** n);",
+	"\treturn Math.floor(Math.random() * (ceiling + 1));",
+	"}",
+].join("\n");
+
+function codeEntries(): ChatEntry[] {
+	const steps: Step[] = [
+		sent("code-1", "Draw the retry flow as an SVG, fix the negative balance summary, then show me the budget helper."),
+		lifecycle("code-1", "started"),
+		say("msg_c1", "I'll draw the diagram first."),
+		tool("t-code-write", "msg_c2", "Write", { file_path: "/work/project/docs/retry-flow.svg", content: FLOW_SVG }),
+		resultWith("t-code-write", "File created successfully at: /work/project/docs/retry-flow.svg", {
+			type: "create",
+			filePath: "/work/project/docs/retry-flow.svg",
+			content: FLOW_SVG,
+			structuredPatch: [],
+			originalFile: null,
+		}),
+		say("msg_c3", "Now the summary. Negative balances lost their sign."),
+		tool("t-code-edit", "msg_c4", "Edit", {
+			file_path: "/work/project/report/report.go",
+			old_string: '\tfmt.Fprintf(&b, "%s %d.%02d\\n", k, balances[k]/100, balances[k]%100)',
+			new_string:
+				'\tc := balances[k]\n\tsign := ""\n\tif c < 0 {\n\t\tsign, c = "-", -c\n\t}\n\tfmt.Fprintf(&b, "%s %s%d.%02d\\n", k, sign, c/100, c%100)',
+		}),
+		resultWith("t-code-edit", "The file /work/project/report/report.go has been updated successfully.", {
+			filePath: "/work/project/report/report.go",
+			oldString: '\tfmt.Fprintf(&b, "%s %d.%02d\\n", k, balances[k]/100, balances[k]%100)',
+			newString: "",
+			originalFile: "package report\n// the whole file text stays out of the fold\n",
+			structuredPatch: [SUMMARY_PATCH],
+			userModified: false,
+			replaceAll: false,
+		}),
+		say("msg_c5", "Last, the budget helper."),
+		tool("t-code-read", "msg_c6", "Read", { file_path: "/work/project/src/retry/budget.ts" }),
+		result(
+			"t-code-read",
+			numbered(BUDGET_TS.split("\n").length, (n) => BUDGET_TS.split("\n")[n - 1]),
+		),
+		say("msg_c7", "The sign now survives, and `delay` caps at `capMs`."),
+		["out", { type: "result", subtype: "success", is_error: false, num_turns: 3, total_cost_usd: 0.03 }],
+		lifecycle("code-1", "completed"),
+	];
+	return steps.map(([dir, payload], i) => ({
+		seq: i + 1,
+		ts: new Date(START + i * 4_000).toISOString(),
+		dir,
+		payload,
+	}));
+}
+
 export const MOCK_LIVE_CHAT_SESSION = "demo-chat-live";
 
 const LIVE_BRIEF = [
@@ -696,9 +810,11 @@ function stubSession(id: string): Promise<StubSession> {
 						? liveEntries()
 						: id === MOCK_IMAGES_CHAT_SESSION
 							? imagesEntries()
-							: long
-								? fixture
-								: mockChatEntries(fixture);
+							: id === MOCK_CODE_CHAT_SESSION
+								? codeEntries()
+								: long
+									? fixture
+									: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };

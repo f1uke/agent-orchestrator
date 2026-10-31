@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { BackgroundTask, Pending, PermissionOutcome, ToolCallItem } from "../lib/chat-fold";
@@ -97,12 +97,11 @@ describe("ToolCard", () => {
 		const content = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
 		const { head } = card(call("Write", { file_path: "new.go", content }), { open: true });
 		expect(head).toHaveTextContent("+50");
-		expect(head).toHaveTextContent("new file");
 		expect(screen.getByText("… 10 more lines")).toBeInTheDocument();
 	});
 
 	it.each([
-		["Read", { file_path: "x.go" }, "1\tpackage x\n2\n3", "x.go", "3 lines"],
+		["Read", { file_path: "x.go" }, "1\tpackage x\n2\t\n3\t", "x.go", "3 lines"],
 		["Grep", { pattern: "attempt", path: "internal" }, "Found 7 matches\na\nb", '"attempt" in internal', "7 matches"],
 		["Glob", { pattern: "**/*.go" }, "a.go\nb.go", "**/*.go", "2 files"],
 	])("reads a %s call as one compact line", (name, input, output, arg, summary) => {
@@ -179,7 +178,8 @@ describe("ToolCard", () => {
 		const read = call("Read", { file_path: "/work/project/docs/shot.png" }, { isError: false, content: [png] });
 		const user = userEvent.setup();
 		const closed = card(read, { root: "/work/project" }).head;
-		expect(closed).toHaveTextContent("docs/shot.png");
+		expect(closed).toHaveTextContent("shot.png");
+		expect(within(closed).getByText("shot.png")).toHaveAttribute("title", "docs/shot.png");
 		expect(closed).toHaveTextContent("image");
 		expect(screen.queryByRole("img")).toBeNull();
 		cleanup();
@@ -202,6 +202,84 @@ describe("ToolCard", () => {
 	it("marks a call with no result yet as running", () => {
 		const { head } = card(call("Read", { file_path: "x.go" }));
 		expect(head).toHaveTextContent("running");
+	});
+});
+
+describe("ToolCard code cards", () => {
+	const svg = Array.from({ length: 15 }, (_, i) => `<g id="n${i + 1}"/>`).join("\n");
+	const write = () => call("Write", { file_path: "/work/project/docs/demo-flow.svg", content: svg });
+	const numbers = () => [...document.querySelectorAll(".chat-codebox__num")].map((n) => n.textContent);
+
+	it("shuts a Write to one row: the verb, the base name with its path as a tooltip, and the green count", () => {
+		const { head } = card(write(), { root: "/work/project" });
+		expect(within(head).getByText("Created")).toBeInTheDocument();
+		expect(head).not.toHaveTextContent("docs/");
+		expect(within(head).getByText("demo-flow.svg")).toHaveAttribute("title", "docs/demo-flow.svg");
+		expect(within(head).getByText("+15")).toHaveClass("chat-tool__add");
+		expect(document.querySelector(".chat-tool__body")).toBeNull();
+	});
+
+	it("opens a Write to a box headed by the file name, with line numbers 1 to 15 and a green block", () => {
+		card(write(), { open: true });
+		const box = document.querySelector<HTMLElement>(".chat-codebox")!;
+		expect(within(box).getByText("demo-flow.svg", { selector: ".chat-codebox__title" })).toBeInTheDocument();
+		expect(numbers()).toEqual(Array.from({ length: 15 }, (_, i) => String(i + 1)));
+		expect(box).toHaveClass("chat-codebox--new");
+		expect(box.querySelectorAll(".chat-codebox__row--add")).toHaveLength(15);
+	});
+
+	it("opens an Edit with the line numbers its patch carries, and a sign column", () => {
+		const hunk = { oldStart: 456, oldLines: 3, newStart: 456, newLines: 4, lines: [" a", "-b", "+c", "+d", " e"] };
+		const edited = call(
+			"Edit",
+			{ file_path: "/work/project/report.go", old_string: "a\nb\ne", new_string: "a\nc\nd\ne" },
+			{ isError: false, content: "updated", structuredPatch: [hunk] },
+		);
+		const { head } = card(edited, { open: true });
+		expect(within(head).getByText("Edited")).toBeInTheDocument();
+		expect(within(head).getByText("report.go")).toBeInTheDocument();
+		expect(within(head).getByText("+2")).toHaveClass("chat-tool__add");
+		expect(within(head).getByText("−1")).toHaveClass("chat-tool__del");
+		expect(numbers()).toEqual(["456", "457", "457", "458", "459"]);
+		expect([...document.querySelectorAll(".chat-codebox__sign")].map((n) => n.textContent)).toEqual([
+			"",
+			"−",
+			"+",
+			"+",
+			"",
+		]);
+		expect(document.querySelectorAll(".chat-codebox__row--del")).toHaveLength(1);
+		expect(document.querySelector(".chat-codebox")).not.toHaveClass("chat-codebox--new");
+	});
+
+	it("opens a Read with the line numbers of its cat -n prefix", () => {
+		const read = call(
+			"Read",
+			{ file_path: "/work/project/src/a.ts" },
+			{ isError: false, content: "    10\tconst a = 1;\n    11\t" },
+		);
+		card(read, { open: true });
+		expect(numbers()).toEqual(["10", "11"]);
+		expect(document.querySelector(".chat-codebox__sign")).toBeNull();
+	});
+
+	it("draws plain text first and then colours the code as spans once the grammar lands", async () => {
+		const go = call("Write", { file_path: "/work/project/a.go", content: "package a\n\nfunc A() {}\n" });
+		card(go, { open: true });
+		const text = () => document.querySelector<HTMLElement>(".chat-codebox__text")!;
+		expect(text()).toHaveTextContent("package a");
+		await waitFor(() => expect(text().querySelector("span[style*='color']")).not.toBeNull());
+		const keyword = [...document.querySelectorAll<HTMLElement>(".chat-codebox__text span")].find(
+			(span) => span.textContent === "package",
+		);
+		expect(keyword?.style.color).not.toBe("");
+	});
+
+	it("leaves a file of an unknown language uncoloured", async () => {
+		card(call("Write", { file_path: "/work/project/notes.unknownext", content: "hello" }), { open: true });
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(document.querySelector(".chat-codebox__text span[style*='color']")).toBeNull();
+		expect(document.querySelector(".chat-codebox__text")).toHaveTextContent("hello");
 	});
 });
 
