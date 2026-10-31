@@ -504,6 +504,44 @@ describe("chatRows on the recorded long session", () => {
 	});
 });
 
+describe("chatRows suggestions", () => {
+	const session = (result: "ok" | "error" | "none" = "ok") =>
+		tool("mcp__ao__suggest_session", { title: "Fix it", prompt: "Do it." }, result);
+	const skill = (result: "ok" | "error" | "none" = "ok") =>
+		tool("mcp__ao__suggest_skill", { name: "verify", reason: "r" }, result);
+
+	it("gives each card its own row instead of a place in a process group", () => {
+		const rows = rowsOf([user(), say("a"), tool("Read"), session(), tool("Bash"), skill(), say("b")]);
+		expect(shape(rows)).toEqual([
+			"user",
+			"assistant_text",
+			"tool_call",
+			"tool_call",
+			"tool_call",
+			"tool_call",
+			"assistant_text",
+		]);
+	});
+
+	it("keeps both cards in view after their turn folds", () => {
+		const rows = rowsOf([user(), tool("Read"), tool("Edit"), session(), skill(), say("closing"), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "tool_call", "tool_call", "assistant_text", "turn_end"]);
+	});
+
+	it("folds a card that failed, since there is nothing to show", () => {
+		const rows = rowsOf([
+			user(),
+			tool("Read"),
+			tool("Edit"),
+			session("error"),
+			skill("error"),
+			say("sorry"),
+			turnEnd(),
+		]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "turn_end"]);
+	});
+});
+
 describe("chatRows live thinking", () => {
 	const SINCE = "2026-10-31T11:53:12.000Z";
 	const afterTool = () => [user(), tool("Read"), tool("Grep")];

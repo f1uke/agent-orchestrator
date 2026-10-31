@@ -1286,3 +1286,107 @@ describe("ChatPane chapters, tasks and wrap-up", () => {
 		expect(api.send).not.toHaveBeenCalled();
 	});
 });
+
+describe("ChatPane run button and suggestion cards", () => {
+	const composer = () => screen.getByRole("textbox", { name: "Message Claude" });
+	const suggest = (id: string, name: string, input: object) => [toolUse(id, name, input), toolDone(id, "Card shown.")];
+	const sessionCard = (id: string, title: string) =>
+		suggest(id, "mcp__ao__suggest_session", { title, prompt: `Brief for ${title}` });
+	const skillCard = (id: string, name: string) =>
+		suggest(id, "mcp__ao__suggest_skill", { name, reason: `Because ${name}` });
+	const run = () => screen.queryAllByRole("button", { name: "Ask Claude to run this" });
+
+	it("offers Run on a one-line shell block in a reply and not on a longer or other block", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "how?"),
+			saying(
+				"One:\n\n```bash\npnpm test chat-widget\n```\n\nMany:\n\n```bash\ncd a\nnpm test\n```\n\n```ts\nconst a = 1;\n```",
+			),
+		);
+		expect(run()).toHaveLength(1);
+		expect(run()[0].closest(".note-prose__code")).toHaveTextContent("pnpm test chat-widget");
+	});
+
+	it("fills the composer with a request to run the command and sends nothing", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "how?"), saying("```bash\nrm -rf build\n```"));
+		const asked = document.querySelectorAll(".chat-user").length;
+		await user.click(run()[0]);
+		await settle();
+		expect(composer()).toHaveValue("Run this command:\n\n```bash\nrm -rf build\n```");
+		expect(api.send).not.toHaveBeenCalled();
+		expect(document.querySelectorAll(".chat-user")).toHaveLength(asked);
+	});
+
+	it("offers no Run button on what the user typed or on tool output", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "```bash\nls\n```"),
+			toolUse("t1", "Read", { file_path: "a.md" }),
+			toolDone("t1", "```bash\nls\n```"),
+		);
+		expect(run()).toHaveLength(0);
+	});
+
+	it("fills the composer with /<name> from a skill card and sends nothing", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "go"), ...skillCard("k1", "verify"));
+		expect(screen.getByText("Skill: /verify")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Use /verify" }));
+		await settle();
+		expect(composer()).toHaveValue("/verify ");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("fills the composer from Do it here and sends nothing", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "go"), ...sessionCard("s1", "Fix the flaky Esc test"));
+		expect(screen.getByText("Start a new session")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Do it here" }));
+		await settle();
+		expect(composer()).toHaveValue("Do it here: Fix the flaky Esc test");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("keeps the buttons of an older card of each kind disabled and the newest live", async () => {
+		const { feed, api, user } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			...skillCard("k1", "old-skill"),
+			...sessionCard("s1", "Old work"),
+			userIn("u2", "next"),
+			...skillCard("k2", "new-skill"),
+			...sessionCard("s2", "New work"),
+		);
+		const old = screen.getByRole("button", { name: "Use /old-skill" });
+		expect(old).toHaveAttribute("aria-disabled", "true");
+		await user.click(old);
+		await user.click(screen.getAllByRole("button", { name: "Open new session…" })[0]);
+		await settle();
+		expect(composer()).toHaveValue("");
+		expect(document.querySelector('[role="dialog"]')).toBeNull();
+		expect(screen.getByRole("button", { name: "Use /new-skill" })).not.toHaveAttribute("aria-disabled");
+		expect(screen.getAllByRole("button", { name: "Open new session…" })[1]).not.toHaveAttribute("aria-disabled");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("keeps both cards on screen after the turn folds, and draws none for a skill name it will not use", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			lifecycle("u1", "started"),
+			toolUse("r1", "Read", { file_path: "a.go" }),
+			toolDone("r1"),
+			toolUse("r2", "Bash", { command: "ls" }),
+			toolDone("r2"),
+			...sessionCard("s1", "Other work"),
+			...skillCard("k1", "verify"),
+			...suggest("k2", "mcp__ao__suggest_skill", { name: "a b/../c", reason: "r" }),
+			saying("Done."),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		expect(document.querySelector("[data-turn]")).not.toBeNull();
+		expect(document.querySelectorAll("[data-suggest]")).toHaveLength(2);
+	});
+});

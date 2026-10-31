@@ -31,12 +31,21 @@ import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/u
 import type { WorkspaceSession } from "../types/workspace";
 import { widgetOf } from "../lib/chat-widget";
 import { chapterOf, chapters as chaptersOf } from "../lib/chat-chapters";
+import { askToRun } from "../lib/chat-run";
+import {
+	liveSuggestions,
+	type LiveSuggestions,
+	type SessionSuggestion,
+	sessionSuggestionOf,
+	skillSuggestionOf,
+} from "../lib/chat-suggest";
 import { latestWrapUpId, wrapUpOf } from "../lib/chat-wrapup";
 import { ChatChapters } from "./ChatChapters";
 import { ChatWrapUp } from "./ChatWrapUp";
 import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
 import { ChatComposer, type Prefill } from "./ChatComposer";
 import { ContextMeter, UsageMeter } from "./ChatMeters";
+import { SessionSuggestionCard, SkillSuggestionCard, SuggestedSessionDialog } from "./ChatSuggestion";
 import { ChatTodoBar } from "./ChatTodoBar";
 import { ChatWidget } from "./ChatWidget";
 import { CopyButton } from "./CopyButton";
@@ -98,6 +107,7 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 	const [requests, setRequests] = useState<RequestStates>({});
 	const [toast, showToast] = useToast();
 	const [prefill, setPrefill] = useState<Prefill>();
+	const [suggested, setSuggested] = useState<SessionSuggestion>();
 	const { transcript } = chat;
 
 	const queuedIds = useMemo(() => new Set(transcript.queued.filter((uuid) => uuid !== "")), [transcript.queued]);
@@ -168,6 +178,7 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 					disabled={actions.hostDown}
 					replaying={chat.connection === "connecting"}
 					onAnswer={onAnswer}
+					onNewSession={setSuggested}
 					onPrompt={onPrompt}
 					pending={transcript.pending}
 					requests={requests}
@@ -217,6 +228,13 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 					) : null}
 				</div>
 			</div>
+			{suggested ? (
+				<SuggestedSessionDialog
+					onClose={() => setSuggested(undefined)}
+					projectId={session.workspaceId}
+					suggestion={suggested}
+				/>
+			) : null}
 			{toast ? (
 				<div className="chat-toast" role="status">
 					{toast}
@@ -294,6 +312,7 @@ type StreamProps = {
 	disabled: boolean;
 	onAnswer: AnswerHandler;
 	onPrompt: (text: string) => void;
+	onNewSession: (suggestion: SessionSuggestion) => void;
 };
 
 // Within this many pixels of the end the user has reached the latest row.
@@ -327,7 +346,18 @@ function isEditable(target: EventTarget): boolean {
 	);
 }
 
-function ChatStream({ rows, replaying, root, pending, theme, requests, disabled, onAnswer, onPrompt }: StreamProps) {
+function ChatStream({
+	rows,
+	replaying,
+	root,
+	pending,
+	theme,
+	requests,
+	disabled,
+	onAnswer,
+	onPrompt,
+	onNewSession,
+}: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
@@ -455,6 +485,7 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 		return chapterList.map((chapter) => indexOf.get(chapter.key) ?? 0);
 	}, [rows, chapterList]);
 	const liveWrapUp = useMemo(() => latestWrapUpId(rows), [rows]);
+	const liveSuggest = useMemo(() => liveSuggestions(rows), [rows]);
 	const [activeChapter, setActiveChapter] = useState(0);
 
 	const findActiveTurn = useCallback(() => {
@@ -539,7 +570,9 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 							>
 								<ChatRowView
 									answers={answers}
+									liveSuggest={liveSuggest}
 									liveWrapUp={liveWrapUp}
+									onNewSession={onNewSession}
 									onPrompt={onPrompt}
 									openRows={openRows}
 									pendingByRequest={pendingByRequest}
@@ -581,7 +614,9 @@ type RowProps = {
 	openRows: OpenRows;
 	toggleRow: ToggleRow;
 	onPrompt: (text: string) => void;
+	onNewSession: (suggestion: SessionSuggestion) => void;
 	liveWrapUp?: string;
+	liveSuggest: LiveSuggestions;
 	pendingByRequest: ReadonlyMap<string, Pending>;
 	sessionNames: ReadonlyMap<string, string>;
 };
@@ -633,7 +668,9 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 				<ItemRow
 					answers={answers}
 					item={row.item}
+					liveSuggest={props.liveSuggest}
 					liveWrapUp={props.liveWrapUp}
+					onNewSession={props.onNewSession}
 					onPrompt={props.onPrompt}
 					openRows={openRows}
 					pendingByRequest={pendingByRequest}
@@ -662,7 +699,9 @@ function ItemRow({
 	openRows,
 	toggleRow,
 	onPrompt,
+	onNewSession,
 	liveWrapUp,
+	liveSuggest,
 	pendingByRequest,
 	sessionNames,
 }: Omit<RowProps, "row"> & {
@@ -689,7 +728,7 @@ function ItemRow({
 		case "assistant_text":
 			return (
 				<div className="note-prose chat-md">
-					<NoteMarkdown source={item.text} theme={theme} />
+					<NoteMarkdown codeAction={askToRun(onPrompt)} source={item.text} theme={theme} />
 				</div>
 			);
 		case "thinking":
@@ -706,6 +745,21 @@ function ItemRow({
 			if (chapter) return <ChapterDivider summary={chapter.summary} title={chapter.title} />;
 			const wrap = wrapUpOf(item);
 			if (wrap) return <ChatWrapUp live={item.id === liveWrapUp} onPrompt={onPrompt} wrap={wrap} />;
+			const session = sessionSuggestionOf(item);
+			if (session) {
+				return (
+					<SessionSuggestionCard
+						live={item.id === liveSuggest.session}
+						onOpen={onNewSession}
+						onPrompt={onPrompt}
+						suggestion={session}
+					/>
+				);
+			}
+			const skill = skillSuggestionOf(item);
+			if (skill) {
+				return <SkillSuggestionCard live={item.id === liveSuggest.skill} onPrompt={onPrompt} suggestion={skill} />;
+			}
 			return (
 				<>
 					<ToolCard

@@ -33,6 +33,8 @@ type NewTaskDialogProps = {
 	 * title pre-filled. Absent for the plain New-task flow.
 	 */
 	initialIssue?: JiraIssueSummary | null;
+	initialTitle?: string;
+	initialPrompt?: string;
 	/** Called after a Start-now create with the new live session id (board navigates to it). */
 	onCreated: (sessionId: string) => void;
 	/** Called after an Add-to-TODO create; the board just refreshes to show the card. */
@@ -49,6 +51,8 @@ export function NewTaskDialog({
 	open,
 	projectId,
 	initialIssue,
+	initialTitle,
+	initialPrompt,
 	onCreated,
 	onQueued,
 	onOpenChange,
@@ -130,6 +134,12 @@ export function NewTaskDialog({
 			setTitle((current) => (current.trim() ? current : (initialIssue.title ?? "")));
 		}
 	}, [open, initialIssue]);
+
+	useEffect(() => {
+		if (!open) return;
+		if (initialTitle) setTitle((current) => (current.trim() ? current : initialTitle));
+		if (initialPrompt) setPrompt((current) => (current.trim() ? current : initialPrompt));
+	}, [open, initialTitle, initialPrompt]);
 
 	useEffect(() => {
 		if (open && !agentTouched) {
