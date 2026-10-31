@@ -1,3 +1,4 @@
+import type { CodeView } from "./chat-code";
 import { isObject, type TaskState } from "./chat-event";
 import { type DiffLine, diffCounts, lineDiff, newFileDiff } from "./chat-diff";
 import { type ChatImage, imagesOf } from "./chat-images";
@@ -23,12 +24,14 @@ export type ToolBody =
 	| { kind: "output"; text: string }
 	| { kind: "image"; images: ChatImage[]; path: string }
 	| { kind: "plan"; plan: string }
-	| { kind: "generic"; input: string; output: string };
+	| { kind: "generic"; input: string; output: string }
+	| { kind: "code"; view: CodeView; mode: "write" | "edit" | "read" };
 
 export type ToolView = {
 	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "todo" | "plan" | "question" | "other";
 	title: string;
 	arg: string;
+	path?: string;
 	status: ToolStatus;
 	body: ToolBody;
 	compact: boolean;

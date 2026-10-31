@@ -1,5 +1,7 @@
 export type Direction = "out" | "in" | "host";
 
+export type PatchHunk = { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] };
+
 export type ChatEntry = {
 	seq: number;
 	ts: string;

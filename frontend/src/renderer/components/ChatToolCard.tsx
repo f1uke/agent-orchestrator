@@ -158,6 +158,8 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 					<NoteMarkdown source={body.plan} theme={theme} />
 				</div>
 			);
+		case "code":
+			return null;
 		case "generic":
 			return (
 				<div className="chat-term">

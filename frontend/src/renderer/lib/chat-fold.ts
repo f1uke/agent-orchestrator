@@ -1,3 +1,4 @@
+import type { PatchHunk } from "./chat-event";
 import {
 	type Block,
 	type CanUseTool,
@@ -28,7 +29,7 @@ export type PermissionOutcome = {
 	updatedPermissions: unknown[];
 };
 
-export type ToolResult = { isError: boolean; content: unknown };
+export type ToolResult = { isError: boolean; content: unknown; structuredPatch?: PatchHunk[] };
 
 export type NoticeKind = "interrupted" | "spawn" | "resumed" | "exit" | "compacted";
 
