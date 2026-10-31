@@ -7893,6 +7893,16 @@ ol.note-prose__list {
 	font-size: 13px;
 }
 
+.chat-waiting .chat-term + .chat-term,
+.chat-waiting .chat-term + .chat-task-output__note {
+	margin-top: 6px;
+}
+
+.chat-task-output__note {
+	color: var(--fg-passive);
+	font-size: 12px;
+}
+
 .chat-live {
 	display: inline-flex;
 	min-width: 0;

@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { POST, PUT } = vi.hoisted(() => ({ POST: vi.fn(), PUT: vi.fn() }));
-vi.mock("./api-client", () => ({ apiClient: { POST, PUT } }));
+const { GET, POST, PUT } = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn() }));
+vi.mock("./api-client", () => ({ apiClient: { GET, POST, PUT } }));
 
 import { chatError, httpChatApi } from "./chat-api";
 
 const reply = (status: number, error?: object) => ({ error, response: new Response(null, { status }) });
 
 beforeEach(() => {
+	GET.mockReset();
 	POST.mockReset();
 	PUT.mockReset();
 });
@@ -76,5 +77,27 @@ describe("httpChatApi", () => {
 			ok: false,
 			error: { kind: "failed", message: "Failed to fetch" },
 		});
+	});
+});
+
+describe("httpChatApi.taskOutput", () => {
+	const output = { text: "line 1\n", size: 7, truncated: false, modifiedAt: "2026-10-30T10:56:00Z" };
+
+	it("reads a task's output by session and task id only", async () => {
+		GET.mockResolvedValue({ data: output, response: new Response(null, { status: 200 }) });
+		expect(await httpChatApi.taskOutput("s1", "b7x")).toEqual(output);
+		expect(GET).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", {
+			params: { path: { sessionId: "s1", taskId: "b7x" } },
+		});
+	});
+
+	it("is null when the daemon has no output for the task, or cannot be reached", async () => {
+		GET.mockResolvedValueOnce({
+			error: { code: "TASK_OUTPUT_NOT_FOUND" },
+			response: new Response(null, { status: 404 }),
+		});
+		expect(await httpChatApi.taskOutput("s1", "b7x")).toBeNull();
+		GET.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+		expect(await httpChatApi.taskOutput("s1", "b7x")).toBeNull();
 	});
 });

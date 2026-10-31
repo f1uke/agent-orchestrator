@@ -31,6 +31,7 @@ import {
 	replyInChat,
 } from "../lib/chat-answers";
 import type { BackgroundTask, Pending, ToolCallItem } from "../lib/chat-fold";
+import { TaskOutputView } from "./ChatTaskOutput";
 import { isObject } from "../lib/chat-event";
 import {
 	type Question,
@@ -180,7 +181,9 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 						<CopyButton className="chat-code__copy" value={body.command} what="command" />
 					</div>
 					{body.exitCode ? <div className="chat-tool__exit">Exit code {body.exitCode}</div> : null}
-					{body.output ? (
+					{body.task ? (
+						<TaskOutputView running={body.task.running} taskId={body.task.id} />
+					) : body.output ? (
 						<div className="chat-term">
 							{body.output.split("\n").map((line, i) => (
 								<span className={outputTone(line, body.failed)} key={i}>

@@ -46,6 +46,7 @@ import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
 import { ChatComposer, type Prefill } from "./ChatComposer";
 import { ContextMeter, UsageMeter } from "./ChatMeters";
 import { SessionSuggestionCard, SkillSuggestionCard, SuggestedSessionDialog } from "./ChatSuggestion";
+import { TaskOutputProvider } from "./ChatTaskOutput";
 import { ChatTodoBar } from "./ChatTodoBar";
 import { ChatWidget } from "./ChatWidget";
 import { CopyButton } from "./CopyButton";
@@ -172,77 +173,79 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 
 	return (
 		<ChatRefsProvider sessionId={session.id}>
-			<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-				{view === "events" ? (
-					<ChatEvents entries={chat.entries} />
-				) : (
-					<ChatStream
-						disabled={actions.hostDown}
-						replaying={chat.connection === "connecting"}
-						onAnswer={onAnswer}
-						onNewSession={setSuggested}
-						onPrompt={onPrompt}
-						pending={transcript.pending}
-						requests={requests}
-						root={root}
-						rows={rows}
-						theme={theme}
-					/>
-				)}
-				<div className="chat-bottom">
-					{actions.hostDown ? (
-						<div className="chat-banner" role="alert">
-							<CloudOff className="chat-icon" aria-hidden="true" />
-							Session is asleep or restarting. Sending and answering resume once it is back.
+			<TaskOutputProvider read={actions.taskOutput}>
+				<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
+					{view === "events" ? (
+						<ChatEvents entries={chat.entries} />
+					) : (
+						<ChatStream
+							disabled={actions.hostDown}
+							replaying={chat.connection === "connecting"}
+							onAnswer={onAnswer}
+							onNewSession={setSuggested}
+							onPrompt={onPrompt}
+							pending={transcript.pending}
+							requests={requests}
+							root={root}
+							rows={rows}
+							theme={theme}
+						/>
+					)}
+					<div className="chat-bottom">
+						{actions.hostDown ? (
+							<div className="chat-banner" role="alert">
+								<CloudOff className="chat-icon" aria-hidden="true" />
+								Session is asleep or restarting. Sending and answering resume once it is back.
+							</div>
+						) : null}
+						{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
+						{view === "chat" ? (
+							<ChatComposer
+								actions={actions}
+								busy={transcript.busy}
+								commands={transcript.commands}
+								model={transcript.model}
+								models={transcript.models}
+								onToast={showToast}
+								permissionMode={transcript.permissionMode}
+								prefill={prefill}
+								queued={queued}
+								sessionId={session.id}
+							/>
+						) : null}
+						<div className="chat-statusline">
+							<ConnectionLabel connection={chat.connection} error={chat.error} />
+							{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+							{runningInBackground > 0 ? (
+								<span>
+									<span className="chat-statusline__dot chat-statusline__dot--live" />
+									{runningInBackground} running in background
+								</span>
+							) : null}
+							<span className="chat-statusline__grow" />
+							{view === "chat" ? (
+								<>
+									<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+									<UsageMeter usage={usage} />
+									<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+								</>
+							) : null}
 						</div>
-					) : null}
-					{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
-					{view === "chat" ? (
-						<ChatComposer
-							actions={actions}
-							busy={transcript.busy}
-							commands={transcript.commands}
-							model={transcript.model}
-							models={transcript.models}
-							onToast={showToast}
-							permissionMode={transcript.permissionMode}
-							prefill={prefill}
-							queued={queued}
-							sessionId={session.id}
+					</div>
+					{suggested ? (
+						<SuggestedSessionDialog
+							onClose={() => setSuggested(undefined)}
+							projectId={session.workspaceId}
+							suggestion={suggested}
 						/>
 					) : null}
-					<div className="chat-statusline">
-						<ConnectionLabel connection={chat.connection} error={chat.error} />
-						{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
-						{runningInBackground > 0 ? (
-							<span>
-								<span className="chat-statusline__dot chat-statusline__dot--live" />
-								{runningInBackground} running in background
-							</span>
-						) : null}
-						<span className="chat-statusline__grow" />
-						{view === "chat" ? (
-							<>
-								<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
-								<UsageMeter usage={usage} />
-								<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
-							</>
-						) : null}
-					</div>
+					{toast ? (
+						<div className="chat-toast" role="status">
+							{toast}
+						</div>
+					) : null}
 				</div>
-				{suggested ? (
-					<SuggestedSessionDialog
-						onClose={() => setSuggested(undefined)}
-						projectId={session.workspaceId}
-						suggestion={suggested}
-					/>
-				) : null}
-				{toast ? (
-					<div className="chat-toast" role="status">
-						{toast}
-					</div>
-				) : null}
-			</div>
+			</TaskOutputProvider>
 		</ChatRefsProvider>
 	);
 }

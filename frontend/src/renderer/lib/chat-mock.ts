@@ -1004,7 +1004,26 @@ export const stubChatApi: ChatApi = {
 		]);
 		return OK;
 	},
+	taskOutput: async (id, taskId) => {
+		const session = await stubSession(id);
+		const task = session.folder.transcript().tasks.find((t) => t.id === taskId);
+		if (id !== MOCK_LIVE_CHAT_SESSION || taskId !== "live-soak" || !task?.startedTs) return null;
+		const text = soakOutput(Math.floor((Date.now() - Date.parse(task.startedTs)) / SOAK_RUN_MS));
+		return { text, size: text.length, truncated: false, modifiedAt: new Date().toISOString() };
+	},
 };
+
+const SOAK_RUN_MS = 700;
+const SOAK_RUNS = 50;
+
+/** What `go test -run Soak -count=50` has printed after `runs` runs. */
+function soakOutput(runs: number): string {
+	const lines: string[] = [];
+	for (let i = 1; i <= Math.min(runs, SOAK_RUNS); i++) {
+		lines.push("=== RUN   TestSenderSoak", `--- PASS: TestSenderSoak (0.${String(600 + ((i * 37) % 300))}s)`);
+	}
+	return lines.length ? `${lines.join("\n")}\n` : "";
+}
 
 // The daemon replays a session's log over its websocket, so a long log lands
 // across many frames, with live entries arriving once the replay catches up.
