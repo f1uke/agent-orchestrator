@@ -665,8 +665,8 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			return row.block.kind === "thinking" ? (
 				<ThinkingRow onToggle={(open) => toggleRow(row.key, open)} open={openRows[row.key]} text={row.block.text} />
 			) : (
-				<div className="chat-stream-text" data-streaming>
-					{row.block.text}
+				<div className="note-prose chat-md" data-streaming>
+					<NoteMarkdown source={row.block.text} theme={theme} />
 					{row.caret ? <span aria-hidden="true" className="chat-caret" /> : null}
 				</div>
 			);

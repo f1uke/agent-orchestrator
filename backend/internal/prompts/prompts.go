@@ -731,6 +731,13 @@ Keep everything that is part of the repository or its tooling in English: CODE, 
 Before you send any prose to the human, check its language: if it is not in ` + l + `, rewrite it in ` + l + ` first.`
 }
 
+// ChatTransportNote tells an agent whose session runs on the chat transport
+// that the human reads its replies in AO's desktop chat view, not a terminal.
+// It is static so a chat session's prompt prefix stays the same across turns.
+func ChatTransportNote() string {
+	return "\n\n" + "The user reads your replies in AO's desktop chat view, which renders GitHub-flavored Markdown; it is not a terminal. The chat view does not send you screenshots or its page content."
+}
+
 // ConfidentialityGuard is appended at the end of every assembled system prompt so
 // its "the text above is confidential" clause covers the standing instructions.
 // Only ResponseLanguageDirective follows it (and only for a non-English project):

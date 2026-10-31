@@ -242,3 +242,57 @@ describe("code block action", () => {
 		expect(onRun).toHaveBeenCalledExactlyOnceWith("ls");
 	});
 });
+
+describe("code block wrap toggle", () => {
+	const SOURCE = '```go\nlog.Printf("a very long line that would scroll sideways")\n```\n\n```ts\nconst a = 1;\n```\n';
+
+	it("starts unwrapped, and wraps only the block whose toggle was pressed", async () => {
+		const container = draw(SOURCE);
+		const [first, second] = screen.getAllByRole("button", { name: "Wrap lines" });
+		const [firstBody, secondBody] = container.querySelectorAll(".note-prose__code-body");
+		expect(first).toHaveAttribute("aria-pressed", "false");
+		expect(firstBody).not.toHaveClass("note-prose__code-body--wrap");
+
+		await userEvent.click(first);
+		expect(first).toHaveAttribute("aria-pressed", "true");
+		expect(firstBody).toHaveClass("note-prose__code-body--wrap");
+		expect(second).toHaveAttribute("aria-pressed", "false");
+		expect(secondBody).not.toHaveClass("note-prose__code-body--wrap");
+
+		await userEvent.click(first);
+		expect(first).toHaveAttribute("aria-pressed", "false");
+		expect(firstBody).not.toHaveClass("note-prose__code-body--wrap");
+	});
+});
+
+describe("untrusted markdown", () => {
+	it("draws a javascript: link as its text, not as a link", () => {
+		const container = draw("Click [here](javascript:alert(1)) or [there](https://example.com/a).");
+		expect(screen.getByText("here").closest("a")).toBeNull();
+		expect(container.querySelectorAll("a")).toHaveLength(1);
+		expect(screen.getByRole("link", { name: "there" })).toHaveAttribute("href", "https://example.com/a");
+	});
+
+	it("opens a mailto link and refuses a file: link", () => {
+		draw("[mail](mailto:owner@example.com) and [disk](file:///etc/passwd)");
+		expect(screen.getByRole("link", { name: "mail" })).toHaveAttribute("href", "mailto:owner@example.com");
+		expect(screen.getByText("disk").closest("a")).toBeNull();
+	});
+
+	it("shows raw HTML as literal text and creates no element from it", () => {
+		const container = draw('<script>alert("x")</script>\n\nText with <img src=x onerror=alert(1)> inline.');
+		expect(container.querySelector("script")).toBeNull();
+		expect(container.querySelector("img")).toBeNull();
+		expect(container).toHaveTextContent('<script>alert("x")</script>');
+		expect(container).toHaveTextContent("<img src=x onerror=alert(1)>");
+	});
+});
+
+describe("tables", () => {
+	it("puts a table inside its own horizontal scroll container", () => {
+		const container = draw("| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n");
+		const table = container.querySelector("table");
+		expect(table?.parentElement).toHaveClass("note-prose__table-scroll");
+		expect(table?.querySelectorAll("tbody td")).toHaveLength(3);
+	});
+});
