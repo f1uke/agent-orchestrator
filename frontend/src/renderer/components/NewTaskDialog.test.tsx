@@ -44,6 +44,14 @@ function renderDialog() {
 	return { onCreated, onOpenChange };
 }
 
+function renderPrefilled(props: { initialTitle?: string; initialPrompt?: string }) {
+	render(
+		<QueryClientProvider client={new QueryClient()}>
+			<NewTaskDialog open projectId="proj-1" onCreated={vi.fn()} onOpenChange={vi.fn()} {...props} />
+		</QueryClientProvider>,
+	);
+}
+
 function spawnBody() {
 	return (postMock.mock.calls[0][1] as { body: Record<string, unknown> }).body;
 }
@@ -504,5 +512,23 @@ describe("NewTaskDialog", () => {
 			await fillAndStart(user);
 			expect(spawnBody().claudeProfile).toBeUndefined();
 		});
+	});
+
+	it("opens with the title and brief it was given and creates nothing until Start is pressed", async () => {
+		renderPrefilled({ initialTitle: "Fix the flaky Esc test", initialPrompt: "Find the race and fix it." });
+		await waitForAgentCatalog();
+		expect(screen.getByLabelText("Title")).toHaveValue("Fix the flaky Esc test");
+		expect(screen.getByLabelText("Brief")).toHaveValue("Find the race and fix it.");
+		expect(postMock).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Start now" }));
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(spawnBody()).toMatchObject({ issueId: "Fix the flaky Esc test", prompt: "Find the race and fix it." });
+	}, 10_000);
+
+	it("leaves the fields empty when it is given nothing to fill", async () => {
+		renderPrefilled({});
+		await waitForAgentCatalog();
+		expect(screen.getByLabelText("Title")).toHaveValue("");
+		expect(screen.getByLabelText("Brief")).toHaveValue("");
 	});
 });

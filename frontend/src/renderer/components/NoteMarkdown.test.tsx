@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { NoteMarkdown } from "./NoteMarkdown";
 
@@ -206,5 +207,38 @@ describe("revealing one line", () => {
 		const source = "- [ ] a row\n";
 		const view = render(<NoteMarkdown source={source} theme="dark" editing={editingFor(source)} reveal={null} />);
 		expect(view.container.querySelectorAll("[data-reveal]")).toHaveLength(0);
+	});
+});
+
+describe("code block action", () => {
+	const SOURCE = "```bash\npnpm test chat-widget\n```\n\n```bash\ncd a\nnpm test\n```\n\n```ts\nconst a = 1;\n```\n";
+	const offer: import("../lib/chat-run").CodeAction = ({ lang, text }) =>
+		lang === "bash" && !text.includes("\n") ? { label: "Ask Claude to run this", onRun: () => undefined } : undefined;
+
+	it("draws no extra button when no action is given, as in a note or the wiki", () => {
+		draw(SOURCE);
+		expect(screen.queryByRole("button", { name: "Ask Claude to run this" })).toBeNull();
+		expect(screen.getAllByRole("button", { name: "Copy code" })).toHaveLength(3);
+	});
+
+	it("draws the button only on the blocks the action names, next to Copy", () => {
+		render(<NoteMarkdown source={SOURCE} theme="dark" codeAction={offer} />);
+		const run = screen.getByRole("button", { name: "Ask Claude to run this" });
+		expect(run).toHaveAttribute("title", "Ask Claude to run this");
+		expect(run.parentElement).toContainElement(screen.getAllByRole("button", { name: "Copy code" })[0]);
+		expect(screen.getAllByRole("button", { name: "Copy code" })).toHaveLength(3);
+	});
+
+	it("runs the action of the block that was clicked", async () => {
+		const onRun = vi.fn();
+		render(
+			<NoteMarkdown
+				source={"- item\n\n  ```bash\n  ls\n  ```\n"}
+				theme="dark"
+				codeAction={({ text }) => ({ label: "Ask Claude to run this", onRun: () => onRun(text) })}
+			/>,
+		);
+		await userEvent.click(screen.getByRole("button", { name: "Ask Claude to run this" }));
+		expect(onRun).toHaveBeenCalledExactlyOnceWith("ls");
 	});
 });

@@ -1,15 +1,18 @@
 import {
+	createContext,
 	Fragment,
 	type KeyboardEvent,
 	type MouseEvent,
 	type ReactNode,
+	useContext,
 	useEffect,
 	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Play } from "lucide-react";
+import type { CodeAction } from "../lib/chat-run";
 import {
 	type Callout,
 	type CalloutKind,
@@ -109,12 +112,15 @@ export type NoteNavigation = {
 	onOpenTag?: (tag: string) => void;
 };
 
+const CodeActionContext = createContext<CodeAction | undefined>(undefined);
+
 export function NoteMarkdown({
 	source,
 	theme,
 	navigation,
 	editing,
 	reveal,
+	codeAction,
 }: {
 	source: string;
 	theme: Theme;
@@ -124,6 +130,7 @@ export function NoteMarkdown({
 	    from the editing index, so a note that could not be mapped simply is not
 	    pointed at — see `NoteReveal`. */
 	reveal?: NoteReveal | null;
+	codeAction?: CodeAction;
 }) {
 	const { tokens } = useMemo(() => parseNote(source), [source]);
 	// The index is built from the SAME token objects the render walks, because it
@@ -133,7 +140,11 @@ export function NoteMarkdown({
 		() => (editing ? indexNote(source, tokens, editing.sourceOffset) : undefined),
 		[editing, source, tokens],
 	);
-	return <Blocks tokens={tokens} theme={theme} navigation={navigation} edit={bind(editing, index)} reveal={reveal} />;
+	return (
+		<CodeActionContext.Provider value={codeAction}>
+			<Blocks tokens={tokens} theme={theme} navigation={navigation} edit={bind(editing, index)} reveal={reveal} />
+		</CodeActionContext.Provider>
+	);
 }
 
 /** The editing props and the index travel together or not at all. */
@@ -505,6 +516,7 @@ function CodeBlock({ code, theme }: { code: Tokens.Code; theme: Theme }) {
 	const language = (code.lang ?? "").trim();
 	const [lines, setLines] = useState<CodeToken[][] | null>(null);
 	const [copied, setCopied] = useState(false);
+	const action = useContext(CodeActionContext)?.({ lang: language, text });
 
 	useEffect(() => {
 		let live = true;
@@ -527,6 +539,17 @@ function CodeBlock({ code, theme }: { code: Tokens.Code; theme: Theme }) {
 		<div className="note-prose__code">
 			<div className="note-prose__code-head">
 				<span className="note-prose__code-lang">{language || "text"}</span>
+				{action ? (
+					<button
+						type="button"
+						className="note-prose__code-copy note-prose__code-run"
+						aria-label={action.label}
+						title={action.label}
+						onClick={action.onRun}
+					>
+						<Play aria-hidden="true" />
+					</button>
+				) : null}
 				<button
 					type="button"
 					className="note-prose__code-copy"

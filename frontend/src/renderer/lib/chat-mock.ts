@@ -4,6 +4,8 @@ import { type ChatEntry, type Direction, isObject } from "./chat-event";
 import { ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
+import { MOCK_SUGGEST_CHAT_SESSION, suggestEntries } from "./chat-mock-suggest";
+import { MOCK_REFS_CHAT_SESSION, refsEntries } from "./chat-mock-refs";
 import { MOCK_WIDGETS_CHAT_SESSION, widgetEntries } from "./chat-mock-widgets";
 import type { ChatMux, ChatMuxListeners } from "./chat-mux";
 import type { MuxConnectionState } from "./terminal-mux";
@@ -890,9 +892,13 @@ function stubSession(id: string): Promise<StubSession> {
 										? widgetEntries()
 										: id === MOCK_CHAPTERS_CHAT_SESSION
 											? chapterEntries()
-											: long
-												? fixture
-												: mockChatEntries(fixture);
+											: id === MOCK_SUGGEST_CHAT_SESSION
+												? suggestEntries()
+												: id === MOCK_REFS_CHAT_SESSION
+													? refsEntries()
+													: long
+														? fixture
+														: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -1023,7 +1029,7 @@ export function createStubChatMux(): ChatMux {
 		if (id === MOCK_TALL_CHAT_SESSION) playTallTail(id, session);
 		else if (id === MOCK_LIVE_CHAT_SESSION) playLiveTail(id, session);
 		else if (id === MOCK_THINKING_CHAT_SESSION) playThinkingTail(id, session);
-		else if (session.folder.transcript().busy) {
+		else if (id !== MOCK_REFS_CHAT_SESSION && session.folder.transcript().busy) {
 			mockChatDeltas().forEach((delta, i) => later(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));
 		}
 	};
