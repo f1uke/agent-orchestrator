@@ -294,6 +294,17 @@ describe("process summaries", () => {
 		expect(summary.failed).toBe(1);
 	});
 
+	it("counts the visual guide read as its own kind, not as another tool", () => {
+		const summary = summarizeTools([
+			call("mcp__ao__read_me", {}, undefined, "g1"),
+			call("ToolSearch", {}, undefined, "s1"),
+		]);
+		expect(summary.counts).toEqual([
+			{ kind: "guides", count: 1 },
+			{ kind: "tools", count: 1 },
+		]);
+	});
+
 	it("says the counts as one sentence, with todos unnumbered", () => {
 		expect(processSentence(summarizeTools(calls))).toBe(
 			"Ran 2 commands, read a file, edited a file, updated todos, used another tool",
@@ -314,6 +325,7 @@ describe("process summaries", () => {
 		["web", 1, "Made a web request"],
 		["skills", 1, "Ran a skill"],
 		["skills", 3, "Ran skill 3 times"],
+		["guides", 1, "Read visual guidelines"],
 		["tools", 2, "Used 2 other tools"],
 	])("says %s x%i as %j", (kind, count, want) => {
 		expect(processSentence({ counts: [{ kind, count }], failed: 0 })).toBe(want);
@@ -350,6 +362,8 @@ describe("liveVerb", () => {
 		["Edit", { file_path: "internal/webhook/sender.go" }, "Editing sender.go"],
 		["Write", { file_path: "budget.go" }, "Editing budget.go"],
 		["WebFetch", { url: "https://example.com" }, "Running WebFetch"],
+		["mcp__ao__show_widget", { title: "flow" }, "Making a visual"],
+		["mcp__ao__read_me", {}, "Reading visual guidelines"],
 	])("says a running %s call in plain words", (name, input, want) => {
 		expect(liveVerb(call(name, input))).toBe(want);
 	});
