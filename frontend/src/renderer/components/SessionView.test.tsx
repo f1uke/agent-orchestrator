@@ -138,7 +138,7 @@ const { chatSessionIds } = vi.hoisted(() => ({ chatSessionIds: [] as Array<strin
 vi.mock("../hooks/useChatSession", () => ({
 	useChatSession: (sessionId: string | undefined) => {
 		chatSessionIds.push(sessionId);
-		return { transcript: { items: [] }, overlay: { blocks: [] }, entries: [], connection: "live" };
+		return { transcript: { items: [] }, overlay: { blocks: [] }, entries: [], connection: "live", replaying: false };
 	},
 }));
 vi.mock("./TodoSessionPane", () => ({

@@ -76,6 +76,7 @@ function transcript(items: ChatItem[], extra: Partial<Transcript> = {}): Transcr
 	return {
 		claudeSessionIds: [],
 		items,
+		itemKeys: items.map((_, i) => String(i)),
 		pending: [],
 		queued: [],
 		busy: false,
@@ -628,5 +629,46 @@ describe("chatRows live thinking", () => {
 		expect(live(rows)).toEqual([
 			{ key: "thinking-live", kind: "thinking_live", text: "The counter is read twice.\n\nMaybe the reset races.\n" },
 		]);
+	});
+});
+
+describe("chatRows keys", () => {
+	let seq = 0;
+	const at = (dir: ChatEntry["dir"], payload: object): ChatEntry => ({ seq: ++seq, ts: "", dir, payload });
+	const turn = (n: number): ChatEntry[] => [
+		at("in", { type: "user", uuid: `u${n}`, message: { content: `turn ${n}` } }),
+		at("out", {
+			type: "assistant",
+			message: {
+				id: `m${n}`,
+				content: [
+					{ type: "thinking", thinking: "looking" },
+					{ type: "tool_use", id: `a${n}`, name: "Read", input: {} },
+					{ type: "tool_use", id: `b${n}`, name: "Grep", input: {} },
+				],
+			},
+		}),
+		at("out", {
+			type: "user",
+			message: {
+				content: [
+					{ type: "tool_result", tool_use_id: `a${n}`, content: "x" },
+					{ type: "tool_result", tool_use_id: `b${n}`, content: "y" },
+				],
+			},
+		}),
+		at("out", { type: "assistant", message: { id: `r${n}`, content: [{ type: "text", text: `done ${n}` }] } }),
+		at("out", { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, usage: {} }),
+	];
+	const walk = (rows: ChatRow[]): ChatRow[] => rows.flatMap((r) => (r.kind === "turn" ? [r, ...walk(r.rows)] : [r]));
+	const keys = (es: ChatEntry[]) => walk(chatRows(foldEntries(es), emptyOverlay, new Set())).map((r) => r.key);
+
+	it("keys a row the same whether the older turns before it are folded in or not", () => {
+		const turns = [1, 2, 3, 4, 5].map(turn);
+		const newest = turns.slice(2).flat();
+		const alone = keys(newest);
+		const whole = keys(turns.flat());
+		expect(alone.length).toBeGreaterThan(6);
+		expect(whole.slice(-alone.length)).toEqual(alone);
 	});
 });

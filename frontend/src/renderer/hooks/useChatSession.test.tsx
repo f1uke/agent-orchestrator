@@ -130,7 +130,10 @@ describe("useChatSession", () => {
 
 	it("reconnects a dropped socket after the last seq, backing off 500 ms then 1 s", () => {
 		const { view, muxes, send } = setup();
-		send((l) => l.entry(userInput(5, "u1", "hello")));
+		send((l) => {
+			l.entry(userInput(5, "u1", "hello"));
+			l.live();
+		});
 		act(() => muxes[0].emitConnection("closed"));
 		expect(view.result.current.connection).toBe("reconnecting");
 		expect(muxes[0].disposed).toBe(false);
@@ -167,6 +170,7 @@ describe("useChatSession", () => {
 	it("streams deltas into the overlay until the logged assistant block replaces them", () => {
 		const { view, frame, send } = setup();
 		send((l) => {
+			l.live();
 			l.delta(streamEvent({ type: "message_start", message: { id: "m1" } }));
 			l.delta(streamEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hel" } }));
 			l.delta(streamEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "lo" } }));
@@ -179,6 +183,97 @@ describe("useChatSession", () => {
 		expect(view.result.current.overlay.blocks).toEqual([]);
 		expect(view.result.current.transcript.items).toEqual([
 			{ kind: "assistant_text", messageId: "m1", text: "Hello", parentToolUseId: "" },
+		]);
+	});
+
+	it("draws a replay once, when it ends, not frame by frame while it streams in", () => {
+		const { view, frame, send } = setup();
+		send((l) => l.entry(userInput(1, "u1", "hello")));
+		frame();
+		expect(view.result.current.transcript.items).toEqual([]);
+		expect(view.result.current.connection).toBe("connecting");
+		expect(view.result.current.replaying).toBe(true);
+		send((l) => {
+			l.entry(assistant(2, "m1", "hi"));
+			l.live();
+		});
+		frame();
+		expect(view.result.current.connection).toBe("live");
+		expect(view.result.current.transcript.items.map((i) => i.kind)).toEqual(["user", "assistant_text"]);
+	});
+
+	it("draws the newest turns at the history marker, then the whole log in order when the replay ends", () => {
+		const { view, frame, send } = setup();
+		send((l) => {
+			l.entry(userInput(3, "u2", "second"));
+			l.entry(assistant(4, "m2", "two"));
+			l.history();
+		});
+		frame();
+		expect(view.result.current.connection).toBe("connecting");
+		expect(view.result.current.replaying).toBe(false);
+		expect(view.result.current.transcript.items.map((i) => (i.kind === "user" ? i.text : i.kind))).toEqual([
+			"second",
+			"assistant_text",
+		]);
+		send((l) => {
+			l.entry(userInput(1, "u1", "first"));
+			l.entry(assistant(2, "m1", "one"));
+			l.offline();
+		});
+		frame();
+		expect(view.result.current.connection).toBe("offline");
+		expect(view.result.current.transcript.items.map((i) => (i.kind === "user" ? i.text : i.kind))).toEqual([
+			"first",
+			"assistant_text",
+			"second",
+			"assistant_text",
+		]);
+		expect(view.result.current.entries.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+		expect(view.result.current.transcript.lastSeq).toBe(4);
+	});
+
+	it("folds what the host logs after a tailed replay, as it arrives", () => {
+		const { view, frame, send } = setup();
+		send((l) => {
+			l.entry(userInput(2, "u2", "second"));
+			l.history();
+			l.entry(userInput(1, "u1", "first"));
+			l.live();
+		});
+		frame();
+		send((l) => l.entry(assistant(3, "m2", "two")));
+		frame();
+		expect(view.result.current.transcript.items.map((i) => (i.kind === "user" ? i.text : i.kind))).toEqual([
+			"first",
+			"second",
+			"assistant_text",
+		]);
+	});
+
+	it("starts a replay that dropped before it ended over from the beginning, so no older entry goes missing", () => {
+		const { view, muxes, frame, send } = setup();
+		send((l) => {
+			l.entry(userInput(3, "u2", "second"));
+			l.history();
+			l.entry(userInput(1, "u1", "first"));
+		});
+		act(() => muxes[0].emitConnection("closed"));
+		act(() => void vi.advanceTimersByTime(500));
+		expect(muxes[1].opens).toEqual([["chat-1", 0]]);
+		send((l) => {
+			l.entry(userInput(3, "u2", "second"));
+			l.history();
+			l.entry(userInput(1, "u1", "first"));
+			l.entry(assistant(2, "m1", "one"));
+			l.live();
+		});
+		frame();
+		expect(view.result.current.entries.map((e) => e.seq)).toEqual([1, 2, 3]);
+		expect(view.result.current.transcript.items.map((i) => (i.kind === "user" ? i.text : i.kind))).toEqual([
+			"first",
+			"assistant_text",
+			"second",
 		]);
 	});
 
@@ -200,6 +295,7 @@ describe("useChatSession", () => {
 		);
 		act(() => {
 			muxes[0].listeners!.entry(userInput(1, "u1", "from chat-1"));
+			muxes[0].listeners!.live();
 		});
 		act(() => void vi.advanceTimersToNextFrame());
 		expect(view.result.current.transcript.items).toHaveLength(1);

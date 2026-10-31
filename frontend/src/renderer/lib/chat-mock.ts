@@ -1032,6 +1032,19 @@ function soakOutput(runs: number): string {
 const REPLAY_CHUNK = 20;
 const REPLAY_TICK_MS = 16;
 
+const TAIL_TURNS = 3;
+
+function tailStart(log: readonly ChatEntry[]): number {
+	let turns = 0;
+	for (let i = log.length - 1; i > 0; i--) {
+		const payload = log[i].payload as { type?: unknown };
+		if (log[i].dir !== "in" || payload.type !== "user" || ++turns < TAIL_TURNS) continue;
+		const note = log[i - 1].payload as { kind?: unknown };
+		return log[i - 1].dir === "host" && note.kind === "user_origin" ? i - 1 : i;
+	}
+	return 0;
+}
+
 export function createStubChatMux(): ChatMux {
 	const connection = new Set<(state: MuxConnectionState) => void>();
 	const mine = new Map<string, Set<ChatMuxListeners>>();
@@ -1058,16 +1071,19 @@ export function createStubChatMux(): ChatMux {
 	return {
 		open: (id, fromSeq) => {
 			void stubSession(id).then((session) => {
-				let next = session.log.findIndex((entry) => entry.seq > fromSeq);
-				if (next < 0) next = session.log.length;
+				const after = session.log.filter((entry) => entry.seq > fromSeq);
+				const cut = fromSeq === 0 ? tailStart(after) : 0;
+				const order: Array<ChatEntry | "history"> =
+					cut > 0 ? [...after.slice(cut), "history", ...after.slice(0, cut)] : after;
+				let next = 0;
 				const replay = () => {
 					if (disposed) return;
-					const end = Math.min(next + REPLAY_CHUNK, session.log.length);
+					const end = Math.min(next + REPLAY_CHUNK, order.length);
 					for (; next < end; next++) {
-						const entry = session.log[next];
-						each(id, (l) => l.entry(entry));
+						const item = order[next];
+						each(id, (l) => (item === "history" ? l.history() : l.entry(item)));
 					}
-					if (next < session.log.length) later(replay, REPLAY_TICK_MS);
+					if (next < order.length) later(replay, REPLAY_TICK_MS);
 					else goLive(id, session);
 				};
 				replay();

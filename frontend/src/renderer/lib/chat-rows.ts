@@ -10,8 +10,8 @@ import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunni
 
 /** A step inside a process group: a tool call, or the thinking between tool calls. */
 export type ProcessMember =
-	| { kind: "tool"; itemIndex: number; call: ToolCallItem; subagentTools: number; task?: BackgroundTask }
-	| { kind: "thinking"; itemIndex: number; text: string };
+	| { kind: "tool"; key: string; call: ToolCallItem; subagentTools: number; task?: BackgroundTask }
+	| { kind: "thinking"; key: string; text: string };
 
 export type WaitingTask = { task: BackgroundTask; command: string; since: string };
 
@@ -38,8 +38,6 @@ export type ChatRow =
 			messages: number;
 			durationMs?: number;
 	  };
-
-export const itemRowKey = (itemIndex: number) => `i${itemIndex}`;
 
 // What an item does to the run of tool calls being collected: joins it, ends it
 // and shows as its own row, or is not shown in the main column at all.
@@ -82,7 +80,7 @@ function liveTool(calls: readonly ToolCallItem[]): LiveTool | undefined {
 }
 
 function memberRow(member: ProcessMember): ChatRow {
-	const key = itemRowKey(member.itemIndex);
+	const { key } = member;
 	if (member.kind === "thinking") {
 		return { key, kind: "item", item: { kind: "thinking", text: member.text, parentToolUseId: "" }, subagentTools: 0 };
 	}
@@ -264,7 +262,7 @@ export function chatRows(
 		if (calls.length >= 2 || live) {
 			const summary = summarizeTools(calls, (id) => taskByToolUse.get(id));
 			summary.live = live;
-			rows.push({ key: `g${run[0].itemIndex}`, kind: "group", members: run, summary });
+			rows.push({ key: `g${run[0].key}`, kind: "group", members: run, summary });
 		} else {
 			rows.push(...run.map(memberRow));
 		}
@@ -279,7 +277,7 @@ export function chatRows(
 			case "break": {
 				flush(false);
 				const row: ChatRow = {
-					key: itemRowKey(index),
+					key: transcript.itemKeys[index],
 					kind: "item",
 					item,
 					subagentTools: item.kind === "tool_call" ? (subagentTools.get(item.id) ?? 0) : 0,
@@ -302,11 +300,11 @@ export function chatRows(
 				if (item.kind === "thinking") {
 					const prev = run.at(-1);
 					if (prev?.kind === "thinking") prev.text += `\n\n${item.text}`;
-					else run.push({ kind: "thinking", itemIndex: index, text: item.text });
+					else run.push({ kind: "thinking", key: transcript.itemKeys[index], text: item.text });
 				} else if (item.kind === "tool_call") {
 					run.push({
 						kind: "tool",
-						itemIndex: index,
+						key: transcript.itemKeys[index],
 						call: item,
 						subagentTools: subagentTools.get(item.id) ?? 0,
 						task: taskByToolUse.get(item.id),

@@ -10,7 +10,7 @@ import {
 	MessageSquare,
 	SquareTerminal,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
@@ -195,7 +195,7 @@ export function ChatPane({
 						) : (
 							<ChatStream
 								disabled={actions.hostDown}
-								replaying={chat.connection === "connecting"}
+								replaying={chat.replaying}
 								onAnswer={onAnswer}
 								onNewSession={setSuggested}
 								onPrompt={onPrompt}
@@ -457,14 +457,34 @@ function ChatStream({
 		onChange: pinToEnd,
 	});
 
-	useLayoutEffect(pinToEnd);
+	// The virtualizer learns of a scroll from the scroll event, a frame after
+	// pinToEnd writes it; until then it places rows for the old offset.
+	const [, repaint] = useReducer((n: number) => n + 1, 0);
+	useLayoutEffect(() => {
+		pinToEnd();
+		const el = scrollRef.current;
+		if (el && virtualizer.scrollOffset !== el.scrollTop) {
+			virtualizer.scrollOffset = el.scrollTop;
+			repaint();
+		}
+	});
 
 	const [revealed, setRevealed] = useState(false);
-	useLayoutEffect(() => {
+	const atEnd = () => {
 		const el = scrollRef.current;
-		if (revealed || !el || replaying) return;
 		const last = virtualizer.getVirtualItems().at(-1);
-		if (rows.length === 0 || (last?.index === rows.length - 1 && distanceFromEnd(el) <= AT_END_PX)) setRevealed(true);
+		return !!el && (rows.length === 0 || (last?.index === rows.length - 1 && distanceFromEnd(el) <= AT_END_PX));
+	};
+	const atEndRef = useRef(atEnd);
+	atEndRef.current = atEnd;
+	// Rows mounted in this commit are placed at estimated heights until the
+	// virtualizer measures them, so the reveal waits a frame and checks again.
+	useLayoutEffect(() => {
+		if (revealed || replaying || !atEnd()) return;
+		const frame = requestAnimationFrame(() => {
+			if (atEndRef.current()) setRevealed(true);
+		});
+		return () => cancelAnimationFrame(frame);
 	});
 
 	// Opening a row is reading it: the stream stops pinning the end, so the row

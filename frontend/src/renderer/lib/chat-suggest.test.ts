@@ -95,6 +95,7 @@ describe("liveSuggestions", () => {
 			{
 				claudeSessionIds: [],
 				items: calls,
+				itemKeys: calls.map((_, i) => String(i)),
 				pending: [],
 				queued: [],
 				busy: false,

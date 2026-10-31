@@ -46,6 +46,7 @@ function recorder() {
 	const listeners: ChatMuxListeners = {
 		entry: (e) => seen.push(`entry:${e.seq}`),
 		delta: (d) => seen.push(`delta:${JSON.stringify(d)}`),
+		history: () => seen.push("history"),
 		live: () => seen.push("live"),
 		offline: () => seen.push("offline"),
 		error: (m) => seen.push(`error:${m}`),
@@ -63,7 +64,9 @@ describe("createChatMux", () => {
 		mux.open("s1", 42);
 		expect(socket.sent).toEqual([]);
 		socket.emitOpen();
-		expect(socket.sent.map((f) => JSON.parse(f))).toEqual([{ ch: "chat", type: "open", id: "s1", fromSeq: 42 }]);
+		expect(socket.sent.map((f) => JSON.parse(f))).toEqual([
+			{ ch: "chat", type: "open", id: "s1", fromSeq: 42, tail: true },
+		]);
 		mux.close("s1");
 		expect(JSON.parse(socket.sent[1])).toEqual({ ch: "chat", type: "close", id: "s1" });
 	});
@@ -77,12 +80,14 @@ describe("createChatMux", () => {
 		mux.listen("s2", other.listeners);
 		socket.emit({ ch: "chat", id: "s1", type: "entry", entry: { seq: 7, ts: "", dir: "out", payload: { type: "x" } } });
 		socket.emit({ ch: "chat", id: "s1", type: "delta", delta: { type: "stream_event" } });
+		socket.emit({ ch: "chat", id: "s1", type: "history" });
 		socket.emit({ ch: "chat", id: "s1", type: "live" });
 		socket.emit({ ch: "chat", id: "s1", type: "offline" });
 		socket.emit({ ch: "chat", id: "s1", type: "error", error: "unknown session s1" });
 		expect(mine.seen).toEqual([
 			"entry:7",
 			'delta:{"type":"stream_event"}',
+			"history",
 			"live",
 			"offline",
 			"error:unknown session s1",
