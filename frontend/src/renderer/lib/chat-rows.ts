@@ -1,4 +1,5 @@
 import { chapterOf, MARK_CHAPTER } from "./chat-chapters";
+import { type TurnDocs, turnDocs } from "./chat-docs";
 import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
@@ -22,6 +23,7 @@ export type ChatRow =
 			subagentTools: number;
 			task?: BackgroundTask;
 			reply?: string;
+			docs?: TurnDocs;
 	  }
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
@@ -253,6 +255,7 @@ export function chatRows(
 	let rows: ChatRow[] = [];
 	let run: ProcessMember[] = [];
 	let reply: string | undefined;
+	let turnItems: ChatItem[] = [];
 	const flush = (atTail: boolean) => {
 		const calls = run.flatMap((m) => (m.kind === "tool" ? [m.call] : []));
 		const live = atTail ? liveTool(calls) : undefined;
@@ -267,6 +270,7 @@ export function chatRows(
 	};
 
 	transcript.items.forEach((item, index) => {
+		turnItems.push(item);
 		switch (role(item, queued)) {
 			case "skip":
 				return;
@@ -279,10 +283,14 @@ export function chatRows(
 					subagentTools: item.kind === "tool_call" ? (subagentTools.get(item.id) ?? 0) : 0,
 					task: taskOf(item),
 				};
-				if (item.kind === "user" || (item.kind === "task_message" && item.opensTurn)) reply = undefined;
-				else if (item.kind === "assistant_text") reply = item.text;
+				if (item.kind === "user" || (item.kind === "task_message" && item.opensTurn)) {
+					reply = undefined;
+					turnItems = [item];
+				} else if (item.kind === "assistant_text") reply = item.text;
 				else if (item.kind === "turn_end") {
 					if (reply !== undefined) row.reply = reply;
+					const docs = turnDocs(turnItems);
+					if (docs) row.docs = docs;
 					reply = undefined;
 				}
 				rows.push(row);

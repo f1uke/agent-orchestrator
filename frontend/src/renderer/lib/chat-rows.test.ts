@@ -314,6 +314,27 @@ describe("chatRows turn fold", () => {
 		expect(shape(rows)).toEqual(["user", "assistant_text", "assistant_text", "turn_end"]);
 	});
 
+	it("hands each turn end the documents its own turn named, and none when it named none", () => {
+		const rows = rowsOf([
+			user(),
+			say("writing"),
+			tool("Write", { file_path: "/w/docs/a.md" }),
+			say("Plan in `docs/b.md`, see https://claude.ai/artifact/AbC123."),
+			turnEnd(),
+			user("u2", "and?"),
+			say("nothing to add"),
+			turnEnd(),
+		]);
+		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");
+		expect(ends.map((r) => r.kind === "item" && r.docs)).toEqual([
+			{
+				refs: ["/w/docs/a.md", "docs/b.md"],
+				artifacts: [{ source: "artifact", url: "https://claude.ai/artifact/AbC123", title: "claude.ai artifact" }],
+			},
+			undefined,
+		]);
+	});
+
 	it("hands each turn end the turn's last reply, for its answer bar", () => {
 		const rows = rowsOf([...finished(), user("u2", "and?"), tool("Read"), turnEnd()]);
 		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");

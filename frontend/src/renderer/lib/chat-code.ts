@@ -25,7 +25,7 @@ export function languageOf(path: string): string | undefined {
 	return grammarFor(EXTENSION_LANGUAGE[extension] ?? extension) || undefined;
 }
 
-function splitLines(text: string): string[] {
+export function splitLines(text: string): string[] {
 	return text === "" ? [] : text.replace(/\n$/, "").split("\n");
 }
 

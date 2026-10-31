@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatApi, ChatResult } from "../lib/chat-api";
 import type { ChatEntry } from "../lib/chat-event";
@@ -7,7 +8,7 @@ import { foldEntries } from "../lib/chat-fold";
 import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import { emptyOverlay } from "../lib/chat-stream";
 import { aoBridge } from "../lib/bridge";
-import { image, resolveCalls, stubChatFiles } from "../test/chat-files-stub";
+import { file, image, resolveCalls, stubChatFiles } from "../test/chat-files-stub";
 import { useUiStore } from "../stores/ui-store";
 import type { SubscriptionUsage } from "../lib/chat-usage";
 import type { WorkspaceSession } from "../types/workspace";
@@ -80,9 +81,14 @@ function fakeApi() {
 	};
 }
 
-function renderPane(view: "chat" | "events" = "chat", api = fakeApi(), who: WorkspaceSession = session) {
+function renderPane(
+	view: "chat" | "events" = "chat",
+	api = fakeApi(),
+	who: WorkspaceSession = session,
+	extra: Partial<ComponentProps<typeof ChatPane>> = {},
+) {
 	const utils = render(
-		<ChatPane chatApi={api} createMux={createMux} daemonReady session={who} theme="dark" view={view} />,
+		<ChatPane chatApi={api} createMux={createMux} daemonReady session={who} theme="dark" view={view} {...extra} />,
 	);
 	act(() => listeners?.live());
 	const feed = (...entries: ChatEntry[]) =>
@@ -820,6 +826,109 @@ describe("ChatPane calm view", () => {
 		const head = document.querySelector("[data-turn] .chat-group__head")!;
 		expect(head).toHaveTextContent(/^Worked for 36s · 1 failed$/);
 		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
+	});
+
+	describe("documents of a turn", () => {
+		const ARTIFACT = "https://claude.ai/artifact/DemoArtifact000000000001";
+		afterEach(() => vi.unstubAllGlobals());
+
+		const turn = (reply: string) => [
+			userIn("u1", "plan it"),
+			lifecycle("u1", "started"),
+			toolUse("w", "Write", { file_path: "/work/project/docs/plan.md", content: "# Plan" }),
+			toolDone("w"),
+			saying(reply),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		];
+
+		const cardNames = () =>
+			[...document.querySelectorAll('[data-testid="chat-docs"] [role="group"]')].map((c) =>
+				c.getAttribute("aria-label"),
+			);
+
+		it("draws a card under the final reply for each file the daemon confirms, and opens it in the Document tab", async () => {
+			const fetchMock = stubChatFiles({
+				"/work/project/docs/plan.md": [file("docs/plan.md", "markdown")],
+				"plans/demo--survey.md": [file("plans/demo--survey.md", "markdown", "knowledge")],
+			});
+			const onOpenDoc = vi.fn();
+			const { feed, user } = renderPane("chat", fakeApi(), session, { onOpenDoc });
+			feed(...turn(`Done. See \`plans/demo--survey.md\`, \`invented.md\` and [the design](${ARTIFACT}).`));
+			await settle();
+			expect(cardNames()).toEqual(["plan.md", "demo--survey.md", "the design"]);
+			const strip = screen.getByTestId("chat-docs");
+			expect(strip.previousElementSibling).toHaveAttribute("data-answer-bar");
+			await user.click(screen.getByRole("button", { name: "Open demo--survey.md" }));
+			expect(onOpenDoc).toHaveBeenCalledWith(
+				expect.objectContaining({ path: "plans/demo--survey.md", root: "knowledge", kind: "markdown" }),
+			);
+			const asked = resolveCalls(fetchMock).flat();
+			expect(asked.filter((ref) => ref === "plans/demo--survey.md")).toHaveLength(1);
+			expect(asked.filter((ref) => ref === "/work/project/docs/plan.md")).toHaveLength(1);
+		});
+
+		it("asks once for a finished turn however often the pane draws again", async () => {
+			const fetchMock = stubChatFiles({});
+			const { feed } = renderPane();
+			feed(...turn("Done, see `docs/b.md`."));
+			await settle();
+			feed(entry("host", { kind: "notice" }));
+			await settle();
+			const asked = resolveCalls(fetchMock).flat();
+			expect(asked.sort()).toEqual(["/work/project/docs/plan.md", "docs/b.md"]);
+		});
+
+		it("asks nothing and draws no card for a turn that named no document", async () => {
+			const fetchMock = stubChatFiles({});
+			const { feed } = renderPane();
+			feed(
+				userIn("u1", "hi"),
+				lifecycle("u1", "started"),
+				saying("Hello."),
+				out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			);
+			await settle();
+			expect(resolveCalls(fetchMock)).toEqual([]);
+			expect(screen.queryByTestId("chat-docs")).toBeNull();
+		});
+
+		it("waits for the turn to finish before it draws a card", async () => {
+			stubChatFiles({ "/work/project/docs/plan.md": [file("docs/plan.md", "markdown")] });
+			const { feed } = renderPane();
+			feed(...turn("Done.").slice(0, 5));
+			await settle();
+			expect(screen.queryByTestId("chat-docs")).toBeNull();
+		});
+
+		it("draws the artifact card at once, with no daemon call, and keeps unconfirmed text plain", async () => {
+			const fetchMock = stubChatFiles({});
+			const { feed } = renderPane();
+			feed(
+				userIn("u1", "hi"),
+				lifecycle("u1", "started"),
+				saying(`See ${ARTIFACT}`),
+				out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			);
+			await settle();
+			expect(resolveCalls(fetchMock)).toEqual([]);
+			expect(screen.getByRole("link", { name: /Open in browser/ })).toHaveAttribute("href", ARTIFACT);
+		});
+
+		it("marks the card whose document is open", async () => {
+			stubChatFiles({ "/work/project/docs/plan.md": [file("docs/plan.md", "markdown")] });
+			const openDoc = {
+				source: "file" as const,
+				root: "worktree" as const,
+				path: "docs/plan.md",
+				kind: "markdown" as const,
+				size: 2048,
+				title: "plan.md",
+			};
+			const { feed } = renderPane("chat", fakeApi(), session, { openDoc });
+			feed(...turn("Done."));
+			await settle();
+			expect(screen.getByRole("group", { name: "plan.md" })).toHaveAttribute("data-open", "true");
+		});
 	});
 
 	describe("the task brief", () => {

@@ -17,6 +17,25 @@ type Refs = { sessionId: string; store: RefStore };
 
 const RefsContext = createContext<Refs | null>(null);
 
+const noSubscribe = () => () => undefined;
+const noSnapshot = () => undefined;
+
+/**
+ * What the daemon says the refs name, once it has said so. Thumbnails and document cards both read it, so a
+ * ref is asked about once however many blocks name it. Undefined outside a chat session.
+ */
+export function useResolved(
+	names: readonly string[],
+): { sessionId: string; known: ReadonlyMap<string, ResolvedFile[]> } | undefined {
+	const refs = useContext(RefsContext);
+	useEffect(() => {
+		if (refs && names.length > 0) refs.store.ensure(names);
+	}, [refs, names]);
+	const known = useSyncExternalStore(refs?.store.subscribe ?? noSubscribe, refs?.store.snapshot ?? noSnapshot);
+	const sessionId = refs?.sessionId;
+	return useMemo(() => (sessionId !== undefined && known ? { sessionId, known } : undefined), [sessionId, known]);
+}
+
 /** One RefStore per chat session, so a ref is resolved once however many blocks name it. */
 export function ChatRefsProvider({ sessionId, children }: { sessionId: string; children: ReactNode }) {
 	const value = useMemo(() => ({ sessionId, store: new RefStore(resolveOverHttp(sessionId)) }), [sessionId]);
@@ -59,24 +78,20 @@ function shownImages(sessionId: string, refs: readonly string[], known: Readonly
 	return shown;
 }
 
-const noSubscribe = () => () => undefined;
-const noSnapshot = () => undefined;
-
 /**
  * The images a block of chat text names by path or glob, as thumbnails under it.
  * Pass the block's final text: a streaming block is drawn as plain text and never
  * reaches here. A ref the daemon cannot confirm draws nothing.
  */
 export function RefImages({ source }: { source: string }) {
-	const refs = useContext(RefsContext);
-	const names = useMemo(() => (refs ? imageRefs(source) : []), [refs, source]);
-	useEffect(() => {
-		if (refs && names.length > 0) refs.store.ensure(names);
-	}, [refs, names]);
-	const known = useSyncExternalStore(refs?.store.subscribe ?? noSubscribe, refs?.store.snapshot ?? noSnapshot);
+	const names = useMemo(() => imageRefs(source), [source]);
+	const resolved = useResolved(names);
 	const [open, setOpen] = useState<number | null>(null);
 	const trigger = useRef<HTMLElement | null>(null);
-	const shown = useMemo(() => (refs && known ? shownImages(refs.sessionId, names, known) : []), [refs, known, names]);
+	const shown = useMemo(
+		() => (resolved ? shownImages(resolved.sessionId, names, resolved.known) : []),
+		[resolved, names],
+	);
 	if (shown.length === 0) return null;
 	const items = shown.map((s) => s.item);
 	return (
