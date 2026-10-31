@@ -9,6 +9,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatusage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -91,6 +92,7 @@ type chatWatch struct {
 	host     func(domain.SessionID) chatHost
 	rec      activity.Recorder
 	feed     activity.Publisher
+	usage    *chatusage.Store
 	log      *slog.Logger
 	after    func(time.Duration) <-chan time.Time
 
@@ -102,7 +104,7 @@ type runningWatcher struct {
 	done   <-chan struct{}
 }
 
-func startChatWatch(ctx context.Context, sessions liveChatSessions, dataDir string, rec activity.Recorder, feed activity.Publisher, reg *looptelemetry.Registry, log *slog.Logger) <-chan struct{} {
+func startChatWatch(ctx context.Context, sessions liveChatSessions, dataDir string, rec activity.Recorder, feed activity.Publisher, usage *chatusage.Store, reg *looptelemetry.Registry, log *slog.Logger) <-chan struct{} {
 	loop := reg.Register(looptelemetry.Spec{
 		Name:        "chat-session-watch",
 		Display:     "Chat session requests",
@@ -115,7 +117,7 @@ func startChatWatch(ctx context.Context, sessions liveChatSessions, dataDir stri
 			_, socket := sessionhost.Paths(dataDir, string(id))
 			return sessionhost.NewClient(socket)
 		},
-		rec: rec, feed: feed, log: log, after: time.After,
+		rec: rec, feed: feed, usage: usage, log: log, after: time.After,
 	}
 	t := time.NewTicker(chatWatchInterval)
 	done := make(chan struct{})
@@ -168,7 +170,7 @@ func (w *chatWatch) reconcile(ctx context.Context) error {
 		wctx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
 		cw := &chatWatcher{
-			id: id, host: w.host(id), rec: w.rec, feed: w.feed, log: w.log, after: w.after,
+			id: id, host: w.host(id), rec: w.rec, feed: w.feed, usage: w.usage, log: w.log, after: w.after,
 			reportedWaiting: state == domain.ActivityWaitingInput,
 		}
 		go func() {
@@ -185,6 +187,7 @@ type chatWatcher struct {
 	host  chatHost
 	rec   activity.Recorder
 	feed  activity.Publisher
+	usage *chatusage.Store
 	log   *slog.Logger
 	after func(time.Duration) <-chan time.Time
 
@@ -221,6 +224,9 @@ func (c *chatWatcher) follow(ctx context.Context) (connected bool, err error) {
 	c.reportWaitingChange(ctx)
 	return true, c.host.Subscribe(ctx, st.LastSeq, nil, func(f sessionhost.Frame) error {
 		if f.Entry != nil {
+			if rl, ok := chatproto.ParseRateLimit(f.Entry.Payload); ok && f.Entry.Dir == chatproto.DirOut {
+				c.usage.Record(rl, f.Entry.TS)
+			}
 			c.pending = foldPending(c.pending, *f.Entry)
 			c.reportWaitingChange(ctx)
 		}

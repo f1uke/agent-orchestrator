@@ -131,6 +131,28 @@ paths:
       summary: Refresh the cached local agent adapter catalog
       tags:
       - agents
+  /api/v1/chat/usage:
+    get:
+      operationId: getChatUsage
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersChatUsageResponse'
+          description: OK
+        "204":
+          description: No Content
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: The newest Claude subscription usage (five-hour and weekly windows)
+        any chat session reported; 204 before the first report since the daemon started
+      tags:
+      - sessions
   /api/v1/daemon/loops:
     get:
       operationId: listDaemonLoops
@@ -10546,6 +10568,39 @@ components:
           - cli
           - api
           type: string
+      type: object
+    ControllersChatUsageResponse:
+      properties:
+        fiveHour:
+          $ref: '#/components/schemas/ControllersChatUsageWindow'
+          description: The five-hour window; absent when the event did not report
+            it.
+        sevenDay:
+          $ref: '#/components/schemas/ControllersChatUsageWindow'
+          description: The weekly window; absent when the event did not report it.
+        updatedAt:
+          description: When the chat session that reported it logged the event.
+          format: date-time
+          type: string
+      required:
+      - updatedAt
+      type: object
+    ControllersChatUsageWindow:
+      properties:
+        resetsAt:
+          format: date-time
+          type: string
+        status:
+          description: Claude's status for the window, such as allowed or allowed_warning.
+          type: string
+        utilization:
+          description: The share of the window used, from 0 to 1.
+          format: double
+          type: number
+      required:
+      - utilization
+      - resetsAt
+      - status
       type: object
     ControllersCheckLearningForbiddenRequest:
       properties:
