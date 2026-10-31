@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { NARROW, settle, open } from "./releases-kit";
 
 const DW = 36;
+type Frame = { scrollLeft: number; line: number; chip: [number, number] | null };
 const line = (page: Page) => page.locator(".rel-bg .hovercol");
 const chip = (page: Page, col: number) => page.locator(`.rel-day[data-col="${col}"]`);
 
@@ -123,16 +124,42 @@ test.describe("releases hover guide line", () => {
 		const sc = page.getByTestId("release-timeline");
 		const before = await sc.evaluate((el) => el.scrollLeft);
 		const box = (await sc.boundingBox())!;
+		const x = box.x + 500;
 		await page.mouse.move(box.x + 700, 420);
+		await expect(line(page)).toBeVisible();
+		await sc.evaluate((el) => {
+			const frames: Frame[] = [];
+			(globalThis as { __frames?: Frame[] }).__frames = frames;
+			el.addEventListener("scroll", () =>
+				requestAnimationFrame(() => {
+					const l = el.querySelector(".rel-bg .hovercol")!.getBoundingClientRect();
+					const c = el.querySelector(".rel-day.hv")?.getBoundingClientRect();
+					frames.push({ scrollLeft: el.scrollLeft, line: l.x + l.width / 2, chip: c ? [c.left, c.right] : null });
+				}),
+			);
+		});
 		await page.mouse.down();
-		await page.mouse.move(box.x + 500, 420, { steps: 6 });
+		await page.mouse.move(x, 420, { steps: 6 });
 		await page.mouse.up();
 		await expect.poll(() => sc.evaluate((el) => el.scrollLeft)).toBeGreaterThan(before + 100);
-		await page.mouse.move(box.x + 760, 420);
-		await expect(line(page)).toBeVisible();
-		const lb = (await line(page).boundingBox())!;
-		const col = await page.locator(".rel-day.hv").getAttribute("data-col");
-		const cb = (await chip(page, Number(col)).boundingBox())!;
-		expect(Math.abs(lb.x + lb.width / 2 - (cb.x + cb.width / 2))).toBeLessThanOrEqual(1);
+		const settled = () => page.evaluate(() => (globalThis as { __frames?: Frame[] }).__frames!);
+		await expect
+			.poll(async () => {
+				const f = await settled();
+				return f.length > 1 && f[f.length - 1].scrollLeft === f[f.length - 2].scrollLeft;
+			}, "the glide comes to rest")
+			.toBe(true);
+		const frames = await settled();
+		for (const f of frames) {
+			expect(f.chip, `a day is lit at scrollLeft ${f.scrollLeft}`).not.toBeNull();
+			const [left, right] = f.chip!;
+			expect(
+				Math.abs(f.line - (left + right) / 2),
+				`line on its chip at scrollLeft ${f.scrollLeft}`,
+			).toBeLessThanOrEqual(1);
+		}
+		const [left, right] = frames[frames.length - 1].chip!;
+		expect(x, "the lit day is the one under the resting pointer").toBeGreaterThanOrEqual(left);
+		expect(x).toBeLessThan(right);
 	});
 });
