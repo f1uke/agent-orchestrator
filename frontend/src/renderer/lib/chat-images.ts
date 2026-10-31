@@ -10,7 +10,6 @@ export function isImageMime(mediaType: string): mediaType is ImageMime {
 	return IMAGE_MIMES.has(mediaType);
 }
 
-/** The base64 image blocks of a tool_result's content, in order. SVG, URL sources and empty data are dropped. */
 export function imagesOf(content: unknown): ChatImage[] {
 	if (!Array.isArray(content)) return [];
 	const images: ChatImage[] = [];
@@ -30,7 +29,6 @@ export function imagesOf(content: unknown): ChatImage[] {
 	return images;
 }
 
-/** A data URL the renderer CSP allows in img-src, so no fetch or blob URL is needed. */
 export function imageSrc(image: ChatImage): string {
 	return `data:${image.mediaType};base64,${image.base64}`;
 }

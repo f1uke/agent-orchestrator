@@ -21,8 +21,7 @@ const OVERLAY = {
  * bytes are fetched from (rendered via a blob: object URL — a direct
  * http://127.0.0.1 subresource is CSP-blocked on the app:// scheme). `mime`
  * decides image vs video; `filename` is the accessible label. Used by the Jira
- * description media previews. `dataUrl` is bytes already in the renderer (the
- * chat log): shown as-is, with no fetch and `src` left empty.
+ * description media previews.
  */
 export type MediaItem = { id: string; filename?: string; mime?: string; src: string; dataUrl?: string };
 
@@ -34,7 +33,7 @@ export type MediaItem = { id: string; filename?: string; mime?: string; src: str
  * the blob URL is allowed by img-src/media-src (see src/shared/renderer-csp.ts).
  * Revokes on unmount / src change; reports fetch failure so callers can show a
  * framed placeholder rather than a broken element. A `dataUrl` is returned
- * untouched: data: is allowed by img-src, so it needs neither fetch nor blob.
+ * untouched (img-src allows data:).
  */
 export function useObjectUrl(src: string, dataUrl?: string): { url: string | null; failed: boolean } {
 	const [url, setUrl] = useState<string | null>(null);

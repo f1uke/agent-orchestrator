@@ -2,11 +2,6 @@ import { type CSSProperties, useRef, useState } from "react";
 import { type ChatImage, imageSrc } from "../lib/chat-images";
 import { MediaLightbox, type MediaItem, MediaThumb } from "./MediaLightbox";
 
-/**
- * The images of one message or tool result. They share one lightbox, so the
- * arrows page between these images only. Bytes come from the chat log as data:
- * URLs, which the renderer CSP allows, so nothing is fetched.
- */
 export function ChatImages({
 	images,
 	name,
@@ -51,7 +46,7 @@ export function ChatImages({
 	);
 }
 
-// Long edge capped, never upscaled; the minimum keeps a very wide or tall strip clickable.
+// The minimum keeps a very wide or tall strip clickable.
 export const READ_THUMB: CSSProperties = {
 	display: "block",
 	maxWidth: 240,

@@ -27,7 +27,7 @@ function chunk(type: string, data: number[] | Uint8Array): number[] {
 	return [...u32(data.length), ...body, ...u32(crc32(body))];
 }
 
-/** zlib stream of stored (uncompressed) deflate blocks: no compressor needed for a fictional test image. */
+// Stored (uncompressed) deflate blocks, so building a fictional test image needs no compressor.
 function zlibStored(raw: Uint8Array): number[] {
 	const out: number[] = [0x78, 0x01];
 	for (let at = 0; at < raw.length; at += 65535) {
@@ -41,7 +41,6 @@ function zlibStored(raw: Uint8Array): number[] {
 
 export type Rgb = [number, number, number];
 
-/** A PNG of `width` x `height` pixels, each coloured by `pixel(x, y)`, as base64. */
 export function pngBase64(width: number, height: number, pixel: (x: number, y: number) => Rgb): string {
 	const raw = new Uint8Array(height * (1 + width * 3));
 	let at = 0;

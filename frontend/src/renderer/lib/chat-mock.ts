@@ -513,12 +513,10 @@ function tallEntries(): ChatEntry[] {
 	}));
 }
 
-/** The preview session whose log holds a Read of a PNG and a pasted image. */
 export const MOCK_IMAGES_CHAT_SESSION = "demo-chat-images";
 
 const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
 
-/** A fictional dashboard-like picture: a gradient with a bar chart, so a thumbnail has something to look at. */
 const SCREEN_PNG = pngBase64(320, 200, (x, y): Rgb => {
 	const bar = Math.floor((x - 24) / 40);
 	const inBars = x >= 24 && x < 296 && bar >= 0 && bar < 7 && (x - 24) % 40 < 28;
@@ -527,7 +525,6 @@ const SCREEN_PNG = pngBase64(320, 200, (x, y): Rgb => {
 	return [lerp(18, 44, y / 200), lerp(30, 63, y / 200), lerp(58, 47, x / 320)];
 });
 
-/** A fictional wide sketch: diagonal stripes, so a second image in the lightbox is distinguishable. */
 const SKETCH_PNG = pngBase64(240, 160, (x, y): Rgb => ((x + y) % 48 < 24 ? [36, 52, 94] : [226, 232, 244]));
 
 function imagesEntries(): ChatEntry[] {
