@@ -63,8 +63,8 @@ func ForLog(logPath string) Store { return New(filepath.Join(filepath.Dir(logPat
 // Dir is the blob directory.
 func (s Store) Dir() string { return s.dir }
 
-// Path returns the file of the blob named name and its media type, or false
-// when name is not a blob name this package writes.
+// Path returns the file of the blob named name, or false when name is not a
+// blob name this package writes.
 func (s Store) Path(name string) (string, bool) {
 	sum, ext, ok := strings.Cut(name, ".")
 	if !ok || len(sum) != sha256.Size*2 || mimeByExt[ext] == "" {
@@ -95,8 +95,33 @@ func (s Store) Externalize(p json.RawMessage) (json.RawMessage, error) {
 	if !ok {
 		return p, nil
 	}
-	changed, err := s.externalize(v, true)
-	if err != nil || !changed {
+	changed := false
+	if f := resultFile(v); f != nil {
+		raw, _ := f["base64"].(string)
+		mime, _ := f["type"].(string)
+		name, _, ok, err := s.storeBase64(raw, mime)
+		if err != nil {
+			return p, err
+		}
+		if ok {
+			delete(f, "base64")
+			f["blob"] = name
+			changed = true
+		}
+	}
+	sourced, err := eachSource(v, func(src map[string]any) (map[string]any, error) {
+		if src["type"] != "base64" {
+			return nil, nil
+		}
+		raw, _ := src["data"].(string)
+		mime, _ := src["media_type"].(string)
+		name, size, ok, err := s.storeBase64(raw, mime)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return map[string]any{"type": SourceType, "media_type": mime, "blob": name, "size": size}, nil
+	})
+	if err != nil || !(changed || sourced) {
 		return p, err
 	}
 	return encode(v)
@@ -114,107 +139,75 @@ func (s Store) Inline(p json.RawMessage) (json.RawMessage, error) {
 	if !ok {
 		return p, nil
 	}
-	changed := dropResultCopy(v)
-	inlined, err := s.inline(v)
-	changed = changed || inlined
-	if err != nil || !changed {
+	changed := false
+	if f := resultFile(v); f != nil {
+		_, inline := f["base64"]
+		_, ref := f["blob"]
+		delete(f, "base64")
+		delete(f, "blob")
+		changed = inline || ref
+	}
+	sourced, err := eachSource(v, func(src map[string]any) (map[string]any, error) {
+		name, _ := src["blob"].(string)
+		path, ok := s.Path(name)
+		if src["type"] != SourceType || !ok {
+			return nil, nil
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // G304: Path accepts only <sha256>.<ext> names inside the store
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("chatblob: read %s: %w", name, err)
+		}
+		mime, _ := src["media_type"].(string)
+		return map[string]any{"type": "base64", "media_type": mime, "data": base64.StdEncoding.EncodeToString(data)}, nil
+	})
+	if err != nil || !(changed || sourced) {
 		return p, err
 	}
 	return encode(v)
 }
 
-func (s Store) externalize(v any, top bool) (bool, error) {
+// resultFile is the tool_use_result.file object of a top-level payload, the
+// place claude puts its second copy of a Read image, or nil.
+func resultFile(v any) map[string]any {
+	top, _ := v.(map[string]any)
+	r, _ := top["tool_use_result"].(map[string]any)
+	f, _ := r["file"].(map[string]any)
+	return f
+}
+
+// eachSource calls fn on every "source" object in v and puts back the
+// replacement fn returns; nil keeps the source. It reports whether any
+// source was replaced.
+func eachSource(v any, fn func(map[string]any) (map[string]any, error)) (bool, error) {
 	changed := false
+	var children []any
 	switch v := v.(type) {
 	case map[string]any:
-		if top {
-			if r, ok := v["tool_use_result"].(map[string]any); ok {
-				if f, ok := r["file"].(map[string]any); ok {
-					mime, _ := f["type"].(string)
-					if name, _, ok, err := s.storeBase64(f["base64"], mime); err != nil {
-						return false, err
-					} else if ok {
-						delete(f, "base64")
-						f["blob"] = name
-						changed = true
-					}
-				}
-			}
-		}
-		if src, ok := v["source"].(map[string]any); ok && src["type"] == "base64" {
-			mime, _ := src["media_type"].(string)
-			raw, _ := src["data"].(string)
-			if name, size, ok, err := s.storeBase64(raw, mime); err != nil {
+		if src, ok := v["source"].(map[string]any); ok {
+			next, err := fn(src)
+			if err != nil {
 				return false, err
-			} else if ok {
-				v["source"] = map[string]any{"type": SourceType, "media_type": mime, "blob": name, "size": size}
+			}
+			if next != nil {
+				v["source"] = next
 				changed = true
 			}
 		}
 		for _, child := range v {
-			c, err := s.externalize(child, false)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || c
+			children = append(children, child)
 		}
 	case []any:
-		for _, child := range v {
-			c, err := s.externalize(child, false)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || c
-		}
+		children = v
 	}
-	return changed, nil
-}
-
-func dropResultCopy(v any) bool {
-	top, _ := v.(map[string]any)
-	r, _ := top["tool_use_result"].(map[string]any)
-	f, _ := r["file"].(map[string]any)
-	_, inline := f["base64"]
-	_, ref := f["blob"]
-	delete(f, "base64")
-	delete(f, "blob")
-	return inline || ref
-}
-
-func (s Store) inline(v any) (bool, error) {
-	changed := false
-	switch v := v.(type) {
-	case map[string]any:
-		if src, ok := v["source"].(map[string]any); ok && src["type"] == SourceType {
-			name, _ := src["blob"].(string)
-			if path, ok := s.Path(name); ok {
-				data, err := os.ReadFile(path) //nolint:gosec // G304: Path accepts only <sha256>.<ext> names inside the store
-				switch {
-				case errors.Is(err, fs.ErrNotExist):
-				case err != nil:
-					return false, fmt.Errorf("chatblob: read %s: %w", name, err)
-				default:
-					mime, _ := src["media_type"].(string)
-					v["source"] = map[string]any{"type": "base64", "media_type": mime, "data": base64.StdEncoding.EncodeToString(data)}
-					changed = true
-				}
-			}
+	for _, child := range children {
+		c, err := eachSource(child, fn)
+		if err != nil {
+			return false, err
 		}
-		for _, child := range v {
-			c, err := s.inline(child)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || c
-		}
-	case []any:
-		for _, child := range v {
-			c, err := s.inline(child)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || c
-		}
+		changed = changed || c
 	}
 	return changed, nil
 }
@@ -222,12 +215,11 @@ func (s Store) inline(v any) (bool, error) {
 // storeBase64 writes the decoded bytes of raw unless a blob with them exists,
 // and returns the blob's name and size. It reports false, and writes nothing,
 // when raw is not a non-empty base64 string.
-func (s Store) storeBase64(raw any, mime string) (string, int, bool, error) {
-	str, _ := raw.(string)
-	if str == "" {
+func (s Store) storeBase64(raw, mime string) (string, int, bool, error) {
+	if raw == "" {
 		return "", 0, false, nil
 	}
-	data, ok := decodeBase64(str)
+	data, ok := decodeBase64(raw)
 	if !ok {
 		return "", 0, false, nil
 	}
@@ -250,8 +242,6 @@ func (s Store) storeBase64(raw any, mime string) (string, int, bool, error) {
 	return name, len(data), true, nil
 }
 
-// decode parses p keeping numbers as written; false means p is not JSON
-// and is passed on untouched.
 // decodeBase64 reports false for data that is not standard base64, which
 // is left inline as written.
 func decodeBase64(s string) ([]byte, bool) {
@@ -259,6 +249,8 @@ func decodeBase64(s string) ([]byte, bool) {
 	return data, err == nil
 }
 
+// decode parses p keeping numbers as written; false means p is not JSON
+// and is passed on untouched.
 func decode(p []byte) (any, bool) {
 	dec := json.NewDecoder(bytes.NewReader(p))
 	dec.UseNumber()
