@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -256,7 +257,7 @@ func outCounter(t *testing.T, sub *subscription) *atomic.Int64 {
 	var n atomic.Int64
 	go func() {
 		for f := range sub.frames {
-			if f.Entry != nil && f.Entry.Dir == chatproto.DirOut {
+			if f.Entry != nil && f.Entry.Dir == chatproto.DirOut && !strings.HasPrefix(messageID(f.Entry.Payload), contextRequestPrefix) {
 				n.Add(1)
 			}
 		}

@@ -24,6 +24,10 @@ const (
 	envFakeChildPID = "SESSIONHOST_FAKE_CHILD"
 	envFakeSleeper  = "SESSIONHOST_FAKE_SLEEPER"
 	envFakeParent   = "SESSIONHOST_FAKE_PARENT"
+	// envFakeContext names a file holding the body fake claude answers each
+	// get_context_usage request with. Unset, it reads those requests and never
+	// answers, as a claude that does not know the request would.
+	envFakeContext = "SESSIONHOST_FAKE_CONTEXT"
 )
 
 func TestMain(m *testing.M) {
@@ -78,6 +82,10 @@ func fakeClaude(fixture string) int {
 		return fail("%v", err)
 	}
 
+	contextBody, err := fakeContextBody()
+	if err != nil {
+		return fail("%v", err)
+	}
 	stdin := bufio.NewReader(os.Stdin)
 	var swaps [][2][]byte
 	for _, e := range entries {
@@ -91,7 +99,7 @@ func fakeClaude(fixture string) int {
 				return fail("write stdout: %v", err)
 			}
 		case chatproto.DirIn:
-			got, err := stdin.ReadBytes('\n')
+			got, err := readSkippingContextRequests(stdin, contextBody)
 			if err != nil {
 				if stubborn {
 					time.Sleep(time.Hour)
@@ -115,6 +123,38 @@ func fakeClaude(fixture string) int {
 		}
 	}
 	return 0
+}
+
+func fakeContextBody() ([]byte, error) {
+	p := os.Getenv(envFakeContext)
+	if p == "" {
+		return nil, nil
+	}
+	return os.ReadFile(p)
+}
+
+// readSkippingContextRequests reads the next stdin line that is not a
+// get_context_usage request, answering those with body when it is set.
+func readSkippingContextRequests(stdin *bufio.Reader, body []byte) ([]byte, error) {
+	for {
+		got, err := stdin.ReadBytes('\n')
+		if err != nil || messageKind(got) != "control_request/get_context_usage" {
+			return got, err
+		}
+		if body == nil {
+			continue
+		}
+		reply, err := json.Marshal(map[string]any{
+			"type":     "control_response",
+			"response": map[string]any{"subtype": "success", "request_id": messageID(got), "response": json.RawMessage(body)},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stdout.Write(append(reply, '\n')); err != nil {
+			return nil, err
+		}
+	}
 }
 
 type wireMessage struct {
