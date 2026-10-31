@@ -91,6 +91,19 @@ describe("widgetDocument", () => {
 		expect(style).toContain("color-scheme:light");
 	});
 
+	it("exposes every variable the widget guide names, the numbered surfaces included", () => {
+		const names = ["--text-primary", "--text-secondary", "--text-muted", "--surface-0", "--surface-1", "--surface-2"];
+		const vars = Object.fromEntries(names.map((n, i) => [n, `#00000${i}`]));
+		const style = parsed(widgetDocument(spec(), { mode: "dark", vars })).head.querySelector("style")!.textContent!;
+		for (const [name, value] of Object.entries(vars)) expect(style).toContain(`${name}:${value}`);
+	});
+
+	it("lets the bootstrap apply a theme message to a numbered variable too", () => {
+		const script = parsed(widgetDocument(spec(), THEME)).head.querySelector("script")!.textContent!;
+		const guard = /if \((\/.+\/)\.test\(name\)\)/.exec(script);
+		expect(new RegExp(guard![1].slice(1, -1)).test("--surface-0")).toBe(true);
+	});
+
 	it("drops a theme value that could close the style rule or element", () => {
 		const style = parsed(
 			widgetDocument(spec(), {

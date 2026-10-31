@@ -83,7 +83,7 @@ const WIDGET_CSP = [
 	"frame-src 'none'",
 ].join("; ");
 
-const VAR_NAME = /^--[a-z-]+$/;
+const VAR_NAME = /^--[a-z0-9-]+$/;
 
 // A theme value ends up inside a <style> rule, so it may not close the rule or the element.
 const safeCssValue = (value: string) => !/[<>{};]/.test(value);
@@ -112,7 +112,7 @@ window.addEventListener("message", function (event) {
   root.setAttribute("data-mode", data.mode === "light" ? "light" : "dark");
   var vars = data.vars || {};
   Object.keys(vars).forEach(function (name) {
-    if (/^--[a-z-]+$/.test(name)) root.style.setProperty(name, String(vars[name]));
+    if (/^--[a-z0-9-]+$/.test(name)) root.style.setProperty(name, String(vars[name]));
   });
 });
 `;
