@@ -204,9 +204,9 @@ func (s Store) storeBase64(raw, mime string) (string, int, bool, error) {
 	if raw == "" {
 		return "", 0, false, nil
 	}
-	data, ok := decodeBase64(raw)
-	if !ok {
-		return "", 0, false, nil
+	data, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return "", 0, false, nil //nolint:nilerr // data that is not base64 stays inline as written
 	}
 	ext := extByMIME[mime]
 	if ext == "" {
@@ -225,11 +225,6 @@ func (s Store) storeBase64(raw, mime string) (string, int, bool, error) {
 		return "", 0, false, fmt.Errorf("chatblob: write %s: %w", name, err)
 	}
 	return name, len(data), true, nil
-}
-
-func decodeBase64(s string) ([]byte, bool) {
-	data, err := base64.StdEncoding.DecodeString(s)
-	return data, err == nil
 }
 
 func decode(p []byte) (any, bool) {
