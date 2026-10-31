@@ -1,8 +1,10 @@
 import { Brain, ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
+import { unfinished } from "../lib/chat-event";
 import { type ChatRow, itemRowKey, type ProcessMember } from "../lib/chat-rows";
 import { formatDuration } from "../lib/chat-time";
 import {
+	isAgentTask,
 	liveVerb,
 	processSentence,
 	type ProcessSummary,
@@ -13,6 +15,7 @@ import {
 } from "../lib/chat-tools";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
+import { TaskOutputView } from "./ChatTaskOutput";
 import { ResolvedLine, ToolCard } from "./ChatToolCard";
 
 export type OpenRows = Readonly<Record<string, boolean>>;
@@ -222,6 +225,7 @@ export function WaitingRow({
 						<div className="chat-waiting" key={task.id}>
 							<div className="chat-waiting__title">{task.description || task.id}</div>
 							{command ? <pre className="chat-term">$ {shortenPaths(command, root)}</pre> : null}
+							{isAgentTask(task) ? null : <TaskOutputView running={unfinished(task.state)} taskId={task.id} />}
 						</div>
 					))}
 				</div>

@@ -50,6 +50,7 @@ function renderComposer(over: Partial<ChatActions> = {}) {
 		interrupt: vi.fn<ChatActions["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatActions["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
+		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
 		hostDown: false,
 		...over,
 	};

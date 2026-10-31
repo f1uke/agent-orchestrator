@@ -2685,6 +2685,17 @@ func sessionOperations() []operation {
 			contentTypes: map[int]string{http.StatusOK: "application/octet-stream"},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", id: "getChatTaskOutput", tag: "sessions",
+			summary:    "The end of a background task's output, at most the last 64 KiB, with the file's size and mtime. The daemon finds the file in the session's own event log and serves it only when, after symlinks, it is a regular file named <taskId>.output in a tasks directory of one of the session's claude sessions, under Claude Code's temp root. 404 for an unknown session or task, a task id outside [A-Za-z0-9_-], a file not written yet, and any file that fails the rule",
+			pathParams: []any{controllers.ChatTaskParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ChatTaskOutputResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/mode", id: "setChatMode", tag: "sessions",
 			summary:    "Change the permission mode of a chat session's agent",
 			pathParams: []any{controllers.SessionIDParam{}},

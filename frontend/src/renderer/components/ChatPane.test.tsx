@@ -76,6 +76,7 @@ function fakeApi() {
 		interrupt: vi.fn<ChatApi["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
+		taskOutput: vi.fn<ChatApi["taskOutput"]>(async () => null),
 	};
 }
 
@@ -879,6 +880,39 @@ describe("ChatPane calm view", () => {
 			expect(row).toHaveTextContent('Waiting on background command "Run the soak test"');
 			await user.click(row);
 			expect(document.querySelector("[data-waiting]")).toHaveTextContent("$ go test -run Soak ./...");
+		});
+
+		it("opens the waiting row to the command and the tail of its output, read for this session", async () => {
+			const api = fakeApi();
+			api.taskOutput.mockResolvedValue({
+				text: "=== RUN TestSoak\n",
+				size: 17,
+				truncated: false,
+				modifiedAt: "2026-10-30T10:56:00Z",
+			});
+			const { feed, user } = renderPane("chat", api);
+			feed(...turnWithBackground(false));
+			expect(api.taskOutput).not.toHaveBeenCalled();
+			await user.click(document.querySelector("[data-waiting] .chat-group__head")!);
+			await settle();
+			expect(api.taskOutput).toHaveBeenCalledWith("chat-1", "t1");
+			expect(document.querySelector("[data-waiting] [data-task-output='t1']")).toHaveTextContent("=== RUN TestSoak");
+		});
+
+		it("opens a running background Bash card to its output instead of the started-in-background note", async () => {
+			const api = fakeApi();
+			api.taskOutput.mockResolvedValue({ text: "", size: 0, truncated: false, modifiedAt: "2026-10-30T10:56:00Z" });
+			const { feed, user } = renderPane("chat", api);
+			feed(...turnWithBackground(false));
+			const head = [...document.querySelectorAll<HTMLElement>(".chat-tool__head")].find((h) =>
+				h.textContent?.includes("go test -run Soak"),
+			)!;
+			await user.click(head);
+			await settle();
+			const body = head.closest(".chat-tool")!;
+			expect(body).toHaveTextContent("No output yet");
+			expect(body).not.toHaveTextContent("Command running in background with ID");
+			expect(api.taskOutput).toHaveBeenCalledWith("chat-1", "t1");
 		});
 
 		it("shows no waiting row once the background task has ended", () => {

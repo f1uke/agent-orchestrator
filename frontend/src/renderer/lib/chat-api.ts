@@ -5,6 +5,8 @@ import { isObject } from "./chat-event";
 
 export type ChatImage = components["schemas"]["ChatImage"];
 
+export type TaskOutput = components["schemas"]["ControllersChatTaskOutputResponse"];
+
 export type ChatErrorKind = "host_not_running" | "rejected" | "not_chat" | "invalid" | "failed";
 
 export type ChatActionError = { kind: ChatErrorKind; message: string };
@@ -17,6 +19,8 @@ export type ChatApi = {
 	interrupt: (sessionId: string) => Promise<ChatResult>;
 	setMode: (sessionId: string, mode: PermissionMode) => Promise<ChatResult>;
 	setModel: (sessionId: string, model: string) => Promise<ChatResult>;
+	/** The tail of a background task's output; null when the daemon has none for it. */
+	taskOutput: (sessionId: string, taskId: string) => Promise<TaskOutput | null>;
 };
 
 const KIND_BY_CODE: Record<string, ChatErrorKind> = {
@@ -61,4 +65,14 @@ export const httpChatApi: ChatApi = {
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/mode", { ...path(sessionId), body: { mode } })),
 	setModel: (sessionId, model) =>
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/model", { ...path(sessionId), body: { model } })),
+	taskOutput: async (sessionId, taskId) => {
+		try {
+			const { data } = await apiClient.GET("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", {
+				params: { path: { sessionId, taskId } },
+			});
+			return data ?? null;
+		} catch {
+			return null;
+		}
+	},
 };

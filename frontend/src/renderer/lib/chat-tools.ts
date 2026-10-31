@@ -1,4 +1,4 @@
-import { isObject, type TaskState } from "./chat-event";
+import { isObject, type TaskState, unfinished } from "./chat-event";
 import { type CodeView, editView, lineCounts, readView, writeView } from "./chat-code";
 import { type ChatImage, imagesOf } from "./chat-images";
 import { READ_ME, SHOW_WIDGET } from "./chat-widget";
@@ -19,7 +19,14 @@ export type Question = {
 };
 
 export type ToolBody =
-	| { kind: "bash"; command: string; output: string; failed: boolean; exitCode?: number }
+	| {
+			kind: "bash";
+			command: string;
+			output: string;
+			failed: boolean;
+			exitCode?: number;
+			task?: { id: string; running: boolean };
+	  }
 	| { kind: "code"; view: CodeView; mode: "write" | "edit" | "read" }
 	| { kind: "output"; text: string }
 	| { kind: "image"; images: ChatImage[]; path: string }
@@ -137,7 +144,7 @@ export function liveVerb(call: ToolCallItem): string {
 	return say ? say(isObject(call.input) ? call.input : {}) : `Running ${call.name}`;
 }
 
-const isAgentTask = (task: BackgroundTask) => task.taskType.includes("agent");
+export const isAgentTask = (task: BackgroundTask) => task.taskType.includes("agent");
 
 export function waitingVerb(tasks: readonly BackgroundTask[]): string {
 	if (tasks.length === 1) {
@@ -320,6 +327,10 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 					output: exit ? output.slice(exit[0].length).replace(/^\n/, "") : output,
 					failed,
 					exitCode: exit ? Number(exit[1]) : undefined,
+					task:
+						input.run_in_background === true && ctx.task
+							? { id: ctx.task.id, running: unfinished(ctx.task.state) }
+							: undefined,
 				},
 			};
 		}

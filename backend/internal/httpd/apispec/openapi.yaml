@@ -4018,6 +4018,59 @@ paths:
       summary: Switch the model of a chat session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output:
+    get:
+      operationId: getChatTaskOutput
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: The background task id claude reported in task_started.
+        in: path
+        name: taskId
+        required: true
+        schema:
+          description: The background task id claude reported in task_started.
+          pattern: ^[A-Za-z0-9_-]+$
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersChatTaskOutputResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: The end of a background task's output, at most the last 64 KiB, with
+        the file's size and mtime. The daemon finds the file in the session's own
+        event log and serves it only when, after symlinks, it is a regular file named
+        <taskId>.output in a tasks directory of one of the session's claude sessions,
+        under Claude Code's temp root. 404 for an unknown session or task, a task
+        id outside [A-Za-z0-9_-], a file not written yet, and any file that fails
+        the rule
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/children:
     get:
       operationId: listChildren
@@ -10621,6 +10674,27 @@ components:
           - cli
           - api
           type: string
+      type: object
+    ControllersChatTaskOutputResponse:
+      properties:
+        modifiedAt:
+          format: date-time
+          type: string
+        size:
+          description: The whole file's size in bytes.
+          format: int64
+          type: integer
+        text:
+          description: The end of the output file, at most the last 64 KiB.
+          type: string
+        truncated:
+          description: True when text is only the end of the file.
+          type: boolean
+      required:
+      - text
+      - size
+      - truncated
+      - modifiedAt
       type: object
     ControllersChatUsageResponse:
       properties:
