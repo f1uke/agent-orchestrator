@@ -281,21 +281,3 @@ export function chatRows(
 	if (thinking) rows.push(thinking);
 	return rows;
 }
-
-function holdsItem(row: ChatRow, itemIndex: number): boolean {
-	switch (row.kind) {
-		case "item":
-			return row.key === itemRowKey(itemIndex);
-		case "group":
-			return row.members.some((m) => m.itemIndex === itemIndex);
-		case "turn":
-			return row.rows.some((inner) => holdsItem(inner, itemIndex));
-		default:
-			return false;
-	}
-}
-
-/** The top-level row that shows an item, whether it stands alone or sits in a group or a folded turn. */
-export function rowIndexOfItem(rows: readonly ChatRow[], itemIndex: number): number {
-	return rows.findIndex((row) => holdsItem(row, itemIndex));
-}

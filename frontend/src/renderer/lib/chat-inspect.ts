@@ -1,6 +1,6 @@
 import { isObject, type TaskState, unfinished } from "./chat-event";
 import type { ChatItem, ToolCallItem, Transcript, TurnEndItem } from "./chat-fold";
-import { resultText, ruleLabel, taskLabel } from "./chat-tools";
+import { resultText, taskLabel } from "./chat-tools";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -17,21 +17,7 @@ export type Activity = {
 	tools: number;
 };
 
-/** Totals for the latest claude session id, whose total_cost_usd carries across a --resume. */
-export type UsageSummary = { sessionId: string; costUsd: number; outputTokens: number; cacheReadTokens: number };
-
 export type ContextUsage = { tokens: number; window?: number };
-
-export type AddedRule = { rule: string; behavior: string };
-
-export type HistoryRow = {
-	itemIndex: number;
-	startedAt: string;
-	resumed: boolean;
-	sessionId: string;
-	turns: number;
-	costUsd: number;
-};
 
 const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
 const TODO_STATUSES = new Set<string>(["pending", "in_progress", "completed"]);
@@ -179,63 +165,12 @@ export function sessionActivity(tr: Transcript): Activity[] {
 	return [...newest.filter((a) => unfinished(a.state)), ...newest.filter((a) => !unfinished(a.state))];
 }
 
-export function usageSummary(tr: Transcript): UsageSummary | undefined {
-	const ends = turnEnds(tr);
-	const last = ends.at(-1);
-	if (!last) return undefined;
-	const mine = ends.filter((e) => e.sessionId === last.sessionId);
-	return {
-		sessionId: last.sessionId,
-		costUsd: last.costUsd,
-		outputTokens: mine.reduce((n, e) => n + e.usage.outputTokens, 0),
-		cacheReadTokens: mine.reduce((n, e) => n + e.usage.cacheReadTokens, 0),
-	};
-}
-
 export function contextUsage(tr: Transcript): ContextUsage | undefined {
 	const ends = turnEnds(tr);
 	const tokens = tr.contextTokens ?? ends.filter((e) => e.contextTokens !== undefined).at(-1)?.contextTokens;
 	if (tokens === undefined) return undefined;
 	const window = ends.filter((e) => e.contextWindows[tr.model] !== undefined).at(-1)?.contextWindows[tr.model];
 	return window === undefined ? { tokens } : { tokens, window };
-}
-
-export function addedRules(tr: Transcript): AddedRule[] {
-	const rules = new Map<string, AddedRule>();
-	for (const item of tr.items) {
-		if (item.kind !== "tool_call") continue;
-		for (const update of item.permission?.updatedPermissions ?? []) {
-			if (!isObject(update) || update.type !== "addRules" || !Array.isArray(update.rules)) continue;
-			const behavior = str(update.behavior) || "allow";
-			for (const rule of update.rules.filter(isObject)) {
-				const label = ruleLabel(rule);
-				const key = `${behavior} ${label}`;
-				if (!rules.has(key)) rules.set(key, { rule: label, behavior });
-			}
-		}
-	}
-	return [...rules.values()];
-}
-
-export function sessionHistory(tr: Transcript): HistoryRow[] {
-	const rows: HistoryRow[] = [];
-	const open = (itemIndex: number, startedAt: string, resumed: string): HistoryRow => {
-		const row = { itemIndex, startedAt, resumed: resumed !== "", sessionId: resumed, turns: 0, costUsd: 0 };
-		rows.push(row);
-		return row;
-	};
-	let row: HistoryRow | undefined;
-	tr.items.forEach((item, i) => {
-		if (item.kind === "notice" && (item.notice === "spawn" || item.notice === "resumed")) {
-			row = open(i, item.ts, item.notice === "resumed" ? item.text : "");
-		} else if (item.kind === "turn_end") {
-			row ??= open(0, "", "");
-			row.turns += 1;
-			row.costUsd = item.costUsd;
-			if (item.sessionId !== "") row.sessionId = item.sessionId;
-		}
-	});
-	return rows;
 }
 
 export function formatTokens(n: number): string {

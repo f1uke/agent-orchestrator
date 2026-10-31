@@ -130,18 +130,8 @@ vi.mock("./CenterPane", () => ({
 	),
 }));
 vi.mock("./ChatPane", () => ({
-	ChatPane: ({
-		session,
-		view,
-		jumpTo,
-	}: {
-		session: { id: string };
-		view: string;
-		jumpTo?: { itemIndex: number } | null;
-	}) => (
-		<div data-jump={jumpTo?.itemIndex} data-testid={`chat-${session.id}`}>
-			chat pane: {view}
-		</div>
+	ChatPane: ({ session, view }: { session: { id: string }; view: string }) => (
+		<div data-testid={`chat-${session.id}`}>chat pane: {view}</div>
 	),
 }));
 const { chatSessionIds } = vi.hoisted(() => ({ chatSessionIds: [] as Array<string | undefined> }));
@@ -193,30 +183,14 @@ vi.mock("./SessionInspector", () => ({
 		onToggleBrowserPopOut,
 		view,
 		hasWebUI,
-		chat,
-		onJumpToChat,
 	}: {
 		onToggleBrowserPopOut?: () => void;
 		view?: string;
 		hasWebUI?: boolean;
-		chat?: unknown;
-		onJumpToChat?: (itemIndex: number) => void;
 	}) => (
-		<>
-			<button
-				type="button"
-				data-has-web-ui={String(Boolean(hasWebUI))}
-				data-view={view}
-				onClick={onToggleBrowserPopOut}
-			>
-				pop browser
-			</button>
-			{chat ? (
-				<button type="button" onClick={() => onJumpToChat?.(3)}>
-					jump to item 3
-				</button>
-			) : null}
-		</>
+		<button type="button" data-has-web-ui={String(Boolean(hasWebUI))} data-view={view} onClick={onToggleBrowserPopOut}>
+			pop browser
+		</button>
 	),
 }));
 // jsdom is not a Mac, and the back/forward chord differs by platform: ⌃⌘←/→
@@ -1000,27 +974,17 @@ describe("SessionView — chat sessions", () => {
 		expect(screen.getByTestId("center-sess-chat")).toBeInTheDocument();
 	});
 
-	it("reads only a chat session's log, and opens its rail on the Session tab", () => {
+	it("reads only a chat session's log, and opens its rail on Summary like any session", () => {
 		chatSessionIds.length = 0;
 		const { unmount } = render(<SessionView sessionId="sess-1" />);
 		expect(new Set(chatSessionIds)).toEqual(new Set([undefined]));
 		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
-		expect(screen.queryByText("jump to item 3")).toBeNull();
 		unmount();
 
 		chatSessionIds.length = 0;
 		render(<SessionView sessionId="sess-chat" />);
 		expect(new Set(chatSessionIds)).toEqual(new Set(["sess-chat"]));
-		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "session");
-	});
-
-	it("brings the chat back from the terminal view and asks it to scroll to a history row", () => {
-		useUiStore.setState({ chatViews: { "sess-chat": "terminal" } });
-		render(<SessionView sessionId="sess-chat" />);
-		expect(screen.queryByTestId("chat-sess-chat")).toBeNull();
-		fireEvent.click(screen.getByText("jump to item 3"));
-		expect(useUiStore.getState().chatViews["sess-chat"]).toBe("chat");
-		expect(screen.getByTestId("chat-sess-chat")).toHaveAttribute("data-jump", "3");
+		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
 	});
 
 	it("shows an unfocused chat pane in a split as chat too", () => {

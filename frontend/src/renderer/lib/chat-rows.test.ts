@@ -11,7 +11,7 @@ import {
 	type UserItem,
 	foldEntries,
 } from "./chat-fold";
-import { type ChatRow, chatRows, rowIndexOfItem } from "./chat-rows";
+import { type ChatRow, chatRows } from "./chat-rows";
 import { emptyOverlay } from "./chat-stream";
 
 const user = (uuid = "u1", text = "go"): UserItem => ({
@@ -317,13 +317,6 @@ describe("chatRows turn fold", () => {
 		const rows = rowsOf([...finished(), user("u2", "and?"), tool("Read"), turnEnd()]);
 		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");
 		expect(ends.map((r) => r.kind === "item" && r.reply)).toEqual(["all done", undefined]);
-	});
-
-	it("finds a folded item's row", () => {
-		const rows = rowsOf(finished());
-		expect(rowIndexOfItem(rows, 3)).toBe(1);
-		expect(rowIndexOfItem(rows, 0)).toBe(0);
-		expect(rowIndexOfItem(rows, 99)).toBe(-1);
 	});
 });
 

@@ -23,7 +23,7 @@ import { contextUsage, formatTokens, sessionActivity, shownTodos } from "../lib/
 import { newestUsage } from "../lib/chat-usage";
 import { useChatUsage } from "../hooks/useChatUsage";
 import { activeTurnIndex, railTurns } from "../lib/chat-rail";
-import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
+import { type ChatRow, chatRows } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
@@ -49,16 +49,12 @@ import { NoteMarkdown } from "./NoteMarkdown";
 
 export type ChatPaneView = "chat" | "events";
 
-export type ChatJump = { itemIndex: number };
-
 type ChatPaneProps = {
 	session: WorkspaceSession;
 	view: ChatPaneView;
 	theme: Theme;
 	daemonReady: boolean;
 	chat?: ChatSessionState;
-	jumpTo?: ChatJump | null;
-	onJumped?: () => void;
 	createMux?: () => ChatMux;
 	chatApi?: ChatApi;
 };
@@ -84,17 +80,7 @@ function useToast(): [string | null, (message: string) => void] {
 	return [toast, show];
 }
 
-export function ChatPane({
-	session,
-	view,
-	theme,
-	daemonReady,
-	chat: given,
-	jumpTo,
-	onJumped,
-	createMux,
-	chatApi,
-}: ChatPaneProps) {
+export function ChatPane({ session, view, theme, daemonReady, chat: given, createMux, chatApi }: ChatPaneProps) {
 	const own = useChatSession(given ? undefined : session.id, {
 		daemonReady,
 		sessionLive: session.status !== "terminated",
@@ -171,9 +157,7 @@ export function ChatPane({
 				<ChatStream
 					disabled={actions.hostDown}
 					replaying={chat.connection === "connecting"}
-					jumpTo={jumpTo}
 					onAnswer={onAnswer}
-					onJumped={onJumped}
 					pending={transcript.pending}
 					requests={requests}
 					root={root}
@@ -297,8 +281,6 @@ type StreamProps = {
 	requests: RequestStates;
 	disabled: boolean;
 	onAnswer: AnswerHandler;
-	jumpTo?: ChatJump | null;
-	onJumped?: () => void;
 };
 
 // Within this many pixels of the end the user has reached the latest row.
@@ -332,18 +314,7 @@ function isEditable(target: EventTarget): boolean {
 	);
 }
 
-function ChatStream({
-	rows,
-	replaying,
-	root,
-	pending,
-	theme,
-	requests,
-	disabled,
-	onAnswer,
-	jumpTo,
-	onJumped,
-}: StreamProps) {
+function ChatStream({ rows, replaying, root, pending, theme, requests, disabled, onAnswer }: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
@@ -441,22 +412,16 @@ function ChatStream({
 		[setFollowing],
 	);
 
-	// The one way to show a given row: it stops following and brings the row to the top.
-	const scrollToRow = useCallback(
-		(key: string, glide = false) => {
+	// Glides a row to the top and stops following.
+	const glideToRow = useCallback(
+		(key: string) => {
 			const index = rows.findIndex((row) => row.key === key);
 			if (index < 0) return;
 			setFollowing(false);
-			if (!glide) {
-				stopGlide();
-				virtualizer.scrollToIndex(index, { align: "start" });
-				return;
-			}
 			glideTo(() => virtualizer.getOffsetForIndex(index, "start")?.[0] ?? scrollRef.current?.scrollTop ?? 0);
 		},
-		[glideTo, rows, setFollowing, stopGlide, virtualizer],
+		[glideTo, rows, setFollowing, virtualizer],
 	);
-	const glideToRow = useCallback((key: string) => scrollToRow(key, true), [scrollToRow]);
 
 	const turns = useMemo(() => railTurns(rows), [rows]);
 	const turnRows = useMemo(() => {
@@ -487,13 +452,6 @@ function ChatStream({
 		setFollowing(true);
 		glideTo(() => scrollRef.current?.scrollHeight ?? 0);
 	}, [glideTo, setFollowing]);
-
-	useLayoutEffect(() => {
-		if (!jumpTo) return;
-		const index = rowIndexOfItem(rows, jumpTo.itemIndex);
-		if (index >= 0) scrollToRow(rows[index].key);
-		onJumped?.();
-	}, [jumpTo, onJumped, rows, scrollToRow]);
 
 	const leaveEnd = (el: HTMLElement) => {
 		if (el.scrollTop > 0) setFollowing(false);

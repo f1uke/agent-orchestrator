@@ -38,28 +38,5 @@ for (const viewport of VIEWPORTS) {
 			await expect(stream.locator("[data-tool]").first()).toBeVisible();
 			await shot("turn-open");
 		});
-
-		test("shows the context, todos and a folded done count in the Session tab", async ({ page }, info) => {
-			await page.goto("/#/projects/ao-demo/sessions/demo-chat-long");
-			await expect(page.getByTestId("chat-stream")).toBeVisible();
-
-			const rail = page.getByRole("complementary", { name: "Session inspector" });
-			await expect(rail.getByRole("tab", { name: "Session" })).toHaveAttribute("aria-selected", "true");
-
-			const todo = rail.getByRole("region", { name: "Todo" });
-			await expect(todo).toContainText("3 / 3");
-			await expect(todo).toContainText("Find failing tests");
-
-			const activity = rail.getByRole("region", { name: "Subagents & background" });
-			const fold = activity.locator("details.chat-insp__fold");
-			await expect(fold).toContainText("2 done");
-			await expect(fold).not.toHaveAttribute("open", "");
-			await expect(activity).not.toContainText("local_bash");
-			await expect(activity).not.toContainText("local_agent");
-			await expect(rail.getByRole("region", { name: "Context" })).toContainText("of the window");
-			await fold.locator("summary").click();
-			await expect(activity.getByText("Bash · background")).toBeVisible();
-			await page.screenshot({ path: info.outputPath(`chat-calm-session-tab-${viewport.width}.png`) });
-		});
 	});
 }

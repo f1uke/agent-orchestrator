@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import { BrowserPanelView } from "./BrowserPanel";
 import { CenterPane } from "./CenterPane";
-import { type ChatJump, ChatPane } from "./ChatPane";
+import { ChatPane } from "./ChatPane";
 import { useChatSession } from "../hooks/useChatSession";
 import { neverStarted } from "../lib/crew";
 import { useSessionTask } from "../hooks/useSessionTask";
@@ -180,17 +180,6 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		daemonReady: daemonStatus.state === "ready",
 		sessionLive: session?.status !== "terminated",
 	});
-	const [chatJump, setChatJump] = useState<ChatJump | null>(null);
-	const setChatView = useUiStore((state) => state.setChatView);
-	const clearChatJump = useCallback(() => setChatJump(null), []);
-	const jumpToChat = useCallback(
-		(itemIndex: number) => {
-			if (!session) return;
-			setChatView(session.id, "chat");
-			setChatJump({ itemIndex });
-		},
-		[session, setChatView],
-	);
 
 	// THE ONE PLACE A FILE IS OPENED. Every entry point — a clicked terminal
 	// reference, the ⌘⇧O palette, and later a go-to-definition jump — describes
@@ -280,9 +269,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// and the back/forward stack are keyed by the same identity — see `taskKeyOf`.
 	useEffect(() => {
 		if (!taskId) return;
-		setInspectorView(isChat ? "session" : "summary");
-		setChatJump(null);
-	}, [taskId, isChat]);
+		setInspectorView("summary");
+	}, [taskId]);
 
 	// A rail tab asked for from OUTSIDE this tree — the topbar's review pip. It is
 	// honoured once, opens the rail if it is shut, and is cleared.
@@ -780,9 +768,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 				<ChatPane
 					chat={chat}
 					daemonReady={daemonStatus.state === "ready"}
-					jumpTo={chatJump}
 					key={session.id}
-					onJumped={clearChatJump}
 					session={session}
 					theme={theme}
 					view={centerView}
@@ -947,8 +933,6 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									view={inspectorView}
 									browserView={browserView}
 									session={session}
-									chat={isChat ? chat.transcript : undefined}
-									onJumpToChat={jumpToChat}
 								/>
 							</div>
 						</ResizablePanel>

@@ -5,16 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatEntry, Direction } from "./chat-event";
 import { foldEntries } from "./chat-fold";
 import { mockChatEntries } from "./chat-mock";
-import {
-	addedRules,
-	contextUsage,
-	formatTokens,
-	latestTodos,
-	sessionActivity,
-	shownTodos,
-	sessionHistory,
-	usageSummary,
-} from "./chat-inspect";
+import { contextUsage, formatTokens, latestTodos, sessionActivity, shownTodos } from "./chat-inspect";
 
 function loadFixture(name: string): ChatEntry[] {
 	const testdata = join(dirname(fileURLToPath(import.meta.url)), "../../../../backend/internal/chatproto/testdata");
@@ -45,27 +36,7 @@ const toolResult = (id: string, content: string, isError = false) =>
 const task = (subtype: string, fields: object) =>
 	at("out", { type: "system", subtype, session_id: SESSION, uuid: `u${seq}`, ...fields });
 
-function finalModelUsage(entries: ChatEntry[]) {
-	const results = entries.filter((e) => (e.payload as { type?: string }).type === "result");
-	const last = results.at(-1)?.payload as {
-		modelUsage: Record<string, { outputTokens: number; cacheReadInputTokens: number }>;
-	};
-	return Object.values(last.modelUsage)[0];
-}
-
-describe("usage and context from the fixtures' results", () => {
-	it("sums result.usage over the claude session, which matches claude's own cumulative modelUsage", () => {
-		const usage = usageSummary(foldEntries(both));
-		const claude = finalModelUsage(both);
-		expect(usage).toEqual({
-			sessionId: SESSION,
-			costUsd: 0.09444599999999999,
-			outputTokens: claude.outputTokens,
-			cacheReadTokens: claude.cacheReadInputTokens,
-		});
-		expect(usage?.outputTokens).toBe(1568);
-	});
-
+describe("context from the fixtures' results", () => {
 	it("reads context from the turn's last API call, not the turn's sum", () => {
 		const twoCallTurn = foldEntries(first.filter((e) => e.seq <= 34));
 		expect(contextUsage(twoCallTurn)).toEqual({ tokens: 2 + 19006 + 328, window: 1_000_000 });
@@ -86,7 +57,6 @@ describe("usage and context from the fixtures' results", () => {
 	});
 
 	it("shows no window it cannot name", () => {
-		expect(usageSummary(foldEntries(first.filter((e) => e.seq < 19)))).toBeUndefined();
 		seq = 0;
 		const result = (modelUsage: object) =>
 			at("out", {
@@ -110,60 +80,6 @@ describe("usage and context from the fixtures' results", () => {
 			result(twoModels),
 		]);
 		expect(contextUsage(named)).toEqual({ tokens: 10, window: 200_000 });
-	});
-});
-
-describe("history", () => {
-	it("has one row per claude process, with its start, turns and the session's cost at its end", () => {
-		const tr = foldEntries(both);
-		const rows = sessionHistory(tr);
-		expect(rows.map(({ itemIndex: _, ...row }) => row)).toEqual([
-			{
-				startedAt: "2026-10-29T17:08:57.042Z",
-				resumed: false,
-				sessionId: SESSION,
-				turns: 5,
-				costUsd: 0.04411749999999999,
-			},
-			{
-				startedAt: "2026-10-29T17:09:36.671Z",
-				resumed: true,
-				sessionId: SESSION,
-				turns: 5,
-				costUsd: 0.09444599999999999,
-			},
-		]);
-		expect(rows.map((r) => tr.items[r.itemIndex])).toMatchObject([
-			{ kind: "notice", notice: "spawn" },
-			{ kind: "notice", notice: "resumed", text: SESSION },
-		]);
-	});
-
-	it("is empty for an empty log", () => {
-		expect(sessionHistory(foldEntries([]))).toEqual([]);
-	});
-});
-
-describe("permissions", () => {
-	it("adds no rule for the fixtures' Always allow (a mode switch) or their denied rule suggestion", () => {
-		expect(addedRules(foldEntries(both))).toEqual([]);
-	});
-
-	it("adds the rule an allowed request carried, once", () => {
-		const request = resumed.find((e) => e.seq === 63)!;
-		const suggestions = (request.payload as { request: { permission_suggestions: unknown[] } }).request
-			.permission_suggestions;
-		const allow = {
-			type: "control_response",
-			response: {
-				subtype: "success",
-				request_id: "e56f8ec6-1341-4bc8-8a84-29e56964a6bf",
-				response: { behavior: "allow", updatedInput: {}, updatedPermissions: suggestions },
-			},
-		};
-		const upToRequest = resumed.filter((e) => e.seq <= 63);
-		const tr = foldEntries([...upToRequest, { seq: 64, ts: "", dir: "in", payload: allow }]);
-		expect(addedRules(tr)).toEqual([{ rule: "Bash(rm hello.txt)", behavior: "allow" }]);
 	});
 });
 
@@ -329,7 +245,6 @@ it("gives the dev:web stub's session a todo list, running background work and a 
 		["Explore", "done", 3],
 	]);
 	expect(contextUsage(tr)).toEqual({ tokens: 124_000, window: 200_000 });
-	expect(usageSummary(tr)).toMatchObject({ costUsd: 1.84, outputTokens: 31_212, cacheReadTokens: 1_899_000 });
 });
 
 describe("todos from TaskCreate and TaskUpdate", () => {
