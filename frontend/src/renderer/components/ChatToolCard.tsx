@@ -45,6 +45,7 @@ import {
 } from "../lib/chat-tools";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
+import { ChatImages, READ_THUMB } from "./ChatImages";
 import { CopyButton } from "./CopyButton";
 import { DiffRows } from "./DiffRows";
 import { NoteMarkdown } from "./NoteMarkdown";
@@ -139,6 +140,18 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 			);
 		case "output":
 			return <div className="chat-term">{body.text || "(no output)"}</div>;
+		case "image": {
+			const file = body.path.split("/").pop() || "image";
+			return (
+				<div className="chat-tool__images">
+					<ChatImages
+						images={body.images}
+						name={(i) => (body.images.length > 1 ? `${file} (${i + 1})` : file)}
+						thumb={READ_THUMB}
+					/>
+				</div>
+			);
+		}
 		case "plan":
 			return (
 				<div className="chat-plan-body note-prose chat-md">

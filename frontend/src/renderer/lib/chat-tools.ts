@@ -1,5 +1,6 @@
 import { isObject, type TaskState } from "./chat-event";
 import { type DiffLine, diffCounts, lineDiff, newFileDiff } from "./chat-diff";
+import { type ChatImage, imagesOf } from "./chat-images";
 import type { BackgroundTask, PermissionOutcome, ToolCallItem, ToolResult } from "./chat-fold";
 
 export type ToolStatus =
@@ -20,6 +21,7 @@ export type ToolBody =
 	| { kind: "bash"; command: string; output: string; failed: boolean; exitCode?: number }
 	| { kind: "diff"; lines: DiffLine[]; hidden: number }
 	| { kind: "output"; text: string }
+	| { kind: "image"; images: ChatImage[]; path: string }
 	| { kind: "plan"; plan: string }
 	| { kind: "generic"; input: string; output: string };
 
@@ -352,15 +354,24 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 				body: { kind: "diff", lines, hidden },
 			};
 		}
-		case "Read":
+		case "Read": {
+			const path = short(str(input.file_path));
+			const images = imagesOf(call.result?.content);
 			return {
 				...base,
 				family: "read",
-				arg: short(str(input.file_path)),
-				status: outcome(call, () => plural(lineCount(output), "line")),
-				body: { kind: "output", text: output },
+				arg: path,
+				status: outcome(call, () =>
+					images.length
+						? images.length === 1
+							? "image"
+							: plural(images.length, "image")
+						: plural(lineCount(output), "line"),
+				),
+				body: images.length ? { kind: "image", images, path } : { kind: "output", text: output },
 				compact: true,
 			};
+		}
 		case "Grep": {
 			const pattern = str(input.pattern);
 			const where = short(str(input.path) || str(input.glob));

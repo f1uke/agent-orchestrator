@@ -2,6 +2,7 @@ import type { AnswerBody } from "./chat-answers";
 import type { ChatApi, ChatResult } from "./chat-api";
 import { type ChatEntry, type Direction, isObject } from "./chat-event";
 import { ChatFolder, type Pending } from "./chat-fold";
+import { pngBase64, type Rgb } from "./chat-mock-images";
 import type { ChatMux, ChatMuxListeners } from "./chat-mux";
 import type { MuxConnectionState } from "./terminal-mux";
 
@@ -512,6 +513,72 @@ function tallEntries(): ChatEntry[] {
 	}));
 }
 
+export const MOCK_IMAGES_CHAT_SESSION = "demo-chat-images";
+
+const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
+
+const SCREEN_PNG = pngBase64(320, 200, (x, y): Rgb => {
+	const bar = Math.floor((x - 24) / 40);
+	const inBars = x >= 24 && x < 296 && bar >= 0 && bar < 7 && (x - 24) % 40 < 28;
+	const top = 190 - [60, 95, 80, 130, 110, 150, 120][bar < 0 ? 0 : Math.min(bar, 6)];
+	if (inBars && y >= top && y < 180) return [242, 249, 60];
+	return [lerp(18, 44, y / 200), lerp(30, 63, y / 200), lerp(58, 47, x / 320)];
+});
+
+const SKETCH_PNG = pngBase64(240, 160, (x, y): Rgb => ((x + y) % 48 < 24 ? [36, 52, 94] : [226, 232, 244]));
+
+function imagesEntries(): ChatEntry[] {
+	const steps: Step[] = [
+		[
+			"in",
+			{
+				type: "user",
+				uuid: "img-1",
+				session_id: "",
+				message: {
+					role: "user",
+					content: [
+						{ type: "text", text: "The export page looks off. Here is a sketch and the current screen." },
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: SKETCH_PNG } },
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: SCREEN_PNG } },
+					],
+				},
+			},
+		],
+		lifecycle("img-1", "started"),
+		say("msg_i1", "I'll look at the saved screenshot first."),
+		tool("t-img-1", "msg_i2", "Read", { file_path: "/work/project/docs/export-page.png" }),
+		[
+			"out",
+			{
+				type: "user",
+				parent_tool_use_id: null,
+				session_id: SESSION,
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-img-1",
+							is_error: false,
+							content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: SCREEN_PNG } }],
+						},
+					],
+				},
+			},
+		],
+		say("msg_i3", "The bars are clipped at the right edge. I'll check the chart width next."),
+		["out", { type: "result", subtype: "success", is_error: false, num_turns: 2, total_cost_usd: 0.02 }],
+		lifecycle("img-1", "completed"),
+	];
+	return steps.map(([dir, payload], i) => ({
+		seq: i + 1,
+		ts: new Date(START + i * 4_000).toISOString(),
+		dir,
+		payload,
+	}));
+}
+
 export const MOCK_LIVE_CHAT_SESSION = "demo-chat-live";
 
 const LIVE_BRIEF = [
@@ -627,9 +694,11 @@ function stubSession(id: string): Promise<StubSession> {
 					? tallEntries()
 					: id === MOCK_LIVE_CHAT_SESSION
 						? liveEntries()
-						: long
-							? fixture
-							: mockChatEntries(fixture);
+						: id === MOCK_IMAGES_CHAT_SESSION
+							? imagesEntries()
+							: long
+								? fixture
+								: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
