@@ -99,6 +99,37 @@ describe("UsageMeter", () => {
 		expect(pop).toHaveTextContent("updated 3 min ago");
 	});
 
+	it("draws one bar per window with its fill, and the status on its window", async () => {
+		render(<UsageMeter usage={usage} />);
+		await userEvent.click(screen.getByRole("button", { name: /subscription usage/i }));
+		const pop = screen.getByRole("dialog", { name: "Subscription usage" });
+		const bars = within(pop).getAllByRole("meter");
+		expect(bars.map((b) => b.getAttribute("aria-label"))).toEqual(["5-hour window", "Weekly window"]);
+		expect(bars.map((b) => b.getAttribute("aria-valuenow"))).toEqual(["1", "36"]);
+		for (const bar of bars) {
+			expect(bar).toHaveAttribute("aria-valuemin", "0");
+			expect(bar).toHaveAttribute("aria-valuemax", "100");
+		}
+		expect(bars[0].firstElementChild).toHaveStyle({ width: "1%" });
+		expect(bars[1].firstElementChild).toHaveStyle({ width: "36%" });
+		expect(bars[0].closest("[data-status]")).toHaveAttribute("data-status", "allowed");
+		expect(bars[1].closest("[data-status]")).toHaveAttribute("data-status", "allowed_warning");
+	});
+
+	it("clamps a bar to 0..100", async () => {
+		const out: SubscriptionUsage = {
+			fiveHour: { utilization: -0.2, resetsAt: "2026-10-31T06:40:00Z", status: "allowed" },
+			sevenDay: { utilization: 1.4, resetsAt: "2026-11-03T08:00:00Z", status: "rejected" },
+			updatedAt: "2026-10-31T04:57:00Z",
+		};
+		render(<UsageMeter usage={out} />);
+		await userEvent.click(screen.getByRole("button", { name: /subscription usage/i }));
+		const bars = within(screen.getByRole("dialog", { name: "Subscription usage" })).getAllByRole("meter");
+		expect(bars.map((b) => b.getAttribute("aria-valuenow"))).toEqual(["0", "100"]);
+		expect(bars[0].firstElementChild).toHaveStyle({ width: "0%" });
+		expect(bars[1].firstElementChild).toHaveStyle({ width: "100%" });
+	});
+
 	it("renders nothing with no usage", () => {
 		const { container } = render(<UsageMeter />);
 		expect(container).toBeEmptyDOMElement();

@@ -64,6 +64,43 @@ for (const viewport of VIEWPORTS) {
 	});
 }
 
+test("colours each usage bar by its window's status", async ({ page }) => {
+	const soon = (ms: number) => new Date(Date.now() + ms).toISOString();
+	const usageFor = (status: string) => ({
+		fiveHour: { utilization: 0.5, resetsAt: soon(3_600_000), status },
+		sevenDay: { utilization: 0.5, resetsAt: soon(86_400_000), status },
+		updatedAt: new Date().toISOString(),
+	});
+	let status = "allowed";
+	await page.route("**/hooks/useChatUsage.ts*", async (route) => {
+		const res = await route.fetch();
+		const body = (await res.text()).replace(
+			"Promise.resolve(PREVIEW_USAGE)",
+			`Promise.resolve(${JSON.stringify(usageFor(status))})`,
+		);
+		await route.fulfill({ response: res, body });
+	});
+	const fills: Record<string, string> = {};
+	const labels: Record<string, string> = {};
+	for (status of ["allowed", "allowed_warning", "rejected"]) {
+		await page.goto("about:blank");
+		await page.goto("/#/projects/ao-demo/sessions/demo-chat");
+		await page.getByRole("button", { name: "Subscription usage" }).click();
+		const pop = page.getByRole("dialog", { name: "Subscription usage" });
+		await expect(pop.getByRole("meter")).toHaveCount(2);
+		const bar = pop.getByRole("meter", { name: "5-hour window" });
+		await expect(bar).toHaveAttribute("aria-valuenow", "50");
+		fills[status] = await bar.locator("span").evaluate((el) => getComputedStyle(el).backgroundColor);
+		labels[status] = await pop
+			.locator(".chat-meter-pop__status")
+			.first()
+			.evaluate((el) => getComputedStyle(el).color);
+	}
+	expect(new Set(Object.values(fills)).size).toBe(3);
+	expect(fills.allowed_warning).toBe(labels.allowed_warning);
+	expect(fills.rejected).toBe(labels.rejected);
+});
+
 test("a terminal session has no Session tab either", async ({ page }) => {
 	await page.goto("/#/projects/ao-demo/sessions/demo-question");
 	await expect(rail(page).getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");

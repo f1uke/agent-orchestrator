@@ -115,7 +115,8 @@ function EstimatedContext({ fallback }: { fallback: ContextUsage }) {
 	);
 }
 
-const pct = (w: UsageWindow) => `${Math.round(w.utilization * 100)}%`;
+const percentOf = (w: UsageWindow) => Math.min(100, Math.max(0, Math.round(w.utilization * 100)));
+const pct = (w: UsageWindow) => `${percentOf(w)}%`;
 
 const STATUS_LABEL: Record<string, string> = {
 	allowed: "Within the limit",
@@ -155,6 +156,16 @@ export function UsageMeter({ usage }: { usage?: SubscriptionUsage }) {
 						<li className="chat-meter-pop__window" data-status={w.status} key={short}>
 							<span className="chat-meter-pop__name">{name}</span>
 							<span className="chat-meter-pop__tokens">{pct(w)}</span>
+							<div
+								aria-label={name}
+								aria-valuemax={100}
+								aria-valuemin={0}
+								aria-valuenow={percentOf(w)}
+								className="chat-meter-pop__bar chat-meter-pop__usage-bar"
+								role="meter"
+							>
+								<span style={{ width: pct(w) }} />
+							</div>
 							<span className="chat-meter-pop__sub">resets {resetTime(w.resetsAt)}</span>
 							<span className="chat-meter-pop__status">{STATUS_LABEL[w.status] ?? w.status}</span>
 						</li>
