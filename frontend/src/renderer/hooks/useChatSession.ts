@@ -97,20 +97,6 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		});
 	}, [r]);
 
-	const fold = useCallback(
-		(entries: readonly ChatEntry[]) => {
-			r.folder = new ChatFolder();
-			for (const entry of entries) {
-				try {
-					r.folder.apply(entry);
-				} catch (err) {
-					console.warn("chat: skipped an entry the fold rejected", err);
-				}
-			}
-		},
-		[r],
-	);
-
 	// A tailed replay sends its newest turns first, then the older entries, so
 	// the entries arrive out of order once; the whole log is folded again in
 	// seq order when the replay ends.
@@ -118,9 +104,16 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		if (r.replay === "done") return;
 		r.replay = "done";
 		r.entries.sort((a, b) => a.seq - b.seq);
-		fold(r.entries);
+		r.folder = new ChatFolder();
+		for (const entry of r.entries) {
+			try {
+				r.folder.apply(entry);
+			} catch (err) {
+				console.warn("chat: skipped an entry the fold rejected", err);
+			}
+		}
 		scheduleFlush();
-	}, [fold, r, scheduleFlush]);
+	}, [r, scheduleFlush]);
 
 	const teardown = useCallback(
 		(id: string | undefined) => {
