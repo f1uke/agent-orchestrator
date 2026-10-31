@@ -9165,6 +9165,7 @@ ol.note-prose__list {
 .chat-meter-pop__tokens {
 	color: var(--fg);
 	font-variant-numeric: tabular-nums;
+	text-align: right;
 }
 
 .chat-meter-pop__bar {
