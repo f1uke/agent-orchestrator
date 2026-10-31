@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Visual</title>
+<script>
+	var open = true;
+	addEventListener("message", function (event) {
+		var data = event.data;
+		if (!open || event.source !== parent || !data || data.type !== "ao-widget/doc" || typeof data.html !== "string")
+			return;
+		open = false;
+		document.open();
+		document.write(data.html);
+		document.close();
+	});
+</script>

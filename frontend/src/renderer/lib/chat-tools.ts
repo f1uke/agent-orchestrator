@@ -1,6 +1,7 @@
 import { isObject, type TaskState } from "./chat-event";
 import { type CodeView, editView, lineCounts, readView, writeView } from "./chat-code";
 import { type ChatImage, imagesOf } from "./chat-images";
+import { READ_ME, SHOW_WIDGET } from "./chat-widget";
 import type { BackgroundTask, PermissionOutcome, ToolCallItem, ToolResult } from "./chat-fold";
 
 export type ToolStatus =
@@ -66,7 +67,7 @@ export function shortenPaths(text: string, root: string | undefined): string {
 }
 
 export type ProcessKind =
-	"commands" | "reads" | "searches" | "edits" | "writes" | "agents" | "skills" | "web" | "todos" | "tools";
+	"commands" | "reads" | "searches" | "edits" | "writes" | "agents" | "skills" | "web" | "todos" | "guides" | "tools";
 
 const PROCESS_KIND: Record<string, ProcessKind> = {
 	Bash: "commands",
@@ -85,6 +86,7 @@ const PROCESS_KIND: Record<string, ProcessKind> = {
 	TodoWrite: "todos",
 	TaskCreate: "todos",
 	TaskUpdate: "todos",
+	[READ_ME]: "guides",
 };
 
 export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolName] ?? "tools";
@@ -103,6 +105,7 @@ const PHRASE: Record<ProcessKind, (n: number) => string> = {
 	skills: (n) => (n === 1 ? "ran a skill" : `ran skill ${n} times`),
 	web: (n) => `made ${n === 1 ? "a web request" : `${n} web requests`}`,
 	todos: () => "updated todos",
+	guides: () => "read visual guidelines",
 	tools: (n) => `used ${n === 1 ? "another tool" : `${n} other tools`}`,
 };
 
@@ -126,6 +129,8 @@ const LIVE_VERB: Record<string, (input: Record<string, unknown>) => string> = {
 	Write: (i) => `Editing ${baseName(str(i.file_path))}`,
 };
 LIVE_VERB.Task = LIVE_VERB.Agent;
+LIVE_VERB[SHOW_WIDGET] = () => "Making a visual";
+LIVE_VERB[READ_ME] = () => "Reading visual guidelines";
 
 export function liveVerb(call: ToolCallItem): string {
 	const say = LIVE_VERB[call.name];
@@ -172,6 +177,7 @@ const KIND_ORDER: ProcessKind[] = [
 	"skills",
 	"web",
 	"todos",
+	"guides",
 	"tools",
 ];
 

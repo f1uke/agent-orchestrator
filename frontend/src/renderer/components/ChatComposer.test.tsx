@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatActions } from "../hooks/useChatActions";
 import type { ChatResult } from "../lib/chat-api";
 import type { ChatCommand, ChatModel } from "../lib/chat-fold";
-import { ChatComposer } from "./ChatComposer";
+import { ChatComposer, type Prefill } from "./ChatComposer";
 
 const files = vi.hoisted(() => ({
 	hook: vi.fn((_sessionId?: string, _enabled?: boolean) => ({
@@ -55,7 +55,7 @@ function renderComposer(over: Partial<ChatActions> = {}) {
 	};
 	const onToast = vi.fn();
 	const parentKeys = vi.fn((e: React.KeyboardEvent) => e.defaultPrevented);
-	render(
+	const tree = (prefill?: Prefill) => (
 		<div onKeyDown={parentKeys}>
 			<ChatComposer
 				actions={actions}
@@ -65,13 +65,22 @@ function renderComposer(over: Partial<ChatActions> = {}) {
 				models={MODELS}
 				onToast={onToast}
 				permissionMode="default"
+				prefill={prefill}
 				queued={[]}
 				sessionId="chat-1"
 			/>
-		</div>,
+		</div>
 	);
+	const { rerender } = render(tree());
 	const input = screen.getByRole("textbox", { name: "Message Claude" });
-	return { actions, onToast, parentKeys, input, user: userEvent.setup() };
+	return {
+		actions,
+		onToast,
+		parentKeys,
+		input,
+		user: userEvent.setup(),
+		prefill: (next: Prefill) => rerender(tree(next)),
+	};
 }
 
 const options = () => screen.getAllByRole("option").map((o) => o.textContent);
@@ -208,5 +217,35 @@ describe("ChatComposer model picker", () => {
 		await user.click(await screen.findByRole("menuitemradio", { name: /Sonnet 5\.5/ }));
 		await act(async () => undefined);
 		expect(onToast).toHaveBeenCalledWith("Model 'x' not found");
+	});
+});
+
+describe("ChatComposer prefill", () => {
+	it("fills an empty box, puts the caret at the end and focuses it, without sending", () => {
+		const { input, prefill, actions } = renderComposer();
+		prefill({ text: "Explain the curve", seq: 1 });
+		expect(input).toHaveValue("Explain the curve");
+		expect(input).toHaveFocus();
+		expect((input as HTMLTextAreaElement).selectionStart).toBe("Explain the curve".length);
+		expect(actions.send).not.toHaveBeenCalled();
+	});
+
+	it("adds to a draft after a blank line and keeps the draft", async () => {
+		const { input, prefill, user, actions } = renderComposer();
+		await user.type(input, "Check the budget first");
+		prefill({ text: "Explain the curve", seq: 1 });
+		expect(input).toHaveValue("Check the budget first\n\nExplain the curve");
+		expect((input as HTMLTextAreaElement).selectionStart).toBe((input as HTMLTextAreaElement).value.length);
+		expect(actions.send).not.toHaveBeenCalled();
+	});
+
+	it("acts once per request: the same seq on a later render does not refill the box", async () => {
+		const { input, prefill, user } = renderComposer();
+		prefill({ text: "Explain", seq: 1 });
+		await user.clear(input);
+		prefill({ text: "Explain", seq: 1 });
+		expect(input).toHaveValue("");
+		prefill({ text: "Explain", seq: 2 });
+		expect(input).toHaveValue("Explain");
 	});
 });

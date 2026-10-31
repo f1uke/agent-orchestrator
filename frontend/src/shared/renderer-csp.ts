@@ -10,6 +10,9 @@
 // and rendered from an object URL (`blob:app://renderer/…`); without `blob:`
 // here the element load is CSP-blocked and shows a broken thumbnail — the bug
 // that survived #111 (which added the blob fetch but not this CSP allowance).
+//
+// `frame-src 'self'` is for the chat widget frame on /widget-frame.html; srcdoc, data: and blob:
+// would inherit `script-src 'self'` and block the widget's inline scripts.
 export function buildContentSecurityPolicy(posthogOrigin: string): string {
 	return [
 		"default-src 'self'",
@@ -21,6 +24,6 @@ export function buildContentSecurityPolicy(posthogOrigin: string): string {
 		["connect-src", "'self'", "http://127.0.0.1:*", "ws://127.0.0.1:*", posthogOrigin].filter(Boolean).join(" "),
 		"object-src 'none'",
 		"base-uri 'self'",
-		"frame-src 'none'",
+		"frame-src 'self'",
 	].join("; ");
 }

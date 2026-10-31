@@ -327,6 +327,58 @@ describe("chatRows turn fold", () => {
 	});
 });
 
+describe("chatRows widgets", () => {
+	const widget = (result: "ok" | "error" | "none" = "ok", code = "<svg></svg>") =>
+		tool("mcp__ao__show_widget", { title: "flow", widget_code: code }, result);
+
+	it("keeps a drawn visual in view after its folded turn, ahead of the last reply", () => {
+		const rows = rowsOf([
+			user(),
+			say("looking"),
+			tool("Read"),
+			tool("Bash"),
+			widget(),
+			tool("Grep"),
+			say("here it is"),
+			turnEnd(),
+		]);
+		expect(shape(rows)).toEqual(["user", "turn", "tool_call", "assistant_text", "turn_end"]);
+		const turn = rows[1];
+		expect(
+			turn.kind === "turn" &&
+				turn.rows.some((r) => r.kind === "item" && r.item.kind === "tool_call" && r.item.name.endsWith("show_widget")),
+		).toBe(false);
+		expect(turn.kind === "turn" && turn.summary.counts.map((c) => c.kind)).toEqual(["commands", "reads", "searches"]);
+	});
+
+	it("keeps each visual of a folded turn, in order", () => {
+		const rows = rowsOf([
+			user(),
+			tool("Read"),
+			tool("Read"),
+			widget("ok", "<svg>1</svg>"),
+			widget("ok", "<svg>2</svg>"),
+			say("done"),
+			turnEnd(),
+		]);
+		const drawn = rows.flatMap((r) => (r.kind === "item" && r.item.kind === "tool_call" ? [r.item.input] : []));
+		expect(drawn).toEqual([
+			{ title: "flow", widget_code: "<svg>1</svg>" },
+			{ title: "flow", widget_code: "<svg>2</svg>" },
+		]);
+	});
+
+	it("gives a visual its own row instead of a place in a process group", () => {
+		const rows = rowsOf([user(), say("a"), tool("Read"), widget("none"), tool("Bash"), say("b")]);
+		expect(shape(rows)).toEqual(["user", "assistant_text", "tool_call", "tool_call", "tool_call", "assistant_text"]);
+	});
+
+	it("folds a call that failed with the rest of the turn, since there is no visual to keep", () => {
+		const rows = rowsOf([user(), tool("Read"), tool("Bash"), widget("error"), say("sorry"), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "turn_end"]);
+	});
+});
+
 describe("chatRows task messages", () => {
 	it("shows a task message as its own row that breaks the run of calls around it", () => {
 		const rows = rowsOf([user(), tool("Bash"), tool("Bash"), taskMessage(), tool("Read"), tool("Read")]);
