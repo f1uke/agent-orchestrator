@@ -24,8 +24,7 @@ const (
 	envFakeChildPID = "SESSIONHOST_FAKE_CHILD"
 	envFakeSleeper  = "SESSIONHOST_FAKE_SLEEPER"
 	envFakeParent   = "SESSIONHOST_FAKE_PARENT"
-	// Unset, fake claude never answers get_context_usage, as a claude that does not know it.
-	envFakeContext = "SESSIONHOST_FAKE_CONTEXT"
+	envFakeContext  = "SESSIONHOST_FAKE_CONTEXT"
 )
 
 func TestMain(m *testing.M) {

@@ -88,10 +88,6 @@ function todoState(tr: Transcript): TodoState | undefined {
 
 const turnStarted = (item: ChatItem) => item.kind === "user" && item.state !== "sent" && item.state !== "queued";
 
-/**
- * The list the todo bar shows: the latest one while any item is open. A list
- * that is all completed stays until the next user turn starts, then goes.
- */
 export function shownTodos(tr: Transcript): Todo[] | undefined {
 	const state = todoState(tr);
 	if (!state || state.todos.length === 0) return undefined;

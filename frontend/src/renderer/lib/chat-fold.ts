@@ -152,11 +152,8 @@ export type Transcript = {
 	tasks: BackgroundTask[];
 	/** The size of the context the latest top-level response saw, known before the turn's result. */
 	contextTokens?: number;
-	/** When the current stretch of top-level thinking began; absent once anything else follows it. */
 	thinkingSince?: string;
-	/** The latest get_context_usage answer, absent when the latest one could not be read. */
 	contextBreakdown?: ContextBreakdown;
-	/** The newest subscription usage claude reported in this session's log. */
 	usage?: SubscriptionUsage;
 	lastSeq: number;
 };

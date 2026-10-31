@@ -23,7 +23,6 @@ export type ChatRow =
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
 	| { key: string; kind: "waiting"; tasks: WaitingTask[] }
-	/** Claude thinks with nothing else running. `since` is absent when only streamed thinking says so. */
 	| { key: string; kind: "thinking_live"; since?: string; text: string }
 	| {
 			key: string;
