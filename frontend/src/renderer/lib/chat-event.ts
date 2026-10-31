@@ -9,6 +9,9 @@ export type ChatEntry = {
 
 export type CommandState = "sent" | "queued" | "started" | "completed" | "cancelled" | (string & {});
 
+/** One hunk of claude's `tool_use_result.structuredPatch`: `lines` carry a ` `, `-` or `+` prefix. */
+export type PatchHunk = { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] };
+
 export type Block =
 	| { type: "text"; text: string }
 	| { type: "thinking"; text: string }
@@ -86,7 +89,14 @@ export type ChatEvent =
 			/** input + cache read + cache creation of message.usage: the context this response saw. */
 			contextTokens?: number;
 	  }
-	| { type: "user"; uuid: string; parentToolUseId: string; isReplay: boolean; blocks: Block[] }
+	| {
+			type: "user";
+			uuid: string;
+			parentToolUseId: string;
+			isReplay: boolean;
+			blocks: Block[];
+			structuredPatch?: PatchHunk[];
+	  }
 	| {
 			type: "result";
 			subtype: string;
@@ -158,6 +168,26 @@ function decodeBlock(raw: unknown): Block {
 		}
 	}
 	return { type: "other", blockType: str(raw.type) };
+}
+
+// Only the patch is kept from tool_use_result: the rest of it (originalFile, content) is the whole file text,
+// which would sit in memory for every edit and read of a long session.
+function decodePatch(toolUseResult: unknown): PatchHunk[] | undefined {
+	if (!isObject(toolUseResult) || !Array.isArray(toolUseResult.structuredPatch)) return undefined;
+	const hunks: PatchHunk[] = [];
+	for (const raw of toolUseResult.structuredPatch) {
+		if (!isObject(raw) || !Array.isArray(raw.lines)) continue;
+		const { oldStart, oldLines, newStart, newLines } = raw;
+		if (![oldStart, oldLines, newStart, newLines].every((n) => typeof n === "number")) continue;
+		hunks.push({
+			oldStart: oldStart as number,
+			oldLines: oldLines as number,
+			newStart: newStart as number,
+			newLines: newLines as number,
+			lines: raw.lines.filter((line): line is string => typeof line === "string"),
+		});
+	}
+	return hunks.length > 0 ? hunks : undefined;
 }
 
 function decodeBlocks(content: unknown): Block[] {
@@ -278,6 +308,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				parentToolUseId: str(line.parent_tool_use_id),
 				isReplay: line.isReplay === true,
 				blocks: decodeBlocks(message.content),
+				structuredPatch: decodePatch(line.tool_use_result),
 			};
 		case "result":
 			return {

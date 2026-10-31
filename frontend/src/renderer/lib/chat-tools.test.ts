@@ -69,6 +69,13 @@ describe("describeTool path shortening", () => {
 		["Read", { file_path: "/work/project/ledger/ledger.go" }, "ledger/ledger.go"],
 		["Edit", { file_path: "/work/project/a.go", old_string: "a", new_string: "b" }, "a.go"],
 		["Write", { file_path: "/work/project/new.go", content: "x" }, "new.go"],
+	])("keeps the shortened %s path for the tooltip and shows the base name", (name, input, path) => {
+		const view = describeTool(call(name, input), { root: ROOT });
+		expect(view.path).toBe(path);
+		expect(view.arg).toBe(path.split("/").at(-1));
+	});
+
+	it.each([
 		["Grep", { pattern: "Transfer", path: "/work/project/ledger" }, '"Transfer" in ledger'],
 		["Glob", { pattern: "*.go", path: "/work/project" }, "*.go in ."],
 	])("shortens the %s argument", (name, input, want) => {
@@ -76,7 +83,7 @@ describe("describeTool path shortening", () => {
 	});
 
 	it("keeps an absolute path when no root is given", () => {
-		expect(describeTool(call("Read", { file_path: "/work/project/a.go" })).arg).toBe("/work/project/a.go");
+		expect(describeTool(call("Read", { file_path: "/work/project/a.go" })).path).toBe("/work/project/a.go");
 	});
 });
 
@@ -98,15 +105,82 @@ describe("describeTool Read of an image", () => {
 		expect(describeTool(read([png, png]), { root: ROOT }).status).toEqual({ tone: "ok", text: "2 images" });
 	});
 
-	it("keeps a text Read as output", () => {
-		const view = describeTool(read("1\tpackage x\n2\n3"), { root: ROOT });
-		expect(view.body).toEqual({ kind: "output", text: "1\tpackage x\n2\n3" });
-		expect(view.status).toEqual({ tone: "ok", text: "3 lines" });
+	it("keeps text that is not numbered as output", () => {
+		const view = describeTool(read("package x\nfunc x() {}\n"), { root: ROOT });
+		expect(view.body).toEqual({ kind: "output", text: "package x\nfunc x() {}\n" });
+		expect(view.status).toEqual({ tone: "ok", text: "2 lines" });
 	});
 
 	it("keeps a Read whose image blocks are all unusable as output", () => {
 		const unknown = { type: "image", source: { type: "base64", media_type: "image/tiff", data: "AA" } };
 		expect(describeTool(read([unknown]), { root: ROOT }).body.kind).toBe("output");
+	});
+});
+
+describe("describeTool code cards", () => {
+	const hunk = { oldStart: 456, oldLines: 3, newStart: 456, newLines: 4, lines: [" a", "-b", "+c", "+d", " e"] };
+	const edit = (extra: { structuredPatch?: (typeof hunk)[] } = {}) =>
+		call("Edit", { file_path: "/work/project/report/report.go", old_string: "a\nb\ne", new_string: "a\nc\nd\ne" }, {
+			content: "updated",
+			...extra,
+		} as { content: string });
+
+	it("reads a Write as Created with the base name and the line count", () => {
+		const content = Array.from({ length: 15 }, (_, i) => `<l${i}/>`).join("\n");
+		const view = describeTool(call("Write", { file_path: "/work/project/docs/demo-flow.svg", content }), {
+			root: ROOT,
+		});
+		expect(view).toMatchObject({
+			title: "Created",
+			arg: "demo-flow.svg",
+			path: "docs/demo-flow.svg",
+			status: { tone: "diff", added: 15, removed: 0 },
+			body: { kind: "code", mode: "write", view: { language: "xml", hidden: 0 } },
+		});
+	});
+
+	it("reads an Edit as Edited, counting the lines of its patch", () => {
+		const view = describeTool(
+			{ ...edit(), result: { isError: false, content: "updated", structuredPatch: [hunk] } },
+			{ root: ROOT },
+		);
+		expect(view).toMatchObject({ title: "Edited", arg: "report.go", status: { tone: "diff", added: 2, removed: 1 } });
+		expect(view.body).toMatchObject({ kind: "code", mode: "edit" });
+		if (view.body.kind !== "code") throw new Error("not a code body");
+		expect(view.body.view.lines.map((l) => l.num)).toEqual([456, 457, 457, 458, 459]);
+	});
+
+	it("falls back to the diff of the strings, numbered from 1, when the result has no patch", () => {
+		const view = describeTool(edit());
+		if (view.body.kind !== "code") throw new Error("not a code body");
+		expect(view.body.view.lines.map((l) => l.num)).toEqual([1, 2, 2, 3, 4]);
+	});
+
+	it("reads a MultiEdit as Edited", () => {
+		const view = describeTool(call("MultiEdit", { file_path: "a.go", edits: [{ old_string: "a", new_string: "b" }] }));
+		expect(view).toMatchObject({ title: "Edited", body: { kind: "code", mode: "edit" } });
+	});
+
+	it("keeps an Edit whose input has no strings as a generic card", () => {
+		expect(describeTool(call("Edit", { file_path: "a.go" })).body.kind).toBe("generic");
+	});
+
+	it("shows a text Read as code with the file's own line numbers", () => {
+		const view = describeTool(
+			call("Read", { file_path: "/work/project/src/budget.ts" }, { content: "    10\texport const a = 1;\n    11\t" }),
+			{ root: ROOT },
+		);
+		expect(view).toMatchObject({ title: "Read", arg: "budget.ts", status: { tone: "ok", text: "2 lines" } });
+		expect(view.body).toMatchObject({
+			kind: "code",
+			mode: "read",
+			view: { language: "typescript", lines: [{ num: 10 }, { num: 11 }] },
+		});
+	});
+
+	it("keeps the error text of a failed Read as output", () => {
+		const view = describeTool(call("Read", { file_path: "a.go" }, { isError: true, content: "File does not exist." }));
+		expect(view.body).toEqual({ kind: "output", text: "File does not exist." });
 	});
 });
 

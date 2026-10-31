@@ -95,7 +95,8 @@ export function grammarFor(language: string): string {
 }
 
 let highlighterPromise: Promise<HighlighterCore> | null = null;
-const loadedGrammars = new Map<string, Promise<void>>();
+// The value is the name shiki registered the grammar under, which differs from the key for typescript (tsx) and javascript (jsx).
+const loadedGrammars = new Map<string, Promise<string>>();
 
 function highlighter(): Promise<HighlighterCore> {
 	highlighterPromise ??= createHighlighterCore({
@@ -126,13 +127,15 @@ export async function highlightCode(
 		let load = loadedGrammars.get(grammar);
 		if (!load) {
 			load = GRAMMARS[grammar]().then(async (mod) => {
-				await shiki.loadLanguage((mod as { default: never }).default);
+				const registrations = (mod as { default: { name: string }[] }).default;
+				await shiki.loadLanguage(registrations as never);
+				return registrations[0].name;
 			});
 			loadedGrammars.set(grammar, load);
 		}
-		await load;
+		const lang = await load;
 		const { tokens } = shiki.codeToTokens(code, {
-			lang: grammar,
+			lang,
 			theme: theme === "light" ? AO_LIGHT_THEME.name : AO_DARK_THEME.name,
 		});
 		return tokens.map((line) => line.map((token) => ({ text: token.content, color: token.color })));

@@ -16,7 +16,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
 	type AnswerBody,
 	allowOnce,
@@ -43,11 +43,12 @@ import {
 	parsePlan,
 	parseQuestions,
 } from "../lib/chat-tools";
+import { type CodeView, highlightView } from "../lib/chat-code";
+import type { CodeToken } from "../lib/note/highlight";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
 import { ChatImages, READ_THUMB } from "./ChatImages";
 import { CopyButton } from "./CopyButton";
-import { DiffRows } from "./DiffRows";
 import { NoteMarkdown } from "./NoteMarkdown";
 import { Button } from "./ui/button";
 
@@ -80,7 +81,7 @@ function Status({ view }: { view: ToolView }) {
 			return (
 				<span className="chat-tool__status">
 					<span className="chat-tool__add">+{status.added}</span>
-					{status.newFile ? <span>new file</span> : <span className="chat-tool__del">−{status.removed}</span>}
+					{status.removed > 0 ? <span className="chat-tool__del">−{status.removed}</span> : null}
 				</span>
 			);
 		case "ok":
@@ -107,6 +108,64 @@ function outputTone(line: string, failed: boolean): string | undefined {
 	return undefined;
 }
 
+const SIGN = { add: "+", del: "−", context: "" } as const;
+
+/**
+ * A file's code under a header with its name. Plain text shows first and the shiki colours replace it
+ * once the grammar lands, so opening a card never waits on a grammar chunk.
+ */
+function CodeBox({ view, mode, theme }: { view: CodeView; mode: "write" | "edit" | "read"; theme: Theme }) {
+	const [tokens, setTokens] = useState<CodeToken[][] | undefined>(undefined);
+	const source = useMemo(() => view.lines.map((l) => `${l.kind[0]}${l.text}`).join("\n"), [view.lines]);
+	useEffect(() => {
+		let live = true;
+		setTokens(undefined);
+		void highlightView(view, theme).then((result) => {
+			if (live) setTokens(result);
+		});
+		return () => {
+			live = false;
+		};
+		// `source` stands for the view: describeTool builds a new object on every render.
+	}, [source, view.language, theme]);
+
+	const name = view.path.split("/").filter(Boolean).at(-1) ?? view.path;
+	return (
+		<div className={cn("chat-codebox", mode === "write" && "chat-codebox--new")}>
+			<div className="chat-codebox__head">
+				<span className="chat-codebox__title">{name}</span>
+			</div>
+			<div className="chat-codebox__body">
+				{view.lines.map((line, i) => (
+					<div
+						className={cn("chat-codebox__row", line.kind !== "context" && `chat-codebox__row--${line.kind}`)}
+						key={i}
+					>
+						<span aria-hidden="true" className="chat-codebox__num">
+							{line.num}
+						</span>
+						{mode === "edit" ? (
+							<span aria-hidden="true" className="chat-codebox__sign">
+								{SIGN[line.kind]}
+							</span>
+						) : null}
+						<span className="chat-codebox__text">
+							{tokens?.[i]?.length
+								? tokens[i].map((token, t) => (
+										<span key={t} style={{ color: token.color }}>
+											{token.text}
+										</span>
+									))
+								: line.text || " "}
+						</span>
+					</div>
+				))}
+			</div>
+			{view.hidden > 0 ? <div className="chat-tool__more">… {view.hidden} more lines</div> : null}
+		</div>
+	);
+}
+
 function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 	switch (body.kind) {
 		case "bash":
@@ -131,13 +190,8 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 					) : null}
 				</div>
 			);
-		case "diff":
-			return (
-				<div className="diff">
-					<DiffRows lines={body.lines} size="wide" />
-					{body.hidden > 0 ? <div className="chat-tool__more">… {body.hidden} more lines</div> : null}
-				</div>
-			);
+		case "code":
+			return <CodeBox mode={body.mode} theme={theme} view={body.view} />;
 		case "output":
 			return <div className="chat-term">{body.text || "(no output)"}</div>;
 		case "image": {
@@ -196,14 +250,19 @@ export function ToolCard({
 	const Icon = FAMILY_ICON[view.family];
 	return (
 		<div
-			className={cn("chat-tool", view.compact && "chat-tool--compact", isOpen && "chat-tool--open")}
+			className={cn(
+				"chat-tool",
+				view.compact && "chat-tool--compact",
+				view.body.kind === "code" && "chat-tool--file",
+				isOpen && "chat-tool--open",
+			)}
 			data-tool={call.name}
 		>
 			<button aria-expanded={isOpen} className="chat-tool__head" onClick={() => onToggle(!isOpen)} type="button">
 				<ChevronRight className="chat-chev" aria-hidden="true" />
 				<Icon className="chat-icon" aria-hidden="true" />
 				<span className="chat-tool__name">{view.title}</span>
-				<span className="chat-tool__arg" title={view.arg}>
+				<span className="chat-tool__arg" title={view.path || view.arg}>
 					{view.arg}
 				</span>
 				<Status view={view} />
@@ -326,7 +385,7 @@ function PermissionCard({ request, theme, state, disabled, onAnswer }: CardProps
 				{typeof input.description === "string" && input.description !== "" ? (
 					<div className="chat-ask__why">{input.description}</div>
 				) : null}
-				{preview.body.kind === "diff" ? (
+				{preview.body.kind === "code" ? (
 					<div className="chat-ask__diff">
 						<ToolBodyView body={preview.body} theme={theme} />
 					</div>

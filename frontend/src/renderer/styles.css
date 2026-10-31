@@ -8132,6 +8132,85 @@ ol.note-prose__list {
 	border-top: 1px solid var(--border);
 }
 
+/* A file card reads as one sentence, "Created demo-flow.svg +15", so the count follows the name. */
+.chat-tool--file .chat-tool__arg {
+	flex: 0 1 auto;
+	color: var(--fg);
+}
+
+.chat-tool--file .chat-tool__head {
+	justify-content: flex-start;
+}
+
+.chat-codebox__head {
+	padding: 8px 12px 6px;
+	font-size: 12px;
+}
+
+.chat-codebox__title {
+	color: var(--fg-muted);
+}
+
+.chat-codebox__body {
+	max-height: 420px;
+	overflow: auto;
+	padding-bottom: 4px;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 1.6;
+	tab-size: 4;
+}
+
+.chat-codebox__row {
+	display: flex;
+	min-width: 0;
+}
+
+.chat-codebox__row--add {
+	background: var(--diff-add-bg);
+}
+
+.chat-codebox__row--del {
+	background: var(--diff-del-bg);
+}
+
+.chat-codebox--new .chat-codebox__body {
+	border-left: 3px solid var(--diff-add-sign);
+	background: var(--diff-add-bg);
+}
+
+.chat-codebox__num {
+	flex: none;
+	width: 48px;
+	padding-right: 14px;
+	color: var(--fg-passive);
+	text-align: right;
+	user-select: none;
+}
+
+.chat-codebox__sign {
+	flex: none;
+	width: 16px;
+	color: var(--fg-passive);
+	user-select: none;
+}
+
+.chat-codebox__row--add .chat-codebox__sign {
+	color: var(--diff-add-sign);
+}
+
+.chat-codebox__row--del .chat-codebox__sign {
+	color: var(--diff-del-sign);
+}
+
+.chat-codebox__text {
+	min-width: 0;
+	flex: 1;
+	padding-right: 12px;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
 .chat-tool__images {
 	display: flex;
 	flex-wrap: wrap;

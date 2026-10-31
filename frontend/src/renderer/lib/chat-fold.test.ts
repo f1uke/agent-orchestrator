@@ -954,3 +954,34 @@ describe("chat fold: the thinking stretch", () => {
 		expect(fold(toolUse(0, "t1"), toolResult(10, "t1")).thinkingSince).toBeUndefined();
 	});
 });
+
+describe("tool_use_result on a tool call", () => {
+	const hunk = { oldStart: 456, oldLines: 2, newStart: 456, newLines: 2, lines: [" keep", "-old", "+new"] };
+	const fold = (toolUseResult: unknown) =>
+		foldEntries([
+			synth(1, "out", {
+				type: "assistant",
+				message: { id: "m1", content: [{ type: "tool_use", id: "e1", name: "Edit", input: { file_path: "/a.go" } }] },
+			}),
+			synth(2, "out", {
+				type: "user",
+				message: { content: [{ type: "tool_result", tool_use_id: "e1", content: "updated" }] },
+				tool_use_result: toolUseResult,
+			}),
+		]);
+
+	it("puts the structuredPatch on the call's result", () => {
+		const [edit] = toolCalls(fold({ structuredPatch: [hunk] }), "Edit");
+		expect(edit.result).toMatchObject({ isError: false, content: "updated", structuredPatch: [hunk] });
+	});
+
+	it("keeps none of the file text in the transcript", () => {
+		const tr = fold({ originalFile: "SECRET ORIGINAL", file: { content: "SECRET FILE" }, structuredPatch: [hunk] });
+		expect(JSON.stringify(tr.items)).not.toContain("SECRET");
+	});
+
+	it("leaves the patch off a result that had none", () => {
+		const [edit] = toolCalls(fold({ type: "text" }), "Edit");
+		expect(edit.result?.structuredPatch).toBeUndefined();
+	});
+});
