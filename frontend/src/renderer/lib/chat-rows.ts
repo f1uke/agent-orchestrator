@@ -150,8 +150,6 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 	return out;
 }
 
-// A chapter divider opens the work after it, so each chapter folds on its own and the divider stays between the folds.
-// The turn's duration belongs to the whole turn, so a turn split by chapters shows none.
 function foldSegments(userKey: string, between: ChatRow[], turnMs: number | undefined): ChatRow[] | undefined {
 	const durationMs = between.some(isChapter) ? undefined : turnMs;
 	const out: ChatRow[] = [];
@@ -184,7 +182,6 @@ function foldSegments(userKey: string, between: ChatRow[], turnMs: number | unde
 
 const isChapter = (row: ChatRow) => isItem(row, "tool_call") && chapterOf(row.item as ToolCallItem) !== undefined;
 
-// What a call shows to the user in its own right stays out of the fold; a failed call has nothing to show and folds.
 function staysInView(row: ChatRow): boolean {
 	if (!isItem(row, "tool_call")) return false;
 	const call = row.item as ToolCallItem;
@@ -193,7 +190,6 @@ function staysInView(row: ChatRow): boolean {
 
 const TODO_TOOLS = new Set(["TodoWrite", "TaskCreate", "TaskUpdate"]);
 
-// The task list is always about the turn in progress or the one just finished, so it follows the last message.
 function tasksRow(transcript: Transcript, queued: ReadonlySet<string>): ChatRow | undefined {
 	let touched = false;
 	for (let i = transcript.items.length - 1; i >= 0; i--) {

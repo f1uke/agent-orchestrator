@@ -24,7 +24,6 @@ function chapterAt(row: ChatRow): Chapter[] {
 	return chapter ? [{ key: row.key, ...chapter }] : [];
 }
 
-/** The chapters in row order, each keyed by the top-level row that holds it. The session start leads once there is a real one. */
 export function chapters(rows: readonly ChatRow[]): Chapter[] {
 	const marked = rows.flatMap(chapterAt);
 	const first = rows[0];

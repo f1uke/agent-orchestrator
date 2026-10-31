@@ -25,7 +25,6 @@ export function wrapUpOf(call: ToolCallItem): WrapUp | undefined {
 	return ask === "" ? { recap, replies } : { recap, ask, replies };
 }
 
-/** The call id of the last wrap-up box in the rows, the only one whose buttons are live. */
 export function latestWrapUpId(rows: readonly ChatRow[]): string | undefined {
 	let id: string | undefined;
 	for (const row of rows) {
