@@ -90,29 +90,28 @@ func (s Store) Externalize(p json.RawMessage) (json.RawMessage, error) {
 	}
 	changed := false
 	if f := resultFile(v); f != nil {
-		raw, _ := f["base64"].(string)
-		mime, _ := f["type"].(string)
-		name, _, ok, err := s.storeBase64(raw, mime)
-		if err != nil {
-			return p, err
-		}
-		if ok {
+		if data, ok := base64Bytes(f["base64"]); ok {
+			mime, _ := f["type"].(string)
+			name, err := s.store(data, mime)
+			if err != nil {
+				return p, err
+			}
 			delete(f, "base64")
 			f["blob"] = name
 			changed = true
 		}
 	}
 	sourced, err := eachSource(v, func(src map[string]any) (map[string]any, error) {
-		if src["type"] != "base64" {
+		data, ok := base64Bytes(src["data"])
+		if src["type"] != "base64" || !ok {
 			return nil, nil
 		}
-		raw, _ := src["data"].(string)
 		mime, _ := src["media_type"].(string)
-		name, size, ok, err := s.storeBase64(raw, mime)
-		if err != nil || !ok {
+		name, err := s.store(data, mime)
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"type": refType, "media_type": mime, "blob": name, "size": size}, nil
+		return map[string]any{"type": refType, "media_type": mime, "blob": name, "size": len(data)}, nil
 	})
 	if err != nil || (!changed && !sourced) {
 		return p, err
@@ -200,14 +199,15 @@ func eachSource(v any, fn func(map[string]any) (map[string]any, error)) (bool, e
 	return changed, nil
 }
 
-func (s Store) storeBase64(raw, mime string) (string, int, bool, error) {
-	if raw == "" {
-		return "", 0, false, nil
-	}
+// base64Bytes decodes v when it is a non-empty standard base64 string. Any
+// other value is not a payload this package stores, so it stays inline.
+func base64Bytes(v any) ([]byte, bool) {
+	raw, _ := v.(string)
 	data, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return "", 0, false, nil //nolint:nilerr // data that is not base64 stays inline as written
-	}
+	return data, err == nil && len(data) > 0
+}
+
+func (s Store) store(data []byte, mime string) (string, error) {
 	ext := extByMIME[mime]
 	if ext == "" {
 		ext = "bin"
@@ -216,15 +216,15 @@ func (s Store) storeBase64(raw, mime string) (string, int, bool, error) {
 	name := hex.EncodeToString(sum[:]) + "." + ext
 	path := filepath.Join(s.dir, name)
 	if _, err := os.Stat(path); err == nil {
-		return name, len(data), true, nil
+		return name, nil
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return "", 0, false, fmt.Errorf("chatblob: create dir: %w", err)
+		return "", fmt.Errorf("chatblob: create dir: %w", err)
 	}
 	if err := fsatomic.WriteFile(path, data, 0o600); err != nil {
-		return "", 0, false, fmt.Errorf("chatblob: write %s: %w", name, err)
+		return "", fmt.Errorf("chatblob: write %s: %w", name, err)
 	}
-	return name, len(data), true, nil
+	return name, nil
 }
 
 func decode(p []byte) (any, bool) {
