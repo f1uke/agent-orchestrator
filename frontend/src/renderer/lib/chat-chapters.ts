@@ -1,6 +1,7 @@
 import { isObject } from "./chat-event";
 import type { ToolCallItem } from "./chat-fold";
 import type { ChatRow } from "./chat-rows";
+import { drewNothing } from "./chat-widget";
 
 export const MARK_CHAPTER = "mcp__ao__mark_chapter";
 
@@ -12,8 +13,7 @@ const START_TITLE = "Session start";
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 export function chapterOf(call: ToolCallItem): { title: string; summary: string } | undefined {
-	if (call.name !== MARK_CHAPTER || call.result?.isError) return undefined;
-	if (call.permission?.status === "denied" || call.permission?.status === "cancelled") return undefined;
+	if (call.name !== MARK_CHAPTER || drewNothing(call)) return undefined;
 	const input = isObject(call.input) ? call.input : {};
 	const title = [...text(input.title)].slice(0, MAX_TITLE_CHARS).join("").trim();
 	return title === "" ? undefined : { title, summary: text(input.summary) };

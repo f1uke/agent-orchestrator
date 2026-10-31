@@ -1,6 +1,7 @@
 import { isObject } from "./chat-event";
 import type { ToolCallItem } from "./chat-fold";
 import type { ChatRow } from "./chat-rows";
+import { drewNothing } from "./chat-widget";
 
 export const WRAP_UP = "mcp__ao__wrap_up";
 
@@ -12,8 +13,7 @@ const MAX_REPLY_CHARS = 24;
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 export function wrapUpOf(call: ToolCallItem): WrapUp | undefined {
-	if (call.name !== WRAP_UP || call.result?.isError) return undefined;
-	if (call.permission?.status === "denied" || call.permission?.status === "cancelled") return undefined;
+	if (call.name !== WRAP_UP || drewNothing(call)) return undefined;
 	const input = isObject(call.input) ? call.input : {};
 	const recap = text(input.recap);
 	if (recap === "") return undefined;
