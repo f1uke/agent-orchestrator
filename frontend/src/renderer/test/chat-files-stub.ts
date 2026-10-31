@@ -10,6 +10,25 @@ export const image = (path: string, root: ResolvedFile["root"] = "knowledge"): R
 	modifiedAt: "2026-10-31T00:00:00Z",
 });
 
+const MIME: Record<ResolvedFile["kind"], string> = {
+	image: "image/png",
+	markdown: "text/markdown; charset=utf-8",
+	html: "text/html; charset=utf-8",
+	pdf: "application/pdf",
+	json: "application/json",
+	text: "text/plain; charset=utf-8",
+	log: "text/plain; charset=utf-8",
+	diff: "text/plain; charset=utf-8",
+};
+
+/** A servable file of any kind, as the resolve route answers for it. */
+export const file = (
+	path: string,
+	kind: ResolvedFile["kind"],
+	root: ResolvedFile["root"] = "worktree",
+	size = 2048,
+): ResolvedFile => ({ root, path, kind, mime: MIME[kind], size, modifiedAt: "2026-10-31T00:00:00Z" });
+
 /**
  * Stands in for the daemon's two chat file routes. `known` maps a ref to what the
  * resolve route answers for it; any other ref names nothing. Returns the fetch mock

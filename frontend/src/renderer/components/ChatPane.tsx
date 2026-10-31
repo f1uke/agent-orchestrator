@@ -18,6 +18,7 @@ import type { ChatEntry } from "../lib/chat-event";
 import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
+import type { FileDoc, TurnDocs } from "../lib/chat-docs";
 import { clockTime, formatDuration } from "../lib/chat-time";
 import { contextUsage, formatTokens, sessionActivity, shownTodos } from "../lib/chat-inspect";
 import { newestUsage } from "../lib/chat-usage";
@@ -63,6 +64,7 @@ import {
 import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
+import { ChatDocsProvider, ChatDocStrip } from "./ChatDocs";
 import { ChatRefsProvider, RefImages } from "./RefImages";
 
 export type ChatPaneView = "chat" | "events";
@@ -75,6 +77,8 @@ type ChatPaneProps = {
 	chat?: ChatSessionState;
 	createMux?: () => ChatMux;
 	chatApi?: ChatApi;
+	onOpenDoc?: (doc: FileDoc) => void;
+	openDoc?: FileDoc | null;
 };
 
 type RequestStates = Readonly<Record<string, RequestState>>;
@@ -98,7 +102,17 @@ function useToast(): [string | null, (message: string) => void] {
 	return [toast, show];
 }
 
-export function ChatPane({ session, view, theme, daemonReady, chat: given, createMux, chatApi }: ChatPaneProps) {
+export function ChatPane({
+	session,
+	view,
+	theme,
+	daemonReady,
+	chat: given,
+	createMux,
+	chatApi,
+	onOpenDoc,
+	openDoc,
+}: ChatPaneProps) {
 	const own = useChatSession(given ? undefined : session.id, {
 		daemonReady,
 		sessionLive: session.status !== "terminated",
@@ -174,77 +188,79 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 	return (
 		<ChatRefsProvider sessionId={session.id}>
 			<TaskOutputProvider read={actions.taskOutput}>
-				<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-					{view === "events" ? (
-						<ChatEvents entries={chat.entries} />
-					) : (
-						<ChatStream
-							disabled={actions.hostDown}
-							replaying={chat.connection === "connecting"}
-							onAnswer={onAnswer}
-							onNewSession={setSuggested}
-							onPrompt={onPrompt}
-							pending={transcript.pending}
-							requests={requests}
-							root={root}
-							rows={rows}
-							theme={theme}
-						/>
-					)}
-					<div className="chat-bottom">
-						{actions.hostDown ? (
-							<div className="chat-banner" role="alert">
-								<CloudOff className="chat-icon" aria-hidden="true" />
-								Session is asleep or restarting. Sending and answering resume once it is back.
+				<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
+					<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
+						{view === "events" ? (
+							<ChatEvents entries={chat.entries} />
+						) : (
+							<ChatStream
+								disabled={actions.hostDown}
+								replaying={chat.connection === "connecting"}
+								onAnswer={onAnswer}
+								onNewSession={setSuggested}
+								onPrompt={onPrompt}
+								pending={transcript.pending}
+								requests={requests}
+								root={root}
+								rows={rows}
+								theme={theme}
+							/>
+						)}
+						<div className="chat-bottom">
+							{actions.hostDown ? (
+								<div className="chat-banner" role="alert">
+									<CloudOff className="chat-icon" aria-hidden="true" />
+									Session is asleep or restarting. Sending and answering resume once it is back.
+								</div>
+							) : null}
+							{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
+							{view === "chat" ? (
+								<ChatComposer
+									actions={actions}
+									busy={transcript.busy}
+									commands={transcript.commands}
+									model={transcript.model}
+									models={transcript.models}
+									onToast={showToast}
+									permissionMode={transcript.permissionMode}
+									prefill={prefill}
+									queued={queued}
+									sessionId={session.id}
+								/>
+							) : null}
+							<div className="chat-statusline">
+								<ConnectionLabel connection={chat.connection} error={chat.error} />
+								{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+								{runningInBackground > 0 ? (
+									<span>
+										<span className="chat-statusline__dot chat-statusline__dot--live" />
+										{runningInBackground} running in background
+									</span>
+								) : null}
+								<span className="chat-statusline__grow" />
+								{view === "chat" ? (
+									<>
+										<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+										<UsageMeter usage={usage} />
+										<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+									</>
+								) : null}
 							</div>
-						) : null}
-						{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
-						{view === "chat" ? (
-							<ChatComposer
-								actions={actions}
-								busy={transcript.busy}
-								commands={transcript.commands}
-								model={transcript.model}
-								models={transcript.models}
-								onToast={showToast}
-								permissionMode={transcript.permissionMode}
-								prefill={prefill}
-								queued={queued}
-								sessionId={session.id}
+						</div>
+						{suggested ? (
+							<SuggestedSessionDialog
+								onClose={() => setSuggested(undefined)}
+								projectId={session.workspaceId}
+								suggestion={suggested}
 							/>
 						) : null}
-						<div className="chat-statusline">
-							<ConnectionLabel connection={chat.connection} error={chat.error} />
-							{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
-							{runningInBackground > 0 ? (
-								<span>
-									<span className="chat-statusline__dot chat-statusline__dot--live" />
-									{runningInBackground} running in background
-								</span>
-							) : null}
-							<span className="chat-statusline__grow" />
-							{view === "chat" ? (
-								<>
-									<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
-									<UsageMeter usage={usage} />
-									<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
-								</>
-							) : null}
-						</div>
+						{toast ? (
+							<div className="chat-toast" role="status">
+								{toast}
+							</div>
+						) : null}
 					</div>
-					{suggested ? (
-						<SuggestedSessionDialog
-							onClose={() => setSuggested(undefined)}
-							projectId={session.workspaceId}
-							suggestion={suggested}
-						/>
-					) : null}
-					{toast ? (
-						<div className="chat-toast" role="status">
-							{toast}
-						</div>
-					) : null}
-				</div>
+				</ChatDocsProvider>
 			</TaskOutputProvider>
 		</ChatRefsProvider>
 	);
@@ -680,6 +696,7 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 					onPrompt={props.onPrompt}
 					openRows={openRows}
 					pendingByRequest={pendingByRequest}
+					docs={row.docs}
 					reply={row.reply}
 					root={root}
 					rowKey={row.key}
@@ -700,6 +717,7 @@ function ItemRow({
 	subagentTools,
 	task,
 	reply,
+	docs,
 	theme,
 	root,
 	openRows,
@@ -716,6 +734,7 @@ function ItemRow({
 	subagentTools: number;
 	task?: BackgroundTask;
 	reply?: string;
+	docs?: TurnDocs;
 }) {
 	switch (item.kind) {
 		case "user":
@@ -788,6 +807,7 @@ function ItemRow({
 			return (
 				<>
 					{reply !== undefined ? <AnswerBar end={item} reply={reply} /> : null}
+					{docs ? <ChatDocStrip docs={docs} /> : null}
 					<div className={cn("chat-sys", item.isError && "chat-sys--error")} data-notice="turn_end">
 						{turnEndText(item)}
 					</div>
