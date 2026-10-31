@@ -62,6 +62,7 @@ import {
 import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
+import { ChatRefsProvider, RefImages } from "./RefImages";
 
 export type ChatPaneView = "chat" | "events";
 
@@ -170,77 +171,79 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 	};
 
 	return (
-		<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-			{view === "events" ? (
-				<ChatEvents entries={chat.entries} />
-			) : (
-				<ChatStream
-					disabled={actions.hostDown}
-					replaying={chat.connection === "connecting"}
-					onAnswer={onAnswer}
-					onNewSession={setSuggested}
-					onPrompt={onPrompt}
-					pending={transcript.pending}
-					requests={requests}
-					root={root}
-					rows={rows}
-					theme={theme}
-				/>
-			)}
-			<div className="chat-bottom">
-				{actions.hostDown ? (
-					<div className="chat-banner" role="alert">
-						<CloudOff className="chat-icon" aria-hidden="true" />
-						Session is asleep or restarting. Sending and answering resume once it is back.
+		<ChatRefsProvider sessionId={session.id}>
+			<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
+				{view === "events" ? (
+					<ChatEvents entries={chat.entries} />
+				) : (
+					<ChatStream
+						disabled={actions.hostDown}
+						replaying={chat.connection === "connecting"}
+						onAnswer={onAnswer}
+						onNewSession={setSuggested}
+						onPrompt={onPrompt}
+						pending={transcript.pending}
+						requests={requests}
+						root={root}
+						rows={rows}
+						theme={theme}
+					/>
+				)}
+				<div className="chat-bottom">
+					{actions.hostDown ? (
+						<div className="chat-banner" role="alert">
+							<CloudOff className="chat-icon" aria-hidden="true" />
+							Session is asleep or restarting. Sending and answering resume once it is back.
+						</div>
+					) : null}
+					{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
+					{view === "chat" ? (
+						<ChatComposer
+							actions={actions}
+							busy={transcript.busy}
+							commands={transcript.commands}
+							model={transcript.model}
+							models={transcript.models}
+							onToast={showToast}
+							permissionMode={transcript.permissionMode}
+							prefill={prefill}
+							queued={queued}
+							sessionId={session.id}
+						/>
+					) : null}
+					<div className="chat-statusline">
+						<ConnectionLabel connection={chat.connection} error={chat.error} />
+						{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+						{runningInBackground > 0 ? (
+							<span>
+								<span className="chat-statusline__dot chat-statusline__dot--live" />
+								{runningInBackground} running in background
+							</span>
+						) : null}
+						<span className="chat-statusline__grow" />
+						{view === "chat" ? (
+							<>
+								<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+								<UsageMeter usage={usage} />
+								<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+							</>
+						) : null}
 					</div>
-				) : null}
-				{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
-				{view === "chat" ? (
-					<ChatComposer
-						actions={actions}
-						busy={transcript.busy}
-						commands={transcript.commands}
-						model={transcript.model}
-						models={transcript.models}
-						onToast={showToast}
-						permissionMode={transcript.permissionMode}
-						prefill={prefill}
-						queued={queued}
-						sessionId={session.id}
+				</div>
+				{suggested ? (
+					<SuggestedSessionDialog
+						onClose={() => setSuggested(undefined)}
+						projectId={session.workspaceId}
+						suggestion={suggested}
 					/>
 				) : null}
-				<div className="chat-statusline">
-					<ConnectionLabel connection={chat.connection} error={chat.error} />
-					{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
-					{runningInBackground > 0 ? (
-						<span>
-							<span className="chat-statusline__dot chat-statusline__dot--live" />
-							{runningInBackground} running in background
-						</span>
-					) : null}
-					<span className="chat-statusline__grow" />
-					{view === "chat" ? (
-						<>
-							<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
-							<UsageMeter usage={usage} />
-							<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
-						</>
-					) : null}
-				</div>
+				{toast ? (
+					<div className="chat-toast" role="status">
+						{toast}
+					</div>
+				) : null}
 			</div>
-			{suggested ? (
-				<SuggestedSessionDialog
-					onClose={() => setSuggested(undefined)}
-					projectId={session.workspaceId}
-					suggestion={suggested}
-				/>
-			) : null}
-			{toast ? (
-				<div className="chat-toast" role="status">
-					{toast}
-				</div>
-			) : null}
-		</div>
+		</ChatRefsProvider>
 	);
 }
 
@@ -727,9 +730,12 @@ function ItemRow({
 			return <UserMessage item={item} />;
 		case "assistant_text":
 			return (
-				<div className="note-prose chat-md">
-					<NoteMarkdown codeAction={askToRun(onPrompt)} source={item.text} theme={theme} />
-				</div>
+				<>
+					<div className="note-prose chat-md">
+						<NoteMarkdown codeAction={askToRun(onPrompt)} source={item.text} theme={theme} />
+					</div>
+					<RefImages source={item.text} />
+				</>
 			);
 		case "thinking":
 			return <ThinkingRow onToggle={(open) => toggleRow(rowKey, open)} open={openRows[rowKey]} text={item.text} />;
@@ -840,9 +846,12 @@ function TaskMessageCard({
 				<div className="chat-task__body">
 					<p>{item.summary}</p>
 					{item.result ? (
-						<div className="note-prose chat-md">
-							<NoteMarkdown source={item.result} theme={theme} />
-						</div>
+						<>
+							<div className="note-prose chat-md">
+								<NoteMarkdown source={item.result} theme={theme} />
+							</div>
+							<RefImages source={item.result} />
+						</>
 					) : null}
 				</div>
 			) : null}
@@ -946,8 +955,11 @@ function TaskBrief({
 				{open ? null : <span className="chat-brief__preview">{preview}</span>}
 			</button>
 			{open ? (
-				<div className="chat-brief__body note-prose chat-md">
-					<NoteMarkdown source={body} theme={theme} />
+				<div className="chat-brief__body">
+					<div className="note-prose chat-md">
+						<NoteMarkdown source={body} theme={theme} />
+					</div>
+					<RefImages source={body} />
 				</div>
 			) : null}
 		</div>
@@ -978,6 +990,7 @@ function PeerMessage({
 			<div className="note-prose chat-md">
 				<NoteMarkdown source={body} theme={theme} />
 			</div>
+			<RefImages source={body} />
 		</div>
 	);
 }

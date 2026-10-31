@@ -1,12 +1,13 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatApi, ChatResult } from "../lib/chat-api";
 import type { ChatEntry } from "../lib/chat-event";
 import { foldEntries } from "../lib/chat-fold";
 import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import { emptyOverlay } from "../lib/chat-stream";
 import { aoBridge } from "../lib/bridge";
+import { image, resolveCalls, stubChatFiles } from "../test/chat-files-stub";
 import { useUiStore } from "../stores/ui-store";
 import type { SubscriptionUsage } from "../lib/chat-usage";
 import type { WorkspaceSession } from "../types/workspace";
@@ -1388,5 +1389,140 @@ describe("ChatPane run button and suggestion cards", () => {
 		);
 		expect(document.querySelector("[data-turn]")).not.toBeNull();
 		expect(document.querySelectorAll("[data-suggest]")).toHaveLength(2);
+	});
+});
+
+describe("ChatPane image refs", () => {
+	const known = {
+		"shots/a.png": [image("shots/a.png")],
+		"shots/clash-*.png": [image("shots/clash-1.png"), image("shots/clash-2.png")],
+	};
+	const named = "Captured `shots/a.png` and `shots/clash-*.png`, plus `shots/gone.png`.";
+	const thumbs = () => screen.queryAllByTestId("ref-images").flatMap((row) => within(row).queryAllByRole("img"));
+
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("draws the images an assistant reply names under it and keeps its text", async () => {
+		const fetchMock = stubChatFiles(known);
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), saying(named));
+		await waitFor(() => expect(thumbs()).toHaveLength(3));
+		expect(thumbs().map((t) => t.getAttribute("alt"))).toEqual(["a.png", "clash-1.png", "clash-2.png"]);
+		expect(screen.getByText("shots/gone.png")).toBeInTheDocument();
+		expect(resolveCalls(fetchMock)).toEqual([["shots/a.png", "shots/clash-*.png", "shots/gone.png"]]);
+		expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+			"/api/v1/sessions/chat-1/chat/files/knowledge/shots/clash-2.png",
+		);
+	});
+
+	it("waits for the reply to finish before it asks, then asks once", async () => {
+		const fetchMock = stubChatFiles(known);
+		const { feed, delta } = renderPane();
+		delta(
+			{ type: "message_start", message: { id: "m1" } },
+			{
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "Captured `shots/a.png` and `shots/cl" },
+			},
+		);
+		await settle();
+		expect(document.querySelector("[data-streaming]")).not.toBeNull();
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		feed(
+			out({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "Captured `shots/a.png`." }] } }),
+		);
+		await waitFor(() => expect(thumbs()).toHaveLength(1));
+		expect(resolveCalls(fetchMock)).toEqual([["shots/a.png"]]);
+	});
+
+	it("draws nothing and no error when the daemon cannot confirm the path", async () => {
+		const fetchMock = stubChatFiles({});
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), saying("Look at `shots/gone.png`."));
+		await waitFor(() => expect(resolveCalls(fetchMock)).toHaveLength(1));
+		await settle();
+		expect(thumbs()).toHaveLength(0);
+		expect(screen.queryByRole("alert")).toBeNull();
+		expect(screen.getByText("shots/gone.png")).toBeInTheDocument();
+	});
+
+	it("draws them under a peer message and an orchestrator message", async () => {
+		stubChatFiles(known);
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			lifecycle("u1", "completed"),
+			entry("host", { kind: "user_origin", uuid: "u2", origin: { via: "ao_send", from: "billing-portal-12" } }),
+			entry("in", {
+				type: "user",
+				uuid: "u2",
+				message: { content: "[from @billing-portal-12] See `shots/clash-*.png`." },
+			}),
+			entry("host", { kind: "user_origin", uuid: "u3", origin: { via: "ao_send", from: "proj-orchestrator" } }),
+			entry("in", {
+				type: "user",
+				uuid: "u3",
+				message: { content: "[from @proj-orchestrator] Compare `shots/a.png`." },
+			}),
+			lifecycle("u2", "completed"),
+			lifecycle("u3", "completed"),
+		);
+		const peer = document.querySelector(".chat-peer:not(.chat-peer--orchestrator)")! as HTMLElement;
+		const orchestrator = document.querySelector(".chat-peer--orchestrator")! as HTMLElement;
+		await waitFor(() => expect(within(peer).getAllByRole("img")).toHaveLength(2));
+		await waitFor(() => expect(within(orchestrator).getAllByRole("img")).toHaveLength(1));
+	});
+
+	it("draws them under the task brief once it is open", async () => {
+		stubChatFiles(known);
+		const { feed, user } = renderPane();
+		feed(
+			entry("host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }),
+			userIn("b", "# Goal\nCompare with `shots/a.png`."),
+			lifecycle("b", "completed"),
+		);
+		const brief = document.querySelector("[data-brief]")! as HTMLElement;
+		expect(within(brief).queryByRole("img")).toBeNull();
+		await user.click(screen.getByRole("button", { name: /Task brief/ }));
+		await waitFor(() => expect(within(brief).getAllByRole("img")).toHaveLength(1));
+	});
+
+	it("draws them under a finished agent's result once the card is open", async () => {
+		stubChatFiles(known);
+		const { feed, user } = renderPane();
+		const notification = [
+			"<task-notification>",
+			"<task-id>a1</task-id>",
+			"<status>completed</status>",
+			'<summary>Agent "Capture screens" finished</summary>',
+			"<result>Saved `shots/a.png`.</result>",
+			"</task-notification>",
+		].join("\n");
+		feed(userIn("u1", "go"), out({ type: "user", isReplay: true, message: { role: "user", content: notification } }));
+		const card = document.querySelector("[data-task-message]")! as HTMLElement;
+		expect(within(card).queryByRole("img")).toBeNull();
+		await user.click(card.querySelector("button")!);
+		await waitFor(() => expect(within(card).getAllByRole("img")).toHaveLength(1));
+	});
+
+	it("draws them under the plan card and keeps one resolve call per ref", async () => {
+		const fetchMock = stubChatFiles(known);
+		const { feed } = renderPane();
+		feed(
+			out({
+				type: "control_request",
+				request_id: "r1",
+				request: {
+					subtype: "can_use_tool",
+					tool_name: "ExitPlanMode",
+					tool_use_id: "t9",
+					input: { plan: "# Plan\n\nMatch `shots/a.png`.", planFilePath: "p.md" },
+				},
+			}),
+		);
+		await waitFor(() => expect(thumbs()).toHaveLength(1));
+		expect(resolveCalls(fetchMock)).toEqual([["shots/a.png"]]);
 	});
 });

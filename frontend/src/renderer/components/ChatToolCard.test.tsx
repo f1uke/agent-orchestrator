@@ -1,7 +1,9 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundTask, Pending, PermissionOutcome, ToolCallItem } from "../lib/chat-fold";
+import { image, stubChatFiles } from "../test/chat-files-stub";
+import { ChatRefsProvider } from "./RefImages";
 import { PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 
 const call = (name: string, input: unknown, result?: ToolCallItem["result"], permission?: PermissionOutcome) =>
@@ -579,5 +581,83 @@ describe("PlanCard", () => {
 		await userEvent.type(screen.getByRole("textbox", { name: "Plan feedback" }), "Name it goodbye.txt");
 		await userEvent.click(send);
 		expect(onAnswer).toHaveBeenCalledWith({ requestId: "r1", behavior: "deny", message: "Name it goodbye.txt" });
+	});
+});
+
+describe("image refs in a request card", () => {
+	const known = {
+		"plans/compare-1920x1080.png": [image("plans/compare-1920x1080.png")],
+		"plans/clash-*.png": [image("plans/clash-1.png"), image("plans/clash-2.png")],
+	};
+	const inSession = (request: Pending) =>
+		render(
+			<ChatRefsProvider sessionId="chat-1">
+				<PendingRequestCard disabled={false} onAnswer={vi.fn()} request={request} state={undefined} theme="dark" />
+			</ChatRefsProvider>,
+		);
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("draws the images the question, an option's label, description and preview name, once for the card", async () => {
+		stubChatFiles(known);
+		inSession(
+			pending("question", "AskUserQuestion", {
+				questions: [
+					{
+						question: "Which layout? See `plans/compare-1920x1080.png`.",
+						header: "Layout",
+						options: [
+							{ label: "A", description: "Like `plans/clash-*.png`", preview: "" },
+							{ label: "B", description: "none", preview: "no image here" },
+						],
+					},
+				],
+			}),
+		);
+		const row = await screen.findByTestId("ref-images");
+		await waitFor(() => expect(within(row).getAllByRole("img")).toHaveLength(3));
+		expect(screen.getAllByTestId("ref-images")).toHaveLength(1);
+		expect(screen.getByRole("radio", { name: /Like `plans\/clash-\*\.png`/ })).toBeInTheDocument();
+	});
+
+	it("follows the question that is showing, not the others", async () => {
+		stubChatFiles(known);
+		inSession(
+			pending("question", "AskUserQuestion", {
+				questions: [
+					{ question: "First?", header: "One", options: [{ label: "x", description: "" }] },
+					{ question: "Second `plans/clash-*.png`?", header: "Two", options: [{ label: "y", description: "" }] },
+				],
+			}),
+		);
+		expect(screen.queryByTestId("ref-images")).toBeNull();
+		await userEvent.click(screen.getByRole("tab", { name: "Two" }));
+		await waitFor(() => expect(within(screen.getByTestId("ref-images")).getAllByRole("img")).toHaveLength(2));
+	});
+
+	it("draws the images the plan names under it, and opens them in the lightbox", async () => {
+		stubChatFiles(known);
+		inSession(
+			pending("plan", "ExitPlanMode", { plan: "# Plan\n\nMatch `plans/compare-1920x1080.png`.", planFilePath: "p.md" }),
+		);
+		const thumb = await screen.findByRole("button", { name: "View compare-1920x1080.png" });
+		await userEvent.click(thumb);
+		expect(await screen.findByRole("dialog")).toBeInTheDocument();
+	});
+
+	it("draws the images a plan names when it is shown as an ExitPlanMode tool body", async () => {
+		stubChatFiles(known);
+		render(
+			<ChatRefsProvider sessionId="chat-1">
+				<ToolCard
+					call={call("ExitPlanMode", { plan: "Match `plans/compare-1920x1080.png`.", planFilePath: "p.md" })}
+					onToggle={vi.fn()}
+					open
+					root=""
+					subagentTools={0}
+					theme="dark"
+				/>
+			</ChatRefsProvider>,
+		);
+		expect(await screen.findByRole("img", { name: "compare-1920x1080.png" })).toBeInTheDocument();
 	});
 });
