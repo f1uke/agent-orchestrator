@@ -3,11 +3,13 @@ package terminal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatblob"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
@@ -44,13 +46,13 @@ func (s *chatStream) stop() {
 func (c *connState) handleChat(msg clientMsg) {
 	switch msg.Type {
 	case msgOpen:
-		c.openChat(msg.ID, msg.FromSeq)
+		c.openChat(msg.ID, msg.FromSeq, msg.BlobRefs)
 	case msgClose:
 		c.closeChat(msg.ID)
 	}
 }
 
-func (c *connState) openChat(id string, fromSeq uint64) {
+func (c *connState) openChat(id string, fromSeq uint64, blobRefs bool) {
 	if id == "" {
 		c.enqueue(serverMsg{Ch: chChat, Type: msgError, Error: "missing session id"})
 		return
@@ -68,7 +70,7 @@ func (c *connState) openChat(id string, fromSeq uint64) {
 	go func() {
 		defer close(s.done)
 		defer cancel()
-		c.streamChat(ctx, s, id, fromSeq)
+		c.streamChat(ctx, s, id, fromSeq, blobRefs)
 	}()
 }
 
@@ -82,9 +84,17 @@ func (c *connState) closeChat(id string) {
 	}
 }
 
-func (c *connState) streamChat(ctx context.Context, s *chatStream, id string, fromSeq uint64) {
+func (c *connState) streamChat(ctx context.Context, s *chatStream, id string, fromSeq uint64, blobRefs bool) {
+	var blobs chatblob.Store
 	send := func(m serverMsg) bool {
 		m.Ch, m.ID = chChat, id
+		if m.Entry != nil {
+			e, err := shapeImages(blobs, *m.Entry, blobRefs)
+			if err != nil {
+				c.mgr.log.Warn("chat: entry images", "session", id, "seq", m.Entry.Seq, "err", err)
+			}
+			m.Entry = &e
+		}
 		select {
 		case c.out <- m:
 			return true
@@ -108,6 +118,7 @@ func (c *connState) streamChat(ctx context.Context, s *chatStream, id string, fr
 		end(serverMsg{Type: msgError, Error: err.Error()})
 		return
 	}
+	blobs = chatblob.ForLog(logPath)
 	entries, err := chatLogAfter(logPath, fromSeq)
 	if err != nil {
 		end(serverMsg{Type: msgError, Error: err.Error()})
@@ -169,6 +180,21 @@ func chatLogAfter(path string, fromSeq uint64) ([]chatproto.Entry, error) {
 		}
 	}
 	return nil, nil
+}
+
+func shapeImages(blobs chatblob.Store, e chatproto.Entry, refs bool) (chatproto.Entry, error) {
+	var shaped json.RawMessage
+	var err error
+	if refs {
+		shaped, err = blobs.Externalize(e.Payload)
+	} else {
+		shaped, err = blobs.Inline(e.Payload)
+	}
+	if err != nil {
+		return e, err
+	}
+	e.Payload = shaped
+	return e, nil
 }
 
 func completeLines(data []byte) []byte {

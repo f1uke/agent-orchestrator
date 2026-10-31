@@ -39,6 +39,10 @@ describe("buildContentSecurityPolicy", () => {
 		expect(directive(csp, "media-src")).not.toContain("http://127.0.0.1");
 	});
 
+	it("lets the app frame only its own origin, for the chat widget frame", () => {
+		expect(directive(buildContentSecurityPolicy(""), "frame-src")).toBe("frame-src 'self'");
+	});
+
 	it("appends a configured PostHog origin to connect-src, and omits it when blank", () => {
 		expect(directive(buildContentSecurityPolicy("https://ph.example"), "connect-src")).toContain("https://ph.example");
 		// No trailing empty token when there is no PostHog origin.

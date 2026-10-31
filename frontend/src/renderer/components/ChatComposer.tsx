@@ -61,6 +61,8 @@ function mentionMenu(files: FilesState, query: string): TokenMenuModel {
 	};
 }
 
+export type Prefill = { text: string; seq: number };
+
 type ComposerProps = {
 	sessionId: string;
 	actions: ChatActions;
@@ -71,6 +73,7 @@ type ComposerProps = {
 	models: readonly ChatModel[];
 	model: string;
 	onToast: (message: string) => void;
+	prefill?: Prefill;
 };
 
 export function ChatComposer({
@@ -83,6 +86,7 @@ export function ChatComposer({
 	models,
 	model,
 	onToast,
+	prefill,
 }: ComposerProps) {
 	const [text, setText] = useState("");
 	const [caret, setCaret] = useState(0);
@@ -133,6 +137,14 @@ export function ChatComposer({
 		setCaret(at);
 		pendingCaret.current = at;
 	};
+
+	const seenPrefill = useRef(prefill?.seq);
+	useLayoutEffect(() => {
+		if (!prefill || prefill.seq === seenPrefill.current) return;
+		seenPrefill.current = prefill.seq;
+		const next = text.trim() === "" ? prefill.text : `${text}\n\n${prefill.text}`;
+		edit(next, next.length);
+	});
 
 	const pick = (index: number) => {
 		const choice = menu?.choices[index];

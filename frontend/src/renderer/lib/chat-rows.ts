@@ -1,6 +1,7 @@
 import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
+import { SHOW_WIDGET, widgetOf } from "./chat-widget";
 import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunning } from "./chat-tools";
 
 /** A step inside a process group: a tool call, or the thinking between tool calls. */
@@ -39,7 +40,7 @@ export const itemRowKey = (itemIndex: number) => `i${itemIndex}`;
 // and shows as its own row, or is not shown in the main column at all.
 type Role = "process" | "break" | "skip";
 
-const OWN_ROW_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
+const OWN_ROW_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", SHOW_WIDGET]);
 
 function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 	switch (item.kind) {
@@ -138,13 +139,20 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 				break;
 			}
 		}
-		const folded = turnRow(row.key, rows.slice(i + 1, last), ended.item.durationMs);
+		const between = rows.slice(i + 1, last);
+		const folded = turnRow(
+			row.key,
+			between.filter((r) => !isDrawnWidget(r)),
+			ended.item.durationMs,
+		);
 		if (!folded) continue;
-		out.push(folded);
+		out.push(folded, ...between.filter(isDrawnWidget));
 		i = last - 1;
 	}
 	return out;
 }
+
+const isDrawnWidget = (row: ChatRow) => isItem(row, "tool_call") && widgetOf(row.item as ToolCallItem) !== undefined;
 
 function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {
 	const last = rows.at(-1);

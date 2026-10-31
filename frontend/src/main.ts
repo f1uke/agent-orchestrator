@@ -48,6 +48,7 @@ import { shouldReplacePortHolder } from "./shared/daemon-takeover";
 import { buildDaemonEnv, resolveShellEnv, type ShellRunner } from "./shared/shell-env";
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/posthog-config";
 import { buildTelemetryBootstrap, defaultDataDir } from "./shared/telemetry";
+import { allowSubframeNavigation } from "./main/frame-navigation";
 import { createBrowserViewHost, type BrowserViewHost } from "./main/browser-view-host";
 import { createCompanionOverlay, type CompanionOverlay } from "./main/companion-window";
 import {
@@ -508,6 +509,13 @@ function createWindow(): void {
 
 	mainWindow.webContents.on("will-navigate", (event, url) => {
 		if (url !== mainWindow?.webContents.getURL()) {
+			event.preventDefault();
+		}
+	});
+
+	// will-navigate sees only the main frame; a widget's script can send its subframe anywhere.
+	mainWindow.webContents.on("will-frame-navigate", (event) => {
+		if (!event.isMainFrame && !allowSubframeNavigation(event.url, mainWindow?.webContents.getURL() ?? "")) {
 			event.preventDefault();
 		}
 	});

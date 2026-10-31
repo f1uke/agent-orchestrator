@@ -1122,3 +1122,84 @@ describe("ChatPane composer footer and todo bar", () => {
 		expect(bar.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 });
+
+describe("ChatPane visuals", () => {
+	const WIDGET = "mcp__ao__show_widget";
+	const draw = (id: string, title: string) => toolUse(id, WIDGET, { title, widget_code: "<svg></svg>" });
+	const frameOf = (title: string) => screen.getByTitle(title) as HTMLIFrameElement;
+	const fromFrame = (title: string, data: unknown) =>
+		act(() => {
+			window.dispatchEvent(new MessageEvent("message", { data, source: frameOf(title).contentWindow }));
+		});
+	const composer = () => screen.getByRole("textbox", { name: "Message Claude" });
+
+	it("draws a show_widget call as a visual instead of a tool card", () => {
+		const { feed } = renderPane();
+		feed(userIn("u1", "draw it"), draw("w1", "flow"), toolDone("w1", "Shown to the user."));
+		expect(frameOf("flow").getAttribute("sandbox")).toBe("allow-scripts");
+		expect(document.querySelector('[data-tool="mcp__ao__show_widget"]')).toBeNull();
+	});
+
+	it("puts a prompt from the frame in the composer and sends nothing", async () => {
+		const { feed, api } = renderPane();
+		feed(userIn("u1", "draw it"), draw("w1", "flow"), toolDone("w1"));
+		fromFrame("flow", { type: "ao-widget/prompt", text: "Why does the curve bend?" });
+		await settle();
+		expect(composer()).toHaveValue("Why does the curve bend?");
+		expect(composer()).toHaveFocus();
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("puts the same prompt in again after the user cleared the box", async () => {
+		const { feed, user } = renderPane();
+		feed(userIn("u1", "draw it"), draw("w1", "flow"), toolDone("w1"));
+		fromFrame("flow", { type: "ao-widget/prompt", text: "Again" });
+		await settle();
+		await user.clear(composer());
+		fromFrame("flow", { type: "ao-widget/prompt", text: "Again" });
+		await settle();
+		expect(composer()).toHaveValue("Again");
+	});
+
+	it("ignores a prompt that did not come from a visual's frame", async () => {
+		const { feed, api } = renderPane();
+		feed(userIn("u1", "draw it"), draw("w1", "flow"), toolDone("w1"));
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "ao-widget/prompt", text: "spoof" }, source: window }),
+			);
+		});
+		await settle();
+		expect(composer()).toHaveValue("");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("draws a failed call as a tool card, not a frame", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "draw it"),
+			draw("w1", "flow"),
+			toolDone("w1", "widget_code is 200000 bytes; the limit is 131072.", true),
+		);
+		expect(screen.queryByTitle("flow")).toBeNull();
+		expect(document.querySelector('[data-tool="mcp__ao__show_widget"]')).not.toBeNull();
+	});
+
+	it("keeps a visual on screen after its turn folds", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "draw it"),
+			lifecycle("u1", "started"),
+			toolUse("r1", "Read", { file_path: "a.go" }),
+			toolDone("r1"),
+			toolUse("r2", "Bash", { command: "ls" }),
+			toolDone("r2"),
+			draw("w1", "flow"),
+			toolDone("w1"),
+			saying("Here it is."),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		expect(document.querySelector("[data-turn]")).not.toBeNull();
+		expect(frameOf("flow")).toBeInTheDocument();
+	});
+});

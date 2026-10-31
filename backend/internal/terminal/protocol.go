@@ -62,6 +62,9 @@ type clientMsg struct {
 	Rows uint16 `json:"rows,omitempty"`
 	// FromSeq is the last log seq the client holds, for ch "chat" / type "open".
 	FromSeq uint64 `json:"fromSeq,omitempty"`
+	// BlobRefs asks ch "chat" / type "open" to send stored images as ao_blob
+	// references, fetched from the chat blob route, instead of inline base64.
+	BlobRefs bool `json:"blobRefs,omitempty"`
 }
 
 // serverMsg is one outbound frame.

@@ -3,6 +3,7 @@ import type { ChatApi, ChatResult } from "./chat-api";
 import { type ChatEntry, type Direction, isObject } from "./chat-event";
 import { ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
+import { MOCK_WIDGETS_CHAT_SESSION, widgetEntries } from "./chat-mock-widgets";
 import type { ChatMux, ChatMuxListeners } from "./chat-mux";
 import type { MuxConnectionState } from "./terminal-mux";
 
@@ -884,9 +885,11 @@ function stubSession(id: string): Promise<StubSession> {
 								? imagesEntries()
 								: id === MOCK_CODE_CHAT_SESSION
 									? codeEntries()
-									: long
-										? fixture
-										: mockChatEntries(fixture);
+									: id === MOCK_WIDGETS_CHAT_SESSION
+										? widgetEntries()
+										: long
+											? fixture
+											: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };

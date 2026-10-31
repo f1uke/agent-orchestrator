@@ -63,7 +63,7 @@ export function Elapsed({ since }: { since: string }) {
 	return <span className="chat-live__time"> {formatDuration(now - start)}</span>;
 }
 
-function LiveDots() {
+export function LiveDots() {
 	return (
 		<span aria-hidden="true" className="chat-dots">
 			<i />

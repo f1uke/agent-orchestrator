@@ -401,3 +401,51 @@ func TestChatFilesResolveValidatesTheRequest(t *testing.T) {
 		t.Errorf("1024-byte ref = %d %s, want 200", status, out)
 	}
 }
+
+func TestChatBlobServesAStoredImageOfThatSessionOnly(t *testing.T) {
+	base := t.TempDir()
+	svc := newFakeSessionService()
+	cfg := config.Config{DataDir: base}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(cfg, log, nil, httpd.APIDeps{Sessions: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	const name = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4.png"
+	writeFile(t, filepath.Join(base, "sessions", "ao-1", "blobs", name), "hi")
+	writeFile(t, filepath.Join(base, "sessions", "ao-1", "events.jsonl"), "{}")
+
+	body, status, h := doRequestHeaders(t, srv, "/api/v1/sessions/ao-1/chat/blobs/"+name)
+	if status != http.StatusOK || string(body) != "hi" {
+		t.Fatalf("GET blob = %d %q, want 200 hi", status, body)
+	}
+	for k, want := range map[string]string{
+		"Content-Type":            "image/png",
+		"X-Content-Type-Options":  "nosniff",
+		"Content-Security-Policy": fileCSP,
+		"Cache-Control":           "private, max-age=31536000, immutable",
+	} {
+		if got := h.Get(k); got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+	for _, path := range []string{
+		"/api/v1/sessions/ao-404/chat/blobs/" + name,
+		"/api/v1/sessions/ao-1/chat/blobs/" + strings.Replace(name, "8f", "00", 1),
+		"/api/v1/sessions/ao-1/chat/blobs/events.jsonl",
+		"/api/v1/sessions/ao-1/chat/blobs/..%2fevents.jsonl",
+	} {
+		if _, status, _ := doRequestHeaders(t, srv, path); status != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, status)
+		}
+	}
+}
+
+func doRequestHeaders(t *testing.T, srv *httptest.Server, path string) ([]byte, int, http.Header) {
+	t.Helper()
+	resp, err := srv.Client().Get(srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	return body, resp.StatusCode, resp.Header
+}

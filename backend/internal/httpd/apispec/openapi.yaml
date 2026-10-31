@@ -3592,6 +3592,59 @@ paths:
         is waiting on. Answers 409 CHAT_REQUEST_REJECTED when the request is not pending
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/blobs/{blob}:
+    get:
+      operationId: getChatBlob
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: 'The blob name an ao_blob image source carries: the SHA-256 of
+          the bytes in lowercase hex, a dot, and the extension (png, jpg, gif, webp,
+          pdf or bin).'
+        in: path
+        name: blob
+        required: true
+        schema:
+          description: 'The blob name an ao_blob image source carries: the SHA-256
+            of the bytes in lowercase hex, a dot, and the extension (png, jpg, gif,
+            webp, pdf or bin).'
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Serve an image a chat session's event log stores by reference (an ao_blob
+        image source). The name is the hash of the bytes, so the answer is immutable.
+        Answers with the type its extension names, nosniff and a sandbox CSP. 404
+        for an unknown session, a name that is not a blob name, or a missing blob
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/files/{root}/*:
     get:
       operationId: getChatFile

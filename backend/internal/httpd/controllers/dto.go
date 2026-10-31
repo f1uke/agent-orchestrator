@@ -121,6 +121,12 @@ type ChatFileParam struct {
 	Root      string `path:"root" enum:"worktree,knowledge" description:"Which directory the file is read from, as the resolve route reported it."`
 }
 
+// ChatBlobParam is the {sessionId}/{blob} path parameters of the chat blob route.
+type ChatBlobParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	Blob      string `path:"blob" description:"The blob name an ao_blob image source carries: the SHA-256 of the bytes in lowercase hex, a dot, and the extension (png, jpg, gif, webp, pdf or bin)."`
+}
+
 // SimLeaseParam is the {sessionId}/{udid} path parameters for releasing a
 // simulator device lease.
 type SimLeaseParam struct {

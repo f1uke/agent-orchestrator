@@ -29,10 +29,12 @@ import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
 import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
+import { widgetOf } from "../lib/chat-widget";
 import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
-import { ChatComposer } from "./ChatComposer";
+import { ChatComposer, type Prefill } from "./ChatComposer";
 import { ContextMeter, UsageMeter } from "./ChatMeters";
 import { ChatTodoBar } from "./ChatTodoBar";
+import { ChatWidget } from "./ChatWidget";
 import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 import {
@@ -91,6 +93,7 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 	const actions = useChatActions(session.id, chat.connection, chatApi);
 	const [requests, setRequests] = useState<RequestStates>({});
 	const [toast, showToast] = useToast();
+	const [prefill, setPrefill] = useState<Prefill>();
 	const { transcript } = chat;
 
 	const queuedIds = useMemo(() => new Set(transcript.queued.filter((uuid) => uuid !== "")), [transcript.queued]);
@@ -140,6 +143,8 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 		[sendAnswer, setMode, showToast],
 	);
 
+	const onPrompt = useCallback((text: string) => setPrefill((prev) => ({ text, seq: (prev?.seq ?? 0) + 1 })), []);
+
 	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
 		if (e.key !== "Escape" || e.defaultPrevented || !transcript.busy || actions.hostDown) return;
 		const target = e.target as Element;
@@ -159,6 +164,7 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 					disabled={actions.hostDown}
 					replaying={chat.connection === "connecting"}
 					onAnswer={onAnswer}
+					onPrompt={onPrompt}
 					pending={transcript.pending}
 					requests={requests}
 					root={root}
@@ -183,6 +189,7 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 						models={transcript.models}
 						onToast={showToast}
 						permissionMode={transcript.permissionMode}
+						prefill={prefill}
 						queued={queued}
 						sessionId={session.id}
 					/>
@@ -282,6 +289,7 @@ type StreamProps = {
 	requests: RequestStates;
 	disabled: boolean;
 	onAnswer: AnswerHandler;
+	onPrompt: (text: string) => void;
 };
 
 // Within this many pixels of the end the user has reached the latest row.
@@ -315,7 +323,7 @@ function isEditable(target: EventTarget): boolean {
 	);
 }
 
-function ChatStream({ rows, replaying, root, pending, theme, requests, disabled, onAnswer }: StreamProps) {
+function ChatStream({ rows, replaying, root, pending, theme, requests, disabled, onAnswer, onPrompt }: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
@@ -519,6 +527,7 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 							>
 								<ChatRowView
 									answers={answers}
+									onPrompt={onPrompt}
 									openRows={openRows}
 									pendingByRequest={pendingByRequest}
 									root={root}
@@ -557,6 +566,7 @@ type RowProps = {
 	root: string;
 	openRows: OpenRows;
 	toggleRow: ToggleRow;
+	onPrompt: (text: string) => void;
 	pendingByRequest: ReadonlyMap<string, Pending>;
 	sessionNames: ReadonlyMap<string, string>;
 };
@@ -608,6 +618,7 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 				<ItemRow
 					answers={answers}
 					item={row.item}
+					onPrompt={props.onPrompt}
 					openRows={openRows}
 					pendingByRequest={pendingByRequest}
 					reply={row.reply}
@@ -634,6 +645,7 @@ function ItemRow({
 	root,
 	openRows,
 	toggleRow,
+	onPrompt,
 	pendingByRequest,
 	sessionNames,
 }: Omit<RowProps, "row"> & {
@@ -672,6 +684,7 @@ function ItemRow({
 				if (request) return <RequestCard answers={answers} request={request} theme={theme} />;
 			}
 			if (item.name === "AskUserQuestion" && permission) return <ResolvedLine call={item} />;
+			if (widgetOf(item)) return <ChatWidget call={item} onPrompt={onPrompt} theme={theme} />;
 			return (
 				<>
 					<ToolCard
