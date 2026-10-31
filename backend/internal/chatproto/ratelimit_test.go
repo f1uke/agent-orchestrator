@@ -7,8 +7,8 @@ import (
 )
 
 func TestParseRateLimit(t *testing.T) {
-	real := `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1793374200,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.01,"resetsAt":1793374200,"status":"allowed"},"seven_day":{"utilization":0.36,"resetsAt":1793692800,"status":"allowed"}}},"uuid":"u","session_id":"s"}`
-	got, ok := ParseRateLimit([]byte(real))
+	emitted := `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1793374200,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.01,"resetsAt":1793374200,"status":"allowed"},"seven_day":{"utilization":0.36,"resetsAt":1793692800,"status":"allowed"}}},"uuid":"u","session_id":"s"}`
+	got, ok := ParseRateLimit([]byte(emitted))
 	if !ok {
 		t.Fatal("did not parse the shape claude emits")
 	}
