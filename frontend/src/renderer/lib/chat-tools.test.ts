@@ -80,6 +80,36 @@ describe("describeTool path shortening", () => {
 	});
 });
 
+describe("describeTool Read of an image", () => {
+	const png = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } };
+	const read = (content: unknown) => call("Read", { file_path: "/work/project/docs/shot.png" }, { content });
+
+	it("shows the image bytes with the path instead of an empty output", () => {
+		const view = describeTool(read([png]), { root: ROOT });
+		expect(view.body).toEqual({
+			kind: "image",
+			images: [{ mediaType: "image/png", base64: "iVBORw==" }],
+			path: "docs/shot.png",
+		});
+		expect(view.status).toEqual({ tone: "ok", text: "image" });
+	});
+
+	it("counts several images in the status", () => {
+		expect(describeTool(read([png, png]), { root: ROOT }).status).toEqual({ tone: "ok", text: "2 images" });
+	});
+
+	it("keeps a text Read as output", () => {
+		const view = describeTool(read("1\tpackage x\n2\n3"), { root: ROOT });
+		expect(view.body).toEqual({ kind: "output", text: "1\tpackage x\n2\n3" });
+		expect(view.status).toEqual({ tone: "ok", text: "3 lines" });
+	});
+
+	it("keeps a Read whose image blocks are all unusable as output", () => {
+		const unknown = { type: "image", source: { type: "base64", media_type: "image/tiff", data: "AA" } };
+		expect(describeTool(read([unknown]), { root: ROOT }).body.kind).toBe("output");
+	});
+});
+
 describe("describeTool background Bash", () => {
 	const bg = (result?: boolean) =>
 		call(

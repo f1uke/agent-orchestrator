@@ -482,7 +482,7 @@ describe("chat fold rules", () => {
 		expect(users(other)[0].origin).toBeUndefined();
 	});
 
-	it("deduplicates user input by uuid and counts images", () => {
+	it("deduplicates user input by uuid and keeps the pasted image's bytes", () => {
 		const input = json(
 			`{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA"}}]}}`,
 		);
@@ -491,7 +491,16 @@ describe("chat fold rules", () => {
 			synth(2, "out", json(`{"type":"user","uuid":"u1","isReplay":true,"message":{"content":"look"}}`)),
 			synth(3, "in", input),
 		]);
-		expect(tr.items).toEqual([{ kind: "user", uuid: "u1", text: "look", images: 1, state: "sent", ts: "" }]);
+		expect(tr.items).toEqual([
+			{
+				kind: "user",
+				uuid: "u1",
+				text: "look",
+				images: [{ mediaType: "image/png", base64: "AA" }],
+				state: "sent",
+				ts: "",
+			},
+		]);
 		expect(tr.queued).toEqual(["u1"]);
 	});
 

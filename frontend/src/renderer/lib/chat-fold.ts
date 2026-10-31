@@ -17,6 +17,7 @@ import {
 	parseHostNote,
 } from "./chat-event";
 import { CONTEXT_REQUEST_PREFIX, type ContextBreakdown, parseContextUsage } from "./chat-context";
+import { type ChatImage, isImageMime } from "./chat-images";
 import { elapsedMs } from "./chat-time";
 import { parseRateLimit, type SubscriptionUsage } from "./chat-usage";
 
@@ -37,7 +38,7 @@ export type UserItem = {
 	kind: "user";
 	uuid: string;
 	text: string;
-	images: number;
+	images: ChatImage[];
 	origin?: Origin;
 	state: CommandState;
 	ts: string;
@@ -439,10 +440,12 @@ export class ChatFolder {
 	private addUserInput(uuid: string, blocks: Block[]): void {
 		if (uuid !== "" && this.users.has(uuid)) return;
 		let text = "";
-		let images = 0;
+		const images: ChatImage[] = [];
 		for (const block of blocks) {
 			if (block.type === "text") text += block.text;
-			else if (block.type === "image") images += 1;
+			else if (block.type === "image" && isImageMime(block.mediaType) && block.data !== "") {
+				images.push({ mediaType: block.mediaType, base64: block.data });
+			}
 		}
 		const item: UserItem = { kind: "user", uuid, text, images, state: this.commands.get(uuid) ?? "sent", ts: this.ts };
 		this.turnStart ??= this.ts;

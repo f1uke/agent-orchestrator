@@ -222,8 +222,10 @@ export function ChatComposer({
 							<History className="chat-icon" aria-hidden="true" />
 							<span className="chat-queue__label">Queued</span>
 							<span className="chat-queue__text">{item.text}</span>
-							{item.images > 0 ? (
-								<span className="chat-queue__label">{item.images === 1 ? "1 image" : `${item.images} images`}</span>
+							{item.images.length > 0 ? (
+								<span className="chat-queue__label">
+									{item.images.length === 1 ? "1 image" : `${item.images.length} images`}
+								</span>
 							) : null}
 						</div>
 					))}

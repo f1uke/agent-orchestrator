@@ -69,3 +69,18 @@ it("MediaThumb renders an openable button once bytes load", async () => {
 	render(<MediaThumb item={items[0]} onOpen={() => {}} style={{ width: 100, height: 100 }} />);
 	expect(await screen.findByRole("button", { name: /View a\.png/i })).toBeInTheDocument();
 });
+
+it("shows an inline data URL as given, with no fetch", async () => {
+	const fetchSpy = vi.mocked(fetch);
+	fetchSpy.mockClear();
+	const inline: MediaItem = {
+		id: "i",
+		filename: "chat.png",
+		mime: "image/png",
+		src: "",
+		dataUrl: "data:image/png;base64,AAAA",
+	};
+	render(<MediaThumb item={inline} onOpen={() => {}} style={{ width: 100, height: 100 }} />);
+	expect(await screen.findByRole("img", { name: "chat.png" })).toHaveAttribute("src", "data:image/png;base64,AAAA");
+	expect(fetchSpy).not.toHaveBeenCalled();
+});
