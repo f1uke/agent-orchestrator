@@ -16,7 +16,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import {
 	type AnswerBody,
 	allowOnce,
@@ -32,6 +32,7 @@ import {
 } from "../lib/chat-answers";
 import type { BackgroundTask, Pending, ToolCallItem } from "../lib/chat-fold";
 import { TaskOutputView } from "./ChatTaskOutput";
+import { rowOpens, writtenPath } from "../lib/chat-docs";
 import { isObject } from "../lib/chat-event";
 import {
 	type Question,
@@ -44,10 +45,10 @@ import {
 	parsePlan,
 	parseQuestions,
 } from "../lib/chat-tools";
-import { type CodeView, highlightView } from "../lib/chat-code";
-import type { CodeToken } from "../lib/note/highlight";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
+import { CodeBox } from "./ChatCodeBox";
+import { useDocOf } from "./ChatDocs";
 import { ChatImages, READ_THUMB } from "./ChatImages";
 import { CopyButton } from "./CopyButton";
 import { NoteMarkdown } from "./NoteMarkdown";
@@ -108,64 +109,6 @@ function outputTone(line: string, failed: boolean): string | undefined {
 	if (/^(--- )?FAIL\b|^panic:|^error\b/i.test(line)) return "chat-term__line--fail";
 	if (/^ok\s/.test(line)) return "chat-term__line--pass";
 	return undefined;
-}
-
-const SIGN = { add: "+", del: "−", context: "" } as const;
-
-/**
- * A file's code under a header with its name. Plain text shows first and the shiki colours replace it
- * once the grammar lands, so opening a card never waits on a grammar chunk.
- */
-function CodeBox({ view, mode, theme }: { view: CodeView; mode: "write" | "edit" | "read"; theme: Theme }) {
-	const [tokens, setTokens] = useState<CodeToken[][] | undefined>(undefined);
-	const source = useMemo(() => view.lines.map((l) => `${l.kind[0]}${l.text}`).join("\n"), [view.lines]);
-	useEffect(() => {
-		let live = true;
-		setTokens(undefined);
-		void highlightView(view, theme).then((result) => {
-			if (live) setTokens(result);
-		});
-		return () => {
-			live = false;
-		};
-		// `source` stands for the view: describeTool builds a new object on every render.
-	}, [source, view.language, theme]);
-
-	const name = view.path.split("/").filter(Boolean).at(-1) ?? view.path;
-	return (
-		<div className={cn("chat-codebox", mode === "write" && "chat-codebox--new")}>
-			<div className="chat-codebox__head">
-				<span className="chat-codebox__title">{name}</span>
-			</div>
-			<div className="chat-codebox__body">
-				{view.lines.map((line, i) => (
-					<div
-						className={cn("chat-codebox__row", line.kind !== "context" && `chat-codebox__row--${line.kind}`)}
-						key={i}
-					>
-						<span aria-hidden="true" className="chat-codebox__num">
-							{line.num}
-						</span>
-						{mode === "edit" ? (
-							<span aria-hidden="true" className="chat-codebox__sign">
-								{SIGN[line.kind]}
-							</span>
-						) : null}
-						<span className="chat-codebox__text">
-							{tokens?.[i]?.length
-								? tokens[i].map((token, t) => (
-										<span key={t} style={{ color: token.color }}>
-											{token.text}
-										</span>
-									))
-								: line.text || " "}
-						</span>
-					</div>
-				))}
-			</div>
-			{view.hidden > 0 ? <div className="chat-tool__more">… {view.hidden} more lines</div> : null}
-		</div>
-	);
 }
 
 function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
@@ -255,6 +198,8 @@ export function ToolCard({
 	const view = describeTool(call, { root, subagentTools, task });
 	const isOpen = open ?? false;
 	const Icon = FAMILY_ICON[view.family];
+	const { doc, open: openDoc } = useDocOf(writtenPath(call));
+	const action = doc && openDoc && rowOpens(doc) ? { label: `Open ${doc.title}`, run: openDoc } : undefined;
 	return (
 		<div
 			className={cn(
@@ -274,6 +219,11 @@ export function ToolCard({
 				</span>
 				<Status view={view} />
 			</button>
+			{action ? (
+				<button aria-label={action.label} className="chat-tool__action" onClick={action.run} type="button">
+					Open
+				</button>
+			) : null}
 			{isOpen ? (
 				<div className="chat-tool__body">
 					<ToolBodyView body={view.body} theme={theme} />

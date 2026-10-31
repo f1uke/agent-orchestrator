@@ -1094,7 +1094,8 @@ body.is-resizing-x [data-slot="sidebar-container"] {
    own their internal layout (fixed header/strips, scrolling list, pinned batch
    bar, toast). */
 .session-inspector__body.session-inspector__body--reviews,
-.session-inspector__body.session-inspector__body--files {
+.session-inspector__body.session-inspector__body--files,
+.session-inspector__body.session-inspector__body--document {
 	padding: 0;
 	overflow: hidden;
 	display: flex;
@@ -9862,4 +9863,231 @@ ol.note-prose__list {
 	font-size: 11px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.chat-docs {
+	display: flex;
+	max-width: 640px;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 10px;
+}
+
+.chat-doc {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 12px 14px;
+	border: 1px solid var(--border-1);
+	border-radius: 12px;
+	background: var(--bg-1);
+}
+
+.chat-doc[data-open="true"] {
+	border-color: var(--accent);
+}
+
+.chat-doc__tag {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	flex: none;
+	border-radius: 8px;
+	background: var(--bg-3);
+	color: var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+}
+
+.chat-doc__tag[data-kind="markdown"],
+.chat-doc__tag[data-kind="diff"] {
+	background: var(--accent-weak);
+	color: var(--accent);
+}
+
+.chat-doc__tag[data-kind="html"] {
+	background: color-mix(in srgb, var(--orange) 16%, transparent);
+	color: var(--orange);
+}
+
+.chat-doc__tag[data-kind="pdf"] {
+	background: color-mix(in srgb, var(--red) 16%, transparent);
+	color: var(--red);
+}
+
+.chat-doc__tag[data-kind="json"] {
+	background: color-mix(in srgb, var(--green) 16%, transparent);
+	color: var(--green);
+}
+
+.chat-doc__tag--artifact svg {
+	width: 16px;
+	height: 16px;
+}
+
+.chat-doc__text {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.chat-doc__title {
+	overflow: hidden;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.4;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-doc__meta {
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-doc__meta--wrap {
+	white-space: normal;
+}
+
+.chat-doc__open,
+.chat-tool__action {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 10px;
+	border: 1px solid var(--border-1);
+	border-radius: 6px;
+	background: var(--bg-1);
+	color: var(--fg);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.chat-doc__open:hover,
+.chat-tool__action:hover {
+	background: var(--interactive-hover);
+}
+
+.chat-doc[data-open="true"] .chat-doc__open {
+	border-color: var(--accent-dim);
+	background: var(--accent-weak);
+	color: var(--accent);
+}
+
+.chat-doc__open:disabled {
+	cursor: default;
+	opacity: 0.45;
+}
+
+.chat-doc__open .chat-icon {
+	width: 13px;
+	height: 13px;
+}
+
+/* A Write or Edit row is one button across its width, so the Open action sits beside it, not inside. */
+.chat-tool:has(> .chat-tool__action) {
+	position: relative;
+}
+
+.chat-tool__action {
+	position: absolute;
+	top: 3px;
+	right: 10px;
+	padding: 2px 8px;
+	font-size: 12px;
+	border-color: var(--accent-dim);
+	background: var(--accent-weak);
+	color: var(--accent);
+}
+
+.chat-tool:has(> .chat-tool__action) .chat-tool__head {
+	padding-right: 130px;
+}
+
+.document-panel {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.document-panel__head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: none;
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--border);
+}
+
+.document-panel__titles {
+	min-width: 0;
+	flex: 1;
+}
+
+.document-panel__title {
+	overflow: hidden;
+	margin: 0;
+	color: var(--accent);
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.4;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.document-panel__meta {
+	overflow: hidden;
+	margin: 0;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.document-panel__body {
+	position: relative;
+	min-height: 0;
+	flex: 1;
+	overflow: auto;
+}
+
+.document-panel__prose {
+	padding: 18px 22px 40px;
+}
+
+.document-panel__slot {
+	position: absolute;
+	inset: 0;
+	min-width: 1px;
+	min-height: 1px;
+}
+
+.document-panel__image {
+	display: block;
+	max-width: 100%;
+	margin: 18px auto;
+}
+
+.document-panel__error {
+	margin: 18px;
+	color: var(--red);
+	font-size: 13px;
+}
+
+.document-panel .chat-codebox__body {
+	max-height: none;
+	padding-top: 10px;
 }

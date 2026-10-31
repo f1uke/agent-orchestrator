@@ -1,4 +1,3 @@
-import type { FileDoc } from "../lib/chat-docs";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { ArrowUpRight, GitPullRequest, Pencil } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -21,6 +20,8 @@ import {
 import type { SessionActivityState, SessionTermination, WorkspaceSession } from "../types/workspace";
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
+import { DocumentPanel } from "./DocumentPanel";
+import type { FileDoc } from "../lib/chat-docs";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPanel";
@@ -74,6 +75,16 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		),
 	},
 	{
+		id: "document",
+		label: "Document",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<rect x="4" y="3" width="16" height="18" rx="2" />
+				<path d="M8 8h8M8 12h8M8 16h5" />
+			</svg>
+		),
+	},
+	{
 		id: "testiny",
 		label: "Testiny",
 		icon: (
@@ -118,7 +129,7 @@ const prStateTone: Record<SessionPRSummary["state"], string> = {
 };
 
 /**
- * Tabbed inspector rail beside the terminal (Session · Summary · Reviews · Files · Testiny · Device · Browser).
+ * Tabbed inspector rail beside the terminal (Summary · Reviews · Files · Document · Testiny · Device · Browser).
  */
 export function SessionInspector({
 	session,
@@ -130,6 +141,8 @@ export function SessionInspector({
 	isInspectorVisible = true,
 	onToggleBrowserPopOut,
 	browserView,
+	openDoc = null,
+	onCloseDoc,
 	view: viewProp,
 	onViewChange,
 	onOpenFile,
@@ -167,6 +180,9 @@ export function SessionInspector({
 	isInspectorVisible?: boolean;
 	onToggleBrowserPopOut?: (next: boolean) => void;
 	browserView?: BrowserViewModel;
+	/** The document a chat card opened, for the Document tab. Only a chat session has one. */
+	openDoc?: FileDoc | null;
+	onCloseDoc?: () => void;
 	/** Controlled active tab. Omit to let the inspector own its own selection. */
 	view?: InspectorView;
 	onViewChange?: (view: InspectorView) => void;
@@ -187,8 +203,6 @@ export function SessionInspector({
 	selectedFileLine?: number;
 	/** A ⌘⇧F press (re-press nonce + the editor's selection to seed the box). */
 	searchRequest?: { nonce: number; seed?: string } | null;
-	openDoc?: FileDoc | null;
-	onCloseDoc?: () => void;
 	/** A terminal ref to reveal in the Files tree (path + re-click nonce). */
 	revealInTree?: { path: string; nonce: number; focus?: boolean } | null;
 }) {
@@ -202,10 +216,13 @@ export function SessionInspector({
 	// and it has no branch of its own to diff — the same reason the readiness strip
 	// is hidden for it.
 	const showFiles = session?.kind !== "orchestrator";
+	// Documents come from chat cards, so a terminal session has nothing to put in the tab.
+	const showDocument = session?.transport === "chat";
 	// A project with no web UI has nothing to preview, so the Browser tab is not
 	// offered at all — an always-empty tab is worse than one tab fewer.
 	const views = VIEWS.filter((v) => {
 		if (v.id === "files") return showFiles;
+		if (v.id === "document") return showDocument;
 		if (v.id === "browser") return hasWebUI;
 		if (v.id === "simulator") return hasIOSSimulator;
 		if (v.id === "testiny") return usesTestiny;
@@ -267,6 +284,7 @@ export function SessionInspector({
 					// Files owns its own scroll (segmented control + summary pinned,
 					// list scrolling beneath), so it renders flush too.
 					view === "files" && "session-inspector__body--files",
+					view === "document" && "session-inspector__body--document",
 					// The Simulator tab owns its own full-height layout (picker,
 					// screen, controls), so it renders flush.
 					view === "simulator" && "session-inspector__body--simulator",
@@ -294,6 +312,14 @@ export function SessionInspector({
 						onOpenSearchHit={onOpenSearchHit}
 						search={searchRequest}
 						reveal={revealInTree}
+					/>
+				) : null}
+				{view === "document" && showDocument ? (
+					<DocumentPanel
+						active={isInspectorVisible}
+						doc={openDoc}
+						onClose={() => onCloseDoc?.()}
+						sessionId={session.id}
 					/>
 				) : null}
 				{view === "testiny" && usesTestiny ? <TestinyView key={taskKeyOf(session)} session={session} /> : null}

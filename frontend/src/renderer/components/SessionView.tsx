@@ -31,6 +31,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resiz
 import { centerViewOf, useUiStore } from "../stores/ui-store";
 import { useShell } from "../lib/shell-context";
 import { useBrowserView } from "../hooks/useBrowserView";
+import type { FileDoc } from "../lib/chat-docs";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { apiClient } from "../lib/api-client";
 import {
@@ -93,6 +94,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const inspectorSeparatorRef = useRef<HTMLDivElement | null>(null);
 	const [terminalTarget, setTerminalTarget] = useState<TerminalTarget>({ kind: "worker" });
 	const [browserPoppedOut, setBrowserPoppedOut] = useState(false);
+	const [openDoc, setOpenDoc] = useState<FileDoc | null>(null);
 	const [inspectorView, setInspectorView] = useState<InspectorView>("summary");
 	// A review comment "expanded to full file" takes over the center pane (in
 	// place of the terminal) until dismissed; cleared on session switch below.
@@ -241,9 +243,20 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		previewRevision,
 	});
 
+	// A card opens its document in the rail's Document tab, shutting nothing: the Browser tab keeps its own view.
+	const openDocument = useCallback(
+		(doc: FileDoc) => {
+			setOpenDoc(doc);
+			setInspectorView("document");
+			if (!useUiStore.getState().isInspectorOpen) toggleInspector();
+		},
+		[toggleInspector],
+	);
+
 	useEffect(() => {
 		setTerminalTarget({ kind: "worker" });
 		setBrowserPoppedOut(false);
+		setOpenDoc(null);
 		setFileView(null);
 		setWorkspaceFile(null);
 		setChangesFocus(null);
@@ -769,6 +782,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					chat={chat}
 					daemonReady={daemonStatus.state === "ready"}
 					key={session.id}
+					onOpenDoc={openDocument}
+					openDoc={openDoc}
 					session={session}
 					theme={theme}
 					view={centerView}
@@ -871,6 +886,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
                   the pane clips instead of reflowing the inspector mid-collapse. */}
 							<div className="h-full min-w-[280px]">
 								<SessionInspector
+									onCloseDoc={() => setOpenDoc(null)}
+									openDoc={openDoc}
 									browserPoppedOut={browserPoppedOut}
 									hasIOSSimulator={hasIOSSimulator}
 									hasWebUI={hasWebUI}
