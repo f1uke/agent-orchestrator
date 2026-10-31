@@ -38,19 +38,3 @@ export function lineDiff(before: string, after: string): DiffLine[] {
 	}
 	return out;
 }
-
-export function newFileDiff(content: string, limit: number): { lines: DiffLine[]; hidden: number } {
-	const all = splitLines(content);
-	const lines = all.slice(0, limit).map((text, i): DiffLine => ({ kind: "add", oldLine: 0, newLine: i + 1, text }));
-	return { lines, hidden: all.length - lines.length };
-}
-
-export function diffCounts(lines: readonly DiffLine[]): { added: number; removed: number } {
-	let added = 0;
-	let removed = 0;
-	for (const line of lines) {
-		if (line.kind === "add") added++;
-		else if (line.kind === "del") removed++;
-	}
-	return { added, removed };
-}

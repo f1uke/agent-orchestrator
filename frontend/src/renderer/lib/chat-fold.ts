@@ -1,4 +1,3 @@
-import type { PatchHunk } from "./chat-event";
 import {
 	type Block,
 	type CanUseTool,
@@ -7,6 +6,7 @@ import {
 	type CommandState,
 	type HostNote,
 	type Origin,
+	type PatchHunk,
 	type TaskEvent,
 	type TaskState,
 	type TaskUsage,
@@ -303,7 +303,7 @@ export class ChatFolder {
 				break;
 			case "user":
 				if (event.isReplay) this.applyTaskMessage(event.blocks);
-				else this.applyToolResults(event.blocks);
+				else this.applyToolResults(event.blocks, event.structuredPatch);
 				break;
 			case "result":
 				this.cost = event.totalCostUsd;
@@ -381,11 +381,13 @@ export class ChatFolder {
 		}
 	}
 
-	private applyToolResults(blocks: Block[]): void {
+	private applyToolResults(blocks: Block[], structuredPatch: PatchHunk[] | undefined): void {
+		// tool_use_result describes one call, so it is only attributable when the message holds one result.
+		const patch = blocks.filter((b) => b.type === "tool_result").length === 1 ? structuredPatch : undefined;
 		for (const block of blocks) {
 			if (block.type === "tool_result") {
 				this.updateTool(block.toolUseId, {
-					result: { isError: block.isError, content: block.content },
+					result: { isError: block.isError, content: block.content, ...(patch && { structuredPatch: patch }) },
 					endedTs: this.ts,
 				});
 			} else if (block.type === "text" && block.text.startsWith(INTERRUPT_MARKER)) {

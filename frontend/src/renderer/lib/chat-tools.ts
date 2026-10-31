@@ -1,6 +1,5 @@
-import type { CodeView } from "./chat-code";
 import { isObject, type TaskState } from "./chat-event";
-import { type DiffLine, diffCounts, lineDiff, newFileDiff } from "./chat-diff";
+import { type CodeView, editView, lineCounts, readView, writeView } from "./chat-code";
 import { type ChatImage, imagesOf } from "./chat-images";
 import type { BackgroundTask, PermissionOutcome, ToolCallItem, ToolResult } from "./chat-fold";
 
@@ -9,7 +8,7 @@ export type ToolStatus =
 	| { tone: "idle"; text: string }
 	| { tone: "ok"; text: string }
 	| { tone: "error"; text: string }
-	| { tone: "diff"; added: number; removed: number; newFile: boolean };
+	| { tone: "diff"; added: number; removed: number };
 
 export type Question = {
 	question: string;
@@ -20,18 +19,19 @@ export type Question = {
 
 export type ToolBody =
 	| { kind: "bash"; command: string; output: string; failed: boolean; exitCode?: number }
-	| { kind: "diff"; lines: DiffLine[]; hidden: number }
+	| { kind: "code"; view: CodeView; mode: "write" | "edit" | "read" }
 	| { kind: "output"; text: string }
 	| { kind: "image"; images: ChatImage[]; path: string }
 	| { kind: "plan"; plan: string }
-	| { kind: "generic"; input: string; output: string }
-	| { kind: "code"; view: CodeView; mode: "write" | "edit" | "read" };
+	| { kind: "generic"; input: string; output: string };
 
 export type ToolView = {
 	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "todo" | "plan" | "question" | "other";
+	/** For a Write, Edit or Read, the verb of its row ("Created", "Edited", "Read"). */
 	title: string;
+	/** For a file card, the base name. The full path stays in `path` for the row's tooltip. */
 	arg: string;
-	path?: string;
+	path: string;
 	status: ToolStatus;
 	body: ToolBody;
 	compact: boolean;
@@ -192,6 +192,7 @@ export function summarizeTools(
 }
 
 const NEW_FILE_PREVIEW_LINES = 40;
+const READ_PREVIEW_LINES = 200;
 
 function str(value: unknown): string {
 	return typeof value === "string" ? value : "";
@@ -237,16 +238,6 @@ export function parseQuestions(input: unknown): Question[] {
 
 export function parsePlan(input: unknown): { plan: string; path: string } {
 	return isObject(input) ? { plan: str(input.plan), path: str(input.planFilePath) } : { plan: "", path: "" };
-}
-
-function editDiff(input: Record<string, unknown>): DiffLine[] | undefined {
-	if (typeof input.old_string === "string" && typeof input.new_string === "string") {
-		return lineDiff(input.old_string, input.new_string);
-	}
-	if (Array.isArray(input.edits)) {
-		return input.edits.filter(isObject).flatMap((e) => lineDiff(str(e.old_string), str(e.new_string)));
-	}
-	return undefined;
 }
 
 function backgroundStatus(call: ToolCallItem, task: BackgroundTask | undefined): ToolStatus {
@@ -295,7 +286,7 @@ const TODO_TITLE: Record<string, string> = { TaskCreate: "Add todo", TaskUpdate:
 export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolView {
 	const input = isObject(call.input) ? call.input : {};
 	const output = resultText(call.result);
-	const base = { title: call.name, compact: false };
+	const base = { title: call.name, compact: false, path: "" };
 	const short = (text: string) => shortenPaths(text, ctx.root);
 
 	switch (call.name) {
@@ -329,41 +320,54 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 		}
 		case "Edit":
 		case "MultiEdit": {
-			const lines = editDiff(input);
-			if (!lines) break;
-			const { added, removed } = diffCounts(lines);
-			const status: ToolStatus = call.result?.isError
-				? { tone: "error", text: "error" }
-				: { tone: "diff", added, removed, newFile: false };
+			if (typeof input.old_string !== "string" && !Array.isArray(input.edits)) break;
+			const path = short(str(input.file_path));
+			const view = editView(path, input, call.result);
 			return {
 				...base,
+				title: "Edited",
 				family: "edit",
-				arg: short(str(input.file_path)),
-				status,
-				body: { kind: "diff", lines, hidden: 0 },
+				arg: baseName(path),
+				path,
+				status: call.result?.isError ? { tone: "error", text: "error" } : { tone: "diff", ...lineCounts(view) },
+				body: { kind: "code", view, mode: "edit" },
 			};
 		}
 		case "Write": {
 			if (typeof input.content !== "string") break;
-			const { lines, hidden } = newFileDiff(input.content, NEW_FILE_PREVIEW_LINES);
-			const status: ToolStatus = call.result?.isError
-				? { tone: "error", text: "error" }
-				: { tone: "diff", added: lineCount(input.content), removed: 0, newFile: true };
+			const path = short(str(input.file_path));
+			const view = writeView(path, input.content, NEW_FILE_PREVIEW_LINES);
 			return {
 				...base,
+				title: "Created",
 				family: "write",
-				arg: short(str(input.file_path)),
-				status,
-				body: { kind: "diff", lines, hidden },
+				arg: baseName(path),
+				path,
+				status: call.result?.isError
+					? { tone: "error", text: "error" }
+					: { tone: "diff", added: view.lines.length + view.hidden, removed: 0 },
+				body: { kind: "code", view, mode: "write" },
 			};
 		}
 		case "Read": {
 			const path = short(str(input.file_path));
 			const images = imagesOf(call.result?.content);
+			const code = call.result?.isError || images.length ? undefined : readView(path, output, READ_PREVIEW_LINES);
+			const file = { arg: baseName(path), path };
+			if (code && code.lines.length > 0) {
+				return {
+					...base,
+					...file,
+					family: "read",
+					status: outcome(call, () => plural(code.lines.length + code.hidden, "line")),
+					body: { kind: "code", view: code, mode: "read" },
+					compact: true,
+				};
+			}
 			return {
 				...base,
+				...file,
 				family: "read",
-				arg: path,
 				status: outcome(call, () =>
 					images.length
 						? images.length === 1
