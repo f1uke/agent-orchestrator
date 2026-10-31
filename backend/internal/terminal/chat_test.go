@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -400,4 +402,79 @@ func messageType(t *testing.T, line json.RawMessage) string {
 		t.Fatalf("delta %q: %v", line, err)
 	}
 	return w.Type
+}
+
+const chatImageB64 = "aGVsbG8gaW1hZ2U="
+
+func writeImageLog(t *testing.T, dataDir, id string) []byte {
+	t.Helper()
+	logPath, _, err := sessionhost.PreparePaths(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":[{"type":"image","source":{"type":"base64","data":"` + chatImageB64 + `","media_type":"image/png"}}]}]},"tool_use_result":{"type":"image","file":{"base64":"` + chatImageB64 + `","type":"image/png"}}}`
+	log := []byte(`{"seq":1,"ts":"2026-10-30T00:00:00Z","dir":"out","payload":{"type":"system","subtype":"init"}}` + "\n" +
+		`{"seq":2,"ts":"2026-10-30T00:00:01Z","dir":"out","payload":` + read + `}` + "\n")
+	if err := os.WriteFile(logPath, log, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return log
+}
+
+func TestChatOpenWithBlobRefsSendsAnOldLogsImagesAsRefs(t *testing.T) {
+	dir := chatDataDir(t)
+	log := writeImageLog(t, dir, "s1")
+	conn := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+
+	conn.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1", BlobRefs: true}
+	got := readChat(t, conn, "s1", msgOffline)
+	wantFrames(t, "replay", got, "entry:1", "entry:2", "offline")
+	p := string(got[1].Entry.Payload)
+	if strings.Contains(p, chatImageB64) || strings.Count(p, `"blob":"`) != 2 || !strings.Contains(p, `"type":"ao_blob"`) {
+		t.Errorf("payload %s, want both copies replaced by refs", p)
+	}
+	logPath, _ := sessionhost.Paths(dir, "s1")
+	if now, _ := os.ReadFile(logPath); !bytes.Equal(now, log) {
+		t.Errorf("the open rewrote the log")
+	}
+	blobs, err := os.ReadDir(filepath.Join(filepath.Dir(logPath), "blobs"))
+	if err != nil || len(blobs) != 1 || !strings.Contains(p, blobs[0].Name()) {
+		t.Errorf("blobs = %v, %v; want the one the refs name", blobs, err)
+	}
+}
+
+func TestChatOpenWithoutBlobRefsSendsEachImageOnce(t *testing.T) {
+	dir := chatDataDir(t)
+	writeImageLog(t, dir, "s1")
+	conn := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+
+	conn.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1"}
+	got := readChat(t, conn, "s1", msgOffline)
+	p := string(got[1].Entry.Payload)
+	if n := strings.Count(p, chatImageB64); n != 1 || !strings.Contains(p, `"source":{"data":"`+chatImageB64+`","media_type":"image/png","type":"base64"}`) {
+		t.Errorf("payload %s carries the image %d times, want once, as the base64 source", p, n)
+	}
+}
+
+func TestChatLiveImagesFollowTheOpensBlobRefs(t *testing.T) {
+	dir := chatDataDir(t)
+	h := startChatHost(t, dir, "s1")
+	refs := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+	inline := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+	refs.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1", BlobRefs: true}
+	inline.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1"}
+	readChat(t, refs, "s1", msgLive)
+	readChat(t, inline, "s1", msgLive)
+
+	if _, err := h.client.Send(context.Background(), chatproto.UserInput{Text: "look", Images: []chatproto.Image{{MediaType: "image/png", Base64: chatImageB64}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	r := readEntries(t, refs, "s1", 3)[0].Entry.Payload
+	i := readEntries(t, inline, "s1", 3)[0].Entry.Payload
+	if bytes.Contains(r, []byte(chatImageB64)) || !bytes.Contains(r, []byte(`"type":"ao_blob"`)) {
+		t.Errorf("blobRefs client got %s, want a ref", r)
+	}
+	if !bytes.Contains(i, []byte(`"data":"`+chatImageB64+`"`)) {
+		t.Errorf("inline client got %s, want the base64 source", i)
+	}
 }

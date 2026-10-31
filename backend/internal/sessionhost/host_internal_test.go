@@ -169,3 +169,36 @@ func TestOpenLogCutsATornLastLine(t *testing.T) {
 		t.Errorf("log = %q, want only the whole line", b)
 	}
 }
+
+func TestImagesAreLoggedOnceAsBlobRefs(t *testing.T) {
+	h := bareHost(t)
+	_, s, err := h.replayAndRegister(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+	read := []byte(`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":[{"type":"image","source":{"type":"base64","data":"` + b64 + `","media_type":"image/png"}}]}]},"tool_use_result":{"type":"image","file":{"base64":"` + b64 + `","type":"image/png"}}}`)
+	h.handleLine(read)
+
+	log, err := os.ReadFile(h.log.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(log, []byte(b64)) {
+		t.Fatalf("log carries the image bytes: %s", log)
+	}
+	blobs, err := os.ReadDir(filepath.Join(filepath.Dir(h.log.path), "blobs"))
+	if err != nil || len(blobs) != 1 {
+		t.Fatalf("blobs = %v, %v; want one file next to the log", blobs, err)
+	}
+	if n := bytes.Count(log, []byte(blobs[0].Name())); n != 2 {
+		t.Errorf("log names the blob %d times, want 2 (the content source and tool_use_result.file)", n)
+	}
+	f := <-s.ch
+	if bytes.Contains(f, []byte(b64)) || !bytes.Contains(f, []byte(`"type":"ao_blob"`)) {
+		t.Errorf("live frame %s, want the logged ref", f)
+	}
+	if _, err := chatproto.Fold(loadEntries(t, h.log.path)); err != nil {
+		t.Errorf("log does not fold: %v", err)
+	}
+}
