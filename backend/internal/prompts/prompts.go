@@ -196,7 +196,7 @@ For more than one PR, every extra branch must stay in your session's namespace s
 
 ## Review feedback (AO)
 
-When addressing PR/MR review feedback, make the requested code change, but do NOT post a reply comment or resolve/close a review thread until the human has confirmed: draft your reply, show it to the human, and wait for the go-ahead.
+When addressing PR/MR review feedback, make the requested code change, but do NOT post a reply comment or resolve/close a review thread until the human has confirmed: draft your reply, show it to the human, and ask for the go-ahead with AskUserQuestion.
 
 ## Project knowledge and context (AO)
 
@@ -247,14 +247,26 @@ Post your review as comments on the pull request or merge request, stating clear
 // The check-in gate's hand-back is the stated exception: it goes to a PERSON
 // through the board (CheckInGateBriefingNote says the same to the orchestrator).
 // qa never gets this block - it hands back to dev, and dev reports.
+//
+// Asking the person goes through AskUserQuestion, because a yes requested in the
+// prose of a long report was missed (2026-10-31: a worker waited on a push yes
+// written under "What's left", and the board never showed Input Needed). The
+// tool reaches the human in both transports: in chat it is a can_use_tool
+// request, rendered as a question card (#444) and reported as waiting_input
+// (#440); in a terminal pane Claude Code draws the question as a picker and
+// fires Notification(permission_prompt), which DeriveActivityState maps to
+// waiting_input. Either way the deriver shows needs_input. A plain ended turn
+// only reaches needs_input after the idle grace, and says nothing about why.
 const workerReportFloor = "\n\n" + `## Reporting to the orchestrator (AO)
 
 Non-negotiable: keep every branch you create within your session's branch namespace so AO can attribute your pull requests, and report to the orchestrator with ` + "`" + `ao send --session {{orchestrator}} --message "<report>"` + "`" + ` at each of these moments, unasked, because AO does not tell it for you:
 - **your PR/MR is open**: its link and CI state;
-- **you need the human**: a decision, an approval, or a blocker you cannot resolve (a check-in before implementing, where the project has one, is the exception: that goes to the person through the board);
+- **you need the human**: a decision, an approval, or a blocker you cannot resolve (a check-in before implementing, where the project has one, is the exception: that goes to the person through the board). Ask the person as well, as below;
 - **you finish**, as your last act before you end your turn: what changed, the PR and its CI state, the knowledge-store paths you wrote, and what is left for the human, including anything a person must check by hand (what, where, and why a test cannot). Send it even when the answer is "nothing to do": a finish nobody hears about looks the same as a session that died.
 
-{{find}}If no orchestrator is running, give the same report in your final reply.`
+{{find}}If no orchestrator is running, give the same report in your final reply.
+
+**Ask the human with the AskUserQuestion tool, never in prose.** Whenever you need a person (a decision, an approval, a yes before a push, a PR, a merge or anything else your rules say to ask about first, or a check-in go-ahead), call AskUserQuestion: one clear question, short options, your recommended option first. Write the question and its options in the human's language (the response-language rule, where one is set), not in English. A question left in a report or a final reply is one the human misses: the tool shows them a question they answer in place and moves this task to **Needs you** on the board while it waits. Make it your last act and do nothing after it until the answer comes. If your agent has no AskUserQuestion tool, end your reply with the question as one short line and end your turn.`
 
 // qaCoordinationFloor is qa's floor: its obligation to HAND BACK, and blocker
 // escalation in place of the orchestrator report (dev is the one that reports).
@@ -373,6 +385,11 @@ This task is tagged mechanical: a small, well-scoped change (a rename, a copy tw
 // anything, and be indistinguishable from one that had hung - which is the exact
 // ambiguity this passage has to avoid, so it says "end your turn" and not "wait".
 //
+// The hand-back ends in an AskUserQuestion (see workerReportFloor for what it
+// does in each transport). The question holds the turn open, but it is still the
+// last act of turn one, so the task lands in Needs you the same way; the text
+// keeps "END YOUR TURN" for an agent that has no such tool.
+//
 // It names no skill and no plugin, on purpose: which skill a human reaches for
 // during the check-in is the human's business, and the prompt describes the
 // behaviour instead (the convention #278 established).
@@ -397,9 +414,9 @@ This project wants a person to see the shape of the work before the work starts,
 
 **Then STOP and END YOUR TURN.** Ending the turn is what makes the pause visible: AO moves this task into the board's **Needs you** lane, which is how a person finds out you are waiting. Do not sit quietly part-way through a turn instead: to everyone watching that is identical to having hung, and nobody will come.
 
-**Leave three things behind, short enough to read on a phone:** what you understand the task to be, what you intend to do about it, and what you need decided. If you wrote a plan or a spec, point at it rather than pasting it.
+**Leave three things behind, short enough to read on a phone:** what you understand the task to be, what you intend to do about it, and what you need decided. If you wrote a plan or a spec, point at it rather than pasting it. Then ask for the go-ahead with AskUserQuestion as the last act of turn one: the human answers that question, and a request buried in the hand-back text is one they miss. Asking it is how this turn ends: do nothing after it until the answer comes, and without an AskUserQuestion tool, make the question the last line and end your turn.
 
-**Turn two: implement.** The human's reply is your go-ahead; the rest of this prompt then applies unchanged and you do not stop a second time. If that reply changes the shape of the task, say in one line what changed and carry on.`
+**Turn two: implement.** The human's reply (their answer to that question, or a message) is your go-ahead; the rest of this prompt then applies unchanged and you do not stop a second time. If that reply changes the shape of the task, say in one line what changed and carry on.`
 
 // CheckInGateBriefingNote returns the passage that tells an ORCHESTRATOR that the
 // project it is dispatching for has the check-in gate on, so the briefs it writes
