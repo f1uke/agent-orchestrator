@@ -27,7 +27,8 @@ export function stubChatFiles(known: Record<string, ResolvedFile[]>) {
 				status: 200,
 			});
 		}
-		return new Response(new Blob(["png"], { type: "image/png" }), { status: 200 });
+		// Bytes, not a jsdom Blob: Node 20's Response (CI) cannot read a jsdom Blob body.
+		return new Response(new TextEncoder().encode("png"), { status: 200, headers: { "Content-Type": "image/png" } });
 	});
 	vi.stubGlobal("fetch", fetchMock);
 	return fetchMock;
