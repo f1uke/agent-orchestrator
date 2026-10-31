@@ -9289,6 +9289,265 @@ ol.note-prose__list {
 	flex: 1;
 }
 
+/* The todo bar right above the composer: collapsed to its counts by default. */
+.chat-todos {
+	border-radius: 12px;
+	background: var(--bg-1);
+	font-size: 13px;
+}
+
+.chat-todos__bar {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	border-radius: 12px;
+	color: var(--fg-muted);
+	cursor: pointer;
+	text-align: left;
+}
+
+.chat-todos__bar:hover {
+	background: var(--interactive-hover);
+}
+
+.chat-todos__title {
+	color: var(--fg);
+	font-weight: 500;
+}
+
+.chat-todos__counts {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	color: var(--fg-passive);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-todos__chev {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	transform: rotate(180deg);
+	transition: transform 150ms ease;
+}
+
+.chat-todos__chev--open {
+	transform: none;
+}
+
+.chat-todos__list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 240px;
+	overflow-y: auto;
+	padding: 2px 12px 10px 14px;
+}
+
+.chat-todos__item {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+	color: var(--fg-muted);
+}
+
+.chat-todos__item[data-status="in_progress"] {
+	color: var(--fg);
+}
+
+.chat-todos__mark {
+	position: relative;
+	top: 1px;
+	width: 12px;
+	height: 12px;
+	flex: none;
+}
+
+.chat-todos__mark::before {
+	position: absolute;
+	inset: 3px;
+	border-radius: 50%;
+	background: var(--fg-passive);
+	content: "";
+}
+
+.chat-todos__item[data-status="completed"] .chat-todos__mark::before {
+	background: var(--green);
+}
+
+.chat-todos__item[data-status="in_progress"] .chat-todos__mark::before {
+	inset: 0;
+	border: 1.5px solid var(--fg-passive);
+	border-top-color: var(--fg-muted);
+	background: none;
+	animation: chat-todos-spin 1s linear infinite;
+}
+
+@keyframes chat-todos-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-todos__item[data-status="in_progress"] .chat-todos__mark::before {
+		animation: none;
+	}
+}
+
+/* The context and subscription meters on the right of the status line. */
+.chat-meter {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 6px;
+	margin: -2px -6px;
+	border-radius: 6px;
+	color: inherit;
+	cursor: pointer;
+	font-variant-numeric: tabular-nums;
+}
+
+.chat-meter:hover,
+.chat-meter[data-state="open"] {
+	background: var(--interactive-hover);
+	color: var(--fg-muted);
+}
+
+.chat-meter__ring {
+	width: 13px;
+	height: 13px;
+	transform: rotate(-90deg);
+}
+
+.chat-meter__ring circle {
+	fill: none;
+	stroke: var(--border-1);
+	stroke-width: 2.5;
+}
+
+.chat-meter__ring circle[data-fill] {
+	stroke: var(--fg-muted);
+	stroke-linecap: round;
+}
+
+.chat-meter-pop {
+	width: 300px;
+	padding: 14px 16px;
+	border-radius: 12px;
+	font-size: 13px;
+}
+
+.chat-meter-pop__head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+	color: var(--fg-muted);
+}
+
+.chat-meter-pop__head b {
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.chat-meter-pop__total,
+.chat-meter-pop__tokens {
+	color: var(--fg);
+	font-variant-numeric: tabular-nums;
+}
+
+.chat-meter-pop__bar {
+	display: flex;
+	height: 6px;
+	gap: 1px;
+	margin: 12px 0 14px;
+	overflow: hidden;
+	border-radius: 999px;
+	background: var(--bg-3);
+}
+
+.chat-meter-pop__bar span {
+	min-width: 3px;
+	height: 100%;
+}
+
+.chat-meter-pop__rows {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.chat-meter-pop__rows li {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.chat-meter-pop__rows li[data-muted] {
+	color: var(--fg-passive);
+}
+
+.chat-meter-pop__rows li[data-muted] .chat-meter-pop__tokens {
+	color: var(--fg-passive);
+}
+
+.chat-meter-pop__swatch {
+	width: 10px;
+	height: 10px;
+	flex: none;
+	border-radius: 3px;
+	background: var(--border-1);
+}
+
+.chat-meter-pop__name {
+	min-width: 0;
+	flex: 1;
+}
+
+.chat-meter-pop__rows li.chat-meter-pop__window {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 2px 12px;
+}
+
+.chat-meter-pop__window + .chat-meter-pop__window {
+	padding-top: 8px;
+	border-top: 1px solid var(--border);
+}
+
+.chat-meter-pop__sub {
+	color: var(--fg-passive);
+	font-size: 12px;
+}
+
+.chat-meter-pop__status {
+	color: var(--fg-passive);
+	font-size: 12px;
+	text-align: right;
+}
+
+.chat-meter-pop__window[data-status="allowed_warning"] .chat-meter-pop__status {
+	color: var(--amber);
+}
+
+.chat-meter-pop__window[data-status="rejected"] .chat-meter-pop__status {
+	color: var(--red);
+}
+
+.chat-meter-pop__head + .chat-meter-pop__rows {
+	margin-top: 12px;
+}
+
+.chat-meter-pop__note {
+	margin-top: 10px;
+	color: var(--fg-passive);
+	font-size: 12px;
+}
+
 .chat-statusline__dot {
 	display: inline-block;
 	width: 6px;

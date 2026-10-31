@@ -96,6 +96,30 @@ const BRIEF_RESULT = {
 	modelUsage: { "claude-opus-5-5": { outputTokens: 30_709, contextWindow: 200_000, costUSD: 1.8 } },
 };
 
+// A get_context_usage answer in the shape claude gives (testdata/context_usage.jsonl), for a 200k window.
+const CONTEXT_ANSWER = {
+	type: "control_response",
+	response: {
+		subtype: "success",
+		request_id: "ctx-demo-1",
+		response: {
+			categories: [
+				{ id: "system_prompt", name: "System prompt", tokens: 2_456, kind: "used" },
+				{ id: "system_tools", name: "System tools", tokens: 8_376, kind: "used" },
+				{ id: "system_tools_deferred", name: "System tools (deferred)", tokens: 13_289, kind: "deferred" },
+				{ id: "skills", name: "Skills", tokens: 2_281, kind: "used" },
+				{ id: "messages", name: "Messages", tokens: 110_887, kind: "used" },
+				{ id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33_000, kind: "buffer" },
+				{ id: "free_space", name: "Free space", tokens: 43_000, kind: "free" },
+			],
+			totalTokens: 124_000,
+			maxTokens: 200_000,
+			percentage: 62,
+			autoCompactThreshold: 167_000,
+		},
+	},
+};
+
 const tool = (id: string, messageId: string, name: string, input: object, parent: string | null = null): Step => [
 	"out",
 	{
@@ -357,6 +381,8 @@ const SCRIPT: Step[] = [
 	),
 	result("t-agent", "3 callers: internal/webhook/sender.go:65, internal/admin/replay.go:19, cmd/requeue/main.go:44"),
 	["out", BRIEF_RESULT],
+	["in", { type: "control_request", request_id: "ctx-demo-1", request: { subtype: "get_context_usage" } }],
+	["out", CONTEXT_ANSWER],
 	lifecycle("brief-1", "completed"),
 	lifecycle("peer-1", "started"),
 	say(

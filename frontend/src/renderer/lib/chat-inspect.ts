@@ -1,5 +1,5 @@
 import { isObject, type TaskState, unfinished } from "./chat-event";
-import type { ToolCallItem, Transcript, TurnEndItem } from "./chat-fold";
+import type { ChatItem, ToolCallItem, Transcript, TurnEndItem } from "./chat-fold";
 import { resultText, ruleLabel, taskLabel } from "./chat-tools";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
@@ -77,11 +77,14 @@ function taskUpdate(list: readonly TodoEntry[], input: Record<string, unknown>):
 	});
 }
 
-/** The todo list as the latest TodoWrite, or the TaskCreate and TaskUpdate calls since, leave it. */
-export function latestTodos(tr: Transcript): Todo[] | undefined {
+type TodoState = { todos: Todo[]; at: number };
+
+function todoState(tr: Transcript): TodoState | undefined {
 	let list: TodoEntry[] | undefined;
-	for (const item of tr.items) {
-		if (item.kind !== "tool_call" || item.parentToolUseId !== "" || item.result?.isError) continue;
+	let at = -1;
+	tr.items.forEach((item, index) => {
+		if (item.kind !== "tool_call" || item.parentToolUseId !== "" || item.result?.isError) return;
+		const before = list;
 		const input = isObject(item.input) ? item.input : {};
 		if (item.name === "TodoWrite") {
 			list = todoWrite(input);
@@ -92,8 +95,27 @@ export function latestTodos(tr: Transcript): Todo[] | undefined {
 		} else if (item.name === "TaskUpdate" && list) {
 			list = taskUpdate(list, input);
 		}
-	}
-	return list?.map((entry) => entry.todo);
+		if (list !== before) at = index;
+	});
+	return list && { todos: list.map((entry) => entry.todo), at };
+}
+
+/** The todo list as the latest TodoWrite, or the TaskCreate and TaskUpdate calls since, leave it. */
+export function latestTodos(tr: Transcript): Todo[] | undefined {
+	return todoState(tr)?.todos;
+}
+
+const turnStarted = (item: ChatItem) => item.kind === "user" && item.state !== "sent" && item.state !== "queued";
+
+/**
+ * The list the todo bar shows: the latest one while any item is open. A list
+ * that is all completed stays until the next user turn starts, then goes.
+ */
+export function shownTodos(tr: Transcript): Todo[] | undefined {
+	const state = todoState(tr);
+	if (!state || state.todos.length === 0) return undefined;
+	if (state.todos.some((t) => t.status !== "completed")) return state.todos;
+	return tr.items.slice(state.at + 1).some(turnStarted) ? undefined : state.todos;
 }
 
 function callState(call: ToolCallItem, processEnded: boolean): TaskState {

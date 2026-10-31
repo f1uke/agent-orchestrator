@@ -11,6 +11,7 @@ import {
 	formatTokens,
 	latestTodos,
 	sessionActivity,
+	shownTodos,
 	sessionHistory,
 	usageSummary,
 } from "./chat-inspect";
@@ -190,6 +191,43 @@ describe("todos", () => {
 			{ content: "Read", status: "completed", activeForm: "Read…" },
 			{ content: "Fix", status: "in_progress", activeForm: "Fix…" },
 		]);
+	});
+});
+
+describe("the todo bar's list", () => {
+	const write = (id: string, ...statuses: string[]) => [
+		toolUse(id, "TodoWrite", {
+			todos: statuses.map((status, i) => ({ content: `step ${i}`, activeForm: `step ${i}…`, status })),
+		}),
+		toolResult(id, "ok"),
+	];
+	const input = (uuid: string) => at("in", { type: "user", uuid, message: { content: "next" } });
+	const lifecycle = (uuid: string, state: string) =>
+		at("out", { type: "command_lifecycle", command_uuid: uuid, state });
+
+	it("is the latest list while any item is open, across later turns", () => {
+		seq = 0;
+		const tr = foldEntries([...write("w1", "completed", "in_progress"), input("u2"), lifecycle("u2", "started")]);
+		expect(shownTodos(tr)?.map((t) => t.status)).toEqual(["completed", "in_progress"]);
+	});
+
+	it("keeps an all-completed list until the next user turn starts, then hides it", () => {
+		seq = 0;
+		const done = [...write("w1", "completed", "completed")];
+		expect(shownTodos(foldEntries(done))).toHaveLength(2);
+		seq = 0;
+		const queued = [...write("w1", "completed", "completed"), input("u2"), lifecycle("u2", "queued")];
+		expect(shownTodos(foldEntries(queued))).toHaveLength(2);
+		seq = 0;
+		const started = [...write("w1", "completed", "completed"), input("u2"), lifecycle("u2", "started")];
+		expect(shownTodos(foldEntries(started))).toBeUndefined();
+	});
+
+	it("is nothing with no list or an empty one", () => {
+		seq = 0;
+		expect(shownTodos(foldEntries([]))).toBeUndefined();
+		seq = 0;
+		expect(shownTodos(foldEntries(write("w1")))).toBeUndefined();
 	});
 });
 

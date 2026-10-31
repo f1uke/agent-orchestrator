@@ -19,7 +19,9 @@ import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
 import { clockTime, formatDuration } from "../lib/chat-time";
-import { formatTokens, sessionActivity } from "../lib/chat-inspect";
+import { contextUsage, formatTokens, sessionActivity, shownTodos } from "../lib/chat-inspect";
+import { newestUsage } from "../lib/chat-usage";
+import { useChatUsage } from "../hooks/useChatUsage";
 import { activeTurnIndex, railTurns } from "../lib/chat-rail";
 import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
@@ -28,6 +30,8 @@ import { cn } from "../lib/utils";
 import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatComposer } from "./ChatComposer";
+import { ContextMeter, UsageMeter } from "./ChatMeters";
+import { ChatTodoBar } from "./ChatTodoBar";
 import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 import {
@@ -113,7 +117,10 @@ export function ChatPane({
 		() => sessionActivity(transcript).filter((a) => unfinished(a.state)).length,
 		[transcript],
 	);
-	const requestInspectorView = useUiStore((state) => state.requestInspectorView);
+	const todos = useMemo(() => shownTodos(transcript), [transcript]);
+	const fallbackContext = useMemo(() => contextUsage(transcript), [transcript]);
+	const sharedUsage = useChatUsage(view === "chat" && daemonReady);
+	const usage = newestUsage(transcript.usage, sharedUsage);
 
 	useEffect(() => {
 		const open = new Set(transcript.pending.map((p) => p.requestId));
@@ -181,6 +188,7 @@ export function ChatPane({
 						Session is asleep or restarting. Sending and answering resume once it is back.
 					</div>
 				) : null}
+				{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
 				{view === "chat" ? (
 					<ChatComposer
 						actions={actions}
@@ -198,13 +206,19 @@ export function ChatPane({
 					<ConnectionLabel connection={chat.connection} error={chat.error} />
 					{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
 					{runningInBackground > 0 ? (
-						<button className="chat-statusline__bg" onClick={() => requestInspectorView("session")} type="button">
+						<span>
 							<span className="chat-statusline__dot chat-statusline__dot--live" />
 							{runningInBackground} running in background
-						</button>
+						</span>
 					) : null}
 					<span className="chat-statusline__grow" />
-					{view === "chat" ? <span>Enter sends · Shift+Enter newline · Esc interrupts</span> : null}
+					{view === "chat" ? (
+						<>
+							<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+							<UsageMeter usage={usage} />
+							<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+						</>
+					) : null}
 				</div>
 			</div>
 			{toast ? (
