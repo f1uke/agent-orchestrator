@@ -154,6 +154,32 @@ describe("ChatPane", () => {
 		expect(screen.getByText("$0.044 this session")).toBeInTheDocument();
 	});
 
+	it("draws a pasted image in the user bubble as a thumbnail, not as a count", async () => {
+		const { feed, user } = renderPane();
+		const png = (data: string) => ({ type: "image", source: { type: "base64", media_type: "image/png", data } });
+		feed(
+			entry("in", {
+				type: "user",
+				uuid: "u1",
+				message: { content: [{ type: "text", text: "What is wrong here?" }, png("iVBORw=="), png("AAAA")] },
+			}),
+			out({ type: "command_lifecycle", command_uuid: "u1", state: "started" }),
+		);
+		const bubble = document.querySelector(".chat-user")!;
+		expect(bubble).toHaveTextContent("What is wrong here?");
+		expect(bubble).not.toHaveTextContent(/\d images?/);
+		const thumbs = within(bubble as HTMLElement).getAllByRole("img");
+		expect(thumbs.map((t) => t.getAttribute("src"))).toEqual([
+			"data:image/png;base64,iVBORw==",
+			"data:image/png;base64,AAAA",
+		]);
+
+		await user.click(within(bubble as HTMLElement).getByRole("button", { name: "View Pasted image 2" }));
+		const dialog = await screen.findByRole("dialog");
+		expect(within(dialog).getByText("2 / 2")).toBeInTheDocument();
+		expect(within(dialog).getByRole("img")).toHaveAttribute("src", "data:image/png;base64,AAAA");
+	});
+
 	it("ends a turn with how long it took, never a money amount", () => {
 		const { feed } = renderPane();
 		const at = (dir: ChatEntry["dir"], sec: number, payload: object): ChatEntry => ({
