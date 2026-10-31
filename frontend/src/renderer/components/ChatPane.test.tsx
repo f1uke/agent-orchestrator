@@ -212,6 +212,23 @@ describe("ChatPane", () => {
 		expect(ends.every((e) => !e.textContent?.includes("$"))).toBe(true);
 	});
 
+	it("renders a streaming reply as markdown, with a half-written fence as a code block", () => {
+		const { delta } = renderPane();
+		delta(
+			{ type: "message_start", message: { id: "m1" } },
+			{
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "The **fix** is:\n\n```go\nfor ev := range " },
+			},
+		);
+		const streaming = document.querySelector("[data-streaming]")!;
+		expect(streaming.querySelector("strong")).toHaveTextContent("fix");
+		expect(streaming.querySelector(".note-prose__code-body")).toHaveTextContent("for ev := range");
+		expect(streaming).not.toHaveTextContent("```");
+		expect(streaming.querySelector(".chat-caret")).not.toBeNull();
+	});
+
 	it("streams a reply with a caret until the logged block replaces it", () => {
 		const { feed, delta } = renderPane();
 		delta(

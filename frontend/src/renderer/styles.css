@@ -7839,11 +7839,6 @@ ol.note-prose__list {
 	}
 }
 
-.chat-stream-text {
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-}
-
 .chat-think {
 	color: var(--fg-passive);
 	font-size: 13px;
