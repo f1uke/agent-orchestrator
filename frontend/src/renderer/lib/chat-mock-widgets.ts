@@ -10,7 +10,7 @@ const START = Date.parse("2026-10-31T09:00:00.000Z");
 // No CDN: the e2e run has no network. Variables are the ones the widget guide names.
 const CALCULATOR = `<style>
 .dca{display:grid;gap:16px;font-size:14px}
-.dca label{display:grid;gap:6px;color:var(--text-secondary)}
+.dca label{display:block;color:var(--text-secondary)}.dca label input{display:block;margin-top:8px}
 .dca label b{color:var(--text-primary);font-weight:500}
 .dca input[type=range]{width:100%;accent-color:var(--accent)}
 .dca .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
