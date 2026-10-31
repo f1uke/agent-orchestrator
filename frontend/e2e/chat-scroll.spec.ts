@@ -69,6 +69,27 @@ async function framesSince(page: Page, mark: number): Promise<Sample[]> {
 	return page.evaluate((m) => (window as unknown as { __frames: Sample[] }).__frames.filter((s) => s.frame >= m), mark);
 }
 
+/**
+ * Frames from the one in which the first wheel after this call reached the page. On a slow machine the stream can
+ * keep following new text for many frames before that wheel lands, and those moves are the follow, not a bug.
+ */
+async function armFirstWheel(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const w = window as unknown as { __frames: Sample[]; __wheelFrame?: number };
+		w.__wheelFrame = undefined;
+		addEventListener("wheel", () => (w.__wheelFrame = (w.__frames.at(-1)?.frame ?? 0) + 1), {
+			capture: true,
+			once: true,
+		});
+	});
+}
+
+async function framesSinceFirstWheel(page: Page): Promise<Sample[]> {
+	const from = await page.evaluate(() => (window as unknown as { __wheelFrame?: number }).__wheelFrame);
+	if (from === undefined) throw new Error("no wheel reached the page");
+	return framesSince(page, from);
+}
+
 async function markFrames(page: Page): Promise<number> {
 	return page.evaluate(() => {
 		const w = window as unknown as { __frames: Sample[] };
@@ -164,6 +185,11 @@ test.describe("chat scroll", () => {
 	test.use({ viewport: { width: 1920, height: 1080 }, colorScheme: "dark" });
 	test.beforeEach(async ({ page }) => {
 		await page.addInitScript(recordFrames);
+		const rate = Number(process.env.AO_E2E_CPU_THROTTLE ?? 0);
+		if (rate > 1) {
+			const cdp = await page.context().newCDPSession(page);
+			await cdp.send("Emulation.setCPUThrottlingRate", { rate });
+		}
 	});
 
 	test("opening a session, and switching while its log still loads, lands on the newest row", async ({ page }) => {
@@ -207,22 +233,22 @@ test.describe("chat scroll", () => {
 
 	test("a small scroll up while a reply streams is not pulled back to the end", async ({ page }) => {
 		await openStreamingTall(page);
-		const mark = await markFrames(page);
+		await armFirstWheel(page);
 		await wheelOverStream(page, 40, -6, 16);
 		await page.waitForTimeout(300);
 
-		const frames = await framesSince(page, mark);
+		const frames = await framesSinceFirstWheel(page);
 		expect(maxMoveUp(frames), "no row moves up against the scroll").toBeLessThanOrEqual(2);
 		expect(await fromEnd(page), "the user left the end").toBeGreaterThan(100);
 	});
 
 	test("scrolling up through rows not yet measured paints no overlap and no jump", async ({ page }) => {
 		await openStreamingTall(page);
-		const mark = await markFrames(page);
+		await armFirstWheel(page);
 		await wheelOverStream(page, 30, -80, 50);
 		await page.waitForTimeout(300);
 
-		const frames = await framesSince(page, mark);
+		const frames = await framesSinceFirstWheel(page);
 		expect(maxOverlap(frames), "no painted frame overlaps two rows").toBeLessThanOrEqual(1);
 		expect(maxMoveUp(frames), "no row moves up against the scroll").toBeLessThanOrEqual(2);
 	});
@@ -313,11 +339,28 @@ test.describe("chat scroll", () => {
 	test("a wheel during a glide stops it and leaves the user where they scrolled", async ({ page }) => {
 		await openStreamingTall(page);
 		await wheelOverStream(page, 10, -150, 30);
-		await page.getByRole("button", { name: "Jump to latest" }).click();
-		await page.waitForTimeout(60);
-		await wheelOverStream(page, 1, -200, 0);
+		const jump = page.getByRole("button", { name: "Jump to latest" });
+		await expect(jump).toBeVisible();
+		await page.evaluate(() => {
+			const sc = document.querySelector<HTMLElement>('[data-testid="chat-stream"]')!;
+			const w = window as unknown as { __stoppedAt?: number };
+			document.querySelector<HTMLButtonElement>('[aria-label="Jump to latest"]')!.click();
+			const start = sc.scrollTop;
+			const watch = () => {
+				if (sc.scrollTop === start) {
+					requestAnimationFrame(watch);
+					return;
+				}
+				sc.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, bubbles: true }));
+				w.__stoppedAt = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+			};
+			requestAnimationFrame(watch);
+		});
+		await expect
+			.poll(() => page.evaluate(() => (window as unknown as { __stoppedAt?: number }).__stoppedAt))
+			.toBeDefined();
 		const mark = await markFrames(page);
-		const stopped = await fromEnd(page);
+		const stopped = await page.evaluate(() => (window as unknown as { __stoppedAt: number }).__stoppedAt);
 		await page.waitForTimeout(600);
 		expect(stopped, "the glide had not reached the end").toBeGreaterThan(100);
 		expect(maxMove(await framesSince(page, mark)), "nothing moves once the user took over").toBeLessThanOrEqual(1);
