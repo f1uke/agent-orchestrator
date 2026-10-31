@@ -21,9 +21,10 @@ const OVERLAY = {
  * bytes are fetched from (rendered via a blob: object URL — a direct
  * http://127.0.0.1 subresource is CSP-blocked on the app:// scheme). `mime`
  * decides image vs video; `filename` is the accessible label. Used by the Jira
- * description media previews.
+ * description media previews. `dataUrl` is bytes already in the renderer (the
+ * chat log): shown as-is, with no fetch and `src` left empty.
  */
-export type MediaItem = { id: string; filename?: string; mime?: string; src: string };
+export type MediaItem = { id: string; filename?: string; mime?: string; src: string; dataUrl?: string };
 
 /**
  * Fetch bytes (connect-src) and expose them as a `blob:` object URL. The renderer
@@ -32,13 +33,14 @@ export type MediaItem = { id: string; filename?: string; mime?: string; src: str
  * img-src/media-src). So both the thumbnail and the lightbox load bytes this way —
  * the blob URL is allowed by img-src/media-src (see src/shared/renderer-csp.ts).
  * Revokes on unmount / src change; reports fetch failure so callers can show a
- * framed placeholder rather than a broken element.
+ * framed placeholder rather than a broken element. A `dataUrl` is returned
+ * untouched: data: is allowed by img-src, so it needs neither fetch nor blob.
  */
-export function useObjectUrl(src: string): { url: string | null; failed: boolean } {
+export function useObjectUrl(src: string, dataUrl?: string): { url: string | null; failed: boolean } {
 	const [url, setUrl] = useState<string | null>(null);
 	const [failed, setFailed] = useState(false);
 	useEffect(() => {
-		if (!src) return;
+		if (!src || dataUrl) return;
 		let alive = true;
 		let objectUrl: string | null = null;
 		setUrl(null);
@@ -57,7 +59,8 @@ export function useObjectUrl(src: string): { url: string | null; failed: boolean
 			alive = false;
 			if (objectUrl) URL.revokeObjectURL(objectUrl);
 		};
-	}, [src]);
+	}, [src, dataUrl]);
+	if (dataUrl) return { url: dataUrl, failed: false };
 	return { url, failed };
 }
 
@@ -80,7 +83,7 @@ export function MediaThumb({
 	style: React.CSSProperties;
 	className?: string;
 }) {
-	const { url, failed } = useObjectUrl(item.src);
+	const { url, failed } = useObjectUrl(item.src, item.dataUrl);
 	const openable = Boolean(onOpen) && !failed;
 
 	const media = failed ? (
@@ -181,7 +184,7 @@ export function MediaLightbox({
 	scaleRef.current = scale;
 	panRef.current = pan;
 
-	const { url, failed } = useObjectUrl(current ? current.src : "");
+	const { url, failed } = useObjectUrl(current ? current.src : "", current?.dataUrl);
 	const isVideo = current ? isVideoMime(current.mime ?? "") : false;
 	const zoomable = Boolean(url) && !failed && !isVideo;
 

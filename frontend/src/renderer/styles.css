@@ -8064,6 +8064,17 @@ ol.note-prose__list {
 	overflow-wrap: anywhere;
 }
 
+.chat-user__images {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.chat-user__images:last-child {
+	margin-bottom: 0;
+}
+
 .chat-user__meta {
 	margin-top: 4px;
 	color: var(--fg-passive);
@@ -8417,6 +8428,13 @@ ol.note-prose__list {
 
 .chat-tool__body {
 	border-top: 1px solid var(--border);
+}
+
+.chat-tool__images {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 10px 12px;
 }
 
 .chat-tool__more {
