@@ -9818,3 +9818,90 @@ ol.note-prose__list {
 .chat-wrap__reply--primary[aria-disabled="true"]:hover {
 	background: var(--accent-weak);
 }
+
+.chat-suggest {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	max-width: 640px;
+	padding: 14px 16px;
+	border: 1px solid var(--border-1);
+	border-radius: 12px;
+	background: var(--bg-1);
+}
+
+.chat-suggest__icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	flex: none;
+	border-radius: 8px;
+	background: var(--accent-weak);
+	color: var(--accent);
+}
+
+.chat-suggest__icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.chat-suggest__text {
+	min-width: 0;
+	flex: 1;
+}
+
+.chat-suggest__title {
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.4;
+}
+
+.chat-suggest__detail {
+	overflow: hidden;
+	color: var(--fg-muted);
+	font-size: 13px;
+	line-height: 1.5;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-suggest__actions {
+	display: flex;
+	flex: none;
+	gap: 8px;
+}
+
+.chat-suggest__button {
+	padding: 4px 10px;
+	border: 1px solid var(--border-1);
+	border-radius: 6px;
+	background: var(--bg-1);
+	color: var(--fg);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.chat-suggest__button:hover {
+	background: var(--interactive-hover);
+}
+
+.chat-suggest__button--primary {
+	border-color: var(--accent-dim);
+	background: var(--accent-weak);
+	color: var(--accent);
+}
+
+.chat-suggest__button[aria-disabled="true"] {
+	cursor: default;
+	opacity: 0.45;
+}
+
+.chat-suggest__button[aria-disabled="true"]:hover {
+	background: var(--bg-1);
+}
+
+.chat-suggest__button--primary[aria-disabled="true"]:hover {
+	background: var(--accent-weak);
+}
