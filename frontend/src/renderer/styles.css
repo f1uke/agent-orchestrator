@@ -9810,3 +9810,27 @@ ol.note-prose__list {
 .chat-suggest__button--primary[aria-disabled="true"]:hover {
 	background: var(--accent-weak);
 }
+
+.ref-images {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-top: 8px;
+}
+
+.ref-images__item {
+	display: flex;
+	max-width: 240px;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0;
+}
+
+.ref-images__name {
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}

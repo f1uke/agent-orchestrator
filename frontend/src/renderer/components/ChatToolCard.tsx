@@ -50,6 +50,7 @@ import type { Theme } from "../stores/ui-store";
 import { ChatImages, READ_THUMB } from "./ChatImages";
 import { CopyButton } from "./CopyButton";
 import { NoteMarkdown } from "./NoteMarkdown";
+import { RefImages } from "./RefImages";
 import { Button } from "./ui/button";
 
 const FAMILY_ICON: Record<ToolView["family"], LucideIcon> = {
@@ -208,8 +209,11 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 		}
 		case "plan":
 			return (
-				<div className="chat-plan-body note-prose chat-md">
-					<NoteMarkdown source={body.plan} theme={theme} />
+				<div className="chat-plan-body">
+					<div className="note-prose chat-md">
+						<NoteMarkdown source={body.plan} theme={theme} />
+					</div>
+					<RefImages source={body.plan} />
 				</div>
 			);
 		case "generic":
@@ -485,6 +489,9 @@ function OptionButton({
 	);
 }
 
+const questionText = (q: Question) =>
+	[q.question, ...q.options.flatMap((o) => [o.label, o.description, o.preview])].join("\n");
+
 const EMPTY_CHOICE: QuestionChoice = { picked: [], other: "" };
 
 function QuestionCard({ request, state, disabled, onAnswer }: CardProps) {
@@ -573,6 +580,7 @@ function QuestionCard({ request, state, disabled, onAnswer }: CardProps) {
 								</div>
 							) : null}
 						</div>
+						<RefImages source={questionText(current)} />
 					</>
 				) : null}
 				<div className="chat-ask__actions">
@@ -617,8 +625,11 @@ function PlanCard({ request, theme, state, disabled, onAnswer }: CardProps) {
 				Plan ready for review
 				<span className="chat-ask__key">{path ? `ExitPlanMode · ${path}` : "ExitPlanMode"}</span>
 			</div>
-			<div className="chat-plan-body note-prose chat-md">
-				<NoteMarkdown source={plan} theme={theme} />
+			<div className="chat-plan-body">
+				<div className="note-prose chat-md">
+					<NoteMarkdown source={plan} theme={theme} />
+				</div>
+				<RefImages source={plan} />
 			</div>
 			<div className="chat-ask__foot">
 				<div className="chat-ask__actions">
