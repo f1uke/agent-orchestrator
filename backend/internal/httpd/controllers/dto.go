@@ -115,6 +115,12 @@ type SessionIDParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
 }
 
+// ChatFileParam is the {sessionId}/{root} path parameters of the chat file bytes route.
+type ChatFileParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	Root      string `path:"root" enum:"worktree,knowledge" description:"Which directory the file is read from, as the resolve route reported it."`
+}
+
 // SimLeaseParam is the {sessionId}/{udid} path parameters for releasing a
 // simulator device lease.
 type SimLeaseParam struct {
@@ -2429,6 +2435,32 @@ type SetChatModeRequest struct {
 // SetChatModelRequest is the body of PUT /api/v1/sessions/{sessionId}/chat/model.
 type SetChatModelRequest struct {
 	Model string `json:"model" description:"A value from the models the session's initialize response lists, such as sonnet, or a full model id. The agent checks it: a model it does not know is a 409 CHAT_REQUEST_REJECTED."`
+}
+
+// ResolveChatFilesRequest is the body of POST /api/v1/sessions/{sessionId}/chat/files/resolve.
+type ResolveChatFilesRequest struct {
+	Refs []string `json:"refs" minItems:"1" maxItems:"64" description:"File names as the agent wrote them: absolute, ~/ or relative paths, or globs. Each is at most 1024 bytes."`
+}
+
+// ChatFileMatch is one servable file a ref names.
+type ChatFileMatch struct {
+	Root       string `json:"root" enum:"worktree,knowledge" description:"The root the file lives in; pass it back as {root} to GET the bytes."`
+	Path       string `json:"path" description:"Slash-separated, relative to the root; pass it back as the rest of the GET path."`
+	Kind       string `json:"kind" enum:"image,markdown,html,pdf,json,text,log,diff"`
+	MIME       string `json:"mime"`
+	Size       int64  `json:"size"`
+	ModifiedAt string `json:"modifiedAt" format:"date-time"`
+}
+
+// ChatFileRef is what one requested ref resolved to.
+type ChatFileRef struct {
+	Ref     string          `json:"ref"`
+	Matches []ChatFileMatch `json:"matches" description:"Servable files only, at most 24 for a glob; empty when the ref names nothing the session may show."`
+}
+
+// ResolveChatFilesResponse is the body of POST /api/v1/sessions/{sessionId}/chat/files/resolve.
+type ResolveChatFilesResponse struct {
+	Files []ChatFileRef `json:"files" description:"One entry per requested ref, in request order."`
 }
 
 // ChatAckResponse is the body of the chat endpoints that return nothing else.

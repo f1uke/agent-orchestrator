@@ -143,6 +143,7 @@ type API struct {
 	projects       *controllers.ProjectsController
 	sessions       *controllers.SessionsController
 	chat           *controllers.ChatController
+	chatFiles      *controllers.ChatFilesController
 	jira           *controllers.JiraController
 	prs            *controllers.PRsController
 	reviews        *controllers.ReviewsController
@@ -199,6 +200,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 			Feed:     deps.ActivityFeed,
 		},
 		chat:           &controllers.ChatController{Svc: deps.Chat},
+		chatFiles:      &controllers.ChatFilesController{Sessions: deps.Sessions, KnowledgeDir: cfg.KnowledgeDir},
 		jira:           &controllers.JiraController{Svc: deps.Jira},
 		prs:            &controllers.PRsController{Svc: deps.PRs},
 		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},
@@ -259,6 +261,7 @@ func (a *API) Register(root chi.Router) {
 			a.projects.Register(r)
 			a.sessions.Register(r)
 			a.chat.Register(r)
+			a.chatFiles.Register(r)
 			a.jira.Register(r)
 			a.prs.Register(r)
 			a.crewRuns.Register(r)

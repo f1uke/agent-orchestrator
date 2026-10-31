@@ -3570,6 +3570,162 @@ paths:
         is waiting on. Answers 409 CHAT_REQUEST_REJECTED when the request is not pending
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/files/{root}/*:
+    get:
+      operationId: getChatFile
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Which directory the file is read from, as the resolve route reported
+          it.
+        in: path
+        name: root
+        required: true
+        schema:
+          description: Which directory the file is read from, as the resolve route
+            reported it.
+          enum:
+          - worktree
+          - knowledge
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+          description: OK
+        "206":
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+          description: Partial Content
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Request Entity Too Large
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Serve the bytes of a file the resolve route returned. Answers with
+        the file's own Content-Type, nosniff and a sandbox CSP, and supports ranges.
+        404 for an unknown session or root, a path that escapes the root, a missing
+        file or a type off the allowlist; 413 over the type's size cap
+      tags:
+      - sessions
+    head:
+      operationId: headChatFile
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Which directory the file is read from, as the resolve route reported
+          it.
+        in: path
+        name: root
+        required: true
+        schema:
+          description: Which directory the file is read from, as the resolve route
+            reported it.
+          enum:
+          - worktree
+          - knowledge
+          type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+        "413":
+          description: Request Entity Too Large
+        "500":
+          description: Internal Server Error
+        "501":
+          description: Not Implemented
+      summary: Headers of a chat file, as getChatFile would answer, without the body
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/chat/files/resolve:
+    post:
+      operationId: resolveChatFiles
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveChatFilesRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveChatFilesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Resolve the file names a chat session's agent wrote (absolute, ~/,
+        relative or glob) to files in the session's worktree or its project's knowledge
+        directory. Only regular files of an allowed type and size inside those roots
+        are returned
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/interrupt:
     post:
       operationId: interruptChat
@@ -10097,6 +10253,60 @@ components:
           type: boolean
       required:
       - ok
+      type: object
+    ChatFileMatch:
+      properties:
+        kind:
+          enum:
+          - image
+          - markdown
+          - html
+          - pdf
+          - json
+          - text
+          - log
+          - diff
+          type: string
+        mime:
+          type: string
+        modifiedAt:
+          format: date-time
+          type: string
+        path:
+          description: Slash-separated, relative to the root; pass it back as the
+            rest of the GET path.
+          type: string
+        root:
+          description: The root the file lives in; pass it back as {root} to GET the
+            bytes.
+          enum:
+          - worktree
+          - knowledge
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+      - root
+      - path
+      - kind
+      - mime
+      - size
+      - modifiedAt
+      type: object
+    ChatFileRef:
+      properties:
+        matches:
+          description: Servable files only, at most 24 for a glob; empty when the
+            ref names nothing the session may show.
+          items:
+            $ref: '#/components/schemas/ChatFileMatch'
+          type: array
+        ref:
+          type: string
+      required:
+      - ref
+      - matches
       type: object
     ChatImage:
       properties:
@@ -16875,6 +17085,29 @@ components:
       required:
       - ok
       - comment
+      type: object
+    ResolveChatFilesRequest:
+      properties:
+        refs:
+          description: 'File names as the agent wrote them: absolute, ~/ or relative
+            paths, or globs. Each is at most 1024 bytes.'
+          items:
+            type: string
+          maxItems: 64
+          minItems: 1
+          type: array
+      required:
+      - refs
+      type: object
+    ResolveChatFilesResponse:
+      properties:
+        files:
+          description: One entry per requested ref, in request order.
+          items:
+            $ref: '#/components/schemas/ChatFileRef'
+          type: array
+      required:
+      - files
       type: object
     ResolveCommentsResponse:
       properties:
