@@ -2101,6 +2101,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		PRTarget:       rec.PRTarget,
 		ChildWorktrees: childWorktrees,
 		ScriptsOwner:   scriptsOwner(rec),
+		Transport:      rec.Transport,
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)
@@ -3534,6 +3535,7 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, pr
 		PRTarget:       prTarget,
 		ChildWorktrees: childWorktrees,
 		ScriptsOwner:   cfg.CrewOf,
+		Transport:      cfg.Transport,
 	})
 	if err != nil {
 		return "", "", err
@@ -3574,6 +3576,9 @@ type systemPromptSpec struct {
 	// uses (scriptsOwner): its crew's dev, or itself. Empty while a session
 	// that will own its workspace is being spawned, before it has an id.
 	ScriptsOwner domain.SessionID
+	// Transport is how the human reads the session. A chat session's prompt
+	// says so; every other value renders nothing.
+	Transport domain.Transport
 }
 
 // buildSystemPrompt derives the standing instructions for a session of the
@@ -3729,6 +3734,9 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 	// override when set, otherwise the global default; English/empty renders nothing
 	// so the default path is byte-for-byte unchanged.
 	lang := prompts.ResolveResponseLanguage(cfg.ResponseLanguage, m.globalResponseLanguage())
+	if spec.Transport == domain.TransportChat {
+		base += prompts.ChatTransportNote()
+	}
 	return base + m.aoSkillPointer(cfg.HasWebUI) + prompts.ConfidentialityGuard + prompts.ResponseLanguageDirective(lang), nil
 }
 
