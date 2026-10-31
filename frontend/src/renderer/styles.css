@@ -5958,8 +5958,14 @@ ol.note-prose__list {
 	margin-left: auto;
 }
 
-.note-prose__code-run + .note-prose__code-copy {
+.note-prose__code-run + .note-prose__code-copy,
+.note-prose__code-copy + .note-prose__code-copy {
 	margin-left: 2px;
+}
+
+.note-prose__code-wrap[aria-pressed="true"] {
+	background: var(--accent-weak);
+	color: var(--prose-accent-text);
 }
 
 .note-prose__code-body {
@@ -5975,6 +5981,11 @@ ol.note-prose__list {
 
 .note-prose__code-body code {
 	font: inherit;
+}
+
+.note-prose__code-body--wrap {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 /* Raw HTML in a note is shown as the literal text it is — never parsed, never
