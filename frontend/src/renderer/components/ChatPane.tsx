@@ -412,7 +412,6 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 		[setFollowing],
 	);
 
-	// Glides a row to the top and stops following.
 	const glideToRow = useCallback(
 		(key: string) => {
 			const index = rows.findIndex((row) => row.key === key);

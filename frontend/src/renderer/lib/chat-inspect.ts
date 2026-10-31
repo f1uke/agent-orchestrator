@@ -65,6 +65,7 @@ function taskUpdate(list: readonly TodoEntry[], input: Record<string, unknown>):
 
 type TodoState = { todos: Todo[]; at: number };
 
+/** The todo list as the latest TodoWrite, or the TaskCreate and TaskUpdate calls since, leave it, and the item that last changed it. */
 function todoState(tr: Transcript): TodoState | undefined {
 	let list: TodoEntry[] | undefined;
 	let at = -1;
@@ -84,11 +85,6 @@ function todoState(tr: Transcript): TodoState | undefined {
 		if (list !== before) at = index;
 	});
 	return list && { todos: list.map((entry) => entry.todo), at };
-}
-
-/** The todo list as the latest TodoWrite, or the TaskCreate and TaskUpdate calls since, leave it. */
-export function latestTodos(tr: Transcript): Todo[] | undefined {
-	return todoState(tr)?.todos;
 }
 
 const turnStarted = (item: ChatItem) => item.kind === "user" && item.state !== "sent" && item.state !== "queued";

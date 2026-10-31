@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatEntry, Direction } from "./chat-event";
 import { foldEntries } from "./chat-fold";
 import { mockChatEntries } from "./chat-mock";
-import { contextUsage, formatTokens, latestTodos, sessionActivity, shownTodos } from "./chat-inspect";
+import { contextUsage, formatTokens, sessionActivity, shownTodos } from "./chat-inspect";
 
 function loadFixture(name: string): ChatEntry[] {
 	const testdata = join(dirname(fileURLToPath(import.meta.url)), "../../../../backend/internal/chatproto/testdata");
@@ -88,7 +88,7 @@ describe("todos", () => {
 	const item = (content: string, status: string) => ({ content, status, activeForm: `${content}…` });
 
 	it("is undefined until claude writes a list", () => {
-		expect(latestTodos(foldEntries(first))).toBeUndefined();
+		expect(shownTodos(foldEntries(first))).toBeUndefined();
 	});
 
 	it("is the latest top-level TodoWrite that was not refused", () => {
@@ -103,7 +103,7 @@ describe("todos", () => {
 			toolUse("w4", "TodoWrite", todos([item("Refused", "pending")])),
 			toolResult("w4", "denied", true),
 		]);
-		expect(latestTodos(tr)).toEqual([
+		expect(shownTodos(tr)).toEqual([
 			{ content: "Read", status: "completed", activeForm: "Read…" },
 			{ content: "Fix", status: "in_progress", activeForm: "Fix…" },
 		]);
@@ -232,7 +232,7 @@ it("formats token counts the way the rail shows them", () => {
 
 it("gives the dev:web stub's session a todo list, running background work and a known window", () => {
 	const tr = foldEntries(mockChatEntries(first));
-	expect(latestTodos(tr)?.map((t) => t.status)).toEqual([
+	expect(shownTodos(tr)?.map((t) => t.status)).toEqual([
 		"completed",
 		"completed",
 		"completed",
@@ -262,7 +262,7 @@ describe("todos from TaskCreate and TaskUpdate", () => {
 			toolResult("u1", "Updated task #1 status"),
 			toolUse("u2", "TaskUpdate", { taskId: "2", status: "in_progress", subject: "Fix the real cause" }),
 		]);
-		expect(latestTodos(tr)).toEqual([
+		expect(shownTodos(tr)).toEqual([
 			{ content: "Find failing tests", activeForm: "Find failing tests", status: "completed" },
 			{ content: "Fix the real cause", activeForm: "Fix the cause", status: "in_progress" },
 		]);
@@ -279,16 +279,21 @@ describe("todos from TaskCreate and TaskUpdate", () => {
 			toolUse("agent", "Agent", { description: "x" }),
 			toolUse("u3", "TaskUpdate", { taskId: "2", status: "completed" }, "agent"),
 		]);
-		expect(latestTodos(tr)?.map((t) => [t.content, t.status])).toEqual([["Two", "pending"]]);
+		expect(shownTodos(tr)?.map((t) => [t.content, t.status])).toEqual([["Two", "pending"]]);
 	});
 
-	it("reads the todo list out of the recorded long session", () => {
-		const tr = foldEntries(loadFixture("long_session.jsonl"));
-		expect(latestTodos(tr)?.map((t) => [t.content, t.status])).toEqual([
+	it("reads the recorded long session's list, all completed, and hides it once the next turn starts", () => {
+		const entries = loadFixture("long_session.jsonl");
+		const starts = entries.flatMap((e, i) =>
+			e.dir === "out" && (e.payload as { state?: string }).state === "started" ? [i] : [],
+		);
+		const nextTurn = starts.at(-1);
+		expect(shownTodos(foldEntries(entries.slice(0, nextTurn)))?.map((t) => [t.content, t.status])).toEqual([
 			["Find failing tests", "completed"],
 			["Fix the cause", "completed"],
 			["Verify and review results", "completed"],
 		]);
+		expect(shownTodos(foldEntries(entries))).toBeUndefined();
 	});
 
 	it("lets a later TodoWrite replace the list", () => {
@@ -298,7 +303,7 @@ describe("todos from TaskCreate and TaskUpdate", () => {
 			toolUse("w1", "TodoWrite", { todos: [{ content: "New", status: "pending", activeForm: "News" }] }),
 			toolResult("w1", "ok"),
 		]);
-		expect(latestTodos(tr)?.map((t) => t.content)).toEqual(["New"]);
+		expect(shownTodos(tr)?.map((t) => t.content)).toEqual(["New"]);
 	});
 });
 
