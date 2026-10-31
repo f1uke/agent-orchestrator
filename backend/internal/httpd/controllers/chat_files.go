@@ -41,6 +41,8 @@ type ChatFilesController struct {
 	// KnowledgeDir is the knowledge store root; a session reads KnowledgeDir/<project>.
 	KnowledgeDir string
 	DataDir      string
+
+	taskOutputs taskOutputPaths
 }
 
 // Register mounts the chat file routes on the supplied router.

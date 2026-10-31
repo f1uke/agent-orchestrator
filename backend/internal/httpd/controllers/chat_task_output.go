@@ -4,12 +4,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatfiles"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
@@ -32,15 +34,12 @@ func (c *ChatFilesController) taskOutput(w http.ResponseWriter, r *http.Request)
 		envelope.WriteError(w, r, err)
 		return
 	}
-	logPath, _ := sessionhost.Paths(c.DataDir, string(id))
-	lf, err := os.Open(logPath) //nolint:gosec // G304: the session's own event log
-	if err != nil {
-		taskOutputNotFound(w, r)
-		return
+	key := string(id) + "/" + taskID
+	found, ok := c.taskOutputs.get(key)
+	if !ok {
+		found, ok = c.findTaskOutput(id, taskID)
 	}
-	found, err := chatproto.FindTaskOutput(lf, taskID)
-	_ = lf.Close()
-	if err != nil || found.Path == "" {
+	if !ok {
 		taskOutputNotFound(w, r)
 		return
 	}
@@ -50,6 +49,7 @@ func (c *ChatFilesController) taskOutput(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer func() { _ = f.Close() }()
+	c.taskOutputs.put(key, found)
 	start := max(0, info.Size()-taskOutputTail)
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
 		taskOutputNotFound(w, r)
@@ -67,6 +67,46 @@ func (c *ChatFilesController) taskOutput(w http.ResponseWriter, r *http.Request)
 		Truncated:  start > 0,
 		ModifiedAt: info.ModTime().UTC().Format(time.RFC3339),
 	})
+}
+
+// findTaskOutput scans the session's event log, which can be tens of MB, so a
+// found path is remembered and later polls skip the scan.
+func (c *ChatFilesController) findTaskOutput(id domain.SessionID, taskID string) (chatproto.TaskOutput, bool) {
+	logPath, _ := sessionhost.Paths(c.DataDir, string(id))
+	lf, err := os.Open(logPath) //nolint:gosec // G304: the session's own event log
+	if err != nil {
+		return chatproto.TaskOutput{}, false
+	}
+	defer func() { _ = lf.Close() }()
+	found, err := chatproto.FindTaskOutput(lf, taskID)
+	return found, err == nil && found.Path != ""
+}
+
+// maxRememberedTasks bounds the path memory; past it the memory starts over.
+const maxRememberedTasks = 512
+
+// taskOutputPaths remembers the output paths the event logs named, by
+// session and task. A path is only remembered after it passed confinement,
+// and it is confined again on every read.
+type taskOutputPaths struct {
+	mu    sync.Mutex
+	paths map[string]chatproto.TaskOutput
+}
+
+func (t *taskOutputPaths) get(key string) (chatproto.TaskOutput, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	found, ok := t.paths[key]
+	return found, ok
+}
+
+func (t *taskOutputPaths) put(key string, found chatproto.TaskOutput) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.paths == nil || len(t.paths) >= maxRememberedTasks {
+		t.paths = map[string]chatproto.TaskOutput{}
+	}
+	t.paths[key] = found
 }
 
 func taskOutputNotFound(w http.ResponseWriter, r *http.Request) {

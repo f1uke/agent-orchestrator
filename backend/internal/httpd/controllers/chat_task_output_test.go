@@ -29,6 +29,7 @@ type taskOutputEnv struct {
 	srv     *httptest.Server
 	root    string // claude's per-uid temp root
 	outside string
+	log     string // ao-1's event log
 }
 
 const (
@@ -89,7 +90,8 @@ func newTaskOutputEnv(t *testing.T) taskOutputEnv {
 	writeFile(t, filepath.Join(tasks2, "other.output"), "the other session's output")
 
 	data := filepath.Join(base, "data")
-	writeFile(t, filepath.Join(data, "sessions", "ao-1", "events.jsonl"), taskLog(sid1,
+	env.log = filepath.Join(data, "sessions", "ao-1", "events.jsonl")
+	writeFile(t, env.log, taskLog(sid1,
 		started("run1", "toolu_1"),
 		backgroundResult("toolu_1", "run1", filepath.Join(tasks1, "run1.output")),
 		started("empty", "toolu_2"),
@@ -225,5 +227,30 @@ func TestChatTaskOutputRefusesABadTaskIDBeforeAnyLookup(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&body)
 	if resp.StatusCode != http.StatusNotFound || body.Code != "TASK_OUTPUT_NOT_FOUND" {
 		t.Errorf("bad id on an unknown session = %d %q, want 404 TASK_OUTPUT_NOT_FOUND before the session is looked up", resp.StatusCode, body.Code)
+	}
+}
+
+func TestChatTaskOutputFindsATaskOnceThenFollowsItsFile(t *testing.T) {
+	env := newTaskOutputEnv(t)
+	if _, status, _ := env.get(t, "ao-1", "run1"); status != http.StatusOK {
+		t.Fatalf("first read = %d, want 200", status)
+	}
+	if err := os.WriteFile(env.log, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(env.root, "-work-project", sid1, "tasks", "run1.output"), "line 1\nline 2\nline 3\n")
+	body, status, _ := env.get(t, "ao-1", "run1")
+	if status != http.StatusOK || body.Text != "line 1\nline 2\nline 3\n" {
+		t.Errorf("poll after the log was emptied = %d %+v, want 200 with the file's new text and no log rescan", status, body)
+	}
+
+	if err := os.Remove(filepath.Join(env.root, "-work-project", sid1, "tasks", "run1.output")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(env.outside, sid1, "tasks", "escape.output"), filepath.Join(env.root, "-work-project", sid1, "tasks", "run1.output")); err != nil {
+		t.Fatal(err)
+	}
+	if _, status, _ := env.get(t, "ao-1", "run1"); status != http.StatusNotFound {
+		t.Errorf("a remembered task whose file became a link outside = %d, want 404", status)
 	}
 }
