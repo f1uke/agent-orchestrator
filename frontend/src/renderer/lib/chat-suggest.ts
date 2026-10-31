@@ -36,7 +36,6 @@ export function skillSuggestionOf(call: ToolCallItem): SkillSuggestion | undefin
 export const isSuggestion = (call: ToolCallItem) =>
 	sessionSuggestionOf(call) !== undefined || skillSuggestionOf(call) !== undefined;
 
-/** The newest card of each kind is the only one whose buttons act. */
 export type LiveSuggestions = { session?: string; skill?: string };
 
 export function liveSuggestions(rows: readonly ChatRow[]): LiveSuggestions {

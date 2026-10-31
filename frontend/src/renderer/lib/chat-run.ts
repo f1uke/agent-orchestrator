@@ -2,7 +2,6 @@ const SHELLS = new Set(["bash", "sh", "shell", "zsh", "console"]);
 
 export type CodeAction = (code: { lang: string; text: string }) => { label: string; onRun: () => void } | undefined;
 
-/** The command a one-line shell block holds, or undefined when the block is not one to offer a Run button on. */
 export function runnableCommand(lang: string, text: string): string | undefined {
 	const shell = lang.trim().toLowerCase();
 	if (!SHELLS.has(shell)) return undefined;
@@ -16,7 +15,7 @@ export function runnableCommand(lang: string, text: string): string | undefined 
 
 export const runRequest = (command: string) => `Run this command:\n\n\`\`\`bash\n${command}\n\`\`\``;
 
-/** A Run button that fills the message box with a request. The human sends it and Claude's permission flow decides. */
+// Never runs anything: the human sends the request, and Claude's own permission prompt still applies to the command.
 export const askToRun =
 	(onPrompt: (text: string) => void): CodeAction =>
 	({ lang, text }) => {

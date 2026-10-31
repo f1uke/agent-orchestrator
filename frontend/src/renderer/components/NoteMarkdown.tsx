@@ -112,7 +112,6 @@ export type NoteNavigation = {
 	onOpenTag?: (tag: string) => void;
 };
 
-// A context, so a code block inside a list, quote or callout reaches it without every renderer passing it on.
 const CodeActionContext = createContext<CodeAction | undefined>(undefined);
 
 export function NoteMarkdown({
@@ -131,7 +130,6 @@ export function NoteMarkdown({
 	    from the editing index, so a note that could not be mapped simply is not
 	    pointed at — see `NoteReveal`. */
 	reveal?: NoteReveal | null;
-	/** Offers a button in the header of a code block it names. Absent for notes and the wiki. */
 	codeAction?: CodeAction;
 }) {
 	const { tokens } = useMemo(() => parseNote(source), [source]);

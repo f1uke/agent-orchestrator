@@ -99,10 +99,6 @@ export function SkillSuggestionCard({
 	);
 }
 
-/**
- * The New task form, filled in from a suggestion. Creating anything stays the human's click on
- * Start or Add to TODO inside the dialog; this only opens it and follows the new session.
- */
 export function SuggestedSessionDialog({
 	suggestion,
 	projectId,

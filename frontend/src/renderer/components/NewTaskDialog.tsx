@@ -33,7 +33,6 @@ type NewTaskDialogProps = {
 	 * title pre-filled. Absent for the plain New-task flow.
 	 */
 	initialIssue?: JiraIssueSummary | null;
-	/** Fills the title and the brief when the dialog opens, unless the human has typed one already. */
 	initialTitle?: string;
 	initialPrompt?: string;
 	/** Called after a Start-now create with the new live session id (board navigates to it). */
