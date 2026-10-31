@@ -228,7 +228,26 @@ test.describe("chat scroll", () => {
 			expect(painted.length, `${id} painted frames`).toBeGreaterThan(0);
 			const away = painted.filter((s) => s.fromEnd > 2).map((s) => `frame ${s.frame}: ${Math.round(s.fromEnd)}px`);
 			expect(away, `${id}: frames painted above the newest row`).toEqual([]);
+			expect(maxOverlap(painted), `${id}: no painted frame overlaps two rows`).toBeLessThanOrEqual(1);
 		}
+	});
+
+	test("a long session shows its newest turns first, then takes in its history without a blank or moved frame", async ({
+		page,
+	}) => {
+		await page.goto("/#/projects/ao-demo/sessions/demo-chat");
+		await expectAtEnd(page, "demo-chat");
+		const mark = await markFrames(page);
+		await go(page, "demo-chat-tall");
+		await expectAtEnd(page, "demo-chat-tall");
+		await page.waitForTimeout(300);
+		const painted = (await framesSince(page, mark)).filter((s) => s.session === "demo-chat-tall" && s.visible);
+		const blank = painted.filter((s) => s.rows.length === 0).map((s) => `frame ${s.frame}`);
+		expect(blank, "no visible frame without rows").toEqual([]);
+		const away = painted.filter((s) => s.fromEnd > 2).map((s) => `frame ${s.frame}: ${Math.round(s.fromEnd)}px`);
+		expect(away, "no frame painted above the newest row").toEqual([]);
+		const newest = new Set(painted.map((s) => Math.round(s.rows.at(-1)!.bottom)));
+		expect(newest.size, "the newest row never moves").toBe(1);
 	});
 
 	test("a small scroll up while a reply streams is not pulled back to the end", async ({ page }) => {

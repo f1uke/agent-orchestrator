@@ -478,3 +478,91 @@ func TestChatLiveImagesFollowTheOpensBlobRefs(t *testing.T) {
 		t.Errorf("inline client got %s, want the base64 source", i)
 	}
 }
+
+func writeTurnsLog(t *testing.T, dataDir, id string, turns int) {
+	t.Helper()
+	logPath, _, err := sessionhost.PreparePaths(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	add := func(dir chatproto.Direction, payload string) {
+		b, err := json.Marshal(chatproto.Entry{Seq: uint64(len(lines) + 1), TS: time.Unix(int64(len(lines)+1), 0).UTC(), Dir: dir, Payload: json.RawMessage(payload)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, string(b))
+	}
+	add(chatproto.DirOut, `{"type":"system","subtype":"init"}`)
+	for i := range turns {
+		if i%2 == 0 {
+			add(chatproto.DirHost, fmt.Sprintf(`{"kind":"user_origin","uuid":"u%d","origin":{"via":"ao_send","from":"x"}}`, i))
+		}
+		add(chatproto.DirIn, fmt.Sprintf(`{"type":"user","uuid":"u%d","message":{"content":"turn %d"}}`, i, i))
+		add(chatproto.DirOut, `{"type":"assistant","message":{"id":"m","content":[{"type":"text","text":"ok"}]}}`)
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChatOpenWithTailSendsTheLastTurnsFirstThenTheHistory(t *testing.T) {
+	dir := chatDataDir(t)
+	writeTurnsLog(t, dir, "s1", 5)
+	conn := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+
+	conn.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1", Tail: true}
+	wantFrames(t, "tail first", readChat(t, conn, "s1", msgOffline),
+		"entry:7", "entry:8", "entry:9", "entry:10", "entry:11", "entry:12", "entry:13", "entry:14",
+		"history",
+		"entry:1", "entry:2", "entry:3", "entry:4", "entry:5", "entry:6",
+		"offline")
+}
+
+func TestChatOpenWithTailOfAShortLogIsAPlainReplay(t *testing.T) {
+	dir := chatDataDir(t)
+	writeTurnsLog(t, dir, "s1", 2)
+	conn := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+
+	conn.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1", Tail: true}
+	wantFrames(t, "short", readChat(t, conn, "s1", msgOffline), "entry:1", "entry:2", "entry:3", "entry:4", "entry:5", "entry:6", "offline")
+}
+
+func TestChatTailedOpenStreamsTheHostAfterTheNewestEntry(t *testing.T) {
+	dir := chatDataDir(t)
+	h := startChatHost(t, dir, "s1")
+	for i, text := range []string{"one", "two", "three", "four"} {
+		h.send(t, text)
+		h.waitForSeq(t, uint64(4+2*i))
+	}
+	conn := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+
+	conn.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1", Tail: true}
+	wantFrames(t, "tailed replay", readChat(t, conn, "s1", msgLive),
+		"entry:5", "entry:6", "entry:7", "entry:8", "entry:9", "entry:10",
+		"history",
+		"entry:1", "entry:2", "entry:3", "entry:4",
+		"live")
+	h.send(t, "five")
+	wantFrames(t, "live", readEntries(t, conn, "s1", 12), "entry:11", "delta", "entry:12")
+}
+
+func TestChatTailedOpenSendsTheNewestTurnsBeforeReadingTheOlderLog(t *testing.T) {
+	dir := chatDataDir(t)
+	writeTurnsLog(t, dir, "s1", 5)
+	logPath, _ := sessionhost.Paths(dir, "s1")
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := bytes.Replace(b, []byte(`{"type":"system","subtype":"init"}`), []byte(`{"type":"system",`), 1)
+	if err := os.WriteFile(logPath, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	conn := serveChat(t, fakeChatSessions{"s1": domain.TransportChat}, dir)
+
+	conn.in <- clientMsg{Ch: chChat, Type: msgOpen, ID: "s1", Tail: true}
+	got := readChat(t, conn, "s1", msgError)
+	wantFrames(t, "tail before the broken head", got,
+		"entry:7", "entry:8", "entry:9", "entry:10", "entry:11", "entry:12", "entry:13", "entry:14", "history", "error")
+}
