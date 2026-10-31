@@ -1203,3 +1203,86 @@ describe("ChatPane visuals", () => {
 		expect(frameOf("flow")).toBeInTheDocument();
 	});
 });
+
+describe("ChatPane chapters, tasks and wrap-up", () => {
+	const mark = (id: string, title: string) => [
+		toolUse(id, "mcp__ao__mark_chapter", { title, summary: `about ${title}` }),
+		toolDone(id, "Chapter marked."),
+	];
+	const wrapUp = (id: string, replies: string[]) => [
+		toolUse(id, "mcp__ao__wrap_up", { recap: `Recap ${id}`, ask: "Commit these changes?", replies }),
+		toolDone(id, "Box shown."),
+	];
+	const composer = () => screen.getByRole("textbox", { name: "Message Claude" });
+
+	it("draws a chapter as a divider instead of a tool card", () => {
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), ...mark("c1", "Codebase exploration"));
+		const divider = document.querySelector("[data-chapter]");
+		expect(divider).toHaveTextContent("Codebase exploration");
+		expect(divider).toHaveAttribute("title", "about Codebase exploration");
+		expect(document.querySelector('[data-tool="mcp__ao__mark_chapter"]')).toBeNull();
+	});
+
+	it("keeps a chapter divider on screen after its turn folds", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			lifecycle("u1", "started"),
+			...mark("c1", "Explore"),
+			toolUse("r1", "Read", { file_path: "a.go" }),
+			toolDone("r1"),
+			toolUse("r2", "Bash", { command: "ls" }),
+			toolDone("r2"),
+			saying("Done."),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		expect(document.querySelector("[data-turn]")).not.toBeNull();
+		expect(document.querySelector("[data-chapter]")).toHaveTextContent("Explore");
+	});
+
+	it("offers the chapters in a table of contents once there are two", () => {
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), ...mark("c1", "Explore"));
+		expect(screen.queryByRole("navigation", { name: "Chapters" })).toBeNull();
+		feed(saying("x"), ...mark("c2", "Build"));
+		expect(screen.getByRole("navigation", { name: "Chapters" })).toBeInTheDocument();
+	});
+
+	it("shows the todos once, in the bar above the composer, not again in the stream", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			toolUse("t1", "TaskCreate", { subject: "Read the fold", description: "d" }),
+			toolDone("t1", "Task #1 created successfully: Read the fold"),
+			toolUse("t2", "TaskCreate", { subject: "Add the frame", description: "d" }),
+			toolDone("t2", "Task #2 created successfully: Add the frame"),
+			toolUse("t3", "TaskUpdate", { taskId: "1", status: "completed" }),
+			toolDone("t3"),
+		);
+		expect(screen.getByRole("button", { name: /To-dos/ })).toHaveTextContent("1 completed · 1 pending");
+		expect(screen.getByTestId("chat-stream")).not.toHaveTextContent("Read the fold");
+	});
+
+	it("fills the composer from a wrap-up reply and sends nothing", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "go"), ...wrapUp("w1", ["Yes, commit", "Not yet"]));
+		expect(screen.getByText("Commit these changes?")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Yes, commit" }));
+		await settle();
+		expect(composer()).toHaveValue("Yes, commit");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("keeps the buttons of an older wrap-up disabled and the latest one live", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "go"), ...wrapUp("w1", ["Old reply"]), userIn("u2", "next"), ...wrapUp("w2", ["New reply"]));
+		const old = screen.getByRole("button", { name: "Old reply" });
+		expect(old).toHaveAttribute("aria-disabled", "true");
+		await user.click(old);
+		await settle();
+		expect(composer()).toHaveValue("");
+		expect(screen.getByRole("button", { name: "New reply" })).not.toHaveAttribute("aria-disabled");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+});

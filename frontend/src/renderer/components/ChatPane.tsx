@@ -30,6 +30,10 @@ import { cn } from "../lib/utils";
 import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
 import { widgetOf } from "../lib/chat-widget";
+import { chapterOf, chapters as chaptersOf } from "../lib/chat-chapters";
+import { latestWrapUpId, wrapUpOf } from "../lib/chat-wrapup";
+import { ChatChapters } from "./ChatChapters";
+import { ChatWrapUp } from "./ChatWrapUp";
 import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
 import { ChatComposer, type Prefill } from "./ChatComposer";
 import { ContextMeter, UsageMeter } from "./ChatMeters";
@@ -445,14 +449,22 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 		[virtualizer],
 	);
 	const [activeTurn, setActiveTurn] = useState(0);
+	const chapterList = useMemo(() => chaptersOf(rows), [rows]);
+	const chapterRows = useMemo(() => {
+		const indexOf = new Map(rows.map((row, i) => [row.key, i]));
+		return chapterList.map((chapter) => indexOf.get(chapter.key) ?? 0);
+	}, [rows, chapterList]);
+	const liveWrapUp = useMemo(() => latestWrapUpId(rows), [rows]);
+	const [activeChapter, setActiveChapter] = useState(0);
 
 	const findActiveTurn = useCallback(() => {
 		const el = scrollRef.current;
 		if (!el) return;
-		const starts = turnRows.map((i) => virtualizer.measurementsCache[i]?.start ?? 0);
+		const start = (i: number) => virtualizer.measurementsCache[i]?.start ?? 0;
 		const probe = el.scrollTop + el.clientHeight / 3 - (colRef.current?.offsetTop ?? 0);
-		setActiveTurn(activeTurnIndex(starts, probe));
-	}, [turnRows, virtualizer]);
+		setActiveTurn(activeTurnIndex(turnRows.map(start), probe));
+		setActiveChapter(activeTurnIndex(chapterRows.map(start), probe));
+	}, [turnRows, chapterRows, virtualizer]);
 
 	useLayoutEffect(findActiveTurn, [findActiveTurn]);
 
@@ -527,6 +539,7 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 							>
 								<ChatRowView
 									answers={answers}
+									liveWrapUp={liveWrapUp}
 									onPrompt={onPrompt}
 									openRows={openRows}
 									pendingByRequest={pendingByRequest}
@@ -542,6 +555,7 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 				</div>
 			</div>
 			<ChatTurnRail active={activeTurn} onJump={glideToRow} turns={turns} />
+			<ChatChapters active={activeChapter} chapters={chapterList} onJump={glideToRow} />
 			{newBelow ? (
 				<button
 					aria-label="Jump to latest"
@@ -567,6 +581,7 @@ type RowProps = {
 	openRows: OpenRows;
 	toggleRow: ToggleRow;
 	onPrompt: (text: string) => void;
+	liveWrapUp?: string;
 	pendingByRequest: ReadonlyMap<string, Pending>;
 	sessionNames: ReadonlyMap<string, string>;
 };
@@ -618,6 +633,7 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 				<ItemRow
 					answers={answers}
 					item={row.item}
+					liveWrapUp={props.liveWrapUp}
 					onPrompt={props.onPrompt}
 					openRows={openRows}
 					pendingByRequest={pendingByRequest}
@@ -646,6 +662,7 @@ function ItemRow({
 	openRows,
 	toggleRow,
 	onPrompt,
+	liveWrapUp,
 	pendingByRequest,
 	sessionNames,
 }: Omit<RowProps, "row"> & {
@@ -685,6 +702,10 @@ function ItemRow({
 			}
 			if (item.name === "AskUserQuestion" && permission) return <ResolvedLine call={item} />;
 			if (widgetOf(item)) return <ChatWidget call={item} onPrompt={onPrompt} theme={theme} />;
+			const chapter = chapterOf(item);
+			if (chapter) return <ChapterDivider summary={chapter.summary} title={chapter.title} />;
+			const wrap = wrapUpOf(item);
+			if (wrap) return <ChatWrapUp live={item.id === liveWrapUp} onPrompt={onPrompt} wrap={wrap} />;
 			return (
 				<>
 					<ToolCard
@@ -722,6 +743,14 @@ function ItemRow({
 		case "notice":
 			return <NoticeRow notice={item} />;
 	}
+}
+
+function ChapterDivider({ title, summary }: { title: string; summary: string }) {
+	return (
+		<div className="chat-chapter" data-chapter={title} title={summary || undefined}>
+			<span className="chat-chapter__title">{title}</span>
+		</div>
+	);
 }
 
 function taskDisplayName(item: TaskMessageItem, task: BackgroundTask | undefined): string {

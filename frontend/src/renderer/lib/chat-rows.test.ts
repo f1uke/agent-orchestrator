@@ -372,6 +372,46 @@ describe("chatRows widgets", () => {
 	});
 });
 
+describe("chatRows chapters and wrap-up", () => {
+	const chapter = (title: string, result: "ok" | "error" | "none" = "ok") =>
+		tool("mcp__ao__mark_chapter", { title }, result);
+	const wrapUp = (recap = "Done.", result: "ok" | "error" | "none" = "ok") =>
+		tool("mcp__ao__wrap_up", { recap }, result);
+	const titleOf = (row: ChatRow) => (row.kind === "item" && row.item.kind === "tool_call" ? row.item.input : undefined);
+
+	it("gives a chapter its own row instead of a place in a process group", () => {
+		const rows = rowsOf([user(), say("a"), tool("Read"), chapter("Build"), tool("Bash"), say("b")]);
+		expect(shape(rows)).toEqual(["user", "assistant_text", "tool_call", "tool_call", "tool_call", "assistant_text"]);
+	});
+
+	it("keeps each chapter between the folds of the work around it", () => {
+		const rows = rowsOf([
+			user(),
+			chapter("Explore"),
+			tool("Read"),
+			tool("Grep"),
+			chapter("Build"),
+			tool("Edit"),
+			tool("Bash"),
+			say("done"),
+			turnEnd(),
+		]);
+		expect(shape(rows)).toEqual(["user", "tool_call", "turn", "tool_call", "turn", "assistant_text", "turn_end"]);
+		expect([rows[1], rows[3]].map(titleOf)).toEqual([{ title: "Explore" }, { title: "Build" }]);
+	});
+
+	it("keeps a wrap-up in view after its turn folds, ahead of the last reply", () => {
+		const rows = rowsOf([user(), tool("Read"), tool("Edit"), wrapUp("Tests pass."), say("closing"), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "tool_call", "assistant_text", "turn_end"]);
+		expect(titleOf(rows[2])).toEqual({ recap: "Tests pass." });
+	});
+
+	it("folds a chapter or wrap-up call that failed, since there is nothing to show", () => {
+		const rows = rowsOf([user(), tool("Read"), chapter("Bad", "error"), wrapUp("x", "error"), say("sorry"), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "turn_end"]);
+	});
+});
+
 describe("chatRows task messages", () => {
 	it("shows a task message as its own row that breaks the run of calls around it", () => {
 		const rows = rowsOf([user(), tool("Bash"), tool("Bash"), taskMessage(), tool("Read"), tool("Read")]);

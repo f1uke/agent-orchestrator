@@ -22,10 +22,12 @@ export function parseWidget(input: unknown): WidgetSpec | undefined {
 	};
 }
 
+/** An errored, denied or cancelled call to one of the chat's drawing tools has nothing to draw. */
+export const drewNothing = (call: ToolCallItem) =>
+	call.result?.isError === true || call.permission?.status === "denied" || call.permission?.status === "cancelled";
+
 export function widgetOf(call: ToolCallItem): WidgetSpec | undefined {
-	if (call.name !== SHOW_WIDGET || call.result?.isError) return undefined;
-	if (call.permission?.status === "denied" || call.permission?.status === "cancelled") return undefined;
-	return parseWidget(call.input);
+	return call.name !== SHOW_WIDGET || drewNothing(call) ? undefined : parseWidget(call.input);
 }
 
 export type WidgetMode = "dark" | "light";
