@@ -1016,7 +1016,6 @@ export const stubChatApi: ChatApi = {
 const SOAK_RUN_MS = 700;
 const SOAK_RUNS = 50;
 
-/** What `go test -run Soak -count=50` has printed after `runs` runs. */
 function soakOutput(runs: number): string {
 	const lines: string[] = [];
 	for (let i = 1; i <= Math.min(runs, SOAK_RUNS); i++) {

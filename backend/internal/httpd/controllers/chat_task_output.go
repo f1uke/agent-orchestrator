@@ -69,8 +69,6 @@ func (c *ChatFilesController) taskOutput(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// findTaskOutput scans the session's event log, which can be tens of MB, so a
-// found path is remembered and later polls skip the scan.
 func (c *ChatFilesController) findTaskOutput(id domain.SessionID, taskID string) (chatproto.TaskOutput, bool) {
 	logPath, _ := sessionhost.Paths(c.DataDir, string(id))
 	lf, err := os.Open(logPath) //nolint:gosec // G304: the session's own event log
@@ -82,12 +80,8 @@ func (c *ChatFilesController) findTaskOutput(id domain.SessionID, taskID string)
 	return found, err == nil && found.Path != ""
 }
 
-// maxRememberedTasks bounds the path memory; past it the memory starts over.
 const maxRememberedTasks = 512
 
-// taskOutputPaths remembers the output paths the event logs named, by
-// session and task. A path is only remembered after it passed confinement,
-// and it is confined again on every read.
 type taskOutputPaths struct {
 	mu    sync.Mutex
 	paths map[string]chatproto.TaskOutput

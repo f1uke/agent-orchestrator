@@ -57,7 +57,7 @@ func OpenTaskOutput(path, taskID string, claudeSessionIDs []string) (*os.File, o
 		if err != nil {
 			return nil, nil, ErrNotFound
 		}
-		// The file must still be the one checked, not a link swapped in since.
+		// A link swapped in between the check and the open must not be served.
 		if opened, err := f.Stat(); err != nil || !os.SameFile(info, opened) {
 			_ = f.Close()
 			return nil, nil, ErrNotFound

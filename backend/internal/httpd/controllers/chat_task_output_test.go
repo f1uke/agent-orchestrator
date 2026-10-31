@@ -27,9 +27,9 @@ type taskOutputBody struct {
 
 type taskOutputEnv struct {
 	srv     *httptest.Server
-	root    string // claude's per-uid temp root
+	root    string
 	outside string
-	log     string // ao-1's event log
+	log     string
 }
 
 const (

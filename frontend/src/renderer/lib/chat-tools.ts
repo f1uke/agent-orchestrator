@@ -25,7 +25,6 @@ export type ToolBody =
 			output: string;
 			failed: boolean;
 			exitCode?: number;
-			/** A background command's task: its output file replaces the instant result. */
 			task?: { id: string; running: boolean };
 	  }
 	| { kind: "code"; view: CodeView; mode: "write" | "edit" | "read" }

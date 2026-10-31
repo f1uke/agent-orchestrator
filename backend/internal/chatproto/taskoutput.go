@@ -82,7 +82,6 @@ func FindTaskOutput(r io.Reader, taskID string) (TaskOutput, error) {
 	return out, nil
 }
 
-// outEvent parses a log line written by claude, or returns nil.
 func outEvent(line []byte) Event {
 	var e Entry
 	if json.Unmarshal(line, &e) != nil || e.Dir != DirOut {
@@ -95,7 +94,6 @@ func outEvent(line []byte) Event {
 	return ev
 }
 
-// resultText is a tool_result's text, whether claude sent a string or blocks.
 func resultText(content json.RawMessage) string {
 	var s string
 	if json.Unmarshal(content, &s) == nil {

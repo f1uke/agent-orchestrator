@@ -13,7 +13,6 @@ const (
 	bashTaskPath  = "/private/tmp/tmp/-private-work-project/22cbfcdc-ec92-42c0-97a8-ac96adf4d02b/tasks/blaf8bxvg.output"
 )
 
-// logUpTo returns the fixture's lines whose seq is at most last.
 func logUpTo(t *testing.T, name string, last uint64) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name))
