@@ -16,7 +16,9 @@ import {
 	parseTaskNotification,
 	parseHostNote,
 } from "./chat-event";
+import { CONTEXT_REQUEST_PREFIX, type ContextBreakdown, parseContextUsage } from "./chat-context";
 import { elapsedMs } from "./chat-time";
+import { parseRateLimit, type SubscriptionUsage } from "./chat-usage";
 
 export type PermissionStatus = "pending" | "allowed" | "denied" | "cancelled";
 
@@ -155,6 +157,10 @@ export type Transcript = {
 	 * those follows, so it is set only while the newest signal is thinking.
 	 */
 	thinkingSince?: string;
+	/** The latest get_context_usage answer, absent when the latest one could not be read. */
+	contextBreakdown?: ContextBreakdown;
+	/** The newest subscription usage claude reported in this session's log. */
+	usage?: SubscriptionUsage;
 	lastSeq: number;
 };
 
@@ -238,6 +244,8 @@ export class ChatFolder {
 	private context: number | undefined;
 	private turnStart: string | undefined;
 	private thinkingSince: string | undefined;
+	private breakdown: ContextBreakdown | undefined;
+	private usage: SubscriptionUsage | undefined;
 	private awaitingBrief = false;
 
 	get lastSeq(): number {
@@ -288,6 +296,8 @@ export class ChatFolder {
 			tasks: [...this.tasks.values()],
 			contextTokens: this.context,
 			thinkingSince: this.thinkingSince,
+			contextBreakdown: this.breakdown,
+			usage: this.usage,
 			lastSeq: this.last,
 		};
 	}
@@ -337,6 +347,10 @@ export class ChatFolder {
 				if (event.canUseTool) this.openPermission(event.requestId, event.canUseTool);
 				break;
 			case "control_response":
+				if (event.requestId.startsWith(CONTEXT_REQUEST_PREFIX)) {
+					this.breakdown = event.ok ? parseContextUsage(event.response) : undefined;
+					break;
+				}
 				this.answerPermission(event);
 				this.answerControl(event);
 				break;
@@ -345,6 +359,9 @@ export class ChatFolder {
 				break;
 			case "command_lifecycle":
 				this.setCommand(event.commandUuid, event.state);
+				break;
+			case "rate_limit":
+				this.usage = parseRateLimit(event.info, this.ts) ?? this.usage;
 				break;
 		}
 	}
