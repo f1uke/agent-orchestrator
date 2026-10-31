@@ -3576,9 +3576,7 @@ type systemPromptSpec struct {
 	// uses (scriptsOwner): its crew's dev, or itself. Empty while a session
 	// that will own its workspace is being spawned, before it has an id.
 	ScriptsOwner domain.SessionID
-	// Transport is how the human reads the session. A chat session's prompt
-	// says so; every other value renders nothing.
-	Transport domain.Transport
+	Transport    domain.Transport
 }
 
 // buildSystemPrompt derives the standing instructions for a session of the

@@ -7823,10 +7823,8 @@ ol.note-prose__list {
 	margin-top: 0;
 }
 
-/* A chat reply sits on --bg, a step darker than a note's page, so the hairlines
-   a note draws at --border vanish here. Tables lay out at their natural width
-   and scroll inside .note-prose__table-scroll, as GitHub's do, rather than
-   breaking every cell at a hyphen to fit the column. */
+/* A chat reply sits on --bg, a step darker than a note's page, so --border
+   hairlines vanish; these rules use --border-1. */
 .chat-md .note-prose__code,
 .chat-md .note-prose__code-head,
 .chat-md .note-prose__code-inline {

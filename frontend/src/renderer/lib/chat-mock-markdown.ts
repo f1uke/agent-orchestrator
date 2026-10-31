@@ -94,7 +94,6 @@ export function markdownEntries(): ChatEntry[] {
 	}));
 }
 
-/** The reply to the second question, streamed word by word, stopping inside an open fence and never settling. */
 export function markdownDeltas(): unknown[] {
 	const event = (e: object) => ({ type: "stream_event", session_id: SESSION, parent_tool_use_id: null, event: e });
 	const words = STREAMING_TAIL.match(/\S+\s*|\s+/g) ?? [];
