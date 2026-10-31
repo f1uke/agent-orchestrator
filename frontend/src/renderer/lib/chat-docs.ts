@@ -6,7 +6,6 @@ import type { ResolvedFile } from "./chat-refs-store";
 
 export type DocKind = ResolvedFile["kind"];
 
-/** A file the daemon confirmed, as a card and the Document tab show it. */
 export type FileDoc = {
 	source: "file";
 	root: ResolvedFile["root"];
@@ -22,7 +21,6 @@ export type ArtifactDoc = { source: "artifact"; url: string; title: string };
 /** What one turn names: refs for the daemon to confirm, and artifact links that need no confirming. */
 export type TurnDocs = { refs: string[]; artifacts: ArtifactDoc[] };
 
-/** The Document tab draws this many lines of a text file and counts the rest. */
 export const DOC_LINE_LIMIT = 2000;
 
 // The resolve endpoint refuses a body with more refs than this, or a ref longer than this.
@@ -38,7 +36,6 @@ export function writtenPath(call: ToolCallItem): string | undefined {
 	return typeof path === "string" && path !== "" ? path : undefined;
 }
 
-/** The documents a turn wrote or named, in the order it did, for the daemon to confirm. */
 export function docsOfTurn(items: readonly ChatItem[]): string[] {
 	const found = new Set<string>();
 	const add = (ref: string) => {
@@ -95,7 +92,6 @@ export function turnDocs(items: readonly ChatItem[]): TurnDocs | undefined {
 // A row's code box already shows text, JSON, a log or a diff in full, so an Open action would only repeat it.
 const ROW_KINDS: ReadonlySet<DocKind> = new Set(["markdown", "html", "pdf", "image"]);
 
-/** Whether a Write or Edit row of this kind offers to open the file in the Document tab. */
 export const rowOpens = (doc: Pick<FileDoc, "kind">): boolean => ROW_KINDS.has(doc.kind);
 
 const baseName = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
@@ -133,7 +129,6 @@ function sizeText(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** The line under a card's title: where the file lives and how big it is. */
 export function docMeta(doc: Pick<FileDoc, "root" | "path" | "size">): string {
 	return `${doc.root} · ${doc.path} · ${sizeText(doc.size)}`;
 }

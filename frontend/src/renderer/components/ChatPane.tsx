@@ -77,7 +77,6 @@ type ChatPaneProps = {
 	chat?: ChatSessionState;
 	createMux?: () => ChatMux;
 	chatApi?: ChatApi;
-	/** Where a document card's Open goes: the inspector's Document tab. */
 	onOpenDoc?: (doc: FileDoc) => void;
 	openDoc?: FileDoc | null;
 };

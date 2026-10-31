@@ -180,7 +180,6 @@ export function SessionInspector({
 	isInspectorVisible?: boolean;
 	onToggleBrowserPopOut?: (next: boolean) => void;
 	browserView?: BrowserViewModel;
-	/** The document a chat card opened, for the Document tab. Only a chat session has one. */
 	openDoc?: FileDoc | null;
 	onCloseDoc?: () => void;
 	/** Controlled active tab. Omit to let the inspector own its own selection. */
