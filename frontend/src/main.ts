@@ -64,6 +64,7 @@ import { readMigrationState, updateMigration, writeAppStateMarker, type Migratio
 import { createNativeNotifier, type NativeNotificationInput } from "./main/native-notifications";
 import { detectOpenTargets, openInAndroidStudio, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
 import { isAllowedTerminalLink } from "./main/open-terminal-link";
+import { opensInSystemBrowser } from "./main/external-link";
 import { createLspRegistry, type LspRegistry, type LspResultOutcome } from "./main/lsp/lsp-registry";
 import type { InfillRequest } from "./main/inline-completion/infill";
 import type { NextEditRequest } from "./main/inline-completion/next-edit";
@@ -501,7 +502,7 @@ function createWindow(): void {
 	// navigate the privileged window away from the app origin. External links go to
 	// the OS browser. Keep this in place before exposing any daemon output to the renderer.
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-		if (/^https?:\/\//.test(url)) {
+		if (opensInSystemBrowser(url)) {
 			void shell.openExternal(url);
 		}
 		return { action: "deny" };
@@ -1900,7 +1901,7 @@ function initCompanionOverlay(): void {
 			// A terminal window shows one session and nothing else: no in-app windows,
 			// no navigating away from the page it was opened on. Same rule as the board.
 			win.webContents.setWindowOpenHandler(({ url }) => {
-				if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+				if (opensInSystemBrowser(url)) void shell.openExternal(url);
 				return { action: "deny" };
 			});
 			win.webContents.on("will-navigate", (event, url) => {
