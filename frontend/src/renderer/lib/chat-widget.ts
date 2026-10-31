@@ -117,7 +117,7 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-/** The `srcdoc` of a widget's frame: CSP first, then the theme, then the bridge, then the widget's own code. */
+/** The document a widget's frame shows: CSP first, then the theme, then the bridge, then the widget's own code. */
 export function widgetDocument(spec: WidgetSpec, theme: WidgetTheme): string {
 	const body = spec.mode === "svg" ? `<div class="ao-svg">${spec.code}</div>` : spec.code;
 	return [
@@ -136,6 +136,17 @@ export function widgetDocument(spec: WidgetSpec, theme: WidgetTheme): string {
 		"</html>",
 	].join("\n");
 }
+
+/**
+ * The page a widget's frame loads (`public/widget-frame.html`, a static page that waits for one document
+ * and writes it). The frame cannot use `srcdoc`, `data:` or `blob:`: those inherit the app's
+ * Content-Security-Policy, whose `script-src 'self'` blocks every inline script a widget carries. This
+ * page has no policy of its own, so the CSP meta that `widgetDocument` puts first is the only one in force.
+ */
+export const WIDGET_FRAME_URL = "/widget-frame.html";
+
+/** What the parent posts to the blank frame page: the document `widgetDocument` built. */
+export const WIDGET_DOC_TYPE = "ao-widget/doc";
 
 export type WidgetMessage = { type: "prompt"; text: string } | { type: "size"; height: number };
 
