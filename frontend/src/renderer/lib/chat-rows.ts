@@ -1,3 +1,4 @@
+import type { TurnDocs } from "./chat-docs";
 import { chapterOf, MARK_CHAPTER } from "./chat-chapters";
 import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
@@ -22,6 +23,7 @@ export type ChatRow =
 			subagentTools: number;
 			task?: BackgroundTask;
 			reply?: string;
+			docs?: TurnDocs;
 	  }
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }

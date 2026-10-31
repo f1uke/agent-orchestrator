@@ -1,3 +1,4 @@
+import type { FileDoc } from "../lib/chat-docs";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { ArrowUpRight, GitPullRequest, Pencil } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -35,7 +36,7 @@ import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "files" | "testiny" | "browser" | "simulator";
+export type InspectorView = "summary" | "reviews" | "files" | "document" | "testiny" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -186,6 +187,8 @@ export function SessionInspector({
 	selectedFileLine?: number;
 	/** A ⌘⇧F press (re-press nonce + the editor's selection to seed the box). */
 	searchRequest?: { nonce: number; seed?: string } | null;
+	openDoc?: FileDoc | null;
+	onCloseDoc?: () => void;
 	/** A terminal ref to reveal in the Files tree (path + re-click nonce). */
 	revealInTree?: { path: string; nonce: number; focus?: boolean } | null;
 }) {

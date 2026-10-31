@@ -1,4 +1,5 @@
 export const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "svg"] as const;
+export const DOC_EXT = ["md", "markdown", "html", "htm", "pdf", "json", "txt", "csv", "log", "diff", "patch"] as const;
 
 const MAX_REFS = 64;
 const MAX_REF_BYTES = 1024;
@@ -83,3 +84,7 @@ export function imageRefs(markdown: string): string[] {
 	add(proseRefs(markdown.slice(at)));
 	return [...found];
 }
+
+export const docRefs = (_markdown: string): string[] => [];
+
+export const isDocPath = (_path: string): boolean => false;

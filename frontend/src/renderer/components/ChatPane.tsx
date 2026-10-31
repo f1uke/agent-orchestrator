@@ -1,3 +1,4 @@
+import type { FileDoc } from "../lib/chat-docs";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	ArrowDown,
@@ -75,6 +76,8 @@ type ChatPaneProps = {
 	chat?: ChatSessionState;
 	createMux?: () => ChatMux;
 	chatApi?: ChatApi;
+	onOpenDoc?: (doc: FileDoc) => void;
+	openDoc?: FileDoc | null;
 };
 
 type RequestStates = Readonly<Record<string, RequestState>>;

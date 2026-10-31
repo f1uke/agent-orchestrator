@@ -432,9 +432,66 @@ describe("SessionInspector tabs", () => {
 
 	it("shows a chat session the same tabs as a terminal one, opening on Summary", () => {
 		renderWithQuery(<SessionInspector session={{ ...session([]), transport: "chat" }} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Files"]);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Document"]);
 		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 		expect(screen.queryByRole("region", { name: "Todo" })).toBeNull();
+	});
+
+	it("puts Document between Files and Browser for a chat session, and counts it in the strip", () => {
+		renderWithQuery(<SessionInspector hasWebUI session={{ ...session([]), transport: "chat" }} />);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Document", "Browser"]);
+		expect(screen.getByRole("tablist")).toHaveAttribute("data-tab-count", "5");
+	});
+
+	it("offers no Document tab to a terminal session, which has no chat to open a document from", () => {
+		renderWithQuery(<SessionInspector hasWebUI session={session([])} />);
+		expect(tabNames()).not.toContain("Document");
+	});
+
+	it("shows the open document in the Document tab, and says what to do when none is open", () => {
+		const chatSession = { ...session([]), transport: "chat" as const };
+		const doc = {
+			source: "file" as const,
+			root: "worktree" as const,
+			path: "docs/plan.png",
+			kind: "image" as const,
+			size: 1,
+			title: "plan.png",
+		};
+		const { unmount } = renderWithQuery(<SessionInspector session={chatSession} view="document" />);
+		expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true");
+		expect(screen.getByText(/Open a document from the chat/)).toBeInTheDocument();
+		unmount();
+
+		renderWithQuery(<SessionInspector openDoc={doc} session={chatSession} view="document" />);
+		expect(screen.getByRole("heading", { name: "plan.png" })).toBeInTheDocument();
+	});
+
+	it("clears the open document when its Close button is pressed", async () => {
+		const onCloseDoc = vi.fn();
+		const doc = {
+			source: "file" as const,
+			root: "worktree" as const,
+			path: "a.md",
+			kind: "markdown" as const,
+			size: 1,
+			title: "a.md",
+		};
+		renderWithQuery(
+			<SessionInspector
+				onCloseDoc={onCloseDoc}
+				openDoc={doc}
+				session={{ ...session([]), transport: "chat" }}
+				view="document"
+			/>,
+		);
+		await userEvent.click(screen.getByRole("button", { name: "Close document" }));
+		expect(onCloseDoc).toHaveBeenCalled();
+	});
+
+	it("falls back when the Document tab is asked for on a terminal session", () => {
+		renderWithQuery(<SessionInspector session={session([])} view="document" />);
+		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 	});
 
 	it("shows the intake issue id in the summary overview when present", () => {
