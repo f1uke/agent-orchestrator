@@ -11,7 +11,7 @@ import {
 	type UserItem,
 	foldEntries,
 } from "./chat-fold";
-import { type ChatRow, chatRows, rowIndexOfItem } from "./chat-rows";
+import { type ChatRow, chatRows } from "./chat-rows";
 import { emptyOverlay } from "./chat-stream";
 
 const user = (uuid = "u1", text = "go"): UserItem => ({
@@ -318,13 +318,6 @@ describe("chatRows turn fold", () => {
 		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");
 		expect(ends.map((r) => r.kind === "item" && r.reply)).toEqual(["all done", undefined]);
 	});
-
-	it("finds a folded item's row", () => {
-		const rows = rowsOf(finished());
-		expect(rowIndexOfItem(rows, 3)).toBe(1);
-		expect(rowIndexOfItem(rows, 0)).toBe(0);
-		expect(rowIndexOfItem(rows, 99)).toBe(-1);
-	});
 });
 
 describe("chatRows widgets", () => {
@@ -416,54 +409,6 @@ describe("chatRows chapters and wrap-up", () => {
 	it("folds a chapter or wrap-up call that failed, since there is nothing to show", () => {
 		const rows = rowsOf([user(), tool("Read"), chapter("Bad", "error"), wrapUp("x", "error"), say("sorry"), turnEnd()]);
 		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "turn_end"]);
-	});
-});
-
-describe("chatRows task list", () => {
-	const create = (subject: string, id: number) => ({
-		...tool("TaskCreate", { subject, description: subject }),
-		result: { isError: false, content: `Task #${id} created successfully: ${subject}` },
-	});
-	const update = (taskId: string, status: string) => tool("TaskUpdate", { taskId, status });
-	const tasksRow = (rows: ChatRow[]) => rows.find((r) => r.kind === "tasks");
-	const listed = (rows: ChatRow[]) => {
-		const row = tasksRow(rows);
-		return row?.kind === "tasks" ? row.todos.map((t) => [t.content, t.status]) : undefined;
-	};
-
-	it("shows the live list as the last row of the turn, after the work", () => {
-		const rows = rowsOf([user(), create("One", 1), create("Two", 2), update("1", "completed"), say("working on two")]);
-		expect(listed(rows)).toEqual([
-			["One", "completed"],
-			["Two", "pending"],
-		]);
-		expect(rows.at(-1)?.kind).toBe("tasks");
-	});
-
-	it("also follows a finished turn that folded", () => {
-		const rows = rowsOf([user(), create("One", 1), update("1", "completed"), tool("Read"), say("done"), turnEnd()]);
-		expect(listed(rows)).toEqual([["One", "completed"]]);
-		expect(rows.at(-1)?.kind).toBe("tasks");
-	});
-
-	it("moves off a finished turn once the user writes again, and returns when the next turn touches it", () => {
-		const first = [user(), create("One", 1), say("ok"), turnEnd()];
-		expect(tasksRow(rowsOf([...first, user("u2", "next")]))).toBeUndefined();
-		expect(listed(rowsOf([...first, user("u2", "next"), update("1", "completed")]))).toEqual([["One", "completed"]]);
-	});
-
-	it("is absent when no todo tool ran, or the list is empty", () => {
-		expect(tasksRow(rowsOf([user(), say("hi"), tool("Read")]))).toBeUndefined();
-		expect(tasksRow(rowsOf([user(), tool("TodoWrite", { todos: [] })]))).toBeUndefined();
-	});
-
-	it("sits after the waiting row and before a streaming row", () => {
-		const rows = chatRows(
-			transcript([user(), create("One", 1), say("hi")]),
-			{ ...emptyOverlay, blocks: [{ messageId: "s", index: 0, kind: "text", text: "typing" }] },
-			new Set(),
-		);
-		expect(rows.map((r) => r.kind).slice(-2)).toEqual(["tasks", "streaming"]);
 	});
 });
 
@@ -594,5 +539,73 @@ describe("chatRows suggestions", () => {
 			turnEnd(),
 		]);
 		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "turn_end"]);
+	});
+});
+
+describe("chatRows live thinking", () => {
+	const SINCE = "2026-10-31T11:53:12.000Z";
+	const afterTool = () => [user(), tool("Read"), tool("Grep")];
+	const overlayOf = (...blocks: Array<{ kind: "text" | "thinking"; text: string }>) => ({
+		...emptyOverlay,
+		blocks: blocks.map((b, index) => ({ messageId: "m9", index, ...b })),
+	});
+	const live = (rows: ChatRow[]) => rows.filter((r) => r.kind === "thinking_live");
+
+	it("ends the rows with one Thinking row when only thinking_tokens followed a tool result", () => {
+		const rows = rowsOf(afterTool(), { busy: true, thinkingSince: SINCE });
+		expect(rows.at(-1)).toEqual({ key: "thinking-live", kind: "thinking_live", since: SINCE, text: "" });
+	});
+
+	it("needs a real thinking signal and a running turn", () => {
+		expect(live(rowsOf(afterTool(), { busy: true }))).toEqual([]);
+		expect(live(rowsOf(afterTool(), { busy: false, thinkingSince: SINCE }))).toEqual([]);
+	});
+
+	it("never shows while a tool runs, a request waits, or claude streams text", () => {
+		const running = [user(), tool("Read"), tool("Bash", { command: "go test ./..." }, "none")];
+		expect(live(rowsOf(running, { busy: true, thinkingSince: SINCE }))).toEqual([]);
+		const pending = {
+			requestId: "r1",
+			toolName: "Bash",
+			toolUseId: "x",
+			kind: "permission" as const,
+			input: {},
+			suggestions: [],
+			defaultToNo: false,
+		};
+		expect(live(rowsOf(afterTool(), { busy: true, thinkingSince: SINCE, pending: [pending] }))).toEqual([]);
+		const streamingText = chatRows(
+			transcript(afterTool(), { busy: true, thinkingSince: SINCE }),
+			overlayOf({ kind: "thinking", text: "hmm" }, { kind: "text", text: "Found it" }),
+		);
+		expect(live(streamingText)).toEqual([]);
+	});
+
+	it("never stacks with the Waiting on row", () => {
+		const soak = { ...tool("Bash", { command: "soak", run_in_background: true }), id: "bg" };
+		const task = {
+			id: "k1",
+			toolUseId: "bg",
+			description: "soak",
+			taskType: "local_bash",
+			state: "running" as const,
+			background: true,
+			startedTs: SINCE,
+		};
+		const rows = rowsOf([user(), soak, say("started"), turnEnd()], { tasks: [task], thinkingSince: SINCE });
+		expect(rows.filter((r) => r.kind === "waiting" || r.kind === "thinking_live").map((r) => r.kind)).toEqual([
+			"waiting",
+		]);
+	});
+
+	it("takes over a streaming thinking block, so its text shows in the one live row", () => {
+		const rows = chatRows(
+			transcript(afterTool(), { busy: true }),
+			overlayOf({ kind: "thinking", text: "The counter is read twice.\n\nMaybe the reset races.\n" }),
+		);
+		expect(rows.filter((r) => r.kind === "streaming")).toEqual([]);
+		expect(live(rows)).toEqual([
+			{ key: "thinking-live", kind: "thinking_live", text: "The counter is read twice.\n\nMaybe the reset races.\n" },
+		]);
 	});
 });

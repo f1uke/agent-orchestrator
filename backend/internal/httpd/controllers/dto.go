@@ -2473,3 +2473,17 @@ type ResolveChatFilesResponse struct {
 type ChatAckResponse struct {
 	OK bool `json:"ok"`
 }
+
+// ChatUsageWindow is one Claude subscription usage window.
+type ChatUsageWindow struct {
+	Utilization float64 `json:"utilization" description:"The share of the window used, from 0 to 1."`
+	ResetsAt    string  `json:"resetsAt" format:"date-time"`
+	Status      string  `json:"status" description:"Claude's status for the window, such as allowed or allowed_warning."`
+}
+
+// ChatUsageResponse is the body of GET /api/v1/chat/usage.
+type ChatUsageResponse struct {
+	FiveHour  *ChatUsageWindow `json:"fiveHour,omitempty" description:"The five-hour window; absent when the event did not report it."`
+	SevenDay  *ChatUsageWindow `json:"sevenDay,omitempty" description:"The weekly window; absent when the event did not report it."`
+	UpdatedAt string           `json:"updatedAt" format:"date-time" description:"When the chat session that reported it logged the event."`
+}

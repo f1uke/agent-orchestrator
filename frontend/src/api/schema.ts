@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The newest Claude subscription usage (five-hour and weekly windows) any chat session reported; 204 before the first report since the daemon started */
+        get: operations["getChatUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/daemon/loops": {
         parameters: {
             query?: never;
@@ -3480,6 +3497,28 @@ export interface components {
              * @enum {string}
              */
             via?: "app" | "cli" | "api";
+        };
+        ControllersChatUsageResponse: {
+            /** @description The five-hour window; absent when the event did not report it. */
+            fiveHour?: components["schemas"]["ControllersChatUsageWindow"];
+            /** @description The weekly window; absent when the event did not report it. */
+            sevenDay?: components["schemas"]["ControllersChatUsageWindow"];
+            /**
+             * Format: date-time
+             * @description When the chat session that reported it logged the event.
+             */
+            updatedAt: string;
+        };
+        ControllersChatUsageWindow: {
+            /** Format: date-time */
+            resetsAt: string;
+            /** @description Claude's status for the window, such as allowed or allowed_warning. */
+            status: string;
+            /**
+             * Format: double
+             * @description The share of the window used, from 0 to 1.
+             */
+            utilization: number;
         };
         ControllersCheckLearningForbiddenRequest: {
             /** @description Project whose rules apply besides the global ones. */
@@ -7601,6 +7640,42 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["APIError"];
                 };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getChatUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersChatUsageResponse"];
+                };
+            };
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Not Implemented */
             501: {

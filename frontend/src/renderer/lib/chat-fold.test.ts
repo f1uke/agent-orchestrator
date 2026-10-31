@@ -885,6 +885,76 @@ describe("chat fold: the task brief", () => {
 	});
 });
 
+describe("chat fold: the thinking stretch", () => {
+	const T0 = Date.parse("2026-10-31T11:53:00.000Z");
+	const iso = (sec: number) => new Date(T0 + sec * 1000).toISOString();
+	let seq = 0;
+	const at = (sec: number, dir: Direction, payload: object): ChatEntry => ({ seq: ++seq, ts: iso(sec), dir, payload });
+	const tokens = (sec: number, parent: string | null = null) =>
+		at(sec, "out", {
+			type: "system",
+			subtype: "thinking_tokens",
+			estimated_tokens: 50,
+			estimated_tokens_delta: 50,
+			parent_tool_use_id: parent,
+		});
+	const assistant = (sec: number, block: object, parent: string | null = null) =>
+		at(sec, "out", { type: "assistant", parent_tool_use_id: parent, message: { id: `m${sec}`, content: [block] } });
+	const toolUse = (sec: number, id: string) => assistant(sec, { type: "tool_use", id, name: "Bash", input: {} });
+	const toolResult = (sec: number, id: string, parent: string | null = null) =>
+		at(sec, "out", {
+			type: "user",
+			parent_tool_use_id: parent,
+			message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+		});
+	const fold = (...entries: ChatEntry[]) => {
+		const tr = foldEntries(entries);
+		seq = 0;
+		return tr;
+	};
+
+	it("starts at the first thinking_tokens after a tool result and keeps that start through the burst", () => {
+		const tr = fold(toolUse(0, "t1"), toolResult(10, "t1"), tokens(12), tokens(12), tokens(30));
+		expect(tr.thinkingSince).toBe(iso(12));
+	});
+
+	it("is cleared by the next tool_use, text, tool result or turn end", () => {
+		const base = () => [toolUse(0, "t1"), toolResult(10, "t1"), tokens(12)];
+		expect(fold(...base(), toolUse(40, "t2")).thinkingSince).toBeUndefined();
+		expect(fold(...base(), assistant(40, { type: "text", text: "Found it." })).thinkingSince).toBeUndefined();
+		expect(
+			fold(...base(), at(40, "out", { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0 }))
+				.thinkingSince,
+		).toBeUndefined();
+		expect(fold(toolUse(0, "t1"), tokens(5), toolResult(10, "t1")).thinkingSince).toBeUndefined();
+	});
+
+	it("restarts at the next thinking signal after a reset", () => {
+		const tr = fold(
+			tokens(2),
+			toolUse(5, "t1"),
+			toolResult(9, "t1"),
+			assistant(11, { type: "thinking", thinking: "" }),
+		);
+		expect(tr.thinkingSince).toBe(iso(11));
+	});
+
+	it("is cleared by the user's next input", () => {
+		const tr = fold(tokens(2), at(3, "in", { type: "user", uuid: "u2", message: { content: "also check the docs" } }));
+		expect(tr.thinkingSince).toBeUndefined();
+	});
+
+	it("ignores a subagent's thinking and its tool results", () => {
+		expect(fold(toolUse(0, "agent"), tokens(4, "agent")).thinkingSince).toBeUndefined();
+		const tr = fold(toolUse(0, "t1"), toolResult(1, "t1"), tokens(2), toolResult(6, "s1", "bg-agent"));
+		expect(tr.thinkingSince).toBe(iso(2));
+	});
+
+	it("has no stretch with no thinking signal at all", () => {
+		expect(fold(toolUse(0, "t1"), toolResult(10, "t1")).thinkingSince).toBeUndefined();
+	});
+});
+
 describe("tool_use_result on a tool call", () => {
 	const hunk = { oldStart: 456, oldLines: 2, newStart: 456, newLines: 2, lines: [" keep", "-old", "+new"] };
 	const fold = (toolUseResult: unknown) =>

@@ -100,6 +100,29 @@ const BRIEF_RESULT = {
 	modelUsage: { "claude-opus-5-5": { outputTokens: 30_709, contextWindow: 200_000, costUSD: 1.8 } },
 };
 
+const CONTEXT_ANSWER = {
+	type: "control_response",
+	response: {
+		subtype: "success",
+		request_id: "ctx-demo-1",
+		response: {
+			categories: [
+				{ id: "system_prompt", name: "System prompt", tokens: 2_456, kind: "used" },
+				{ id: "system_tools", name: "System tools", tokens: 8_376, kind: "used" },
+				{ id: "system_tools_deferred", name: "System tools (deferred)", tokens: 13_289, kind: "deferred" },
+				{ id: "skills", name: "Skills", tokens: 2_281, kind: "used" },
+				{ id: "messages", name: "Messages", tokens: 110_887, kind: "used" },
+				{ id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33_000, kind: "buffer" },
+				{ id: "free_space", name: "Free space", tokens: 43_000, kind: "free" },
+			],
+			totalTokens: 124_000,
+			maxTokens: 200_000,
+			percentage: 62,
+			autoCompactThreshold: 167_000,
+		},
+	},
+};
+
 const tool = (id: string, messageId: string, name: string, input: object, parent: string | null = null): Step => [
 	"out",
 	{
@@ -371,6 +394,8 @@ const SCRIPT: Step[] = [
 	),
 	result("t-agent", "3 callers: internal/webhook/sender.go:65, internal/admin/replay.go:19, cmd/requeue/main.go:44"),
 	["out", BRIEF_RESULT],
+	["in", { type: "control_request", request_id: "ctx-demo-1", request: { subtype: "get_context_usage" } }],
+	["out", CONTEXT_ANSWER],
 	lifecycle("brief-1", "completed"),
 	lifecycle("peer-1", "started"),
 	say(
@@ -725,6 +750,51 @@ function liveEntries(): ChatEntry[] {
 	}));
 }
 
+export const MOCK_THINKING_CHAT_SESSION = "demo-chat-thinking";
+
+const thinkingTokens = (estimated: number, delta: number): Step => [
+	"out",
+	{
+		type: "system",
+		subtype: "thinking_tokens",
+		estimated_tokens: estimated,
+		estimated_tokens_delta: delta,
+		session_id: SESSION,
+		user_message_uuid: "thinking-brief",
+	},
+];
+
+function thinkingEntries(): ChatEntry[] {
+	const steps: Step[] = [
+		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],
+		sent("thinking-brief", "Find why the parked-event counter drifts under load, then fix it."),
+		lifecycle("thinking-brief", "started"),
+		say("msg_k1", "Reading the counter and its callers first."),
+		tool("t-think-1", "msg_k2", "Read", { file_path: "/work/project/internal/webhook/metrics.go" }),
+		result("t-think-1", "package webhook\n..."),
+		tool("t-think-2", "msg_k3", "Grep", { pattern: "parkedTotal", path: "/work/project/internal" }),
+		result("t-think-2", "Found 4 matches"),
+		thinkingTokens(50, 50),
+		thinkingTokens(195, 145),
+		thinkingTokens(410, 215),
+	];
+	const at = (i: number) => new Date(Date.now() - (steps.length - i) * 2_000).toISOString();
+	return steps.map(([dir, payload], i) => ({ seq: i + 1, ts: at(i), dir, payload }));
+}
+
+const THINKING_TICK_MS = 1_500;
+const thinkingTails = new Set<string>();
+
+function playThinkingTail(id: string, session: StubSession): void {
+	if (thinkingTails.has(id)) return;
+	thinkingTails.add(id);
+	let estimated = 410;
+	setInterval(() => {
+		estimated += 120;
+		append(id, session, [thinkingTokens(estimated, 120)]);
+	}, THINKING_TICK_MS);
+}
+
 const liveTails = new Set<string>();
 
 function playLiveTail(id: string, session: StubSession): void {
@@ -811,19 +881,21 @@ function stubSession(id: string): Promise<StubSession> {
 					? tallEntries()
 					: id === MOCK_LIVE_CHAT_SESSION
 						? liveEntries()
-						: id === MOCK_IMAGES_CHAT_SESSION
-							? imagesEntries()
-							: id === MOCK_CODE_CHAT_SESSION
-								? codeEntries()
-								: id === MOCK_WIDGETS_CHAT_SESSION
-									? widgetEntries()
-									: id === MOCK_CHAPTERS_CHAT_SESSION
-										? chapterEntries()
-										: id === MOCK_SUGGEST_CHAT_SESSION
-											? suggestEntries()
-											: long
-												? fixture
-												: mockChatEntries(fixture);
+						: id === MOCK_THINKING_CHAT_SESSION
+							? thinkingEntries()
+							: id === MOCK_IMAGES_CHAT_SESSION
+								? imagesEntries()
+								: id === MOCK_CODE_CHAT_SESSION
+									? codeEntries()
+									: id === MOCK_WIDGETS_CHAT_SESSION
+										? widgetEntries()
+										: id === MOCK_CHAPTERS_CHAT_SESSION
+											? chapterEntries()
+											: id === MOCK_SUGGEST_CHAT_SESSION
+												? suggestEntries()
+												: long
+													? fixture
+													: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -953,6 +1025,7 @@ export function createStubChatMux(): ChatMux {
 		connection.forEach((l) => l("open"));
 		if (id === MOCK_TALL_CHAT_SESSION) playTallTail(id, session);
 		else if (id === MOCK_LIVE_CHAT_SESSION) playLiveTail(id, session);
+		else if (id === MOCK_THINKING_CHAT_SESSION) playThinkingTail(id, session);
 		else if (session.folder.transcript().busy) {
 			mockChatDeltas().forEach((delta, i) => later(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));
 		}

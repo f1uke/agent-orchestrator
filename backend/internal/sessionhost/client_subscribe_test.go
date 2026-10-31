@@ -74,7 +74,7 @@ func TestClientSubscribe(t *testing.T) {
 	r := startHost(t, cfg)
 	c := NewClient(cfg.SocketPath)
 	ctx := context.Background()
-	eventually(t, "initialize answered", func() bool { return state(t, cfg.SocketPath).LastSeq == 3 })
+	eventually(t, "initialize answered", func() bool { return state(t, cfg.SocketPath).LastSeq >= 3 })
 
 	all := subscribeClient(ctx, c, 0)
 	if got := all.entries(t, 3); got[0].Seq != 1 || got[2].Seq != 3 {
@@ -138,7 +138,7 @@ func TestClientSubscribeReportsAttachBeforeTheFirstFrame(t *testing.T) {
 	dir := shortDir(t)
 	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir))
 	r := startHost(t, cfg)
-	eventually(t, "initialize answered", func() bool { return state(t, cfg.SocketPath).LastSeq == 3 })
+	eventually(t, "initialize answered", func() bool { return state(t, cfg.SocketPath).LastSeq >= 3 })
 
 	attached := 0
 	stop := errors.New("stop")

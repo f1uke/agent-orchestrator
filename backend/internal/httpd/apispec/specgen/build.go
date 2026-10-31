@@ -2699,6 +2699,15 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/chat/usage", id: "getChatUsage", tag: "sessions",
+			summary: "The newest Claude subscription usage (five-hour and weekly windows) any chat session reported; 204 before the first report since the daemon started",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ChatUsageResponse{}},
+				{http.StatusNoContent, nil},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/model", id: "setChatModel", tag: "sessions",
 			summary:    "Switch the model of a chat session's agent",
 			pathParams: []any{controllers.SessionIDParam{}},

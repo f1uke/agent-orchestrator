@@ -3,7 +3,6 @@ import { type ReactNode, useEffect, useState } from "react";
 import { type ChatRow, itemRowKey, type ProcessMember } from "../lib/chat-rows";
 import { formatDuration } from "../lib/chat-time";
 import {
-	type LiveTool,
 	liveVerb,
 	processSentence,
 	type ProcessSummary,
@@ -28,12 +27,10 @@ const latestLine = (text: string) =>
 
 export function ThinkingRow({
 	text,
-	streaming = false,
 	open = false,
 	onToggle,
 }: {
 	text: string;
-	streaming?: boolean;
 	open?: boolean;
 	onToggle: (open: boolean) => void;
 }) {
@@ -43,8 +40,7 @@ export function ThinkingRow({
 			<button aria-expanded={open} className="chat-think__head" onClick={() => onToggle(!open)} type="button">
 				<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
 				<Brain className="chat-icon" aria-hidden="true" />
-				{streaming ? "Thinking…" : "Thought"}
-				{streaming && !open ? <span className="chat-think__tail">{latestLine(text)}</span> : null}
+				Thought
 			</button>
 			{open ? <div className="chat-think__body">{text}</div> : null}
 		</div>
@@ -77,6 +73,37 @@ export function LiveDots() {
 	);
 }
 
+function LiveRow({
+	verb,
+	since,
+	detail,
+	open,
+	onToggle,
+}: {
+	verb: string;
+	since?: string;
+	detail?: string;
+	open: boolean;
+	onToggle: (open: boolean) => void;
+}) {
+	return (
+		<button
+			aria-expanded={open}
+			className="chat-group__head chat-live-row"
+			onClick={() => onToggle(!open)}
+			type="button"
+		>
+			<span className="chat-live">
+				<LiveDots />
+				<span className="chat-live__verb">{verb}</span>
+				{detail ? <span className="chat-live__detail">{detail}</span> : null}
+				{since ? <Elapsed since={since} /> : null}
+			</span>
+			<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
+		</button>
+	);
+}
+
 function Head({
 	open,
 	onToggle,
@@ -99,16 +126,6 @@ function Head({
 			{children}
 			<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
 		</button>
-	);
-}
-
-function LiveHead({ live }: { live: LiveTool }) {
-	return (
-		<span className="chat-live">
-			<LiveDots />
-			<span className="chat-live__verb">{live.verb}</span>
-			<Elapsed since={live.since} />
-		</span>
 	);
 }
 
@@ -147,16 +164,21 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 	const running = summary.live ? row.members.filter((m) => m.kind === "tool" && toolRunning(m.call)).at(-1) : undefined;
 	return (
 		<div className="chat-group" data-group data-live={summary.live ? "" : undefined}>
-			<Head onToggle={(next) => rest.toggleRow(row.key, next)} open={open}>
-				{summary.live ? (
-					<LiveHead live={summary.live} />
-				) : (
+			{summary.live ? (
+				<LiveRow
+					onToggle={(next) => rest.toggleRow(row.key, next)}
+					open={open}
+					since={summary.live.since}
+					verb={summary.live.verb}
+				/>
+			) : (
+				<Head onToggle={(next) => rest.toggleRow(row.key, next)} open={open}>
 					<span className="chat-group__text">
 						{processSentence(summary)}
 						{summary.failed > 0 ? <span className="chat-group__failed"> ({summary.failed} failed)</span> : null}
 					</span>
-				)}
-			</Head>
+				</Head>
+			)}
 			{shown.length > 0 ? (
 				<div className="chat-group__body">
 					{shown.map((member) =>
@@ -188,13 +210,12 @@ export function WaitingRow({
 		.sort()[0];
 	return (
 		<div className="chat-group" data-live="" data-waiting>
-			<Head onToggle={(next) => toggleRow(row.key, next)} open={open}>
-				<span className="chat-live">
-					<LiveDots />
-					<span className="chat-live__verb">{waitingVerb(row.tasks.map((t) => t.task))}</span>
-					{since ? <Elapsed since={since} /> : null}
-				</span>
-			</Head>
+			<LiveRow
+				onToggle={(next) => toggleRow(row.key, next)}
+				open={open}
+				since={since}
+				verb={waitingVerb(row.tasks.map((t) => t.task))}
+			/>
 			{open ? (
 				<div className="chat-group__body">
 					{row.tasks.map(({ task, command }) => (
@@ -205,6 +226,31 @@ export function WaitingRow({
 					))}
 				</div>
 			) : null}
+		</div>
+	);
+}
+
+export function LiveThinkingRow({
+	row,
+	openRows,
+	toggleRow,
+}: {
+	row: Extract<ChatRow, { kind: "thinking_live" }>;
+	openRows: OpenRows;
+	toggleRow: ToggleRow;
+}) {
+	const open = openRows[row.key] ?? false;
+	const hasText = row.text.trim() !== "";
+	return (
+		<div className="chat-group" data-live="" data-thinking>
+			<LiveRow
+				detail={hasText && !open ? latestLine(row.text) : undefined}
+				onToggle={(next) => toggleRow(row.key, next)}
+				open={open}
+				since={row.since}
+				verb="Thinking"
+			/>
+			{open && hasText ? <div className="chat-think__body">{row.text}</div> : null}
 		</div>
 	);
 }

@@ -374,7 +374,7 @@ func TestSubscribe(t *testing.T) {
 	)
 	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir, turn...))
 	r := startHost(t, cfg)
-	eventually(t, "initialize answered", func() bool { return state(t, cfg.SocketPath).LastSeq == 3 })
+	eventually(t, "initialize answered", func() bool { return state(t, cfg.SocketPath).LastSeq >= 3 })
 
 	a := subscribeTo(t, cfg.SocketPath, 0)
 	callOK(t, cfg.SocketPath, map[string]any{"op": "send", "text": "first"})

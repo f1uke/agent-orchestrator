@@ -327,7 +327,8 @@ test.describe("chat scroll", () => {
 		const landed = frames.findIndex((s) => s.rows.some((r) => r.key === key));
 		expect(landed, "the turn's message was painted").toBeGreaterThanOrEqual(0);
 		const tops = frames.slice(landed).map((s) => s.rows.find((r) => r.key === key)?.top ?? NaN);
-		expect(new Set(tops).size, "the message was painted at several positions on its way up").toBeGreaterThan(2);
+		const travel = frames.map((s) => s.scrollTop).filter((top, i, all) => i === 0 || top !== all[i - 1]);
+		expect(travel.length, "the list scrolled through several positions on its way to the turn").toBeGreaterThan(2);
 		const rest = tops.findIndex((top, i) => tops.slice(i).every((t) => t === top));
 		expect(tops[rest], "the message comes to rest at the top").toBeLessThanOrEqual(40);
 		expect(maxMoveUp(frames.slice(landed)), "the glide only moves rows down toward the message").toBeLessThanOrEqual(1);

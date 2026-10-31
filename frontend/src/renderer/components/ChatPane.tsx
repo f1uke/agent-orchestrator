@@ -19,9 +19,11 @@ import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
 import { clockTime, formatDuration } from "../lib/chat-time";
-import { formatTokens, sessionActivity } from "../lib/chat-inspect";
+import { contextUsage, formatTokens, sessionActivity, shownTodos } from "../lib/chat-inspect";
+import { newestUsage } from "../lib/chat-usage";
+import { useChatUsage } from "../hooks/useChatUsage";
 import { activeTurnIndex, railTurns } from "../lib/chat-rail";
-import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
+import { type ChatRow, chatRows } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
@@ -39,22 +41,29 @@ import {
 } from "../lib/chat-suggest";
 import { latestWrapUpId, wrapUpOf } from "../lib/chat-wrapup";
 import { ChatChapters } from "./ChatChapters";
-import { ChatTaskList } from "./ChatTaskList";
 import { ChatWrapUp } from "./ChatWrapUp";
 import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
 import { ChatComposer, type Prefill } from "./ChatComposer";
+import { ContextMeter, UsageMeter } from "./ChatMeters";
 import { SessionSuggestionCard, SkillSuggestionCard, SuggestedSessionDialog } from "./ChatSuggestion";
+import { ChatTodoBar } from "./ChatTodoBar";
 import { ChatWidget } from "./ChatWidget";
 import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
-import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow, WaitingRow } from "./ChatProcessRows";
+import {
+	GroupRow,
+	LiveThinkingRow,
+	type OpenRows,
+	ThinkingRow,
+	type ToggleRow,
+	TurnRow,
+	WaitingRow,
+} from "./ChatProcessRows";
 import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
 
 export type ChatPaneView = "chat" | "events";
-
-export type ChatJump = { itemIndex: number };
 
 type ChatPaneProps = {
 	session: WorkspaceSession;
@@ -62,8 +71,6 @@ type ChatPaneProps = {
 	theme: Theme;
 	daemonReady: boolean;
 	chat?: ChatSessionState;
-	jumpTo?: ChatJump | null;
-	onJumped?: () => void;
 	createMux?: () => ChatMux;
 	chatApi?: ChatApi;
 };
@@ -89,17 +96,7 @@ function useToast(): [string | null, (message: string) => void] {
 	return [toast, show];
 }
 
-export function ChatPane({
-	session,
-	view,
-	theme,
-	daemonReady,
-	chat: given,
-	jumpTo,
-	onJumped,
-	createMux,
-	chatApi,
-}: ChatPaneProps) {
+export function ChatPane({ session, view, theme, daemonReady, chat: given, createMux, chatApi }: ChatPaneProps) {
 	const own = useChatSession(given ? undefined : session.id, {
 		daemonReady,
 		sessionLive: session.status !== "terminated",
@@ -124,7 +121,10 @@ export function ChatPane({
 		() => sessionActivity(transcript).filter((a) => unfinished(a.state)).length,
 		[transcript],
 	);
-	const requestInspectorView = useUiStore((state) => state.requestInspectorView);
+	const todos = useMemo(() => shownTodos(transcript), [transcript]);
+	const fallbackContext = useMemo(() => contextUsage(transcript), [transcript]);
+	const sharedUsage = useChatUsage(view === "chat" && daemonReady);
+	const usage = newestUsage(transcript.usage, sharedUsage);
 
 	useEffect(() => {
 		const open = new Set(transcript.pending.map((p) => p.requestId));
@@ -177,9 +177,7 @@ export function ChatPane({
 				<ChatStream
 					disabled={actions.hostDown}
 					replaying={chat.connection === "connecting"}
-					jumpTo={jumpTo}
 					onAnswer={onAnswer}
-					onJumped={onJumped}
 					onNewSession={setSuggested}
 					onPrompt={onPrompt}
 					pending={transcript.pending}
@@ -196,6 +194,7 @@ export function ChatPane({
 						Session is asleep or restarting. Sending and answering resume once it is back.
 					</div>
 				) : null}
+				{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
 				{view === "chat" ? (
 					<ChatComposer
 						actions={actions}
@@ -214,13 +213,19 @@ export function ChatPane({
 					<ConnectionLabel connection={chat.connection} error={chat.error} />
 					{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
 					{runningInBackground > 0 ? (
-						<button className="chat-statusline__bg" onClick={() => requestInspectorView("session")} type="button">
+						<span>
 							<span className="chat-statusline__dot chat-statusline__dot--live" />
 							{runningInBackground} running in background
-						</button>
+						</span>
 					) : null}
 					<span className="chat-statusline__grow" />
-					{view === "chat" ? <span>Enter sends · Shift+Enter newline · Esc interrupts</span> : null}
+					{view === "chat" ? (
+						<>
+							<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+							<UsageMeter usage={usage} />
+							<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+						</>
+					) : null}
 				</div>
 			</div>
 			{suggested ? (
@@ -308,8 +313,6 @@ type StreamProps = {
 	onAnswer: AnswerHandler;
 	onPrompt: (text: string) => void;
 	onNewSession: (suggestion: SessionSuggestion) => void;
-	jumpTo?: ChatJump | null;
-	onJumped?: () => void;
 };
 
 // Within this many pixels of the end the user has reached the latest row.
@@ -354,8 +357,6 @@ function ChatStream({
 	onAnswer,
 	onPrompt,
 	onNewSession,
-	jumpTo,
-	onJumped,
 }: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
@@ -454,22 +455,15 @@ function ChatStream({
 		[setFollowing],
 	);
 
-	// The one way to show a given row: it stops following and brings the row to the top.
-	const scrollToRow = useCallback(
-		(key: string, glide = false) => {
+	const glideToRow = useCallback(
+		(key: string) => {
 			const index = rows.findIndex((row) => row.key === key);
 			if (index < 0) return;
 			setFollowing(false);
-			if (!glide) {
-				stopGlide();
-				virtualizer.scrollToIndex(index, { align: "start" });
-				return;
-			}
 			glideTo(() => virtualizer.getOffsetForIndex(index, "start")?.[0] ?? scrollRef.current?.scrollTop ?? 0);
 		},
-		[glideTo, rows, setFollowing, stopGlide, virtualizer],
+		[glideTo, rows, setFollowing, virtualizer],
 	);
-	const glideToRow = useCallback((key: string) => scrollToRow(key, true), [scrollToRow]);
 
 	const turns = useMemo(() => railTurns(rows), [rows]);
 	const turnRows = useMemo(() => {
@@ -509,13 +503,6 @@ function ChatStream({
 		setFollowing(true);
 		glideTo(() => scrollRef.current?.scrollHeight ?? 0);
 	}, [glideTo, setFollowing]);
-
-	useLayoutEffect(() => {
-		if (!jumpTo) return;
-		const index = rowIndexOfItem(rows, jumpTo.itemIndex);
-		if (index >= 0) scrollToRow(rows[index].key);
-		onJumped?.();
-	}, [jumpTo, onJumped, rows, scrollToRow]);
 
 	const leaveEnd = (el: HTMLElement) => {
 		if (el.scrollTop > 0) setFollowing(false);
@@ -654,12 +641,7 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			return <RequestCard answers={answers} request={row.pending} theme={theme} />;
 		case "streaming":
 			return row.block.kind === "thinking" ? (
-				<ThinkingRow
-					onToggle={(open) => toggleRow(row.key, open)}
-					open={openRows[row.key]}
-					streaming
-					text={row.block.text}
-				/>
+				<ThinkingRow onToggle={(open) => toggleRow(row.key, open)} open={openRows[row.key]} text={row.block.text} />
 			) : (
 				<div className="chat-stream-text" data-streaming>
 					{row.block.text}
@@ -670,8 +652,8 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			return <GroupRow openRows={openRows} root={root} row={row} theme={theme} toggleRow={toggleRow} />;
 		case "waiting":
 			return <WaitingRow openRows={openRows} root={root} row={row} toggleRow={toggleRow} />;
-		case "tasks":
-			return <ChatTaskList todos={row.todos} />;
+		case "thinking_live":
+			return <LiveThinkingRow openRows={openRows} row={row} toggleRow={toggleRow} />;
 		case "turn":
 			return (
 				<TurnRow

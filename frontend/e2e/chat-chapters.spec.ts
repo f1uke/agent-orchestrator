@@ -21,7 +21,7 @@ async function boxOf(target: Locator): Promise<Box> {
 async function open(page: Page) {
 	await page.goto(SESSION);
 	await expect(page.getByTestId("chat-stream")).toBeVisible();
-	await expect(page.locator("[data-tasks]")).toBeVisible();
+	await expect(page.locator('[data-testid="chat-pane"] [data-connection="live"]')).toBeVisible();
 }
 
 for (const viewport of VIEWPORTS) {
@@ -102,36 +102,6 @@ for (const viewport of VIEWPORTS) {
 				await expect(toc.getByRole("list")).toBeVisible();
 				await check("open");
 				await shot(page, info, "gutter");
-			});
-
-			test("lists the live tasks with their state icons", async ({ page }, info) => {
-				await open(page);
-				const list = page.getByRole("list", { name: "Tasks" });
-				await expect(page.locator("[data-tasks]")).toContainText("Tasks · 2 of 4");
-				await expect(list.getByRole("listitem")).toHaveCount(4);
-				const done = list.locator('[data-status="completed"]');
-				await expect(done).toHaveCount(2);
-				await expect(done.locator(".chat-tasks__icon--done")).toHaveCount(2);
-				const active = list.locator('[data-status="in_progress"]');
-				await expect(active).toHaveText("Wire sendPrompt to the composer");
-				await expect(active.locator(".chat-tasks__icon--active")).toHaveCount(1);
-				const pending = list.locator('[data-status="pending"]');
-				await expect(pending).toHaveText("Screenshot at 1920 and 2560");
-				await expect(pending.locator(".chat-tasks__icon--done, .chat-tasks__icon--active")).toHaveCount(0);
-
-				const colors = await list.evaluate((el) => {
-					const color = (sel: string) => getComputedStyle(el.querySelector(sel) as Element).color;
-					return {
-						done: color(".chat-tasks__icon--done"),
-						active: color(".chat-tasks__icon--active"),
-						doneText: color('[data-status="completed"]'),
-						activeText: color('[data-status="in_progress"]'),
-					};
-				});
-				expect(colors.done).not.toBe(colors.active);
-				expect(colors.doneText).not.toBe(colors.activeText);
-				await page.locator("[data-tasks]").scrollIntoViewIfNeeded();
-				await shot(page, info, "tasks");
 			});
 
 			test("fills the composer from a wrap-up reply and sends nothing", async ({ page }, info) => {
