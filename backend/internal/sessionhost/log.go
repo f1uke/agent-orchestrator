@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatblob"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 )
 
 type eventLog struct {
 	path  string
+	blobs chatblob.Store
 	file  *os.File
 	seq   uint64
 	size  int64
@@ -54,7 +56,7 @@ func openLog(path string) (*eventLog, *chatproto.Folder, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("sessionhost: open log: %w", err)
 	}
-	lg := &eventLog{path: path, file: f, size: int64(len(data))}
+	lg := &eventLog{path: path, blobs: chatblob.ForLog(path), file: f, size: int64(len(data))}
 	for i, off := range lineStarts(data) {
 		lg.index = append(lg.index, logPos{seq: entries[i].Seq, off: off})
 		lg.seq = entries[i].Seq
@@ -62,20 +64,25 @@ func openLog(path string) (*eventLog, *chatproto.Folder, error) {
 	return lg, folder, nil
 }
 
-func (l *eventLog) append(e chatproto.Entry) ([]byte, error) {
+func (l *eventLog) append(e chatproto.Entry) ([]byte, chatproto.Entry, error) {
+	payload, err := l.blobs.Externalize(e.Payload)
+	if err != nil {
+		return nil, e, fmt.Errorf("sessionhost: %w", err)
+	}
+	e.Payload = payload
 	line, err := marshal(e)
 	if err != nil {
-		return nil, fmt.Errorf("sessionhost: encode entry: %w", err)
+		return nil, e, fmt.Errorf("sessionhost: encode entry: %w", err)
 	}
 	line = append(line, '\n')
 	if _, err := l.file.Write(line); err != nil {
 		_ = os.Truncate(l.path, l.size)
-		return nil, fmt.Errorf("sessionhost: append log: %w", err)
+		return nil, e, fmt.Errorf("sessionhost: append log: %w", err)
 	}
 	l.seq = e.Seq
 	l.index = append(l.index, logPos{seq: e.Seq, off: l.size})
 	l.size += int64(len(line))
-	return line, nil
+	return line, e, nil
 }
 
 func (l *eventLog) after(from uint64) ([][]byte, error) {

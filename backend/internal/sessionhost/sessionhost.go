@@ -391,7 +391,7 @@ func (h *host) noteLocked(note any) {
 
 func (h *host) appendLocked(dir chatproto.Direction, payload []byte) error {
 	e := chatproto.Entry{Seq: h.log.seq + 1, TS: time.Now().UTC(), Dir: dir, Payload: payload}
-	line, err := h.log.append(e)
+	line, e, err := h.log.append(e)
 	if err != nil {
 		return err
 	}

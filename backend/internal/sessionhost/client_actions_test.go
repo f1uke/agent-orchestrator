@@ -3,6 +3,7 @@ package sessionhost
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -122,8 +123,12 @@ func TestClientInterruptSetModeAndImages(t *testing.T) {
 	if _, err := c.Send(ctx, chatproto.UserInput{Text: "look", Images: images}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := loggedInputs(t, cfg.LogPath, "user/"); len(got) != 1 || !strings.Contains(got[0], `"media_type":"image/png"`) || !strings.Contains(got[0], `"data":"aGk="`) {
-		t.Errorf("logged user messages = %v, want one carrying the image", got)
+	got := loggedInputs(t, cfg.LogPath, "user/")
+	if len(got) != 1 || !strings.Contains(got[0], `"media_type":"image/png"`) || !strings.Contains(got[0], `"type":"ao_blob"`) || strings.Contains(got[0], "aGk=") {
+		t.Errorf("logged user messages = %v, want one carrying a ref to the image", got)
+	}
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(cfg.LogPath), "blobs", "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4.png")); err != nil || string(b) != "hi" {
+		t.Errorf("stored image = %q, %v; want the decoded bytes", b, err)
 	}
 }
 
