@@ -27,7 +27,6 @@ export type ToolBody =
 
 export type ToolView = {
 	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "todo" | "plan" | "question" | "other";
-	/** For a Write, Edit or Read, the verb of its row ("Created", "Edited", "Read"). */
 	title: string;
 	/** For a file card, the base name. The full path stays in `path` for the row's tooltip. */
 	arg: string;

@@ -4,7 +4,7 @@ import { type CodeToken, grammarFor, highlightCode } from "./note/highlight";
 
 export type CodeLine = { kind: "add" | "del" | "context"; num: number; text: string };
 
-/** What a Write, Edit or Read card draws. `hidden` counts the lines a preview cap left out. */
+/** `hidden` counts the lines a preview cap left out. */
 export type CodeView = { path: string; language: string | undefined; lines: CodeLine[]; hidden: number };
 
 // Where an extension names a language differently from the note highlighter's own aliases.
@@ -17,7 +17,6 @@ const EXTENSION_LANGUAGE: Record<string, string> = {
 	mdx: "markdown",
 };
 
-/** The shiki grammar key for a path, or undefined when the highlighter has no grammar for it. */
 export function languageOf(path: string): string | undefined {
 	const name = path.split("/").at(-1) ?? "";
 	const dot = name.lastIndexOf(".");
@@ -38,7 +37,6 @@ export function writeView(path: string, content: string, limit: number): CodeVie
 
 type Marked = { kind: CodeLine["kind"]; text: string };
 
-/** A deletion counts on the old side, an addition on the new side, and context shows the new number. */
 function numbered(marked: Marked[], oldStart: number, newStart: number): CodeLine[] {
 	let oldLine = oldStart;
 	let newLine = newStart;
