@@ -379,6 +379,94 @@ describe("chatRows widgets", () => {
 	});
 });
 
+describe("chatRows chapters and wrap-up", () => {
+	const chapter = (title: string, result: "ok" | "error" | "none" = "ok") =>
+		tool("mcp__ao__mark_chapter", { title }, result);
+	const wrapUp = (recap = "Done.", result: "ok" | "error" | "none" = "ok") =>
+		tool("mcp__ao__wrap_up", { recap }, result);
+	const titleOf = (row: ChatRow) => (row.kind === "item" && row.item.kind === "tool_call" ? row.item.input : undefined);
+
+	it("gives a chapter its own row instead of a place in a process group", () => {
+		const rows = rowsOf([user(), say("a"), tool("Read"), chapter("Build"), tool("Bash"), say("b")]);
+		expect(shape(rows)).toEqual(["user", "assistant_text", "tool_call", "tool_call", "tool_call", "assistant_text"]);
+	});
+
+	it("keeps each chapter between the folds of the work around it", () => {
+		const rows = rowsOf([
+			user(),
+			chapter("Explore"),
+			tool("Read"),
+			tool("Grep"),
+			chapter("Build"),
+			tool("Edit"),
+			tool("Bash"),
+			say("done"),
+			turnEnd(),
+		]);
+		expect(shape(rows)).toEqual(["user", "tool_call", "turn", "tool_call", "turn", "assistant_text", "turn_end"]);
+		expect([rows[1], rows[3]].map(titleOf)).toEqual([{ title: "Explore" }, { title: "Build" }]);
+	});
+
+	it("keeps a wrap-up in view after its turn folds, ahead of the last reply", () => {
+		const rows = rowsOf([user(), tool("Read"), tool("Edit"), wrapUp("Tests pass."), say("closing"), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "tool_call", "assistant_text", "turn_end"]);
+		expect(titleOf(rows[2])).toEqual({ recap: "Tests pass." });
+	});
+
+	it("folds a chapter or wrap-up call that failed, since there is nothing to show", () => {
+		const rows = rowsOf([user(), tool("Read"), chapter("Bad", "error"), wrapUp("x", "error"), say("sorry"), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "turn_end"]);
+	});
+});
+
+describe("chatRows task list", () => {
+	const create = (subject: string, id: number) => ({
+		...tool("TaskCreate", { subject, description: subject }),
+		result: { isError: false, content: `Task #${id} created successfully: ${subject}` },
+	});
+	const update = (taskId: string, status: string) => tool("TaskUpdate", { taskId, status });
+	const tasksRow = (rows: ChatRow[]) => rows.find((r) => r.kind === "tasks");
+	const listed = (rows: ChatRow[]) => {
+		const row = tasksRow(rows);
+		return row?.kind === "tasks" ? row.todos.map((t) => [t.content, t.status]) : undefined;
+	};
+
+	it("shows the live list as the last row of the turn, after the work", () => {
+		const rows = rowsOf([user(), create("One", 1), create("Two", 2), update("1", "completed"), say("working on two")]);
+		expect(listed(rows)).toEqual([
+			["One", "completed"],
+			["Two", "pending"],
+		]);
+		expect(rows.at(-1)?.kind).toBe("tasks");
+	});
+
+	it("also follows a finished turn that folded", () => {
+		const rows = rowsOf([user(), create("One", 1), update("1", "completed"), tool("Read"), say("done"), turnEnd()]);
+		expect(listed(rows)).toEqual([["One", "completed"]]);
+		expect(rows.at(-1)?.kind).toBe("tasks");
+	});
+
+	it("moves off a finished turn once the user writes again, and returns when the next turn touches it", () => {
+		const first = [user(), create("One", 1), say("ok"), turnEnd()];
+		expect(tasksRow(rowsOf([...first, user("u2", "next")]))).toBeUndefined();
+		expect(listed(rowsOf([...first, user("u2", "next"), update("1", "completed")]))).toEqual([["One", "completed"]]);
+	});
+
+	it("is absent when no todo tool ran, or the list is empty", () => {
+		expect(tasksRow(rowsOf([user(), say("hi"), tool("Read")]))).toBeUndefined();
+		expect(tasksRow(rowsOf([user(), tool("TodoWrite", { todos: [] })]))).toBeUndefined();
+	});
+
+	it("sits after the waiting row and before a streaming row", () => {
+		const rows = chatRows(
+			transcript([user(), create("One", 1), say("hi")]),
+			{ ...emptyOverlay, blocks: [{ messageId: "s", index: 0, kind: "text", text: "typing" }] },
+			new Set(),
+		);
+		expect(rows.map((r) => r.kind).slice(-2)).toEqual(["tasks", "streaming"]);
+	});
+});
+
 describe("chatRows task messages", () => {
 	it("shows a task message as its own row that breaks the run of calls around it", () => {
 		const rows = rowsOf([user(), tool("Bash"), tool("Bash"), taskMessage(), tool("Read"), tool("Read")]);

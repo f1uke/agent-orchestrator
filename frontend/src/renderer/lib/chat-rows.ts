@@ -1,7 +1,10 @@
+import { chapterOf, MARK_CHAPTER } from "./chat-chapters";
 import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
+import { latestTodos, type Todo } from "./chat-inspect";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
 import { SHOW_WIDGET, widgetOf } from "./chat-widget";
+import { WRAP_UP, wrapUpOf } from "./chat-wrapup";
 import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunning } from "./chat-tools";
 
 /** A step inside a process group: a tool call, or the thinking between tool calls. */
@@ -24,6 +27,7 @@ export type ChatRow =
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
 	| { key: string; kind: "waiting"; tasks: WaitingTask[] }
+	| { key: "tasks"; kind: "tasks"; todos: Todo[] }
 	| {
 			key: string;
 			kind: "turn";
@@ -39,7 +43,7 @@ export const itemRowKey = (itemIndex: number) => `i${itemIndex}`;
 // and shows as its own row, or is not shown in the main column at all.
 type Role = "process" | "break" | "skip";
 
-const OWN_ROW_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", SHOW_WIDGET]);
+const OWN_ROW_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", SHOW_WIDGET, MARK_CHAPTER, WRAP_UP]);
 
 function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 	switch (item.kind) {
@@ -138,20 +142,68 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 				break;
 			}
 		}
-		const between = rows.slice(i + 1, last);
-		const folded = turnRow(
-			row.key,
-			between.filter((r) => !isDrawnWidget(r)),
-			ended.item.durationMs,
-		);
-		if (!folded) continue;
-		out.push(folded, ...between.filter(isDrawnWidget));
+		const pieces = foldSegments(row.key, rows.slice(i + 1, last), ended.item.durationMs);
+		if (!pieces) continue;
+		out.push(...pieces);
 		i = last - 1;
 	}
 	return out;
 }
 
-const isDrawnWidget = (row: ChatRow) => isItem(row, "tool_call") && widgetOf(row.item as ToolCallItem) !== undefined;
+// A chapter divider opens the work after it, so each chapter folds on its own and the divider stays between the folds.
+// The turn's duration belongs to the whole turn, so a turn split by chapters shows none.
+function foldSegments(userKey: string, between: ChatRow[], turnMs: number | undefined): ChatRow[] | undefined {
+	const durationMs = between.some(isChapter) ? undefined : turnMs;
+	const out: ChatRow[] = [];
+	let folded = false;
+	let segment: ChatRow[] = [];
+	let segmentKey = userKey;
+	const close = (nextKey: string) => {
+		const turn = turnRow(
+			segmentKey,
+			segment.filter((r) => !staysInView(r)),
+			durationMs,
+		);
+		if (turn) {
+			folded = true;
+			out.push(turn);
+		}
+		out.push(...(turn ? segment.filter(staysInView) : segment));
+		segment = [];
+		segmentKey = nextKey;
+	};
+	for (const r of between) {
+		if (isChapter(r)) {
+			close(r.key);
+			out.push(r);
+		} else segment.push(r);
+	}
+	close(userKey);
+	return folded ? out : undefined;
+}
+
+const isChapter = (row: ChatRow) => isItem(row, "tool_call") && chapterOf(row.item as ToolCallItem) !== undefined;
+
+// What a call shows to the user in its own right stays out of the fold; a failed call has nothing to show and folds.
+function staysInView(row: ChatRow): boolean {
+	if (!isItem(row, "tool_call")) return false;
+	const call = row.item as ToolCallItem;
+	return widgetOf(call) !== undefined || chapterOf(call) !== undefined || wrapUpOf(call) !== undefined;
+}
+
+const TODO_TOOLS = new Set(["TodoWrite", "TaskCreate", "TaskUpdate"]);
+
+// The task list is always about the turn in progress or the one just finished, so it follows the last message.
+function tasksRow(transcript: Transcript, queued: ReadonlySet<string>): ChatRow | undefined {
+	let touched = false;
+	for (let i = transcript.items.length - 1; i >= 0; i--) {
+		const item = transcript.items[i];
+		if ((item.kind === "user" && !queued.has(item.uuid)) || (item.kind === "task_message" && item.opensTurn)) break;
+		if (item.kind === "tool_call" && item.parentToolUseId === "" && TODO_TOOLS.has(item.name)) touched = true;
+	}
+	const todos = touched ? latestTodos(transcript) : undefined;
+	return todos?.length ? { key: "tasks", kind: "tasks", todos } : undefined;
+}
 
 function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {
 	const last = rows.at(-1);
@@ -252,6 +304,8 @@ export function chatRows(
 	rows = foldTurns(rows);
 	const waiting = waitingRow(transcript, rows);
 	if (waiting) rows.push(waiting);
+	const tasks = tasksRow(transcript, queued);
+	if (tasks) rows.push(tasks);
 
 	for (const pending of transcript.pending) {
 		if (!toolIds.has(pending.toolUseId)) rows.push({ key: `p${pending.requestId}`, kind: "pending", pending });
