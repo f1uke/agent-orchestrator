@@ -9504,7 +9504,6 @@ ol.note-prose__list {
 	color: var(--fg);
 }
 
-/* Chat visuals (show_widget): a quiet header over a card that holds the sandboxed frame. */
 .chat-widget {
 	display: flex;
 	flex-direction: column;

@@ -513,8 +513,7 @@ function createWindow(): void {
 		}
 	});
 
-	// A chat widget runs in a sandboxed subframe and may set its own location to any host. will-navigate
-	// above sees only the main frame, so subframes get their own gate.
+	// will-navigate sees only the main frame; a widget's script can send its subframe anywhere.
 	mainWindow.webContents.on("will-frame-navigate", (event) => {
 		if (!event.isMainFrame && !allowSubframeNavigation(event.url, mainWindow?.webContents.getURL() ?? "")) {
 			event.preventDefault();

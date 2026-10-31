@@ -15,8 +15,6 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "./ui/sheet";
 
 const START_HEIGHT = 160;
 
-// A row scrolled out of the virtual list unmounts its frame. Keeping the last height means the row
-// comes back at the size it had, instead of at the start height until the widget measures itself again.
 const heights = new Map<string, number>();
 
 type FrameProps = {
@@ -29,11 +27,6 @@ type FrameProps = {
 	style?: React.CSSProperties;
 };
 
-/**
- * One sandboxed frame and its bridge. The sandbox is exactly "allow-scripts": the frame has an opaque
- * origin, so it can reach nothing of the app, and everything it may ask for arrives as a message that
- * is read only when it came from this frame's own window.
- */
 function WidgetFrame({ html, title, theme, onPrompt, onSize, className, style }: FrameProps) {
 	const frame = useRef<HTMLIFrameElement>(null);
 	const [loaded, setLoaded] = useState(false);
@@ -52,9 +45,6 @@ function WidgetFrame({ html, title, theme, onPrompt, onSize, className, style }:
 		return () => window.removeEventListener("message", onMessage);
 	}, []);
 
-	// The frame's document was built with the theme at first render. This keeps it current without
-	// rebuilding it, which would reload the frame and lose the widget's state. The frame is read a
-	// frame later because the app sets its theme attribute in an effect that runs after this one.
 	useEffect(() => {
 		if (!loaded) return;
 		const id = requestAnimationFrame(() => {
@@ -69,7 +59,7 @@ function WidgetFrame({ html, title, theme, onPrompt, onSize, className, style }:
 		<iframe
 			className={className}
 			onLoad={() => {
-				// Writing the document into the frame fires load again; the page takes one document only.
+				// document.write in the frame fires load again.
 				if (sent.current) return;
 				sent.current = true;
 				frame.current?.contentWindow?.postMessage({ type: WIDGET_DOC_TYPE, html }, "*");

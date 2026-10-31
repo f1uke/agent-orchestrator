@@ -151,7 +151,6 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 	return out;
 }
 
-// A visual the agent drew is the answer's content, so a folded turn keeps it in view.
 const isDrawnWidget = (row: ChatRow) => isItem(row, "tool_call") && widgetOf(row.item as ToolCallItem) !== undefined;
 
 function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {

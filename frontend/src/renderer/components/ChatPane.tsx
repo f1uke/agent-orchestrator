@@ -142,7 +142,6 @@ export function ChatPane({
 		[sendAnswer, setMode, showToast],
 	);
 
-	// The one way anything in a row puts text in the composer. It only fills the box; the user sends.
 	const onPrompt = useCallback((text: string) => setPrefill((prev) => ({ text, seq: (prev?.seq ?? 0) + 1 })), []);
 
 	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {

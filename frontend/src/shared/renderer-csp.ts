@@ -11,10 +11,8 @@
 // here the element load is CSP-blocked and shows a broken thumbnail — the bug
 // that survived #111 (which added the blob fetch but not this CSP allowance).
 //
-// `frame-src 'self'` is for the chat's widget frame, a sandboxed (opaque-origin)
-// iframe on /widget-frame.html. It cannot be `srcdoc`, `data:` or `blob:`: those
-// inherit this policy, whose `script-src 'self'` blocks the widget's inline scripts.
-// main.ts allows that one frame URL and nothing else to navigate.
+// `frame-src 'self'` is for the chat widget frame on /widget-frame.html; srcdoc, data: and blob:
+// would inherit `script-src 'self'` and block the widget's inline scripts.
 export function buildContentSecurityPolicy(posthogOrigin: string): string {
 	return [
 		"default-src 'self'",

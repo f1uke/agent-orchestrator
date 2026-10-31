@@ -61,7 +61,6 @@ function mentionMenu(files: FilesState, query: string): TokenMenuModel {
 	};
 }
 
-/** Text another part of the chat wants in the box. A new `seq` is a new request, even for the same text. */
 export type Prefill = { text: string; seq: number };
 
 type ComposerProps = {
@@ -139,7 +138,6 @@ export function ChatComposer({
 		pendingCaret.current = at;
 	};
 
-	// Fills the box and never sends. A draft already there keeps its text and the prefill goes below it.
 	const seenPrefill = useRef(prefill?.seq);
 	useLayoutEffect(() => {
 		if (!prefill || prefill.seq === seenPrefill.current) return;

@@ -8,7 +8,6 @@ export type WidgetSpec = { title: string; code: string; mode: "svg" | "html"; lo
 
 const MAX_LOADING_MESSAGES = 4;
 
-/** The visual a `show_widget` call carries, or undefined when it has no code to draw. */
 export function parseWidget(input: unknown): WidgetSpec | undefined {
 	if (!isObject(input) || typeof input.widget_code !== "string" || input.widget_code.trim() === "") return undefined;
 	const code = input.widget_code;
@@ -23,7 +22,6 @@ export function parseWidget(input: unknown): WidgetSpec | undefined {
 	};
 }
 
-/** The visual to draw for a call, or undefined when the call is not one, failed, or was refused. */
 export function widgetOf(call: ToolCallItem): WidgetSpec | undefined {
 	if (call.name !== SHOW_WIDGET || call.result?.isError) return undefined;
 	if (call.permission?.status === "denied" || call.permission?.status === "cancelled") return undefined;
@@ -32,7 +30,6 @@ export function widgetOf(call: ToolCallItem): WidgetSpec | undefined {
 
 export type WidgetMode = "dark" | "light";
 
-/** The CSS variables a widget sees (names from the widget guide), each resolved to a colour or length. */
 export type WidgetTheme = { mode: WidgetMode; vars: Record<string, string> };
 
 // App token behind each variable the widget guide names. Fonts and radius are
@@ -54,7 +51,6 @@ const TOKEN: ReadonlyArray<readonly [widgetVar: string, appVar: string, fallback
 	["--radius", "--radius-lg", "8px"],
 ];
 
-/** Reads the app's resolved tokens off `root` once. Variables the app does not define are left out. */
 export function widgetTheme(root: HTMLElement, mode: WidgetMode): WidgetTheme {
 	const style = getComputedStyle(root);
 	const vars: Record<string, string> = {};
@@ -69,8 +65,7 @@ export function widgetTheme(root: HTMLElement, mode: WidgetMode): WidgetTheme {
 
 const CDN = "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh";
 
-// Loopback and every host outside the four CDNs (and Google Fonts) stay blocked:
-// the daemon listens on 127.0.0.1 and a widget must not reach it.
+// Only CDN and Google Fonts hosts are listed, so the daemon on 127.0.0.1 stays unreachable.
 const WIDGET_CSP = [
 	"default-src 'none'",
 	`script-src 'unsafe-inline' ${CDN}`,
@@ -85,7 +80,6 @@ const WIDGET_CSP = [
 
 const VAR_NAME = /^--[a-z0-9-]+$/;
 
-// A theme value ends up inside a <style> rule, so it may not close the rule or the element.
 const safeCssValue = (value: string) => !/[<>{};]/.test(value);
 
 function cssVars(vars: Readonly<Record<string, string>>): string {
@@ -95,8 +89,6 @@ function cssVars(vars: Readonly<Record<string, string>>): string {
 		.join(";");
 }
 
-// Runs before the widget code. The frame's opaque origin means the only way out
-// is postMessage to the parent, and the only message it accepts comes from the parent.
 const BOOTSTRAP = `
 window.sendPrompt = function (text) {
   parent.postMessage({ type: "ao-widget/prompt", text: String(text) }, "*");
@@ -117,7 +109,6 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-/** The document a widget's frame shows: CSP first, then the theme, then the bridge, then the widget's own code. */
 export function widgetDocument(spec: WidgetSpec, theme: WidgetTheme): string {
 	const body = spec.mode === "svg" ? `<div class="ao-svg">${spec.code}</div>` : spec.code;
 	return [
@@ -137,15 +128,9 @@ export function widgetDocument(spec: WidgetSpec, theme: WidgetTheme): string {
 	].join("\n");
 }
 
-/**
- * The page a widget's frame loads (`public/widget-frame.html`, a static page that waits for one document
- * and writes it). The frame cannot use `srcdoc`, `data:` or `blob:`: those inherit the app's
- * Content-Security-Policy, whose `script-src 'self'` blocks every inline script a widget carries. This
- * page has no policy of its own, so the CSP meta that `widgetDocument` puts first is the only one in force.
- */
+// srcdoc, data: and blob: inherit the app CSP and block inline scripts; this page has no policy of its own.
 export const WIDGET_FRAME_URL = "/widget-frame.html";
 
-/** What the parent posts to the blank frame page: the document `widgetDocument` built. */
 export const WIDGET_DOC_TYPE = "ao-widget/doc";
 
 export type WidgetMessage = { type: "prompt"; text: string } | { type: "size"; height: number };
@@ -154,7 +139,6 @@ export const MAX_PROMPT_CHARS = 4000;
 export const MIN_WIDGET_HEIGHT = 40;
 export const MAX_WIDGET_HEIGHT = 4000;
 
-/** What a frame may ask of the chat. Anything that is not exactly one of these two requests is dropped. */
 export function parseWidgetMessage(data: unknown): WidgetMessage | undefined {
 	if (!isObject(data)) return undefined;
 	if (data.type === "ao-widget/prompt") {

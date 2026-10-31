@@ -1,13 +1,11 @@
 import type { ChatEntry, Direction } from "./chat-event";
 import { READ_ME, SHOW_WIDGET } from "./chat-widget";
 
-/** The preview session whose agent draws two visuals: a DCA calculator and a flow diagram. */
 export const MOCK_WIDGETS_CHAT_SESSION = "demo-chat-widgets";
 
 const SESSION = "5b0c3e5e-7c4d-4f5b-9a77-0a1d6f4b2c11";
 const START = Date.parse("2026-10-31T09:00:00.000Z");
 
-// No CDN: the e2e run has no network. Variables are the ones the widget guide names.
 const CALCULATOR = `<style>
 .dca{display:grid;gap:16px;font-size:14px}
 .dca label{display:block;color:var(--text-secondary)}.dca label input{display:block;margin-top:8px}
