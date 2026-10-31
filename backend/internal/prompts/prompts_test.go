@@ -798,7 +798,9 @@ func TestCheckInGate_StandardAndDeepStopBeforeImplementing(t *testing.T) {
 			"identical to having hung",            // why a quiet mid-turn pause is wrong
 			"what you understand the task to be",
 			"what you need decided",
-			"reply is your go-ahead",
+			"reply (their answer to that question, or a message) is your go-ahead",
+			"ask for the go-ahead with AskUserQuestion as the last act of turn one",
+			"do nothing after it until the answer comes",
 		} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("CheckInGate(%q) missing %q:\n%s", size, want, got)
@@ -998,6 +1000,33 @@ func TestCoordinationFloor_WorkerReportsAtEachMoment(t *testing.T) {
 	}
 	if strings.Contains(worker, "true blocker") {
 		t.Error("worker floor must not limit orchestrator contact to true blockers")
+	}
+}
+
+// A yes asked for in the prose of a long report was missed: no question card,
+// and the board never showed Input Needed (2026-10-31). Every ask of the human
+// goes through AskUserQuestion, in the human's language, recommendation first.
+func TestCoordinationFloor_WorkerAsksViaAskUserQuestion(t *testing.T) {
+	worker := CoordinationFloor(KindWorker)
+	for _, want := range []string{
+		"**Ask the human with the AskUserQuestion tool, never in prose.**",
+		"a yes before a push, a PR, a merge",
+		"a check-in go-ahead",
+		"one clear question, short options, your recommended option first",
+		"in the human's language",
+		"**Needs you**",
+		"do nothing after it until the answer comes",
+		"If your agent has no AskUserQuestion tool",
+	} {
+		if !strings.Contains(worker, want) {
+			t.Errorf("worker floor missing %q", want)
+		}
+	}
+	if !strings.Contains(workerDefault, "ask for the go-ahead with AskUserQuestion") {
+		t.Error("review-feedback rule must ask for the go-ahead with AskUserQuestion")
+	}
+	if strings.Contains(workerDefault, "and wait for the go-ahead") {
+		t.Error("review-feedback rule still says to wait for the go-ahead in prose")
 	}
 }
 

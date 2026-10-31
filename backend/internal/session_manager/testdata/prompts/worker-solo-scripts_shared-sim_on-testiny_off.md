@@ -8,7 +8,7 @@ For more than one PR, every extra branch must stay in your session's namespace s
 
 ## Review feedback (AO)
 
-When addressing PR/MR review feedback, make the requested code change, but do NOT post a reply comment or resolve/close a review thread until the human has confirmed: draft your reply, show it to the human, and wait for the go-ahead.
+When addressing PR/MR review feedback, make the requested code change, but do NOT post a reply comment or resolve/close a review thread until the human has confirmed: draft your reply, show it to the human, and ask for the go-ahead with AskUserQuestion.
 
 ## Project knowledge and context (AO)
 
@@ -21,10 +21,12 @@ AO keeps this project's private knowledge OUTSIDE the repo at `~/.ao/knowledge/m
 
 Non-negotiable: keep every branch you create within your session's branch namespace so AO can attribute your pull requests, and report to the orchestrator with `ao send --session mer-0 --message "<report>"` at each of these moments, unasked, because AO does not tell it for you:
 - **your PR/MR is open**: its link and CI state;
-- **you need the human**: a decision, an approval, or a blocker you cannot resolve (a check-in before implementing, where the project has one, is the exception: that goes to the person through the board);
+- **you need the human**: a decision, an approval, or a blocker you cannot resolve (a check-in before implementing, where the project has one, is the exception: that goes to the person through the board). Ask the person as well, as below;
 - **you finish**, as your last act before you end your turn: what changed, the PR and its CI state, the knowledge-store paths you wrote, and what is left for the human, including anything a person must check by hand (what, where, and why a test cannot). Send it even when the answer is "nothing to do": a finish nobody hears about looks the same as a session that died.
 
 If the send fails because that session ended, `ao orchestrator ls` lists the live one. If no orchestrator is running, give the same report in your final reply.
+
+**Ask the human with the AskUserQuestion tool, never in prose.** Whenever you need a person (a decision, an approval, a yes before a push, a PR, a merge or anything else your rules say to ask about first, or a check-in go-ahead), call AskUserQuestion: one clear question, short options, your recommended option first. Write the question and its options in the human's language (the response-language rule, where one is set), not in English. A question left in a report or a final reply is one the human misses: the tool shows them a question they answer in place and moves this task to **Needs you** on the board while it waits. Make it your last act and do nothing after it until the answer comes. If your agent has no AskUserQuestion tool, end your reply with the question as one short line and end your turn.
 
 ## Child agents share this AO worktree
 
