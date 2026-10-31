@@ -41,6 +41,8 @@ type ChatFilesController struct {
 	// KnowledgeDir is the knowledge store root; a session reads KnowledgeDir/<project>.
 	KnowledgeDir string
 	DataDir      string
+
+	taskOutputs taskOutputPaths
 }
 
 // Register mounts the chat file routes on the supplied router.
@@ -49,6 +51,7 @@ func (c *ChatFilesController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/chat/files/{root}/*", c.serve)
 	r.Head("/sessions/{sessionId}/chat/files/{root}/*", c.serve)
 	r.Get("/sessions/{sessionId}/chat/blobs/{blob}", c.blob)
+	r.Get("/sessions/{sessionId}/chat/tasks/{taskId}/output", c.taskOutput)
 }
 
 func (c *ChatFilesController) roots(r *http.Request) (chatfiles.Roots, error) {

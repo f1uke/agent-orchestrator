@@ -2487,3 +2487,17 @@ type ChatUsageResponse struct {
 	SevenDay  *ChatUsageWindow `json:"sevenDay,omitempty" description:"The weekly window; absent when the event did not report it."`
 	UpdatedAt string           `json:"updatedAt" format:"date-time" description:"When the chat session that reported it logged the event."`
 }
+
+// ChatTaskParam is the {sessionId}/{taskId} path parameters of the chat task output route.
+type ChatTaskParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	TaskID    string `path:"taskId" pattern:"^[A-Za-z0-9_-]+$" description:"The background task id claude reported in task_started."`
+}
+
+// ChatTaskOutputResponse is the body of GET /api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output.
+type ChatTaskOutputResponse struct {
+	Text       string `json:"text" description:"The end of the output file, at most the last 64 KiB."`
+	Size       int64  `json:"size" description:"The whole file's size in bytes."`
+	Truncated  bool   `json:"truncated" description:"True when text is only the end of the file."`
+	ModifiedAt string `json:"modifiedAt" format:"date-time"`
+}

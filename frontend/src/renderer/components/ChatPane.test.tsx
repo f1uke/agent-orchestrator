@@ -1,12 +1,13 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatApi, ChatResult } from "../lib/chat-api";
 import type { ChatEntry } from "../lib/chat-event";
 import { foldEntries } from "../lib/chat-fold";
 import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import { emptyOverlay } from "../lib/chat-stream";
 import { aoBridge } from "../lib/bridge";
+import { image, resolveCalls, stubChatFiles } from "../test/chat-files-stub";
 import { useUiStore } from "../stores/ui-store";
 import type { SubscriptionUsage } from "../lib/chat-usage";
 import type { WorkspaceSession } from "../types/workspace";
@@ -75,6 +76,7 @@ function fakeApi() {
 		interrupt: vi.fn<ChatApi["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
+		taskOutput: vi.fn<ChatApi["taskOutput"]>(async () => null),
 	};
 }
 
@@ -882,6 +884,39 @@ describe("ChatPane calm view", () => {
 			expect(document.querySelector("[data-waiting]")).toHaveTextContent("$ go test -run Soak ./...");
 		});
 
+		it("opens the waiting row to the command and the tail of its output, read for this session", async () => {
+			const api = fakeApi();
+			api.taskOutput.mockResolvedValue({
+				text: "=== RUN TestSoak\n",
+				size: 17,
+				truncated: false,
+				modifiedAt: "2026-10-30T10:56:00Z",
+			});
+			const { feed, user } = renderPane("chat", api);
+			feed(...turnWithBackground(false));
+			expect(api.taskOutput).not.toHaveBeenCalled();
+			await user.click(document.querySelector("[data-waiting] .chat-group__head")!);
+			await settle();
+			expect(api.taskOutput).toHaveBeenCalledWith("chat-1", "t1");
+			expect(document.querySelector("[data-waiting] [data-task-output='t1']")).toHaveTextContent("=== RUN TestSoak");
+		});
+
+		it("opens a running background Bash card to its output instead of the started-in-background note", async () => {
+			const api = fakeApi();
+			api.taskOutput.mockResolvedValue({ text: "", size: 0, truncated: false, modifiedAt: "2026-10-30T10:56:00Z" });
+			const { feed, user } = renderPane("chat", api);
+			feed(...turnWithBackground(false));
+			const head = [...document.querySelectorAll<HTMLElement>(".chat-tool__head")].find((h) =>
+				h.textContent?.includes("go test -run Soak"),
+			)!;
+			await user.click(head);
+			await settle();
+			const body = head.closest(".chat-tool")!;
+			expect(body).toHaveTextContent("No output yet");
+			expect(body).not.toHaveTextContent("Command running in background with ID");
+			expect(api.taskOutput).toHaveBeenCalledWith("chat-1", "t1");
+		});
+
 		it("shows no waiting row once the background task has ended", () => {
 			const { feed } = renderPane();
 			feed(...turnWithBackground(true));
@@ -1286,5 +1321,244 @@ describe("ChatPane chapters, tasks and wrap-up", () => {
 		expect(composer()).toHaveValue("");
 		expect(screen.getByRole("button", { name: "New reply" })).not.toHaveAttribute("aria-disabled");
 		expect(api.send).not.toHaveBeenCalled();
+	});
+});
+
+describe("ChatPane run button and suggestion cards", () => {
+	const composer = () => screen.getByRole("textbox", { name: "Message Claude" });
+	const suggest = (id: string, name: string, input: object) => [toolUse(id, name, input), toolDone(id, "Card shown.")];
+	const sessionCard = (id: string, title: string) =>
+		suggest(id, "mcp__ao__suggest_session", { title, prompt: `Brief for ${title}` });
+	const skillCard = (id: string, name: string) =>
+		suggest(id, "mcp__ao__suggest_skill", { name, reason: `Because ${name}` });
+	const run = () => screen.queryAllByRole("button", { name: "Ask Claude to run this" });
+
+	it("offers Run on a one-line shell block in a reply and not on a longer or other block", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "how?"),
+			saying(
+				"One:\n\n```bash\npnpm test chat-widget\n```\n\nMany:\n\n```bash\ncd a\nnpm test\n```\n\n```ts\nconst a = 1;\n```",
+			),
+		);
+		expect(run()).toHaveLength(1);
+		expect(run()[0].closest(".note-prose__code")).toHaveTextContent("pnpm test chat-widget");
+	});
+
+	it("fills the composer with a request to run the command and sends nothing", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "how?"), saying("```bash\nrm -rf build\n```"));
+		const asked = document.querySelectorAll(".chat-user").length;
+		await user.click(run()[0]);
+		await settle();
+		expect(composer()).toHaveValue("Run this command:\n\n```bash\nrm -rf build\n```");
+		expect(api.send).not.toHaveBeenCalled();
+		expect(document.querySelectorAll(".chat-user")).toHaveLength(asked);
+	});
+
+	it("offers no Run button on what the user typed or on tool output", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "```bash\nls\n```"),
+			toolUse("t1", "Read", { file_path: "a.md" }),
+			toolDone("t1", "```bash\nls\n```"),
+		);
+		expect(run()).toHaveLength(0);
+	});
+
+	it("fills the composer with /<name> from a skill card and sends nothing", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "go"), ...skillCard("k1", "verify"));
+		expect(screen.getByText("Skill: /verify")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Use /verify" }));
+		await settle();
+		expect(composer()).toHaveValue("/verify ");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("fills the composer from Do it here and sends nothing", async () => {
+		const { feed, api, user } = renderPane();
+		feed(userIn("u1", "go"), ...sessionCard("s1", "Fix the flaky Esc test"));
+		expect(screen.getByText("Start a new session")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Do it here" }));
+		await settle();
+		expect(composer()).toHaveValue("Do it here: Fix the flaky Esc test");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("keeps the buttons of an older card of each kind disabled and the newest live", async () => {
+		const { feed, api, user } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			...skillCard("k1", "old-skill"),
+			...sessionCard("s1", "Old work"),
+			userIn("u2", "next"),
+			...skillCard("k2", "new-skill"),
+			...sessionCard("s2", "New work"),
+		);
+		const old = screen.getByRole("button", { name: "Use /old-skill" });
+		expect(old).toHaveAttribute("aria-disabled", "true");
+		await user.click(old);
+		await user.click(screen.getAllByRole("button", { name: "Open new session…" })[0]);
+		await settle();
+		expect(composer()).toHaveValue("");
+		expect(document.querySelector('[role="dialog"]')).toBeNull();
+		expect(screen.getByRole("button", { name: "Use /new-skill" })).not.toHaveAttribute("aria-disabled");
+		expect(screen.getAllByRole("button", { name: "Open new session…" })[1]).not.toHaveAttribute("aria-disabled");
+		expect(api.send).not.toHaveBeenCalled();
+	});
+
+	it("keeps both cards on screen after the turn folds, and draws none for a skill name it will not use", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			lifecycle("u1", "started"),
+			toolUse("r1", "Read", { file_path: "a.go" }),
+			toolDone("r1"),
+			toolUse("r2", "Bash", { command: "ls" }),
+			toolDone("r2"),
+			...sessionCard("s1", "Other work"),
+			...skillCard("k1", "verify"),
+			...suggest("k2", "mcp__ao__suggest_skill", { name: "a b/../c", reason: "r" }),
+			saying("Done."),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		expect(document.querySelector("[data-turn]")).not.toBeNull();
+		expect(document.querySelectorAll("[data-suggest]")).toHaveLength(2);
+	});
+});
+
+describe("ChatPane image refs", () => {
+	const known = {
+		"shots/a.png": [image("shots/a.png")],
+		"shots/clash-*.png": [image("shots/clash-1.png"), image("shots/clash-2.png")],
+	};
+	const named = "Captured `shots/a.png` and `shots/clash-*.png`, plus `shots/gone.png`.";
+	const thumbs = () => screen.queryAllByTestId("ref-images").flatMap((row) => within(row).queryAllByRole("img"));
+
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("draws the images an assistant reply names under it and keeps its text", async () => {
+		const fetchMock = stubChatFiles(known);
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), saying(named));
+		await waitFor(() => expect(thumbs()).toHaveLength(3));
+		expect(thumbs().map((t) => t.getAttribute("alt"))).toEqual(["a.png", "clash-1.png", "clash-2.png"]);
+		expect(screen.getByText("shots/gone.png")).toBeInTheDocument();
+		expect(resolveCalls(fetchMock)).toEqual([["shots/a.png", "shots/clash-*.png", "shots/gone.png"]]);
+		expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+			"/api/v1/sessions/chat-1/chat/files/knowledge/shots/clash-2.png",
+		);
+	});
+
+	it("waits for the reply to finish before it asks, then asks once", async () => {
+		const fetchMock = stubChatFiles(known);
+		const { feed, delta } = renderPane();
+		delta(
+			{ type: "message_start", message: { id: "m1" } },
+			{
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "Captured `shots/a.png` and `shots/cl" },
+			},
+		);
+		await settle();
+		expect(document.querySelector("[data-streaming]")).not.toBeNull();
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		feed(
+			out({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "Captured `shots/a.png`." }] } }),
+		);
+		await waitFor(() => expect(thumbs()).toHaveLength(1));
+		expect(resolveCalls(fetchMock)).toEqual([["shots/a.png"]]);
+	});
+
+	it("draws nothing and no error when the daemon cannot confirm the path", async () => {
+		const fetchMock = stubChatFiles({});
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), saying("Look at `shots/gone.png`."));
+		await waitFor(() => expect(resolveCalls(fetchMock)).toHaveLength(1));
+		await settle();
+		expect(thumbs()).toHaveLength(0);
+		expect(screen.queryByRole("alert")).toBeNull();
+		expect(screen.getByText("shots/gone.png")).toBeInTheDocument();
+	});
+
+	it("draws them under a peer message and an orchestrator message", async () => {
+		stubChatFiles(known);
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			lifecycle("u1", "completed"),
+			entry("host", { kind: "user_origin", uuid: "u2", origin: { via: "ao_send", from: "billing-portal-12" } }),
+			entry("in", {
+				type: "user",
+				uuid: "u2",
+				message: { content: "[from @billing-portal-12] See `shots/clash-*.png`." },
+			}),
+			entry("host", { kind: "user_origin", uuid: "u3", origin: { via: "ao_send", from: "proj-orchestrator" } }),
+			entry("in", {
+				type: "user",
+				uuid: "u3",
+				message: { content: "[from @proj-orchestrator] Compare `shots/a.png`." },
+			}),
+			lifecycle("u2", "completed"),
+			lifecycle("u3", "completed"),
+		);
+		const peer = document.querySelector(".chat-peer:not(.chat-peer--orchestrator)")! as HTMLElement;
+		const orchestrator = document.querySelector(".chat-peer--orchestrator")! as HTMLElement;
+		await waitFor(() => expect(within(peer).getAllByRole("img")).toHaveLength(2));
+		await waitFor(() => expect(within(orchestrator).getAllByRole("img")).toHaveLength(1));
+	});
+
+	it("draws them under the task brief once it is open", async () => {
+		stubChatFiles(known);
+		const { feed, user } = renderPane();
+		feed(
+			entry("host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }),
+			userIn("b", "# Goal\nCompare with `shots/a.png`."),
+			lifecycle("b", "completed"),
+		);
+		const brief = document.querySelector("[data-brief]")! as HTMLElement;
+		expect(within(brief).queryByRole("img")).toBeNull();
+		await user.click(screen.getByRole("button", { name: /Task brief/ }));
+		await waitFor(() => expect(within(brief).getAllByRole("img")).toHaveLength(1));
+	});
+
+	it("draws them under a finished agent's result once the card is open", async () => {
+		stubChatFiles(known);
+		const { feed, user } = renderPane();
+		const notification = [
+			"<task-notification>",
+			"<task-id>a1</task-id>",
+			"<status>completed</status>",
+			'<summary>Agent "Capture screens" finished</summary>',
+			"<result>Saved `shots/a.png`.</result>",
+			"</task-notification>",
+		].join("\n");
+		feed(userIn("u1", "go"), out({ type: "user", isReplay: true, message: { role: "user", content: notification } }));
+		const card = document.querySelector("[data-task-message]")! as HTMLElement;
+		expect(within(card).queryByRole("img")).toBeNull();
+		await user.click(card.querySelector("button")!);
+		await waitFor(() => expect(within(card).getAllByRole("img")).toHaveLength(1));
+	});
+
+	it("draws them under the plan card and keeps one resolve call per ref", async () => {
+		const fetchMock = stubChatFiles(known);
+		const { feed } = renderPane();
+		feed(
+			out({
+				type: "control_request",
+				request_id: "r1",
+				request: {
+					subtype: "can_use_tool",
+					tool_name: "ExitPlanMode",
+					tool_use_id: "t9",
+					input: { plan: "# Plan\n\nMatch `shots/a.png`.", planFilePath: "p.md" },
+				},
+			}),
+		);
+		await waitFor(() => expect(thumbs()).toHaveLength(1));
+		expect(resolveCalls(fetchMock)).toEqual([["shots/a.png"]]);
 	});
 });

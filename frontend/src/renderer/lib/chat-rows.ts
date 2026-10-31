@@ -2,6 +2,7 @@ import { chapterOf, MARK_CHAPTER } from "./chat-chapters";
 import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
+import { isSuggestion, SUGGEST_SESSION, SUGGEST_SKILL } from "./chat-suggest";
 import { SHOW_WIDGET, widgetOf } from "./chat-widget";
 import { WRAP_UP, wrapUpOf } from "./chat-wrapup";
 import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunning } from "./chat-tools";
@@ -40,7 +41,15 @@ export type ChatRow =
 // and shows as its own row, or is not shown in the main column at all.
 type Role = "process" | "break" | "skip";
 
-const OWN_ROW_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", SHOW_WIDGET, MARK_CHAPTER, WRAP_UP]);
+const OWN_ROW_TOOLS = new Set([
+	"AskUserQuestion",
+	"ExitPlanMode",
+	SHOW_WIDGET,
+	MARK_CHAPTER,
+	WRAP_UP,
+	SUGGEST_SESSION,
+	SUGGEST_SKILL,
+]);
 
 function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 	switch (item.kind) {
@@ -182,7 +191,9 @@ const isChapter = (row: ChatRow) => isItem(row, "tool_call") && chapterOf(row.it
 function staysInView(row: ChatRow): boolean {
 	if (!isItem(row, "tool_call")) return false;
 	const call = row.item as ToolCallItem;
-	return widgetOf(call) !== undefined || chapterOf(call) !== undefined || wrapUpOf(call) !== undefined;
+	return (
+		widgetOf(call) !== undefined || chapterOf(call) !== undefined || wrapUpOf(call) !== undefined || isSuggestion(call)
+	);
 }
 
 function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {

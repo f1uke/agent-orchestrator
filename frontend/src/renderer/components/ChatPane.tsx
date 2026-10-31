@@ -31,12 +31,22 @@ import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/u
 import type { WorkspaceSession } from "../types/workspace";
 import { widgetOf } from "../lib/chat-widget";
 import { chapterOf, chapters as chaptersOf } from "../lib/chat-chapters";
+import { askToRun } from "../lib/chat-run";
+import {
+	liveSuggestions,
+	type LiveSuggestions,
+	type SessionSuggestion,
+	sessionSuggestionOf,
+	skillSuggestionOf,
+} from "../lib/chat-suggest";
 import { latestWrapUpId, wrapUpOf } from "../lib/chat-wrapup";
 import { ChatChapters } from "./ChatChapters";
 import { ChatWrapUp } from "./ChatWrapUp";
 import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
 import { ChatComposer, type Prefill } from "./ChatComposer";
 import { ContextMeter, UsageMeter } from "./ChatMeters";
+import { SessionSuggestionCard, SkillSuggestionCard, SuggestedSessionDialog } from "./ChatSuggestion";
+import { TaskOutputProvider } from "./ChatTaskOutput";
 import { ChatTodoBar } from "./ChatTodoBar";
 import { ChatWidget } from "./ChatWidget";
 import { CopyButton } from "./CopyButton";
@@ -53,6 +63,7 @@ import {
 import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
+import { ChatRefsProvider, RefImages } from "./RefImages";
 
 export type ChatPaneView = "chat" | "events";
 
@@ -98,6 +109,7 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 	const [requests, setRequests] = useState<RequestStates>({});
 	const [toast, showToast] = useToast();
 	const [prefill, setPrefill] = useState<Prefill>();
+	const [suggested, setSuggested] = useState<SessionSuggestion>();
 	const { transcript } = chat;
 
 	const queuedIds = useMemo(() => new Set(transcript.queued.filter((uuid) => uuid !== "")), [transcript.queued]);
@@ -160,69 +172,81 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 	};
 
 	return (
-		<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-			{view === "events" ? (
-				<ChatEvents entries={chat.entries} />
-			) : (
-				<ChatStream
-					disabled={actions.hostDown}
-					replaying={chat.replaying}
-					onAnswer={onAnswer}
-					onPrompt={onPrompt}
-					pending={transcript.pending}
-					requests={requests}
-					root={root}
-					rows={rows}
-					theme={theme}
-				/>
-			)}
-			<div className="chat-bottom">
-				{actions.hostDown ? (
-					<div className="chat-banner" role="alert">
-						<CloudOff className="chat-icon" aria-hidden="true" />
-						Session is asleep or restarting. Sending and answering resume once it is back.
+		<ChatRefsProvider sessionId={session.id}>
+			<TaskOutputProvider read={actions.taskOutput}>
+				<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
+					{view === "events" ? (
+						<ChatEvents entries={chat.entries} />
+					) : (
+						<ChatStream
+							disabled={actions.hostDown}
+							replaying={chat.replaying}
+							onAnswer={onAnswer}
+							onNewSession={setSuggested}
+							onPrompt={onPrompt}
+							pending={transcript.pending}
+							requests={requests}
+							root={root}
+							rows={rows}
+							theme={theme}
+						/>
+					)}
+					<div className="chat-bottom">
+						{actions.hostDown ? (
+							<div className="chat-banner" role="alert">
+								<CloudOff className="chat-icon" aria-hidden="true" />
+								Session is asleep or restarting. Sending and answering resume once it is back.
+							</div>
+						) : null}
+						{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
+						{view === "chat" ? (
+							<ChatComposer
+								actions={actions}
+								busy={transcript.busy}
+								commands={transcript.commands}
+								model={transcript.model}
+								models={transcript.models}
+								onToast={showToast}
+								permissionMode={transcript.permissionMode}
+								prefill={prefill}
+								queued={queued}
+								sessionId={session.id}
+							/>
+						) : null}
+						<div className="chat-statusline">
+							<ConnectionLabel connection={chat.connection} error={chat.error} />
+							{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+							{runningInBackground > 0 ? (
+								<span>
+									<span className="chat-statusline__dot chat-statusline__dot--live" />
+									{runningInBackground} running in background
+								</span>
+							) : null}
+							<span className="chat-statusline__grow" />
+							{view === "chat" ? (
+								<>
+									<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+									<UsageMeter usage={usage} />
+									<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+								</>
+							) : null}
+						</div>
 					</div>
-				) : null}
-				{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
-				{view === "chat" ? (
-					<ChatComposer
-						actions={actions}
-						busy={transcript.busy}
-						commands={transcript.commands}
-						model={transcript.model}
-						models={transcript.models}
-						onToast={showToast}
-						permissionMode={transcript.permissionMode}
-						prefill={prefill}
-						queued={queued}
-						sessionId={session.id}
-					/>
-				) : null}
-				<div className="chat-statusline">
-					<ConnectionLabel connection={chat.connection} error={chat.error} />
-					{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
-					{runningInBackground > 0 ? (
-						<span>
-							<span className="chat-statusline__dot chat-statusline__dot--live" />
-							{runningInBackground} running in background
-						</span>
+					{suggested ? (
+						<SuggestedSessionDialog
+							onClose={() => setSuggested(undefined)}
+							projectId={session.workspaceId}
+							suggestion={suggested}
+						/>
 					) : null}
-					<span className="chat-statusline__grow" />
-					{view === "chat" ? (
-						<>
-							<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
-							<UsageMeter usage={usage} />
-							<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
-						</>
+					{toast ? (
+						<div className="chat-toast" role="status">
+							{toast}
+						</div>
 					) : null}
 				</div>
-			</div>
-			{toast ? (
-				<div className="chat-toast" role="status">
-					{toast}
-				</div>
-			) : null}
-		</div>
+			</TaskOutputProvider>
+		</ChatRefsProvider>
 	);
 }
 
@@ -294,6 +318,7 @@ type StreamProps = {
 	disabled: boolean;
 	onAnswer: AnswerHandler;
 	onPrompt: (text: string) => void;
+	onNewSession: (suggestion: SessionSuggestion) => void;
 };
 
 // Within this many pixels of the end the user has reached the latest row.
@@ -327,7 +352,18 @@ function isEditable(target: EventTarget): boolean {
 	);
 }
 
-function ChatStream({ rows, replaying, root, pending, theme, requests, disabled, onAnswer, onPrompt }: StreamProps) {
+function ChatStream({
+	rows,
+	replaying,
+	root,
+	pending,
+	theme,
+	requests,
+	disabled,
+	onAnswer,
+	onPrompt,
+	onNewSession,
+}: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
@@ -475,6 +511,7 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 		return chapterList.map((chapter) => indexOf.get(chapter.key) ?? 0);
 	}, [rows, chapterList]);
 	const liveWrapUp = useMemo(() => latestWrapUpId(rows), [rows]);
+	const liveSuggest = useMemo(() => liveSuggestions(rows), [rows]);
 	const [activeChapter, setActiveChapter] = useState(0);
 
 	const findActiveTurn = useCallback(() => {
@@ -559,7 +596,9 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 							>
 								<ChatRowView
 									answers={answers}
+									liveSuggest={liveSuggest}
 									liveWrapUp={liveWrapUp}
+									onNewSession={onNewSession}
 									onPrompt={onPrompt}
 									openRows={openRows}
 									pendingByRequest={pendingByRequest}
@@ -601,7 +640,9 @@ type RowProps = {
 	openRows: OpenRows;
 	toggleRow: ToggleRow;
 	onPrompt: (text: string) => void;
+	onNewSession: (suggestion: SessionSuggestion) => void;
 	liveWrapUp?: string;
+	liveSuggest: LiveSuggestions;
 	pendingByRequest: ReadonlyMap<string, Pending>;
 	sessionNames: ReadonlyMap<string, string>;
 };
@@ -653,7 +694,9 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 				<ItemRow
 					answers={answers}
 					item={row.item}
+					liveSuggest={props.liveSuggest}
 					liveWrapUp={props.liveWrapUp}
+					onNewSession={props.onNewSession}
 					onPrompt={props.onPrompt}
 					openRows={openRows}
 					pendingByRequest={pendingByRequest}
@@ -682,7 +725,9 @@ function ItemRow({
 	openRows,
 	toggleRow,
 	onPrompt,
+	onNewSession,
 	liveWrapUp,
+	liveSuggest,
 	pendingByRequest,
 	sessionNames,
 }: Omit<RowProps, "row"> & {
@@ -708,9 +753,12 @@ function ItemRow({
 			return <UserMessage item={item} />;
 		case "assistant_text":
 			return (
-				<div className="note-prose chat-md">
-					<NoteMarkdown source={item.text} theme={theme} />
-				</div>
+				<>
+					<div className="note-prose chat-md">
+						<NoteMarkdown codeAction={askToRun(onPrompt)} source={item.text} theme={theme} />
+					</div>
+					<RefImages source={item.text} />
+				</>
 			);
 		case "thinking":
 			return <ThinkingRow onToggle={(open) => toggleRow(rowKey, open)} open={openRows[rowKey]} text={item.text} />;
@@ -726,6 +774,21 @@ function ItemRow({
 			if (chapter) return <ChapterDivider summary={chapter.summary} title={chapter.title} />;
 			const wrap = wrapUpOf(item);
 			if (wrap) return <ChatWrapUp live={item.id === liveWrapUp} onPrompt={onPrompt} wrap={wrap} />;
+			const session = sessionSuggestionOf(item);
+			if (session) {
+				return (
+					<SessionSuggestionCard
+						live={item.id === liveSuggest.session}
+						onOpen={onNewSession}
+						onPrompt={onPrompt}
+						suggestion={session}
+					/>
+				);
+			}
+			const skill = skillSuggestionOf(item);
+			if (skill) {
+				return <SkillSuggestionCard live={item.id === liveSuggest.skill} onPrompt={onPrompt} suggestion={skill} />;
+			}
 			return (
 				<>
 					<ToolCard
@@ -806,9 +869,12 @@ function TaskMessageCard({
 				<div className="chat-task__body">
 					<p>{item.summary}</p>
 					{item.result ? (
-						<div className="note-prose chat-md">
-							<NoteMarkdown source={item.result} theme={theme} />
-						</div>
+						<>
+							<div className="note-prose chat-md">
+								<NoteMarkdown source={item.result} theme={theme} />
+							</div>
+							<RefImages source={item.result} />
+						</>
 					) : null}
 				</div>
 			) : null}
@@ -912,8 +978,11 @@ function TaskBrief({
 				{open ? null : <span className="chat-brief__preview">{preview}</span>}
 			</button>
 			{open ? (
-				<div className="chat-brief__body note-prose chat-md">
-					<NoteMarkdown source={body} theme={theme} />
+				<div className="chat-brief__body">
+					<div className="note-prose chat-md">
+						<NoteMarkdown source={body} theme={theme} />
+					</div>
+					<RefImages source={body} />
 				</div>
 			) : null}
 		</div>
@@ -944,6 +1013,7 @@ function PeerMessage({
 			<div className="note-prose chat-md">
 				<NoteMarkdown source={body} theme={theme} />
 			</div>
+			<RefImages source={body} />
 		</div>
 	);
 }

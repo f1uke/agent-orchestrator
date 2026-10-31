@@ -120,17 +120,9 @@ func (r Roots) Open(root Root, rel string) (File, string, error) {
 	if !ok || !cleanRel(rel) {
 		return File{}, "", ErrNotFound
 	}
-	resolved, err := filepath.EvalSymlinks(filepath.Join(base, filepath.FromSlash(rel)))
+	resolved, inside, info, err := Within(base, filepath.Join(base, filepath.FromSlash(rel)))
 	if err != nil {
-		return File{}, "", ErrNotFound
-	}
-	inside, ok := relWithin(base, resolved)
-	if !ok {
-		return File{}, "", ErrNotFound
-	}
-	info, err := os.Stat(resolved)
-	if err != nil || !info.Mode().IsRegular() {
-		return File{}, "", ErrNotFound
+		return File{}, "", err
 	}
 	spec, ok := kinds[strings.ToLower(strings.TrimPrefix(filepath.Ext(resolved), "."))]
 	if !ok {
@@ -147,6 +139,30 @@ func (r Roots) Open(root Root, rel string) (File, string, error) {
 		Size:    info.Size(),
 		ModTime: info.ModTime(),
 	}, resolved, nil
+}
+
+// Within is the confinement rule every chatfiles reader shares. It resolves
+// abs's symlinks and accepts the result only when it is a regular file inside
+// base, a symlink-resolved directory. It returns the resolved path, that path
+// relative to base, and the file's info. A ".." segment in abs is refused, never
+// clamped. Every refusal is ErrNotFound.
+func Within(base, abs string) (resolved, rel string, info os.FileInfo, err error) {
+	if !filepath.IsAbs(abs) || strings.ContainsRune(abs, 0) || hasParentSegment(abs) {
+		return "", "", nil, ErrNotFound
+	}
+	resolved, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", "", nil, ErrNotFound
+	}
+	rel, ok := relWithin(base, resolved)
+	if !ok {
+		return "", "", nil, ErrNotFound
+	}
+	info, err = os.Stat(resolved)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", "", nil, ErrNotFound
+	}
+	return resolved, rel, info, nil
 }
 
 // Resolve returns the servable files ref names. It never errors: a ref that
