@@ -68,7 +68,7 @@ export class RefStore {
 	}
 }
 
-/** The resolve call for one session. It reads the base URL the way the file bytes do, so both reach the same daemon. */
+// Reads the base URL the way the file bytes do, so both reach the same daemon.
 export function resolveOverHttp(sessionId: string): ResolveFiles {
 	return async (refs) => {
 		const response = await fetch(
@@ -85,7 +85,6 @@ export function resolveOverHttp(sessionId: string): ResolveFiles {
 	};
 }
 
-/** Where the bytes of a resolved file are fetched from; every path segment is escaped, the slashes stay. */
 export function chatFileUrl(sessionId: string, file: Pick<ResolvedFile, "root" | "path">): string {
 	const path = file.path.split("/").map(encodeURIComponent).join("/");
 	return `${getApiBaseUrl()}/api/v1/sessions/${encodeURIComponent(sessionId)}/chat/files/${file.root}/${path}`;
