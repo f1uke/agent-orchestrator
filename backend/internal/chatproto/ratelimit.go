@@ -5,9 +5,7 @@ import (
 	"time"
 )
 
-// RateLimit is the subscription usage claude reports in a rate_limit_event:
-// the account's five-hour and weekly windows. A window claude did not report
-// is nil.
+// RateLimit is the subscription usage in a rate_limit_event. An unreported window is nil.
 type RateLimit struct {
 	FiveHour *RateLimitWindow
 	SevenDay *RateLimitWindow
@@ -20,8 +18,7 @@ type RateLimitWindow struct {
 	Status      string
 }
 
-// ParseRateLimit reads a rate_limit_event line. It reports false for any other
-// line, and for an event with no window it can read.
+// ParseRateLimit reads a rate_limit_event line; false for any other line or one with no readable window.
 func ParseRateLimit(line []byte) (RateLimit, bool) {
 	type window struct {
 		Utilization *float64 `json:"utilization"`

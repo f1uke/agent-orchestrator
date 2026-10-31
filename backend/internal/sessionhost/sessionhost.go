@@ -45,13 +45,9 @@ const (
 	defaultStdinGrace     = 5 * time.Second
 	defaultKillGrace      = 2 * time.Second
 	defaultControlTimeout = requestTimeout / 2
-	// defaultContextTimeout is how long a get_context_usage request stays
-	// pending. Claude may not know the request, so a missing answer is dropped,
-	// never retried.
+	// Claude may not know get_context_usage, so a missing answer is dropped, not retried.
 	defaultContextTimeout = 5 * time.Second
-	// contextRequestPrefix marks the host's get_context_usage request ids, so
-	// a reader of the log can tell their answers from any other.
-	contextRequestPrefix = "ctx-"
+	contextRequestPrefix  = "ctx-"
 	// stdoutDrain bounds the wait for claude's stdout to reach EOF after it
 	// exits, in case a leftover subprocess still holds the pipe open.
 	stdoutDrain = 2 * time.Second
@@ -387,10 +383,6 @@ func (h *host) handleLine(line []byte) {
 	}
 }
 
-// askContextLocked asks claude for its context breakdown, unless an earlier
-// request is still waiting for an answer. A request is dropped after
-// contextTimeout so that a claude that never answers is asked again only at
-// the next turn end.
 func (h *host) askContextLocked() {
 	if h.contextID != "" {
 		return
@@ -410,9 +402,8 @@ func (h *host) askContextLocked() {
 	})
 }
 
-// withoutGridRows drops the CLI's own /context drawing from a
-// get_context_usage answer. It repeats the categories square by square and is
-// most of the line, which the log would otherwise keep after every turn.
+// The CLI's own /context drawing repeats the categories square by square and is
+// most of a get_context_usage answer.
 func withoutGridRows(line []byte) []byte {
 	var w struct {
 		Type     string `json:"type"`

@@ -53,8 +53,7 @@ type MCPReply struct {
 	Message   json.RawMessage
 }
 
-// GetContextUsage asks claude for the /context breakdown of its context
-// window. The request is undocumented, so callers must expect no answer.
+// GetContextUsage asks claude for its /context breakdown. Undocumented: expect no answer.
 type GetContextUsage struct{ RequestID string }
 
 // PermissionAnswer answers a can_use_tool request.

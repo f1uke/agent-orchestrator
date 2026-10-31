@@ -4,7 +4,6 @@ export type ContextCategoryKind = "used" | "deferred" | "buffer" | "free";
 
 export type ContextCategory = { id: string; name: string; tokens: number; kind: ContextCategoryKind };
 
-/** The /context breakdown claude answers a get_context_usage request with. */
 export type ContextBreakdown = {
 	categories: ContextCategory[];
 	totalTokens: number;
@@ -13,7 +12,6 @@ export type ContextBreakdown = {
 	autoCompactThreshold?: number;
 };
 
-/** The session host's get_context_usage request ids start with this. */
 export const CONTEXT_REQUEST_PREFIX = "ctx-";
 
 const KINDS = new Set<string>(["used", "deferred", "buffer", "free"]);
@@ -26,11 +24,7 @@ function parseCategory(raw: unknown): ContextCategory | undefined {
 	return { id: raw.id, name: raw.name, tokens: raw.tokens, kind: raw.kind as ContextCategoryKind };
 }
 
-/**
- * Reads a get_context_usage answer. The request is undocumented, so any shape
- * this cannot fully read gives undefined, and the chat falls back to the
- * context size of the last response.
- */
+/** Reads a get_context_usage answer. The request is undocumented, so any shape it cannot fully read gives undefined. */
 export function parseContextUsage(raw: unknown): ContextBreakdown | undefined {
 	if (!isObject(raw) || !Array.isArray(raw.categories)) return undefined;
 	const { totalTokens, maxTokens, percentage, autoCompactThreshold } = raw;

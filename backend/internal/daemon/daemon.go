@@ -569,8 +569,6 @@ func Run() error {
 		log.Warn("simowner: initial sync of simulator leases failed", "err", err)
 	}
 
-	// The newest Claude subscription usage any chat session reported: the chat
-	// watch below records it, the API serves it.
 	chatUsage := &chatusage.Store{}
 	learningSvc := learningService(ctx, store, cfg.DataDir, learnCollector, learnSettings, learnRules, learnDecider)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{

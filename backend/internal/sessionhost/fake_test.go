@@ -24,9 +24,7 @@ const (
 	envFakeChildPID = "SESSIONHOST_FAKE_CHILD"
 	envFakeSleeper  = "SESSIONHOST_FAKE_SLEEPER"
 	envFakeParent   = "SESSIONHOST_FAKE_PARENT"
-	// envFakeContext names a file holding the body fake claude answers each
-	// get_context_usage request with. Unset, it reads those requests and never
-	// answers, as a claude that does not know the request would.
+	// Unset, fake claude never answers get_context_usage, as a claude that does not know it.
 	envFakeContext = "SESSIONHOST_FAKE_CONTEXT"
 )
 
@@ -133,8 +131,6 @@ func fakeContextBody() ([]byte, error) {
 	return os.ReadFile(p)
 }
 
-// readSkippingContextRequests reads the next stdin line that is not a
-// get_context_usage request, answering those with body when it is set.
 func readSkippingContextRequests(stdin *bufio.Reader, body []byte) ([]byte, error) {
 	for {
 		got, err := stdin.ReadBytes('\n')

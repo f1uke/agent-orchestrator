@@ -15,7 +15,6 @@ function parseWindow(raw: unknown): UsageWindow | undefined {
 	return { utilization: raw.utilization, resetsAt: new Date(raw.resetsAt * 1000).toISOString(), status };
 }
 
-/** Reads a rate_limit_event's windows; undefined when it has neither one. */
 export function parseRateLimit(rateLimitInfo: unknown, loggedAt: string): SubscriptionUsage | undefined {
 	const windows = isObject(rateLimitInfo) && isObject(rateLimitInfo.unifiedWindows) ? rateLimitInfo.unifiedWindows : {};
 	const fiveHour = parseWindow(windows.five_hour);
@@ -24,7 +23,6 @@ export function parseRateLimit(rateLimitInfo: unknown, loggedAt: string): Subscr
 	return { ...(fiveHour && { fiveHour }), ...(sevenDay && { sevenDay }), updatedAt: loggedAt };
 }
 
-/** The newer of the session's own value and the daemon's account-wide one. */
 export function newestUsage(
 	own: SubscriptionUsage | undefined,
 	shared: SubscriptionUsage | undefined,

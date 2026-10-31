@@ -7901,7 +7901,6 @@ ol.note-prose__list {
 	white-space: nowrap;
 }
 
-/* A thinking stream's latest line, as the closed Thinking row's detail. */
 [data-thinking] .chat-live__detail {
 	font-style: italic;
 }
@@ -8996,7 +8995,6 @@ ol.note-prose__list {
 	flex: 1;
 }
 
-/* The todo bar right above the composer: collapsed to its counts by default. */
 .chat-todos {
 	border-radius: 12px;
 	background: var(--bg-1);
@@ -9105,7 +9103,6 @@ ol.note-prose__list {
 	}
 }
 
-/* The context and subscription meters on the right of the status line. */
 .chat-meter {
 	display: inline-flex;
 	align-items: center;

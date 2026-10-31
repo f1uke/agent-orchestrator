@@ -73,12 +73,6 @@ function LiveDots() {
 	);
 }
 
-/**
- * The one live row at the tail of the stream: dots, what claude is doing, an
- * optional detail, how long it has been at it, and a chevron. Running a tool,
- * waiting on background work and thinking all render through it, so they
- * look the same and only one of them shows at a time.
- */
 function LiveRow({
 	verb,
 	since,
@@ -236,7 +230,6 @@ export function WaitingRow({
 	);
 }
 
-/** Claude thinking with nothing else running. Its streamed text, when there is any, opens below. */
 export function LiveThinkingRow({
 	row,
 	openRows,

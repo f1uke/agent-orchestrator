@@ -9,7 +9,6 @@ const COUNT_LABEL: Array<[TodoStatus, string]> = [
 	["pending", "pending"],
 ];
 
-/** Claude's todo list in a bar right above the composer, collapsed by default. */
 export function ChatTodoBar({ todos }: { todos: readonly Todo[] | undefined }) {
 	const [open, setOpen] = useState(false);
 	if (!todos?.length) return null;

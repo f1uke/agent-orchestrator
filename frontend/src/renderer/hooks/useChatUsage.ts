@@ -13,7 +13,6 @@ const PREVIEW_USAGE: SubscriptionUsage = {
 		status: "allowed",
 	},
 	sevenDay: { utilization: 0.36, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(), status: "allowed" },
-	// Newer than the demo sessions' own logged events, so the preview shows this account-wide value.
 	updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
 };
 
@@ -23,11 +22,6 @@ async function fetchChatUsage(): Promise<SubscriptionUsage | null> {
 	return response.status === 204 ? null : (data ?? null);
 }
 
-/**
- * The newest Claude subscription usage any chat session reported, from the
- * daemon. Read on mount and every minute while a chat pane shows it. The
- * renderer preview, which has no daemon, serves a fixed value.
- */
 export function useChatUsage(daemonReady: boolean): SubscriptionUsage | undefined {
 	const enabled = daemonReady || usePreviewData;
 	const { data } = useQuery({

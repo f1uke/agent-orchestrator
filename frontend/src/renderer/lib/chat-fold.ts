@@ -150,12 +150,7 @@ export type Transcript = {
 	tasks: BackgroundTask[];
 	/** The size of the context the latest top-level response saw, known before the turn's result. */
 	contextTokens?: number;
-	/**
-	 * When claude started its current stretch of top-level thinking: the first
-	 * thinking signal (a thinking_tokens event or a thinking block) since the
-	 * last input, tool result, tool use, text or turn end. Absent once any of
-	 * those follows, so it is set only while the newest signal is thinking.
-	 */
+	/** When the current stretch of top-level thinking began; absent once anything else follows it. */
 	thinkingSince?: string;
 	/** The latest get_context_usage answer, absent when the latest one could not be read. */
 	contextBreakdown?: ContextBreakdown;

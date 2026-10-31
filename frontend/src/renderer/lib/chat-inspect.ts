@@ -65,7 +65,6 @@ function taskUpdate(list: readonly TodoEntry[], input: Record<string, unknown>):
 
 type TodoState = { todos: Todo[]; at: number };
 
-/** The todo list as the latest TodoWrite, or the TaskCreate and TaskUpdate calls since, leave it, and the item that last changed it. */
 function todoState(tr: Transcript): TodoState | undefined {
 	let list: TodoEntry[] | undefined;
 	let at = -1;

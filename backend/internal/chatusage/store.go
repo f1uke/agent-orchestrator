@@ -1,6 +1,4 @@
-// Package chatusage keeps the newest Claude subscription usage any chat
-// session reported. Usage is per account, so one value serves every session.
-// It lives in memory only: a daemon restart forgets it until the next event.
+// Package chatusage keeps the newest Claude subscription usage any chat session reported, in memory only.
 package chatusage
 
 import (
@@ -23,8 +21,7 @@ type Store struct {
 	set    bool
 }
 
-// Record keeps rl unless the store already holds a newer event. Sessions
-// replay their logs in any order, so an older event must not win.
+// Record keeps rl unless the store already holds a newer event.
 func (s *Store) Record(rl chatproto.RateLimit, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

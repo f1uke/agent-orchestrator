@@ -164,10 +164,6 @@ function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow |
 	return { key: "waiting", kind: "waiting", tasks };
 }
 
-// The one live row while claude thinks: no tool runs, nothing waits on the
-// user or on background work, and the newest signal is thinking. That signal
-// is a thinking_tokens event during a running turn, or an open thinking
-// stream, which only a running turn has.
 function thinkingRow(transcript: Transcript, overlay: StreamOverlay, rows: readonly ChatRow[]): ChatRow | undefined {
 	if (transcript.pending.length > 0 || rows.at(-1)?.kind === "waiting") return undefined;
 	const running = transcript.items.some((i) => i.kind === "tool_call" && i.parentToolUseId === "" && toolRunning(i));

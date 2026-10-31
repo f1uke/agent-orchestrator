@@ -3,8 +3,6 @@ import { type ContextUsage, formatTokens } from "../lib/chat-inspect";
 import type { SubscriptionUsage, UsageWindow } from "../lib/chat-usage";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
-// Colors for the categories claude names today; any other used category
-// takes the next one in SPARE.
 const CATEGORY_COLOR: Record<string, string> = {
 	system_prompt: "var(--fg-passive)",
 	system_tools: "var(--purple)",
@@ -34,11 +32,6 @@ function Ring({ percent }: { percent: number }) {
 
 type ContextMeterProps = { breakdown?: ContextBreakdown; fallback?: ContextUsage };
 
-/**
- * The context window in the composer footer: a ring and a percent that open to
- * the per-category breakdown claude reports. Without one it shows the size of
- * the last response, marked estimated.
- */
 export function ContextMeter({ breakdown, fallback }: ContextMeterProps) {
 	if (breakdown) return <ExactContext breakdown={breakdown} />;
 	if (fallback) return <EstimatedContext fallback={fallback} />;
@@ -143,7 +136,6 @@ function updatedAgo(iso: string, now = Date.now()): string {
 	return `updated ${hours} h ago`;
 }
 
-/** The Claude subscription's five-hour and weekly usage in the composer footer. */
 export function UsageMeter({ usage }: { usage?: SubscriptionUsage }) {
 	if (!usage || (!usage.fiveHour && !usage.sevenDay)) return null;
 	const windows: Array<[string, string, UsageWindow]> = [];

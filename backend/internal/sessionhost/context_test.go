@@ -38,8 +38,6 @@ func TestContextUsageAskedAfterInitializeAndEachTurn(t *testing.T) {
 	cfg, _, _ := runFirstSession(t, dir)
 	got := loadEntries(t, cfg.LogPath)
 
-	// Fake claude answers a request only when it next reads stdin, so the ask
-	// after the last turns stays open and the turn after it asks nothing.
 	asks := contextRequests(got)
 	if len(asks) < 3 {
 		t.Fatalf("asked for context usage %d times, want after initialize and after the turns", len(asks))

@@ -32,13 +32,11 @@ import (
 
 // APIDeps bundles every service the API layer's controllers depend on.
 type APIDeps struct {
-	Agents   controllers.AgentCatalog
-	Projects projectsvc.Manager
-	Sessions controllers.SessionService
-	Activity controllers.ActivityRecorder
-	Chat     controllers.ChatService
-	// ChatUsage is the newest Claude subscription usage any chat session
-	// reported. nil answers 501.
+	Agents    controllers.AgentCatalog
+	Projects  projectsvc.Manager
+	Sessions  controllers.SessionService
+	Activity  controllers.ActivityRecorder
+	Chat      controllers.ChatService
 	ChatUsage *chatusage.Store
 	Jira      controllers.JiraService
 	PRs       prsvc.ActionManager

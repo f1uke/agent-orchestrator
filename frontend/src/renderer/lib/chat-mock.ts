@@ -96,7 +96,6 @@ const BRIEF_RESULT = {
 	modelUsage: { "claude-opus-5-5": { outputTokens: 30_709, contextWindow: 200_000, costUSD: 1.8 } },
 };
 
-// A get_context_usage answer in the shape claude gives (testdata/context_usage.jsonl), for a 200k window.
 const CONTEXT_ANSWER = {
 	type: "control_response",
 	response: {
@@ -567,11 +566,6 @@ function liveEntries(): ChatEntry[] {
 	}));
 }
 
-/**
- * The preview session where claude thinks after a tool result with nothing
- * else on screen: only system/thinking_tokens events arrive, as with a model
- * whose thinking text is redacted.
- */
 export const MOCK_THINKING_CHAT_SESSION = "demo-chat-thinking";
 
 const thinkingTokens = (estimated: number, delta: number): Step => [
@@ -607,7 +601,6 @@ function thinkingEntries(): ChatEntry[] {
 const THINKING_TICK_MS = 1_500;
 const thinkingTails = new Set<string>();
 
-/** Keeps the thinking session thinking: a thinking_tokens burst every tick, and nothing else. */
 function playThinkingTail(id: string, session: StubSession): void {
 	if (thinkingTails.has(id)) return;
 	thinkingTails.add(id);
