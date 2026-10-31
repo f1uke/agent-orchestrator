@@ -52,7 +52,7 @@ for (const viewport of VIEWPORTS) {
 			await expect(edit.getByRole("button", { expanded: true })).toBeVisible();
 			await expect(edit).toContainText("internal/webhook/sender.go");
 			await expect(edit).toContainText("sleepCtx(ctx, s.budget.Delay(attempt))");
-			await expect(stream.locator('[data-tool="Bash"]').first()).toContainText("exit 1");
+			await expect(stream.locator('[data-tool="Bash"]').first()).toContainText("Failed");
 			await shot("diff");
 
 			await stream.evaluate((el) => el.scrollTo(0, 0));

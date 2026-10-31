@@ -41,9 +41,11 @@ export function CopyButton({
 	className,
 	/** Extra classes while confirming, for a caller whose reveal rules differ. */
 	copiedClassName,
+	named = true,
 }: {
 	value: string;
 	what: string;
+	named?: boolean;
 	className?: string;
 	copiedClassName?: string;
 	size?: number;
@@ -67,7 +69,8 @@ export function CopyButton({
 			});
 	};
 
-	const label = copied ? `Copied ${what} ${value}` : `Copy ${what} ${value}`;
+	const subject = named ? `${what} ${value}` : what;
+	const label = copied ? `Copied ${subject}` : `Copy ${subject}`;
 	return (
 		<button
 			aria-label={label}

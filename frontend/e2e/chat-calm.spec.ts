@@ -16,7 +16,9 @@ for (const viewport of VIEWPORTS) {
 			const stream = page.getByTestId("chat-stream");
 			await expect(stream).toBeVisible();
 
-			await expect(stream.locator("[data-turn] .chat-group__head").first()).toContainText("Worked · ran");
+			await expect(stream.locator("[data-turn] .chat-group__head").first()).toHaveText(
+				/^Worked for \d+(s|m \d+s) · 1 failed$/,
+			);
 			await expect(stream.locator("[data-group]")).toHaveCount(0);
 			await expect(stream.locator('[data-tool="Bash"]')).toHaveCount(0);
 			await expect(stream.getByRole("button", { name: /Thought/ })).toHaveCount(0);
@@ -28,7 +30,7 @@ for (const viewport of VIEWPORTS) {
 			await first.click();
 			await expect(first).toHaveAttribute("aria-expanded", "true");
 			const group = stream.locator("[data-group] .chat-group__head").first();
-			await expect(group).toContainText(/(Ran|Read|Edited|Searched) \d+/);
+			await expect(group).toContainText(/^(Ran|Read|Edited|Started) (a|an|\d+) /);
 			const bash = stream.locator('[data-tool="Bash"]');
 			await expect(bash).toHaveCount(1);
 			await expect(bash).toContainText("failed · exit 1");

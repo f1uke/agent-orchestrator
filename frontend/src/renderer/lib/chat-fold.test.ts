@@ -448,6 +448,8 @@ describe("chat fold rules", () => {
 				sessionId: "",
 				usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
 				contextWindows: {},
+				ts: "",
+				durationMs: undefined,
 			},
 		]);
 		expect(tr.costUsd).toBe(0.25);
@@ -489,7 +491,7 @@ describe("chat fold rules", () => {
 			synth(2, "out", json(`{"type":"user","uuid":"u1","isReplay":true,"message":{"content":"look"}}`)),
 			synth(3, "in", input),
 		]);
-		expect(tr.items).toEqual([{ kind: "user", uuid: "u1", text: "look", images: 1, state: "sent" }]);
+		expect(tr.items).toEqual([{ kind: "user", uuid: "u1", text: "look", images: 1, state: "sent", ts: "" }]);
 		expect(tr.queued).toEqual(["u1"]);
 	});
 
@@ -711,5 +713,165 @@ describe("chat fold: long_session.jsonl", () => {
 		const withSub = foldEntries(entries.filter((e) => e.seq <= 26));
 		const without = foldEntries(entries.filter((e) => e.seq <= 25));
 		expect(withSub.contextTokens).toBe(without.contextTokens);
+	});
+});
+
+describe("chat fold timing", () => {
+	const T0 = Date.parse("2026-10-30T10:00:00.000Z");
+	const at = (seq: number, sec: number, dir: Direction, payload: object): ChatEntry => ({
+		seq,
+		ts: new Date(T0 + sec * 1000).toISOString(),
+		dir,
+		payload,
+	});
+	const iso = (sec: number) => new Date(T0 + sec * 1000).toISOString();
+	const input = (uuid: string, text: string) => ({ type: "user", uuid, message: { content: text } });
+	const started = (uuid: string) => ({ type: "command_lifecycle", command_uuid: uuid, state: "started" });
+	const done = { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.1 };
+
+	it("stamps the user input, each tool call's start and result, and the turn end with their entry times", () => {
+		const tr = foldEntries([
+			at(1, 0, "in", input("u1", "go")),
+			at(2, 10, "out", {
+				type: "assistant",
+				message: { id: "m1", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] },
+			}),
+			at(3, 25, "out", {
+				type: "user",
+				message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+			}),
+			at(4, 134, "out", done),
+		]);
+		expect(tr.items[0]).toMatchObject({ kind: "user", ts: iso(0) });
+		expect(tr.items[1]).toMatchObject({ kind: "tool_call", startedTs: iso(10), endedTs: iso(25) });
+		expect(tr.items[2]).toMatchObject({ kind: "turn_end", ts: iso(134), durationMs: 134_000 });
+	});
+
+	it("measures a queued input's turn from when it started, not from when it was sent", () => {
+		const tr = foldEntries([
+			at(1, 0, "in", input("u1", "first")),
+			at(2, 0, "out", started("u1")),
+			at(3, 100, "in", input("u2", "second")),
+			at(4, 134, "out", done),
+			at(5, 135, "out", started("u2")),
+			at(6, 180, "out", done),
+		]);
+		const ends = tr.items.filter((i) => i.kind === "turn_end");
+		expect(ends.map((e) => e.durationMs)).toEqual([134_000, 45_000]);
+	});
+
+	it("stamps a task with the time of its first event, and keeps it through later ones", () => {
+		const task = (subtype: string, extra: object = {}) => ({
+			type: "system",
+			subtype,
+			task_id: "k1",
+			tool_use_id: "t1",
+			task_type: "local_bash",
+			...extra,
+		});
+		const tr = foldEntries([
+			at(1, 3, "out", task("task_started", { description: "soak" })),
+			at(2, 9, "out", task("task_updated")),
+		]);
+		expect(tr.tasks[0]).toMatchObject({ id: "k1", startedTs: iso(3) });
+	});
+
+	it("has no duration for a turn whose start it never saw", () => {
+		const tr = foldEntries([at(1, 5, "out", done)]);
+		expect(tr.items[0]).toMatchObject({ kind: "turn_end", ts: iso(5), durationMs: undefined });
+	});
+});
+
+describe("chat fold: task messages", () => {
+	const notification = (fields: string) => ({
+		type: "user",
+		isReplay: true,
+		message: { role: "user", content: `<task-notification>\n${fields}\n</task-notification>` },
+	});
+
+	it("folds each task notification claude hands the model into a task message, in place", () => {
+		const tr = foldEntries(loadFixture("long_session.jsonl"));
+		const messages = tr.items.filter((i) => i.kind === "task_message");
+		expect(messages).toEqual([
+			{
+				kind: "task_message",
+				ts: "2026-10-30T10:55:37.624Z",
+				taskId: "blaf8bxvg",
+				toolUseId: "toolu_01DS7U6L1EUCBr5sbc7oukPi",
+				status: "failed",
+				summary: 'Background command "Run slow check script in background" failed with exit code 1',
+				result: "",
+				opensTurn: false,
+			},
+			expect.objectContaining({
+				taskId: "a5108821f9804b8ee",
+				status: "completed",
+				summary: 'Agent "Summarize docs directory" finished',
+				result: expect.stringMatching(/^The `docs\/` directory has two short Markdown files/),
+				opensTurn: false,
+			}),
+		]);
+		const firstReply = tr.items.findIndex((i) => i.kind === "assistant_text");
+		expect(tr.items.findIndex((i) => i.kind === "task_message")).toBeLessThan(firstReply);
+	});
+
+	it("still drops the replay of the user's own input", () => {
+		const tr = foldEntries([
+			synth(1, "in", { type: "user", uuid: "u1", message: { content: "fix it" } }),
+			synth(2, "out", { type: "user", isReplay: true, message: { role: "user", content: "fix it" } }),
+		]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["user"]);
+	});
+
+	it("opens a turn when it arrives after the last turn ended, and times that turn from it", () => {
+		const T0 = Date.parse("2026-10-30T10:00:00.000Z");
+		const at = (seq: number, sec: number, dir: Direction, payload: object): ChatEntry => ({
+			seq,
+			ts: new Date(T0 + sec * 1000).toISOString(),
+			dir,
+			payload,
+		});
+		const done = { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.1 };
+		const tr = foldEntries([
+			at(1, 0, "in", { type: "user", uuid: "u1", message: { content: "start a sleep" } }),
+			at(2, 0, "out", { type: "command_lifecycle", command_uuid: "u1", state: "started" }),
+			at(3, 4, "out", done),
+			at(4, 40, "out", notification("<task-id>k1</task-id>\n<status>completed</status>\n<summary>done</summary>")),
+			at(5, 52, "out", done),
+		]);
+		const message = tr.items.find((i) => i.kind === "task_message");
+		expect(message).toMatchObject({ taskId: "k1", toolUseId: "", opensTurn: true });
+		const ends = tr.items.filter((i) => i.kind === "turn_end");
+		expect(ends.map((e) => e.durationMs)).toEqual([4_000, 12_000]);
+	});
+});
+
+describe("chat fold: the task brief", () => {
+	const spawn = (seq: number, resume = "") => synth(seq, "host", { kind: "spawn", argv: ["claude"], resume, pid: 1 });
+	const input = (seq: number, uuid: string, text: string) =>
+		synth(seq, "in", { type: "user", uuid, message: { role: "user", content: text }, parent_tool_use_id: null });
+	const briefs = (entries: ChatEntry[]) =>
+		users(foldEntries(entries))
+			.filter((u) => u.brief)
+			.map((u) => u.uuid);
+
+	it("marks the first input after a fresh spawn as the brief, and nothing after it", () => {
+		expect(briefs([spawn(1), input(2, "b", "/pstack:poteto-mode # Goal ..."), input(3, "u2", "thanks")])).toEqual([
+			"b",
+		]);
+	});
+
+	it("does not mark the first input after a resumed spawn", () => {
+		expect(briefs([spawn(1, "claude-session-1"), input(2, "u1", "continue")])).toEqual([]);
+	});
+
+	it("does not mark a peer message that arrives first", () => {
+		const origin = synth(2, "host", { kind: "user_origin", uuid: "p", origin: { via: "ao_send", from: "w-1" } });
+		expect(briefs([spawn(1), origin, input(3, "p", "[from @w-1] hello")])).toEqual([]);
+	});
+
+	it("keeps the first fresh brief when a later restore resumes the session", () => {
+		const entries = [spawn(1), input(2, "b", "# Goal"), spawn(3, "claude-session-1"), input(4, "u2", "go on")];
+		expect(briefs(entries)).toEqual(["b"]);
 	});
 });

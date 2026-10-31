@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatApi, ChatResult } from "../lib/chat-api";
@@ -6,6 +6,7 @@ import type { ChatEntry } from "../lib/chat-event";
 import { foldEntries } from "../lib/chat-fold";
 import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import { emptyOverlay } from "../lib/chat-stream";
+import { aoBridge } from "../lib/bridge";
 import { useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatPane, ChatViewToggle } from "./ChatPane";
@@ -118,10 +119,11 @@ describe("ChatPane", () => {
 		expect(mux).not.toHaveBeenCalled();
 	});
 
-	it("draws user input, peer and orchestrator messages, notices and the turn's cost", () => {
+	it("draws user input, peer and orchestrator messages, notices and the session's cost", () => {
 		const { feed } = renderPane();
 		feed(
 			entry("host", { kind: "spawn", resume: "" }),
+			entry("in", { type: "user", uuid: "b", message: { content: "# Goal\nGreet the user." } }),
 			entry("in", { type: "user", uuid: "u1", message: { content: "Make hello.txt" } }),
 			entry("host", { kind: "user_origin", uuid: "u2", origin: { via: "ao_send", from: "billing-portal-12" } }),
 			entry("in", { type: "user", uuid: "u2", message: { content: "[from @billing-portal-12] Use the new name." } }),
@@ -148,9 +150,33 @@ describe("ChatPane", () => {
 		expect(screen.getByRole("button", { name: /Thought/ })).toHaveAttribute("aria-expanded", "false");
 		expect(screen.queryByText("plan it")).toBeNull();
 		expect(screen.getByText("now").tagName).toBe("STRONG");
-		expect(screen.getByText("Turn complete · $0.044 this session")).toBeInTheDocument();
 		expect(screen.getByText("Claude exited · exit code 0")).toBeInTheDocument();
 		expect(screen.getByText("$0.044 this session")).toBeInTheDocument();
+	});
+
+	it("ends a turn with how long it took, never a money amount", () => {
+		const { feed } = renderPane();
+		const at = (dir: ChatEntry["dir"], sec: number, payload: object): ChatEntry => ({
+			seq: ++seq,
+			ts: new Date(Date.parse("2026-10-30T10:00:00.000Z") + sec * 1000).toISOString(),
+			dir,
+			payload,
+		});
+		feed(
+			at("in", 0, { type: "user", uuid: "u1", message: { content: "go" } }),
+			at("out", 0, { type: "command_lifecycle", command_uuid: "u1", state: "started" }),
+			at("out", 30, { type: "assistant", message: { id: "m1", content: [{ type: "text", text: "done" }] } }),
+			at("out", 134, { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 23.45 }),
+			at("in", 140, { type: "user", uuid: "u2", message: { content: "again" } }),
+			at("out", 140, { type: "command_lifecycle", command_uuid: "u2", state: "started" }),
+			at("out", 152, { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1 }),
+		);
+		const ends = [...rowOf("turn_end")];
+		expect(ends.map((e) => e.querySelector("[data-notice]")?.textContent)).toEqual([
+			"Completed in 2m 14s",
+			"Turn ended: error during execution · 12s",
+		]);
+		expect(ends.every((e) => !e.textContent?.includes("$"))).toBe(true);
 	});
 
 	it("streams a reply with a caret until the logged block replaces it", () => {
@@ -513,7 +539,7 @@ describe("ChatPane calm view", () => {
 			toolDone("c"),
 		);
 		const head = document.querySelector("[data-group] .chat-group__head")!;
-		expect(head).toHaveTextContent("Ran 2 commands · read 1 file");
+		expect(head).toHaveTextContent(/^Ran 2 commands, read a file$/);
 		expect(head).toHaveAttribute("aria-expanded", "false");
 		expect(document.querySelector("[data-tool]")).toBeNull();
 		await user.click(head);
@@ -529,13 +555,19 @@ describe("ChatPane calm view", () => {
 			toolUse("b", "Bash", { command: "go test" }),
 			toolDone("b", "Exit code 1\nFAIL", true),
 		);
-		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent("1 failed");
+		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(
+			/^Ran a command, read a file \(1 failed\)$/,
+		);
 		const shown = document.querySelectorAll("[data-tool]");
 		expect(shown).toHaveLength(1);
 		expect(shown[0]).toHaveAttribute("data-tool", "Bash");
 	});
 
-	it("names the running call on the header with the worktree root cut away", () => {
+	it("shows the running call as a plain verb with a timer that ticks each second", () => {
+		vi.useFakeTimers({
+			toFake: ["Date", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"],
+		});
+		vi.setSystemTime(Date.parse("2026-10-30T10:01:25.000Z"));
 		const { feed } = renderPane("chat", fakeApi(), rooted);
 		feed(
 			userIn("u1", "go"),
@@ -543,7 +575,10 @@ describe("ChatPane calm view", () => {
 			toolDone("a"),
 			toolUse("b", "Bash", { command: "cd /work/project && go test ./..." }),
 		);
-		expect(document.querySelector(".chat-group__live")).toHaveTextContent("cd . && go test ./...");
+		const head = document.querySelector("[data-group] .chat-group__head")!;
+		expect(head).toHaveTextContent(/^Running a command 1m 25s$/);
+		act(() => vi.advanceTimersByTime(1000));
+		expect(head).toHaveTextContent(/^Running a command 1m 26s$/);
 	});
 
 	it("folds a finished turn's work between the user's message and the last reply", async () => {
@@ -560,12 +595,250 @@ describe("ChatPane calm view", () => {
 			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
 		);
 		const head = document.querySelector("[data-turn] .chat-group__head")!;
-		expect(head).toHaveTextContent("Worked · ran 2 commands · 1 message");
+		expect(head).toHaveTextContent(/^Worked for 0s$/);
+		expect(head).toHaveAttribute("title", "Ran 2 commands, 1 message");
 		expect(screen.getByText("all fixed")).toBeInTheDocument();
 		expect(screen.queryByText("on it")).toBeNull();
 		await user.click(head);
 		expect(screen.getByText("on it")).toBeInTheDocument();
 		expect(document.querySelector("[data-group]")).not.toBeNull();
+	});
+
+	it("opens a turn whose work is one group straight to its calls, with no inner sentence", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "check it"),
+			lifecycle("u1", "started"),
+			toolUse("a", "Bash", { command: "go test" }),
+			toolDone("a"),
+			toolUse("b", "Bash", { command: "go vet" }),
+			toolDone("b"),
+			saying("all green"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		const turn = document.querySelector("[data-turn]")!;
+		await user.click(turn.querySelector(".chat-group__head")!);
+		expect(turn.querySelector("[data-group]")).toBeNull();
+		expect(turn).not.toHaveTextContent("Ran 2 commands");
+		expect(turn.querySelectorAll("[data-tool]")).toHaveLength(2);
+	});
+
+	it("keeps the sentence line of each group when an opened turn holds several", async () => {
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "fix it"),
+			lifecycle("u1", "started"),
+			toolUse("a", "Bash", { command: "go test" }),
+			toolDone("a"),
+			toolUse("b", "Read", { file_path: "a.go" }),
+			toolDone("b"),
+			saying("found it"),
+			toolUse("c", "Edit", { file_path: "a.go", old_string: "x", new_string: "y" }),
+			toolDone("c"),
+			toolUse("d", "Bash", { command: "go test" }),
+			toolDone("d"),
+			saying("fixed"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+		);
+		const turn = document.querySelector("[data-turn]")!;
+		await user.click(turn.querySelector(".chat-group__head")!);
+		const heads = [...turn.querySelectorAll("[data-group] .chat-group__head")].map((h) => h.textContent);
+		expect(heads).toEqual(["Ran a command, read a file", "Ran a command, edited a file"]);
+		expect(turn.querySelectorAll("[data-tool]")).toHaveLength(0);
+	});
+
+	it("says how long a finished turn worked, and how many of its calls failed", () => {
+		const { feed } = renderPane();
+		const at = (sec: number, e: ChatEntry): ChatEntry => ({
+			...e,
+			ts: new Date(Date.parse("2026-10-30T10:00:00.000Z") + sec * 1000).toISOString(),
+		});
+		feed(
+			at(0, userIn("u1", "fix it")),
+			at(0, lifecycle("u1", "started")),
+			at(2, toolUse("a", "Bash", { command: "go test" })),
+			at(9, toolDone("a", "Exit code 1\nFAIL", true)),
+			at(10, toolUse("b", "Bash", { command: "go vet" })),
+			at(12, toolDone("b")),
+			at(30, saying("fixed")),
+			at(36, out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 })),
+		);
+		const head = document.querySelector("[data-turn] .chat-group__head")!;
+		expect(head).toHaveTextContent(/^Worked for 36s · 1 failed$/);
+		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
+	});
+
+	describe("the task brief", () => {
+		const spawn = (resume = "") => entry("host", { kind: "spawn", argv: ["claude"], resume, pid: 1 });
+		const brief = "/pstack:poteto-mode # Goal\nFix the **flaky** test.\n\n## Rules\n- one\n- two";
+
+		it("folds the brief AO spawned the session with, and opens it as markdown", async () => {
+			const { feed, user } = renderPane();
+			feed(
+				spawn(),
+				userIn("b", brief),
+				lifecycle("b", "completed"),
+				userIn("u2", "thanks"),
+				lifecycle("u2", "completed"),
+			);
+			const row = screen.getByRole("button", { name: /Task brief/ });
+			expect(row).toHaveAttribute("aria-expanded", "false");
+			expect(row).toHaveTextContent("pstack:poteto-mode");
+			expect(row).toHaveTextContent("# Goal");
+			expect(screen.queryByText("Rules")).toBeNull();
+			expect(screen.getByText("thanks")).toBeInTheDocument();
+			await user.click(row);
+			expect(screen.getByRole("heading", { name: "Rules" })).toBeInTheDocument();
+			expect(screen.getByText("flaky").tagName).toBe("STRONG");
+		});
+
+		it("shows the first input after a restore as an ordinary message", () => {
+			const { feed } = renderPane();
+			feed(spawn("claude-session-1"), userIn("u1", "go on with the plan"), lifecycle("u1", "completed"));
+			expect(screen.queryByRole("button", { name: /Task brief/ })).toBeNull();
+			expect(screen.getByText("go on with the plan")).toBeInTheDocument();
+		});
+	});
+
+	describe("a turn that ends with background work still running", () => {
+		const turnWithBackground = (finished: boolean): ChatEntry[] => [
+			userIn("u1", "run the soak test"),
+			toolUse("bg", "Bash", { command: "go test -run Soak ./...", run_in_background: true }),
+			out({
+				type: "system",
+				subtype: "task_started",
+				task_id: "t1",
+				tool_use_id: "bg",
+				task_type: "local_bash",
+				is_backgrounded: true,
+				description: "Run the soak test",
+			}),
+			toolDone("bg", "Command running in background with ID: t1."),
+			saying("started it"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			...(finished
+				? [out({ type: "system", subtype: "task_notification", task_id: "t1", tool_use_id: "bg", status: "completed" })]
+				: []),
+		];
+
+		it("says what claude waits on, and opens to the command", async () => {
+			const { feed, user } = renderPane();
+			feed(...turnWithBackground(false));
+			const row = document.querySelector("[data-waiting] .chat-group__head")!;
+			expect(row).toHaveTextContent('Waiting on background command "Run the soak test"');
+			await user.click(row);
+			expect(document.querySelector("[data-waiting]")).toHaveTextContent("$ go test -run Soak ./...");
+		});
+
+		it("shows no waiting row once the background task has ended", () => {
+			const { feed } = renderPane();
+			feed(...turnWithBackground(true));
+			expect(document.querySelector("[data-waiting]")).toBeNull();
+		});
+
+		it("shows no waiting row for a turn that left nothing running", () => {
+			const { feed } = renderPane();
+			feed(
+				userIn("u1", "fix it"),
+				toolUse("a", "Bash", { command: "go test" }),
+				toolDone("a"),
+				saying("fixed"),
+				out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			);
+			expect(document.querySelector("[data-waiting]")).toBeNull();
+		});
+	});
+
+	it("shows a finished agent's task message as a quiet card that opens to its summary", async () => {
+		const { feed, user } = renderPane();
+		const notification = [
+			"<task-notification>",
+			"<task-id>a1</task-id>",
+			"<tool-use-id>agent</tool-use-id>",
+			"<status>completed</status>",
+			'<summary>Agent "Summarize docs directory" finished</summary>',
+			"<result>Two short Markdown files.</result>",
+			"</task-notification>",
+		].join("\n");
+		feed(
+			userIn("u1", "go"),
+			toolUse("agent", "Agent", { description: "Summarize docs directory", subagent_type: "Explore" }),
+			out({
+				type: "system",
+				subtype: "task_started",
+				task_id: "a1",
+				tool_use_id: "agent",
+				task_type: "local_agent",
+				description: "Summarize docs directory",
+			}),
+			toolDone("agent", "Async agent launched"),
+			out({ type: "user", isReplay: true, message: { role: "user", content: notification } }),
+		);
+		const card = document.querySelector("[data-task-message]")!;
+		const head = card.querySelector("button")!;
+		expect(head).toHaveTextContent(/^Agent finished\s*Summarize docs directory\s*\d\d:\d\d$/);
+		expect(head).toHaveAttribute("aria-expanded", "false");
+		expect(card).not.toHaveTextContent("Two short Markdown files.");
+		await user.click(head);
+		expect(card).toHaveTextContent('Agent "Summarize docs directory" finished');
+		expect(card).toHaveTextContent("Two short Markdown files.");
+	});
+
+	it("says a failed background command's task message failed, in red", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "go"),
+			out({
+				type: "user",
+				isReplay: true,
+				message: {
+					role: "user",
+					content:
+						'<task-notification>\n<task-id>k1</task-id>\n<status>failed</status>\n<summary>Background command "Run slow check" failed with exit code 1</summary>\n</task-notification>',
+				},
+			}),
+		);
+		const head = document.querySelector("[data-task-message] button")!;
+		expect(head).toHaveTextContent(/^Task message received\s*Run slow check\s*Failed/);
+		expect(head.querySelector(".chat-task__failed")).toHaveTextContent("Failed");
+	});
+
+	it("ends a finished turn's reply with a bar that copies it and shows the turn's usage and end time", async () => {
+		const write = vi.spyOn(aoBridge.clipboard, "writeText").mockResolvedValue();
+		const { feed, user } = renderPane();
+		feed(
+			userIn("u1", "fix it"),
+			lifecycle("u1", "started"),
+			toolUse("a", "Bash", { command: "go test" }),
+			toolDone("a"),
+			saying("**All fixed.**"),
+			out({
+				type: "result",
+				subtype: "success",
+				num_turns: 1,
+				total_cost_usd: 0.01,
+				usage: {
+					input_tokens: 1200,
+					output_tokens: 800,
+					cache_read_input_tokens: 10000,
+					cache_creation_input_tokens: 300,
+				},
+			}),
+		);
+		const bar = document.querySelector("[data-answer-bar]")!;
+		expect(bar).toHaveTextContent(/Usage 12.3k tok\s*\d\d:\d\d$/);
+		await user.click(within(bar as HTMLElement).getByRole("button", { name: "Copy reply" }));
+		expect(write).toHaveBeenCalledWith("**All fixed.**");
+	});
+
+	it("draws no answer bar while a turn runs or for a turn with no reply", () => {
+		const { feed } = renderPane();
+		feed(userIn("u1", "go"), lifecycle("u1", "started"), saying("working on it"));
+		expect(document.querySelector("[data-answer-bar]")).toBeNull();
+		feed(toolUse("a", "Bash", { command: "go test" }), toolDone("a"), out({ type: "result", subtype: "success" }));
+		expect(document.querySelector("[data-answer-bar]")).not.toBeNull();
+		feed(userIn("u2", "again"), lifecycle("u2", "started"), out({ type: "result", subtype: "success" }));
+		expect(document.querySelectorAll("[data-answer-bar]")).toHaveLength(1);
 	});
 
 	it("leaves a subagent's text and thinking out of the main column", () => {

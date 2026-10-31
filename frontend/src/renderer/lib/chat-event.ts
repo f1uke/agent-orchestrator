@@ -51,6 +51,30 @@ export type TaskEvent = {
 	usage?: TaskUsage;
 };
 
+export type TaskNotification = {
+	taskId: string;
+	toolUseId: string;
+	status: string;
+	summary: string;
+	result: string;
+};
+
+const TASK_NOTIFICATION = "<task-notification>";
+
+export function parseTaskNotification(text: string): TaskNotification | undefined {
+	const body = text.trimStart();
+	if (!body.startsWith(TASK_NOTIFICATION)) return undefined;
+	const tag = (name: string, greedy = false) =>
+		new RegExp(`<${name}>([\\s\\S]*${greedy ? "" : "?"})</${name}>`).exec(body)?.[1].trim() ?? "";
+	return {
+		taskId: tag("task-id"),
+		toolUseId: tag("tool-use-id"),
+		status: tag("status"),
+		summary: tag("summary"),
+		result: tag("result", true),
+	};
+}
+
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
 	| { type: "system"; subtype: string; permissionMode: string; task?: TaskEvent }

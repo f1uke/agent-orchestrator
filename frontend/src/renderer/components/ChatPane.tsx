@@ -1,5 +1,15 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, Code, CloudOff, type LucideIcon, MessageSquare, SquareTerminal } from "lucide-react";
+import {
+	ArrowDown,
+	Bot,
+	ChevronRight,
+	Code,
+	CloudOff,
+	Database,
+	type LucideIcon,
+	MessageSquare,
+	SquareTerminal,
+} from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
@@ -7,8 +17,10 @@ import { useSessionNames } from "../hooks/useSessionNames";
 import type { ChatEntry } from "../lib/chat-event";
 import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
-import type { BackgroundTask, ChatItem, Pending, UserItem } from "../lib/chat-fold";
-import { sessionActivity } from "../lib/chat-inspect";
+import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
+import { clockTime, formatDuration } from "../lib/chat-time";
+import { formatTokens, sessionActivity } from "../lib/chat-inspect";
+import { activeTurnIndex, railTurns } from "../lib/chat-rail";
 import { type ChatRow, chatRows, rowIndexOfItem } from "../lib/chat-rows";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
@@ -16,8 +28,10 @@ import { cn } from "../lib/utils";
 import { type ChatView, centerViewOf, type Theme, useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatComposer } from "./ChatComposer";
+import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
-import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow } from "./ChatProcessRows";
+import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow, WaitingRow } from "./ChatProcessRows";
+import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
 
@@ -86,10 +100,7 @@ export function ChatPane({
 		[transcript.items, queuedIds],
 	);
 	const root = session.workspacePath ?? "";
-	const rows = useMemo(
-		() => chatRows(transcript, chat.overlay, queuedIds, root),
-		[transcript, chat.overlay, queuedIds, root],
-	);
+	const rows = useMemo(() => chatRows(transcript, chat.overlay, queuedIds), [transcript, chat.overlay, queuedIds]);
 	const runningInBackground = useMemo(
 		() => sessionActivity(transcript).filter((a) => unfinished(a.state)).length,
 		[transcript],
@@ -144,6 +155,7 @@ export function ChatPane({
 			) : (
 				<ChatStream
 					disabled={actions.hostDown}
+					replaying={chat.connection === "connecting"}
 					jumpTo={jumpTo}
 					onAnswer={onAnswer}
 					onJumped={onJumped}
@@ -256,6 +268,7 @@ const STICK_TO_BOTTOM_PX = 48;
 
 type StreamProps = {
 	rows: ChatRow[];
+	replaying: boolean;
 	root: string;
 	pending: Pending[];
 	theme: Theme;
@@ -287,13 +300,28 @@ function tailOf(rows: readonly ChatRow[]): string | undefined {
 
 const distanceFromEnd = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
 
+const GLIDE_MS = 320;
+
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function isEditable(target: EventTarget): boolean {
 	return (
 		target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select") !== null)
 	);
 }
 
-function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, jumpTo, onJumped }: StreamProps) {
+function ChatStream({
+	rows,
+	replaying,
+	root,
+	pending,
+	theme,
+	requests,
+	disabled,
+	onAnswer,
+	jumpTo,
+	onJumped,
+}: StreamProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [openRows, setOpenRows] = useState<OpenRows>({});
 	const pendingByRequest = useMemo(() => new Map(pending.map((p) => [p.requestId, p])), [pending]);
@@ -313,10 +341,46 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 		setFollowState(following ? { mode: "follow" } : { mode: "free", seenTail: tailRef.current });
 	}, []);
 
+	const glideRef = useRef<number | null>(null);
+
 	const pinToEnd = useCallback(() => {
 		const el = scrollRef.current;
+		if (glideRef.current !== null) return;
 		if (followingRef.current && el && distanceFromEnd(el) > AT_END_PX) el.scrollTop = el.scrollHeight;
 	}, []);
+
+	const stopGlide = useCallback(() => {
+		if (glideRef.current !== null) cancelAnimationFrame(glideRef.current);
+		glideRef.current = null;
+	}, []);
+
+	// The target is read again every frame, because rows measured on the way move it. A target more
+	// than a viewport away is reached at once to within a viewport, so the glide only paints rows near it.
+	const glideTo = useCallback(
+		(target: () => number) => {
+			const el = scrollRef.current;
+			if (!el) return;
+			stopGlide();
+			const goal = () => Math.max(0, Math.min(target(), el.scrollHeight - el.clientHeight));
+			if (reducedMotion()) {
+				el.scrollTop = goal();
+				return;
+			}
+			const gap = goal() - el.scrollTop;
+			el.scrollTop = goal() - Math.sign(gap) * Math.min(Math.abs(gap), el.clientHeight);
+			const from = el.scrollTop;
+			const start = performance.now();
+			const step = (now: number) => {
+				const t = Math.min(1, (now - start) / GLIDE_MS);
+				el.scrollTop = from + (goal() - from) * (1 - (1 - t) ** 3);
+				glideRef.current = t < 1 ? requestAnimationFrame(step) : null;
+			};
+			glideRef.current = requestAnimationFrame(step);
+		},
+		[stopGlide],
+	);
+
+	useEffect(() => stopGlide, [stopGlide]);
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
@@ -337,6 +401,14 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 
 	useLayoutEffect(pinToEnd);
 
+	const [revealed, setRevealed] = useState(false);
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (revealed || !el || replaying) return;
+		const last = virtualizer.getVirtualItems().at(-1);
+		if (rows.length === 0 || (last?.index === rows.length - 1 && distanceFromEnd(el) <= AT_END_PX)) setRevealed(true);
+	});
+
 	// Opening a row is reading it: the stream stops pinning the end, so the row
 	// the user clicked stays where it was while it grows.
 	const toggleRow = useCallback<ToggleRow>(
@@ -349,19 +421,50 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 
 	// The one way to show a given row: it stops following and brings the row to the top.
 	const scrollToRow = useCallback(
-		(key: string) => {
+		(key: string, glide = false) => {
 			const index = rows.findIndex((row) => row.key === key);
 			if (index < 0) return;
 			setFollowing(false);
-			virtualizer.scrollToIndex(index, { align: "start" });
+			if (!glide) {
+				stopGlide();
+				virtualizer.scrollToIndex(index, { align: "start" });
+				return;
+			}
+			glideTo(() => virtualizer.getOffsetForIndex(index, "start")?.[0] ?? scrollRef.current?.scrollTop ?? 0);
 		},
-		[rows, setFollowing, virtualizer],
+		[glideTo, rows, setFollowing, stopGlide, virtualizer],
 	);
+	const glideToRow = useCallback((key: string) => scrollToRow(key, true), [scrollToRow]);
+
+	const turns = useMemo(() => railTurns(rows), [rows]);
+	const turnRows = useMemo(() => {
+		const indexOf = new Map(rows.map((row, i) => [row.key, i]));
+		return turns.map((turn) => indexOf.get(turn.key) ?? 0);
+	}, [rows, turns]);
+	const colRef = useRef<HTMLDivElement | null>(null);
+	const setCol = useCallback(
+		(node: HTMLDivElement | null) => {
+			colRef.current = node;
+			virtualizer.containerRef(node);
+		},
+		[virtualizer],
+	);
+	const [activeTurn, setActiveTurn] = useState(0);
+
+	const findActiveTurn = useCallback(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const starts = turnRows.map((i) => virtualizer.measurementsCache[i]?.start ?? 0);
+		const probe = el.scrollTop + el.clientHeight / 3 - (colRef.current?.offsetTop ?? 0);
+		setActiveTurn(activeTurnIndex(starts, probe));
+	}, [turnRows, virtualizer]);
+
+	useLayoutEffect(findActiveTurn, [findActiveTurn]);
 
 	const jumpToLatest = useCallback(() => {
 		setFollowing(true);
-		pinToEnd();
-	}, [pinToEnd, setFollowing]);
+		glideTo(() => scrollRef.current?.scrollHeight ?? 0);
+	}, [glideTo, setFollowing]);
 
 	useLayoutEffect(() => {
 		if (!jumpTo) return;
@@ -374,14 +477,32 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 		if (el.scrollTop > 0) setFollowing(false);
 	};
 
+	// React's wheel listener is passive and can run after the browser has already scrolled and the
+	// stream has pinned back to the end; a capturing native listener sees the wheel first.
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const onWheel = (e: WheelEvent) => {
+			if (glideRef.current !== null) {
+				stopGlide();
+				if (distanceFromEnd(el) > AT_END_PX) setFollowing(false);
+			}
+			if (e.deltaY < 0) leaveEnd(el);
+		};
+		el.addEventListener("wheel", onWheel, { capture: true, passive: true });
+		return () => el.removeEventListener("wheel", onWheel, { capture: true });
+	});
+
 	const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
 		const el = e.currentTarget;
+		findActiveTurn();
 		if (distanceFromEnd(el) <= AT_END_PX) setFollowing(true);
 		else if (draggingRef.current) setFollowing(false);
 	};
 
 	const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
 		if (e.target !== e.currentTarget) return;
+		stopGlide();
 		draggingRef.current = true;
 		window.addEventListener("pointerup", () => (draggingRef.current = false), { once: true });
 	};
@@ -392,19 +513,19 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 		<div className="chat-stream-wrap">
 			<div
 				className="chat-scroll"
+				data-unrevealed={revealed ? undefined : ""}
 				data-testid="chat-stream"
 				onKeyDown={(e) => {
-					if (SCROLL_UP_KEYS.has(e.key) && !isEditable(e.target)) leaveEnd(e.currentTarget);
+					if (!SCROLL_UP_KEYS.has(e.key) || isEditable(e.target)) return;
+					stopGlide();
+					leaveEnd(e.currentTarget);
 				}}
 				onPointerDown={onPointerDown}
 				onScroll={onScroll}
-				onWheel={(e) => {
-					if (e.deltaY < 0) leaveEnd(e.currentTarget);
-				}}
 				ref={scrollRef}
 			>
 				{rows.length === 0 ? <div className="chat-empty">Nothing in this session's log yet.</div> : null}
-				<div className="chat-col" ref={virtualizer.containerRef}>
+				<div className="chat-col" ref={setCol}>
 					{virtualizer.getVirtualItems().map((v) => {
 						const row = rows[v.index];
 						return (
@@ -431,6 +552,7 @@ function ChatStream({ rows, root, pending, theme, requests, disabled, onAnswer, 
 					})}
 				</div>
 			</div>
+			<ChatTurnRail active={activeTurn} onJump={glideToRow} turns={turns} />
 			{newBelow ? (
 				<button
 					aria-label="Jump to latest"
@@ -493,6 +615,8 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			);
 		case "group":
 			return <GroupRow openRows={openRows} root={root} row={row} theme={theme} toggleRow={toggleRow} />;
+		case "waiting":
+			return <WaitingRow openRows={openRows} root={root} row={row} toggleRow={toggleRow} />;
 		case "turn":
 			return (
 				<TurnRow
@@ -509,6 +633,7 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 					item={row.item}
 					openRows={openRows}
 					pendingByRequest={pendingByRequest}
+					reply={row.reply}
 					root={root}
 					rowKey={row.key}
 					sessionNames={props.sessionNames}
@@ -527,20 +652,34 @@ function ItemRow({
 	rowKey,
 	subagentTools,
 	task,
+	reply,
 	theme,
 	root,
 	openRows,
 	toggleRow,
 	pendingByRequest,
 	sessionNames,
-}: Omit<RowProps, "row"> & { item: ChatItem; rowKey: string; subagentTools: number; task?: BackgroundTask }) {
+}: Omit<RowProps, "row"> & {
+	item: ChatItem;
+	rowKey: string;
+	subagentTools: number;
+	task?: BackgroundTask;
+	reply?: string;
+}) {
 	switch (item.kind) {
 		case "user":
-			return item.origin ? (
-				<PeerMessage item={item} sessionNames={sessionNames} theme={theme} />
-			) : (
-				<UserMessage item={item} />
-			);
+			if (item.origin) return <PeerMessage item={item} sessionNames={sessionNames} theme={theme} />;
+			if (item.brief) {
+				return (
+					<TaskBrief
+						item={item}
+						onToggle={(open) => toggleRow(rowKey, open)}
+						open={openRows[rowKey] ?? false}
+						theme={theme}
+					/>
+				);
+			}
+			return <UserMessage item={item} />;
 		case "assistant_text":
 			return (
 				<div className="note-prose chat-md">
@@ -573,14 +712,99 @@ function ItemRow({
 		}
 		case "turn_end":
 			return (
-				<div className={cn("chat-sys", item.isError && "chat-sys--error")} data-notice="turn_end">
-					{item.isError ? `Turn ended: ${item.subtype.replace(/_/g, " ")}` : "Turn complete"}
-					{item.costUsd > 0 ? ` · ${formatCost(item.costUsd)} this session` : ""}
-				</div>
+				<>
+					{reply !== undefined ? <AnswerBar end={item} reply={reply} /> : null}
+					<div className={cn("chat-sys", item.isError && "chat-sys--error")} data-notice="turn_end">
+						{turnEndText(item)}
+					</div>
+				</>
+			);
+		case "task_message":
+			return (
+				<TaskMessageCard
+					item={item}
+					onToggle={(open) => toggleRow(rowKey, open)}
+					open={openRows[rowKey] ?? false}
+					task={task}
+					theme={theme}
+				/>
 			);
 		case "notice":
 			return <NoticeRow notice={item} />;
 	}
+}
+
+function taskDisplayName(item: TaskMessageItem, task: BackgroundTask | undefined): string {
+	return task?.description || /"([^"]+)"/.exec(item.summary)?.[1] || item.summary;
+}
+
+function TaskMessageCard({
+	item,
+	task,
+	theme,
+	open,
+	onToggle,
+}: {
+	item: TaskMessageItem;
+	task?: BackgroundTask;
+	theme: Theme;
+	open: boolean;
+	onToggle: (open: boolean) => void;
+}) {
+	const agent = task?.taskType === "local_agent" || item.summary.startsWith("Agent ");
+	const Icon = agent ? Bot : SquareTerminal;
+	return (
+		<div className="chat-task" data-task-message={item.taskId}>
+			<button aria-expanded={open} className="chat-task__head" onClick={() => onToggle(!open)} type="button">
+				<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
+				<Icon className="chat-icon" aria-hidden="true" />
+				<span className="chat-task__title">{agent ? "Agent finished" : "Task message received"}</span>
+				<span className="chat-task__label">{taskDisplayName(item, task)}</span>
+				{item.status === "failed" ? <span className="chat-task__failed">Failed</span> : null}
+				<span className="chat-task__time">{clockTime(item.ts)}</span>
+			</button>
+			{open ? (
+				<div className="chat-task__body">
+					<p>{item.summary}</p>
+					{item.result ? (
+						<div className="note-prose chat-md">
+							<NoteMarkdown source={item.result} theme={theme} />
+						</div>
+					) : null}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function AnswerBar({ end, reply }: { end: TurnEndItem; reply: string }) {
+	const u = end.usage;
+	const total = u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens;
+	const detail = [
+		`${formatTokens(u.inputTokens)} in`,
+		`${formatTokens(u.outputTokens)} out`,
+		`${formatTokens(u.cacheReadTokens)} cache read`,
+		`${formatTokens(u.cacheCreationTokens)} cache write`,
+	].join(" · ");
+	return (
+		<div className="chat-answer" data-answer-bar>
+			<CopyButton className="chat-answer__copy" named={false} value={reply} what="reply" />
+			{total > 0 ? (
+				<span className="chat-answer__usage" title={detail}>
+					<Database className="chat-icon" aria-hidden="true" />
+					Usage {formatTokens(total)} tok
+				</span>
+			) : null}
+			<span className="chat-answer__time">{clockTime(end.ts)}</span>
+		</div>
+	);
+}
+
+function turnEndText(item: TurnEndItem): string {
+	const took = item.durationMs === undefined ? undefined : formatDuration(item.durationMs);
+	if (!item.isError) return took ? `Completed in ${took}` : "Completed";
+	const ended = `Turn ended: ${item.subtype.replace(/_/g, " ")}`;
+	return took ? `${ended} · ${took}` : ended;
 }
 
 const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id);
@@ -616,6 +840,39 @@ function UserMessage({ item }: { item: UserItem }) {
 		<div className="chat-user" data-state={item.state}>
 			<div className="chat-user__bubble">{item.text}</div>
 			{meta.length ? <div className="chat-user__meta">{meta.join(" · ")}</div> : null}
+		</div>
+	);
+}
+
+const BRIEF_SLASH_COMMAND = /^\/([\w:.-]+)\s*/;
+
+function TaskBrief({
+	item,
+	open,
+	onToggle,
+	theme,
+}: {
+	item: UserItem;
+	open: boolean;
+	onToggle: (open: boolean) => void;
+	theme: Theme;
+}) {
+	const command = BRIEF_SLASH_COMMAND.exec(item.text);
+	const body = command ? item.text.slice(command[0].length) : item.text;
+	const preview = body.split("\n").find((line) => line.trim() !== "") ?? "";
+	return (
+		<div className="chat-brief" data-brief>
+			<button aria-expanded={open} className="chat-brief__head" onClick={() => onToggle(!open)} type="button">
+				<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
+				<span className="chat-brief__title">Task brief</span>
+				{command ? <span className="chat-brief__command">{command[1]}</span> : null}
+				{open ? null : <span className="chat-brief__preview">{preview}</span>}
+			</button>
+			{open ? (
+				<div className="chat-brief__body note-prose chat-md">
+					<NoteMarkdown source={body} theme={theme} />
+				</div>
+			) : null}
 		</div>
 	);
 }

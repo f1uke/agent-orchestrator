@@ -45,6 +45,7 @@ import {
 } from "../lib/chat-tools";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
+import { CopyButton } from "./CopyButton";
 import { DiffRows } from "./DiffRows";
 import { NoteMarkdown } from "./NoteMarkdown";
 import { Button } from "./ui/button";
@@ -109,15 +110,24 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 	switch (body.kind) {
 		case "bash":
 			return (
-				<div className="chat-term">
-					<span className="chat-term__cmd">$ {body.command}</span>
-					{body.output
-						? body.output.split("\n").map((line, i) => (
+				<div className="chat-bash">
+					<div className="chat-code">
+						<span aria-hidden="true" className="chat-code__prompt">
+							$
+						</span>
+						<span className="chat-code__text">{body.command}</span>
+						<CopyButton className="chat-code__copy" value={body.command} what="command" />
+					</div>
+					{body.exitCode ? <div className="chat-tool__exit">Exit code {body.exitCode}</div> : null}
+					{body.output ? (
+						<div className="chat-term">
+							{body.output.split("\n").map((line, i) => (
 								<span className={outputTone(line, body.failed)} key={i}>
-									{`\n${line}`}
+									{i > 0 ? `\n${line}` : line}
 								</span>
-							))
-						: null}
+							))}
+						</div>
+					) : null}
 				</div>
 			);
 		case "diff":
@@ -267,6 +277,7 @@ function PermissionCard({ request, theme, state, disabled, onAnswer }: CardProps
 		name: request.toolName,
 		parentToolUseId: "",
 		input: request.input,
+		startedTs: "",
 	});
 	const command = typeof input.command === "string" ? input.command : preview.arg;
 	const suggestions = describeSuggestions(request.suggestions);

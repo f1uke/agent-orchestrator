@@ -14,7 +14,14 @@ import {
 import { type ChatRow, chatRows, rowIndexOfItem } from "./chat-rows";
 import { emptyOverlay } from "./chat-stream";
 
-const user = (uuid = "u1", text = "go"): UserItem => ({ kind: "user", uuid, text, images: 0, state: "completed" });
+const user = (uuid = "u1", text = "go"): UserItem => ({
+	kind: "user",
+	uuid,
+	text,
+	images: 0,
+	state: "completed",
+	ts: "",
+});
 const say = (text: string, parentToolUseId = ""): ChatItem => ({
 	kind: "assistant_text",
 	messageId: "m",
@@ -32,6 +39,18 @@ const turnEnd = (isError = false): ChatItem => ({
 	sessionId: "s",
 	usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
 	contextWindows: {},
+	ts: "",
+});
+
+const taskMessage = (opensTurn = false, taskId = "k1"): ChatItem => ({
+	kind: "task_message",
+	ts: "",
+	taskId,
+	toolUseId: "",
+	status: "completed",
+	summary: "done",
+	result: "",
+	opensTurn,
 });
 
 let n = 0;
@@ -48,6 +67,7 @@ function tool(
 		name,
 		parentToolUseId,
 		input,
+		startedTs: "",
 		result: result === "none" ? undefined : { isError: result === "error", content: "" },
 	};
 }
@@ -70,8 +90,8 @@ function transcript(items: ChatItem[], extra: Partial<Transcript> = {}): Transcr
 	};
 }
 
-const rowsOf = (items: ChatItem[], extra: Partial<Transcript> = {}, root = "") =>
-	chatRows(transcript(items, extra), emptyOverlay, new Set(), root);
+const rowsOf = (items: ChatItem[], extra: Partial<Transcript> = {}) =>
+	chatRows(transcript(items, extra), emptyOverlay, new Set());
 
 const shape = (rows: ChatRow[]) => rows.map((r) => (r.kind === "item" ? r.item.kind : r.kind));
 
@@ -179,23 +199,24 @@ describe("chatRows process groups", () => {
 
 	it("skips queued user messages", () => {
 		const queued = { ...user("q1", "later"), state: "queued" };
-		const rows = chatRows(transcript([user(), tool("Read"), queued, tool("Read")]), emptyOverlay, new Set(["q1"]), "");
+		const rows = chatRows(transcript([user(), tool("Read"), queued, tool("Read")]), emptyOverlay, new Set(["q1"]));
 		expect(shape(rows)).toEqual(["user", "group"]);
 	});
 });
 
 describe("chatRows live detail", () => {
-	it("names the newest tool that has no result, with the worktree root shortened", () => {
-		const rows = rowsOf(
-			[
-				user(),
-				tool("Read", { file_path: "/work/project/a.go" }),
-				tool("Bash", { command: "cd /work/project && go test ./..." }, "none"),
-			],
-			{},
-			"/work/project",
-		);
-		expect(group(rows).summary.live).toBe("cd . && go test ./...");
+	it("names the newest tool that has no result in plain words, with when it started", () => {
+		const running = { ...tool("Read", { file_path: "/work/project/docs/a.md" }, "none"), startedTs: "T1" };
+		const rows = rowsOf([user(), tool("Bash", { command: "go test" }), running]);
+		expect(group(rows).summary.live).toEqual({ verb: "Reading a.md", since: "T1" });
+	});
+
+	it("shows a lone running tool at the tail as a live group, and a lone finished one as its own row", () => {
+		const live = rowsOf([user(), say("on it"), tool("Bash", { command: "go test" }, "none")]);
+		expect(shape(live)).toEqual(["user", "assistant_text", "group"]);
+		expect(group(live).summary.live?.verb).toBe("Running a command");
+		const done = rowsOf([user(), say("on it"), tool("Bash", { command: "go test" })]);
+		expect(shape(done)).toEqual(["user", "assistant_text", "tool_call"]);
 	});
 
 	it("has no live detail once every tool has a result", () => {
@@ -258,6 +279,13 @@ describe("chatRows turn fold", () => {
 		expect(turn.kind === "turn" && shape(turn.rows)).toEqual(["assistant_text", "group"]);
 	});
 
+	it("carries the turn's duration onto its fold", () => {
+		const items = finished();
+		items[items.length - 1] = { ...(items.at(-1) as Extract<ChatItem, { kind: "turn_end" }>), durationMs: 36_000 };
+		const turn = rowsOf(items)[1];
+		expect(turn.kind === "turn" && turn.durationMs).toBe(36_000);
+	});
+
 	it("leaves the open turn unfolded", () => {
 		const items = finished();
 		items.pop();
@@ -285,11 +313,88 @@ describe("chatRows turn fold", () => {
 		expect(shape(rows)).toEqual(["user", "assistant_text", "assistant_text", "turn_end"]);
 	});
 
+	it("hands each turn end the turn's last reply, for its answer bar", () => {
+		const rows = rowsOf([...finished(), user("u2", "and?"), tool("Read"), turnEnd()]);
+		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");
+		expect(ends.map((r) => r.kind === "item" && r.reply)).toEqual(["all done", undefined]);
+	});
+
 	it("finds a folded item's row", () => {
 		const rows = rowsOf(finished());
 		expect(rowIndexOfItem(rows, 3)).toBe(1);
 		expect(rowIndexOfItem(rows, 0)).toBe(0);
 		expect(rowIndexOfItem(rows, 99)).toBe(-1);
+	});
+});
+
+describe("chatRows task messages", () => {
+	it("shows a task message as its own row that breaks the run of calls around it", () => {
+		const rows = rowsOf([user(), tool("Bash"), tool("Bash"), taskMessage(), tool("Read"), tool("Read")]);
+		expect(shape(rows)).toEqual(["user", "group", "task_message", "group"]);
+	});
+
+	it("hands a task message its task", () => {
+		const task = {
+			id: "k1",
+			toolUseId: "",
+			description: "Summarize docs",
+			taskType: "local_agent",
+			state: "done" as const,
+		};
+		const row = rowsOf([user(), taskMessage()], { tasks: [task] })[1];
+		expect(row.kind === "item" && row.task).toEqual(task);
+	});
+
+	it("folds a turn that a task message opened, keeping the message visible", () => {
+		const rows = rowsOf([
+			user(),
+			say("started it"),
+			turnEnd(),
+			taskMessage(true),
+			tool("Bash"),
+			tool("Bash"),
+			say("it passed"),
+			turnEnd(),
+		]);
+		expect(shape(rows)).toEqual([
+			"user",
+			"assistant_text",
+			"turn_end",
+			"task_message",
+			"turn",
+			"assistant_text",
+			"turn_end",
+		]);
+	});
+});
+
+describe("chatRows waiting on background work", () => {
+	const soak = { ...tool("Bash", { command: "go test -count=50 ./...", run_in_background: true }), id: "bg" };
+	const running = {
+		id: "k1",
+		toolUseId: "bg",
+		description: "Run the soak test",
+		taskType: "local_bash",
+		state: "running" as const,
+		background: true,
+		startedTs: "2026-10-30T10:00:05.000Z",
+	};
+	const ended = [user(), soak, say("started it"), turnEnd()];
+
+	it("ends the rows with what the finished turn left running, its command and since when", () => {
+		const rows = rowsOf(ended, { tasks: [running] });
+		const last = rows.at(-1)!;
+		expect(last.kind).toBe("waiting");
+		expect(last.kind === "waiting" && last.tasks).toEqual([
+			{ task: running, command: "go test -count=50 ./...", since: "2026-10-30T10:00:05.000Z" },
+		]);
+	});
+
+	it("has no waiting row once the task ended, while the turn still runs, or for a foreground task", () => {
+		const done = { ...running, state: "done" as const };
+		expect(rowsOf(ended, { tasks: [done] }).at(-1)?.kind).not.toBe("waiting");
+		expect(rowsOf(ended.slice(0, 3), { tasks: [running], busy: true }).at(-1)?.kind).not.toBe("waiting");
+		expect(rowsOf(ended, { tasks: [{ ...running, background: false }] }).at(-1)?.kind).not.toBe("waiting");
 	});
 });
 
@@ -303,7 +408,7 @@ describe("chatRows on the recorded long session", () => {
 	const walk = (rows: ChatRow[]): ChatRow[] => rows.flatMap((r) => (r.kind === "turn" ? [r, ...walk(r.rows)] : [r]));
 
 	it("shows far fewer rows than the log has items, with no empty thinking and no subagent text", () => {
-		const rows = chatRows(tr, emptyOverlay, new Set(), "/work/project");
+		const rows = chatRows(tr, emptyOverlay, new Set());
 		expect(rows.length).toBeLessThan(tr.items.length / 2);
 		const all = walk(rows);
 		const thoughts = all.flatMap((r) => (r.kind === "item" && r.item.kind === "thinking" ? [r.item] : []));

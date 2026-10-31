@@ -5,7 +5,7 @@ import { expect, type Page, test } from "@playwright/test";
 // (on the first row of each new stream), so it runs after the list has repositioned its rows:
 // what was painted.
 type Row = { key: string; top: number; bottom: number };
-type Sample = { frame: number; scrollTop: number; fromEnd: number; rows: Row[] };
+type Sample = { frame: number; session: string; visible: boolean; scrollTop: number; fromEnd: number; rows: Row[] };
 
 function recordFrames() {
 	const w = window as unknown as { __frames: Sample[]; __mark: number };
@@ -32,7 +32,15 @@ function recordFrames() {
 			.sort((a, b) => a.index - b.index)
 			.map(({ key, top, bottom }) => ({ key, top, bottom }));
 		const last = w.__frames.at(-1);
-		const next = { frame, scrollTop: sc.scrollTop, fromEnd: sc.scrollHeight - sc.scrollTop - sc.clientHeight, rows };
+		const session = sc.closest<HTMLElement>('[data-testid="chat-pane"]')?.dataset.session ?? "";
+		const next = {
+			frame,
+			session,
+			visible: getComputedStyle(sc).visibility !== "hidden",
+			scrollTop: sc.scrollTop,
+			fromEnd: sc.scrollHeight - sc.scrollTop - sc.clientHeight,
+			rows,
+		};
 		if (last?.frame === frame) w.__frames[w.__frames.length - 1] = next;
 		else w.__frames.push(next);
 	};
@@ -59,6 +67,27 @@ function recordFrames() {
 
 async function framesSince(page: Page, mark: number): Promise<Sample[]> {
 	return page.evaluate((m) => (window as unknown as { __frames: Sample[] }).__frames.filter((s) => s.frame >= m), mark);
+}
+
+/**
+ * Frames from the one in which the first wheel after this call reached the page. On a slow machine the stream can
+ * keep following new text for many frames before that wheel lands, and those moves are the follow, not a bug.
+ */
+async function armFirstWheel(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const w = window as unknown as { __frames: Sample[]; __wheelFrame?: number };
+		w.__wheelFrame = undefined;
+		addEventListener("wheel", () => (w.__wheelFrame = (w.__frames.at(-1)?.frame ?? 0) + 1), {
+			capture: true,
+			once: true,
+		});
+	});
+}
+
+async function framesSinceFirstWheel(page: Page): Promise<Sample[]> {
+	const from = await page.evaluate(() => (window as unknown as { __wheelFrame?: number }).__wheelFrame);
+	if (from === undefined) throw new Error("no wheel reached the page");
+	return framesSince(page, from);
 }
 
 async function markFrames(page: Page): Promise<number> {
@@ -156,6 +185,11 @@ test.describe("chat scroll", () => {
 	test.use({ viewport: { width: 1920, height: 1080 }, colorScheme: "dark" });
 	test.beforeEach(async ({ page }) => {
 		await page.addInitScript(recordFrames);
+		const rate = Number(process.env.AO_E2E_CPU_THROTTLE ?? 0);
+		if (rate > 1) {
+			const cdp = await page.context().newCDPSession(page);
+			await cdp.send("Emulation.setCPUThrottlingRate", { rate });
+		}
 	});
 
 	test("opening a session, and switching while its log still loads, lands on the newest row", async ({ page }) => {
@@ -180,24 +214,41 @@ test.describe("chat scroll", () => {
 		}
 	});
 
+	test("a switched-to session paints its first frame at the newest row, with no scroll on the way", async ({
+		page,
+	}) => {
+		await page.goto("/#/projects/ao-demo/sessions/demo-chat");
+		await expectAtEnd(page, "demo-chat");
+		for (const id of ["demo-chat-tall", "demo-chat", "demo-chat-long", "demo-chat-tall"]) {
+			const mark = await markFrames(page);
+			await go(page, id);
+			await expectAtEnd(page, id);
+			await page.waitForTimeout(300);
+			const painted = (await framesSince(page, mark)).filter((s) => s.session === id && s.visible && s.rows.length > 0);
+			expect(painted.length, `${id} painted frames`).toBeGreaterThan(0);
+			const away = painted.filter((s) => s.fromEnd > 2).map((s) => `frame ${s.frame}: ${Math.round(s.fromEnd)}px`);
+			expect(away, `${id}: frames painted above the newest row`).toEqual([]);
+		}
+	});
+
 	test("a small scroll up while a reply streams is not pulled back to the end", async ({ page }) => {
 		await openStreamingTall(page);
-		const mark = await markFrames(page);
+		await armFirstWheel(page);
 		await wheelOverStream(page, 40, -6, 16);
 		await page.waitForTimeout(300);
 
-		const frames = await framesSince(page, mark);
+		const frames = await framesSinceFirstWheel(page);
 		expect(maxMoveUp(frames), "no row moves up against the scroll").toBeLessThanOrEqual(2);
 		expect(await fromEnd(page), "the user left the end").toBeGreaterThan(100);
 	});
 
 	test("scrolling up through rows not yet measured paints no overlap and no jump", async ({ page }) => {
 		await openStreamingTall(page);
-		const mark = await markFrames(page);
+		await armFirstWheel(page);
 		await wheelOverStream(page, 30, -80, 50);
 		await page.waitForTimeout(300);
 
-		const frames = await framesSince(page, mark);
+		const frames = await framesSinceFirstWheel(page);
 		expect(maxOverlap(frames), "no painted frame overlaps two rows").toBeLessThanOrEqual(1);
 		expect(maxMoveUp(frames), "no row moves up against the scroll").toBeLessThanOrEqual(2);
 	});
@@ -247,14 +298,99 @@ test.describe("chat scroll", () => {
 
 		await wheelOverStream(page, 10, -150, 30);
 		await expect(jump).toBeVisible();
+		const glide = await markFrames(page);
 		await jump.click();
 		await expect.poll(() => fromEnd(page)).toBeLessThanOrEqual(2);
 		await expect(jump).toHaveCount(0);
+		const gliding = await framesSince(page, glide);
+		expect(gliding.filter((s) => s.fromEnd > 2).length, "the jump glides over several frames").toBeGreaterThan(2);
+		expect(maxOverlap(gliding), "no painted frame overlaps two rows").toBeLessThanOrEqual(1);
 
 		const mark = await markFrames(page);
 		await page.waitForTimeout(1000);
 		const behind = (await framesSince(page, mark)).filter((s) => s.fromEnd > 2);
 		expect(behind, "keeps following after the jump").toEqual([]);
+	});
+
+	test("a rail jump glides the turn's message to the top, paints no overlap, and stops following", async ({ page }) => {
+		await openStreamingTall(page);
+		const rail = page.getByRole("navigation", { name: "Turns" });
+		const tick = rail.getByRole("button", { name: /^Turn 10:/ });
+		const mark = await markFrames(page);
+		await tick.click();
+		const target = stream(page).locator(".chat-row", { hasText: "Step 10: run the checks" });
+		await expect(target).toBeVisible();
+		await page.waitForTimeout(1500);
+
+		const key = await target.getAttribute("data-key");
+		const frames = await framesSince(page, mark);
+		const landed = frames.findIndex((s) => s.rows.some((r) => r.key === key));
+		expect(landed, "the turn's message was painted").toBeGreaterThanOrEqual(0);
+		const tops = frames.slice(landed).map((s) => s.rows.find((r) => r.key === key)?.top ?? NaN);
+		expect(new Set(tops).size, "the message was painted at several positions on its way up").toBeGreaterThan(2);
+		const rest = tops.findIndex((top, i) => tops.slice(i).every((t) => t === top));
+		expect(tops[rest], "the message comes to rest at the top").toBeLessThanOrEqual(40);
+		expect(maxMoveUp(frames.slice(landed)), "the glide only moves rows down toward the message").toBeLessThanOrEqual(1);
+		expect(maxOverlap(frames), "no painted frame overlaps two rows").toBeLessThanOrEqual(1);
+		await expect(tick).toHaveAttribute("aria-current", "true");
+		expect(await fromEnd(page), "the jump left the end, and new turns below did not pull it back").toBeGreaterThan(100);
+	});
+
+	test("a wheel during a glide stops it and leaves the user where they scrolled", async ({ page }) => {
+		await openStreamingTall(page);
+		await wheelOverStream(page, 10, -150, 30);
+		const jump = page.getByRole("button", { name: "Jump to latest" });
+		await expect(jump).toBeVisible();
+		await page.evaluate(() => {
+			const sc = document.querySelector<HTMLElement>('[data-testid="chat-stream"]')!;
+			const w = window as unknown as { __stoppedAt?: number };
+			document.querySelector<HTMLButtonElement>('[aria-label="Jump to latest"]')!.click();
+			const start = sc.scrollTop;
+			const watch = () => {
+				if (sc.scrollTop === start) {
+					requestAnimationFrame(watch);
+					return;
+				}
+				sc.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, bubbles: true }));
+				w.__stoppedAt = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+			};
+			requestAnimationFrame(watch);
+		});
+		await expect
+			.poll(() => page.evaluate(() => (window as unknown as { __stoppedAt?: number }).__stoppedAt))
+			.toBeDefined();
+		const mark = await markFrames(page);
+		const stopped = await page.evaluate(() => (window as unknown as { __stoppedAt: number }).__stoppedAt);
+		await page.waitForTimeout(600);
+		expect(stopped, "the glide had not reached the end").toBeGreaterThan(100);
+		expect(maxMove(await framesSince(page, mark)), "nothing moves once the user took over").toBeLessThanOrEqual(1);
+	});
+
+	test("with reduced motion, a rail jump lands in one frame", async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await openStreamingTall(page);
+		const tick = page.getByRole("navigation", { name: "Turns" }).getByRole("button", { name: /^Turn 10:/ });
+		const mark = await markFrames(page);
+		await tick.click();
+		const target = stream(page).locator(".chat-row", { hasText: "Step 10: run the checks" });
+		await expect(target).toBeVisible();
+		await page.waitForTimeout(600);
+		const key = await target.getAttribute("data-key");
+		const tops = (await framesSince(page, mark)).flatMap((s) => s.rows.filter((r) => r.key === key).map((r) => r.top));
+		expect(new Set(tops).size, `one landing position, saw ${[...new Set(tops)].join(", ")}`).toBe(1);
+		expect(tops[0], "the message sits at the top").toBeLessThanOrEqual(40);
+	});
+
+	test("the rail's current tick follows the scroll", async ({ page }) => {
+		await openStreamingTall(page);
+		const rail = page.getByRole("navigation", { name: "Turns" });
+		const current = rail.locator('[aria-current="true"]');
+		const atEnd = await current.getAttribute("aria-label");
+		await rail.getByRole("button", { name: /^Turn 5:/ }).click();
+		await expect(current).toHaveAttribute("aria-label", /^Turn 5:/);
+		await wheelOverStream(page, 3, 400, 50);
+		await expect(current).not.toHaveAttribute("aria-label", /^Turn 5:/);
+		expect(await current.getAttribute("aria-label")).not.toBe(atEnd);
 	});
 
 	test("scrolled up with nothing new below, there is no jump button", async ({ page }) => {

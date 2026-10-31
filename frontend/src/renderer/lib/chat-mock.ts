@@ -512,6 +512,75 @@ function tallEntries(): ChatEntry[] {
 	}));
 }
 
+export const MOCK_LIVE_CHAT_SESSION = "demo-chat-live";
+
+const LIVE_BRIEF = [
+	"/pstack:poteto-mode # Goal",
+	"Make the webhook sender's soak test reliable and keep it running in the background.",
+	"",
+	"## Done when",
+	"- `go test ./internal/webhook/...` passes",
+	"- the soak test runs in the background and reports back",
+].join("\n");
+const LIVE_COMMAND_MS = 6_000;
+
+function liveEntries(): ChatEntry[] {
+	const steps: Step[] = [
+		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],
+		sent("live-brief", LIVE_BRIEF),
+		lifecycle("live-brief", "started"),
+		say("msg_l1", "Starting with the package tests, then the soak test in the background."),
+		tool("t-live-1", "msg_l2", "Read", { file_path: "/work/project/internal/webhook/sender.go" }),
+		result("t-live-1", "package webhook\n..."),
+	];
+	return steps.map(([dir, payload], i) => ({
+		seq: i + 1,
+		ts: new Date(Date.now() - (steps.length - i) * 1_000).toISOString(),
+		dir,
+		payload,
+	}));
+}
+
+const liveTails = new Set<string>();
+
+function playLiveTail(id: string, session: StubSession): void {
+	if (liveTails.has(id)) return;
+	liveTails.add(id);
+	append(id, session, [
+		tool("t-live-2", "msg_l3", "Bash", {
+			command: "go test ./internal/webhook/... -count=1",
+			description: "Run the webhook package tests",
+		}),
+	]);
+	setTimeout(() => {
+		append(id, session, [
+			result("t-live-2", "ok  \tbilling/internal/webhook\t1.204s"),
+			tool("t-live-3", "msg_l4", "Bash", {
+				command: "go test ./internal/webhook/... -run Soak -count=50",
+				description: "Run the soak test",
+				run_in_background: true,
+			}),
+			[
+				"out",
+				{
+					type: "system",
+					subtype: "task_started",
+					task_id: "live-soak",
+					tool_use_id: "t-live-3",
+					task_type: "local_bash",
+					is_backgrounded: true,
+					description: "Run the soak test",
+					session_id: SESSION,
+				},
+			],
+			result("t-live-3", "Command running in background with ID: live-soak."),
+			say("msg_l5", "The package tests pass. The soak test runs in the background; I will report when it lands."),
+			["out", { type: "result", subtype: "success", is_error: false, num_turns: 3, total_cost_usd: 0.04 }],
+			lifecycle("live-brief", "completed"),
+		]);
+	}, LIVE_COMMAND_MS);
+}
+
 const tallTails = new Set<string>();
 
 /** Plays the tall session's live turns once per page: each streams its reply word by word, then settles. */
@@ -553,7 +622,14 @@ function stubSession(id: string): Promise<StubSession> {
 				.split("\n")
 				.filter((line) => line.trim() !== "")
 				.map((line) => JSON.parse(line) as ChatEntry);
-			const log = id === MOCK_TALL_CHAT_SESSION ? tallEntries() : long ? fixture : mockChatEntries(fixture);
+			const log =
+				id === MOCK_TALL_CHAT_SESSION
+					? tallEntries()
+					: id === MOCK_LIVE_CHAT_SESSION
+						? liveEntries()
+						: long
+							? fixture
+							: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -682,6 +758,7 @@ export function createStubChatMux(): ChatMux {
 		each(id, (l) => l.live());
 		connection.forEach((l) => l("open"));
 		if (id === MOCK_TALL_CHAT_SESSION) playTallTail(id, session);
+		else if (id === MOCK_LIVE_CHAT_SESSION) playLiveTail(id, session);
 		else if (session.folder.transcript().busy) {
 			mockChatDeltas().forEach((delta, i) => later(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));
 		}

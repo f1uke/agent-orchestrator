@@ -62,6 +62,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		attempts: 0,
 		retryTimer: null as ReturnType<typeof setTimeout> | null,
 		frame: null as number | null,
+		liveAfterFlush: false,
 		sessionId,
 	}).current;
 
@@ -81,8 +82,12 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 				overlay: r.overlay,
 				entries: [...r.entries],
 			});
+			if (r.liveAfterFlush) {
+				r.liveAfterFlush = false;
+				transition("live");
+			}
 		});
-	}, [r]);
+	}, [r, transition]);
 
 	const teardown = useCallback(
 		(id: string | undefined) => {
@@ -142,7 +147,8 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 				live: () => {
 					if (!current()) return;
 					r.attempts = 0;
-					transition("live");
+					if (r.frame !== null && connectionRef.current === "connecting") r.liveAfterFlush = true;
+					else transition("live");
 				},
 				offline: () => {
 					if (!current()) return;
@@ -175,6 +181,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		r.overlay = emptyOverlay;
 		r.lastSeq = 0;
 		r.attempts = 0;
+		r.liveAfterFlush = false;
 		r.sessionId = sessionId;
 		setSnapshot(emptySnapshot(sessionId));
 		if (!sessionId) return;
@@ -201,6 +208,13 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		connect();
 	}, [connect, daemonReady, r, sessionId, sessionLive]);
 
-	const shown = snapshot.sessionId === sessionId ? snapshot : emptySnapshot(sessionId);
-	return { transcript: shown.transcript, overlay: shown.overlay, entries: shown.entries, connection, error };
+	const current = snapshot.sessionId === sessionId;
+	const shown = current ? snapshot : emptySnapshot(sessionId);
+	return {
+		transcript: shown.transcript,
+		overlay: shown.overlay,
+		entries: shown.entries,
+		connection: current ? connection : "connecting",
+		error: current ? error : undefined,
+	};
 }
