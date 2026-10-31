@@ -200,7 +200,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 			Feed:     deps.ActivityFeed,
 		},
 		chat:           &controllers.ChatController{Svc: deps.Chat},
-		chatFiles:      &controllers.ChatFilesController{Sessions: deps.Sessions, KnowledgeDir: cfg.KnowledgeDir},
+		chatFiles:      &controllers.ChatFilesController{Sessions: deps.Sessions, KnowledgeDir: cfg.KnowledgeDir, DataDir: cfg.DataDir},
 		jira:           &controllers.JiraController{Svc: deps.Jira},
 		prs:            &controllers.PRsController{Svc: deps.PRs},
 		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},

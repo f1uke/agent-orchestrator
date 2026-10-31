@@ -67,6 +67,7 @@ const ROUTE_TEMPLATES = [
 	"/api/v1/sessions/{sessionId}/activity",
 	"/api/v1/sessions/{sessionId}/auto-nudge",
 	"/api/v1/sessions/{sessionId}/auto-resolve",
+	"/api/v1/sessions/{sessionId}/chat/blobs/{blob}",
 	"/api/v1/sessions/{sessionId}/chat/files/resolve",
 	"/api/v1/sessions/{sessionId}/chat/files/{root}/*",
 	"/api/v1/sessions/{sessionId}/comment-dispatch",

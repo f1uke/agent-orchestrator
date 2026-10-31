@@ -11,10 +11,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatblob"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatfiles"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
 )
 
 const (
@@ -38,6 +40,8 @@ type ChatFilesController struct {
 	Sessions ChatFilesSessions
 	// KnowledgeDir is the knowledge store root; a session reads KnowledgeDir/<project>.
 	KnowledgeDir string
+	// DataDir holds each chat session's event log and the blobs it names.
+	DataDir string
 }
 
 // Register mounts the chat file routes on the supplied router.
@@ -45,6 +49,7 @@ func (c *ChatFilesController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/chat/files/resolve", c.resolve)
 	r.Get("/sessions/{sessionId}/chat/files/{root}/*", c.serve)
 	r.Head("/sessions/{sessionId}/chat/files/{root}/*", c.serve)
+	r.Get("/sessions/{sessionId}/chat/blobs/{blob}", c.blob)
 }
 
 func (c *ChatFilesController) roots(r *http.Request) (chatfiles.Roots, error) {
@@ -150,6 +155,39 @@ func (c *ChatFilesController) serve(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Security-Policy", chatFileCSP)
 	h.Set("Cache-Control", "private, no-cache")
 	http.ServeContent(w, r, "", file.ModTime, f)
+}
+
+// blob serves an image the session's event log names by reference. A blob is
+// named by the hash of its bytes, so it never changes and may be cached.
+func (c *ChatFilesController) blob(w http.ResponseWriter, r *http.Request) {
+	if c.Sessions == nil || c.DataDir == "" {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/chat/blobs/{blob}")
+		return
+	}
+	id := sessionID(r)
+	if _, err := c.Sessions.Get(r.Context(), id); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	logPath, _ := sessionhost.Paths(c.DataDir, string(id))
+	name := chi.URLParam(r, "blob")
+	path, ok := chatblob.ForLog(logPath).Path(name)
+	if !ok {
+		chatFileNotFound(w, r)
+		return
+	}
+	f, err := os.Open(path) //nolint:gosec // G304: Path accepts only <sha256>.<ext> names inside the session's blob dir
+	if err != nil {
+		chatFileNotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	h := w.Header()
+	h.Set("Content-Type", chatblob.MIME(name))
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", chatFileCSP)
+	h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	http.ServeContent(w, r, "", time.Time{}, f)
 }
 
 func chatFileNotFound(w http.ResponseWriter, r *http.Request) {

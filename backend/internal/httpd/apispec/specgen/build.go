@@ -2673,6 +2673,18 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/chat/blobs/{blob}", id: "getChatBlob", tag: "sessions",
+			summary:    "Serve an image a chat session's event log stores by reference (an ao_blob image source). The name is the hash of the bytes, so the answer is immutable. Answers with the type its extension names, nosniff and a sandbox CSP. 404 for an unknown session, a name that is not a blob name, or a missing blob",
+			pathParams: []any{controllers.ChatBlobParam{}},
+			resps: []respUnit{
+				{http.StatusOK, ""},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+			contentTypes: map[int]string{http.StatusOK: "application/octet-stream"},
+		},
+		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/mode", id: "setChatMode", tag: "sessions",
 			summary:    "Change the permission mode of a chat session's agent",
 			pathParams: []any{controllers.SessionIDParam{}},
