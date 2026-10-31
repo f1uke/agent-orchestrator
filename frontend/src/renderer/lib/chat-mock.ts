@@ -1007,8 +1007,6 @@ const REPLAY_TICK_MS = 16;
 
 const TAIL_TURNS = 3;
 
-// Where the daemon's tailed replay starts: the third-newest human turn, with
-// the user_origin note just before it.
 function tailStart(log: readonly ChatEntry[]): number {
 	let turns = 0;
 	for (let i = log.length - 1; i > 0; i--) {

@@ -405,9 +405,8 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 		onChange: pinToEnd,
 	});
 
-	// Rows were placed from the offset the virtualizer last saw; when pinning
-	// moves the scroll, it learns the new offset before the frame is painted,
-	// not a scroll event later, so no frame shows rows from the old position.
+	// The virtualizer learns of a scroll from the scroll event, a frame after
+	// pinToEnd writes it; until then it places rows for the old offset.
 	const [, repaint] = useReducer((n: number) => n + 1, 0);
 	useLayoutEffect(() => {
 		pinToEnd();
@@ -426,8 +425,8 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 	};
 	const atEndRef = useRef(atEnd);
 	atEndRef.current = atEnd;
-	// Rows that mount in the same commit as the reveal would paint once at their
-	// estimated heights; the check runs again a frame later, once they are placed.
+	// Rows mounted in this commit are placed at estimated heights until the
+	// virtualizer measures them, so the reveal waits a frame and checks again.
 	useLayoutEffect(() => {
 		if (revealed || replaying || !atEnd()) return;
 		const frame = requestAnimationFrame(() => {

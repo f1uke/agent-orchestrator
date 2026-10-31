@@ -46,19 +46,16 @@ func (s *chatStream) stop() {
 func (c *connState) handleChat(msg clientMsg) {
 	switch msg.Type {
 	case msgOpen:
-		c.openChat(msg.ID, chatOpen{fromSeq: msg.FromSeq, blobRefs: msg.BlobRefs, tail: msg.Tail})
+		c.openChat(msg.ID, chatOpen{fromSeq: msg.FromSeq, blobRefs: msg.BlobRefs, newestFirst: msg.Tail})
 	case msgClose:
 		c.closeChat(msg.ID)
 	}
 }
 
-// chatOpen is what a client asked for when it opened a chat stream.
 type chatOpen struct {
-	fromSeq  uint64
-	blobRefs bool
-	// tail sends the last turns of a full replay first, then a history
-	// marker, then the older entries, so the newest message shows at once.
-	tail bool
+	fromSeq     uint64
+	blobRefs    bool
+	newestFirst bool
 }
 
 func (c *connState) openChat(id string, open chatOpen) {
@@ -128,14 +125,14 @@ func (c *connState) streamChat(ctx context.Context, s *chatStream, id string, op
 		return
 	}
 	blobs = chatblob.ForLog(logPath)
-	data, err := readChatLog(logPath)
+	data, err := readWholeLines(logPath)
 	if err != nil {
 		end(serverMsg{Type: msgError, Error: err.Error()})
 		return
 	}
 	cut := 0
-	if open.tail && open.fromSeq == 0 {
-		cut = tailStart(data, tailTurns)
+	if open.newestFirst && open.fromSeq == 0 {
+		cut = newestTurnsOffset(data, tailTurns)
 	}
 	newest, err := decodeAfter(data[cut:], open.fromSeq)
 	if err != nil {
@@ -195,9 +192,7 @@ func (m *Manager) chatPaths(ctx context.Context, id string) (logPath, socketPath
 	return logPath, socketPath, nil
 }
 
-// readChatLog returns the whole lines of the log, leaving out a line the host
-// is still writing. A log not written yet is empty.
-func readChatLog(path string) ([]byte, error) {
+func readWholeLines(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -236,14 +231,9 @@ func shapeImages(blobs chatblob.Store, e chatproto.Entry, refs bool) (chatproto.
 	return e, nil
 }
 
-// tailTurns is how many of the newest human turns a tailed replay sends first.
 const tailTurns = 3
 
-// tailStart is the offset of the line that opens the nth-newest human turn
-// (its user_origin note, or the user message itself), found from the end of
-// the log without decoding the rest of it; 0 when the log holds n turns or
-// fewer.
-func tailStart(data []byte, n int) int {
+func newestTurnsOffset(data []byte, n int) int {
 	for end := len(data); end > 0; {
 		start := bytes.LastIndexByte(data[:end-1], '\n') + 1
 		if opensTurn(data[start:end]) {

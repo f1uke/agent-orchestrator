@@ -25,12 +25,7 @@ export type UseChatSessionOptions = {
 	createMux?: () => ChatMux;
 };
 
-// Where a replay from seq 0 is. "newest": the newest turns are arriving, and
-// none show until the history marker. "older": the older entries are
-// arriving, oldest first, and show folded in order when the replay ends.
-// "done": entries arrive in seq order and show as they come, as they do on a
-// resume after the last seq held.
-type Replay = "newest" | "older" | "done";
+type Replay = "holdNewest" | "holdOlder" | "inOrder";
 
 const RETRY_BASE_MS = 500;
 const RETRY_MAX_MS = 8_000;
@@ -73,7 +68,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		attempts: 0,
 		retryTimer: null as ReturnType<typeof setTimeout> | null,
 		frame: null as number | null,
-		replay: "done" as Replay,
+		replay: "inOrder" as Replay,
 		sessionId,
 	}).current;
 
@@ -92,17 +87,14 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 				transcript: r.folder.transcript(),
 				overlay: r.overlay,
 				entries: [...r.entries],
-				replaying: r.replay === "newest",
+				replaying: r.replay === "holdNewest",
 			});
 		});
 	}, [r]);
 
-	// A tailed replay sends its newest turns first, then the older entries, so
-	// the entries arrive out of order once; the whole log is folded again in
-	// seq order when the replay ends.
-	const endReplay = useCallback(() => {
-		if (r.replay === "done") return;
-		r.replay = "done";
+	const foldInSeqOrder = useCallback(() => {
+		if (r.replay === "inOrder") return;
+		r.replay = "inOrder";
 		r.entries.sort((a, b) => a.seq - b.seq);
 		r.folder = new ChatFolder();
 		for (const entry of r.entries) {
@@ -128,9 +120,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		[r],
 	);
 
-	// A replay cut off before its end may lack older entries, so the next open
-	// starts over from the beginning of the log.
-	const restart = useCallback(() => {
+	const forgetLog = useCallback(() => {
 		r.folder = new ChatFolder();
 		r.entries = [];
 		r.lastSeq = 0;
@@ -163,7 +153,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 			mux.listen(sessionId, {
 				entry: (entry) => {
 					if (!current()) return;
-					if (r.replay === "older") {
+					if (r.replay === "holdOlder") {
 						r.entries.push(entry);
 						return;
 					}
@@ -176,11 +166,11 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 						console.warn("chat: skipped an entry the fold rejected", err);
 					}
 					r.overlay = settleOverlay(r.overlay, entry);
-					if (r.replay === "done") scheduleFlush();
+					if (r.replay === "inOrder") scheduleFlush();
 				},
 				history: () => {
-					if (!current() || r.replay !== "newest") return;
-					r.replay = "older";
+					if (!current() || r.replay !== "holdNewest") return;
+					r.replay = "holdOlder";
 					scheduleFlush();
 				},
 				delta: (delta) => {
@@ -191,12 +181,12 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 				live: () => {
 					if (!current()) return;
 					r.attempts = 0;
-					endReplay();
+					foldInSeqOrder();
 					transition("live");
 				},
 				offline: () => {
 					if (!current()) return;
-					endReplay();
+					foldInSeqOrder();
 					r.overlay = emptyOverlay;
 					scheduleFlush();
 					if (optionsRef.current.sessionLive) scheduleRetry("offline");
@@ -204,7 +194,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 				},
 				error: (message) => {
 					if (!current()) return;
-					endReplay();
+					foldInSeqOrder();
 					teardown(undefined);
 					transition("error", message);
 				},
@@ -212,19 +202,19 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 			mux.onConnectionChange((state) => {
 				if (!current() || state !== "closed") return;
 				if (connectionRef.current === "error" || connectionRef.current === "offline") return;
-				if (r.replay !== "done") restart();
+				if (r.replay !== "inOrder") forgetLog();
 				r.overlay = emptyOverlay;
 				scheduleFlush();
 				scheduleRetry("reconnecting");
 			}),
 		);
-		r.replay = r.lastSeq === 0 ? "newest" : "done";
+		r.replay = r.lastSeq === 0 ? "holdNewest" : "inOrder";
 		mux.open(sessionId, r.lastSeq);
-	}, [endReplay, r, restart, scheduleFlush, scheduleRetry, sessionId, teardown, transition]);
+	}, [foldInSeqOrder, r, forgetLog, scheduleFlush, scheduleRetry, sessionId, teardown, transition]);
 	connectRef.current = connect;
 
 	useEffect(() => {
-		restart();
+		forgetLog();
 		r.overlay = emptyOverlay;
 		r.attempts = 0;
 		r.sessionId = sessionId;
@@ -242,7 +232,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 			if (r.frame !== null) cancelAnimationFrame(r.frame);
 			r.frame = null;
 		};
-	}, [connect, r, restart, sessionId, teardown, transition]);
+	}, [connect, r, forgetLog, sessionId, teardown, transition]);
 
 	const { daemonReady, sessionLive } = options;
 	useEffect(() => {

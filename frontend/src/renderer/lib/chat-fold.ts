@@ -226,9 +226,8 @@ export class ChatFolder {
 	private sessions: string[] = [];
 	private items: ChatItem[] = [];
 	private itemKeys: string[] = [];
-	// The entry being folded, and how many items it has added so far.
-	private seq = 0;
-	private added = 0;
+	private entrySeq = 0;
+	private entryItems = 0;
 	private tools = new Map<string, number>();
 	private users = new Map<string, number>();
 	private origins = new Map<string, Origin>();
@@ -264,8 +263,8 @@ export class ChatFolder {
 	apply(entry: ChatEntry): void {
 		if (entry.seq <= this.last) return;
 		this.ts = entry.ts;
-		this.seq = entry.seq;
-		this.added = 0;
+		this.entrySeq = entry.seq;
+		this.entryItems = 0;
 		switch (entry.dir) {
 			case "out":
 			case "in": {
@@ -285,7 +284,7 @@ export class ChatFolder {
 
 	private push(item: ChatItem): void {
 		this.items.push(item);
-		this.itemKeys.push(`${this.seq}.${this.added++}`);
+		this.itemKeys.push(`${this.entrySeq}.${this.entryItems++}`);
 	}
 
 	transcript(): Transcript {
