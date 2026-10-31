@@ -38,7 +38,9 @@ export function ChatChapters({
 				type="button"
 			>
 				<List aria-hidden="true" className="chat-icon" />
-				<span className="chat-chapters__current">{chapters[active]?.title ?? "Chapters"}</span>
+				<span className="chat-chapters__current" title={chapters[active]?.title}>
+					{chapters[active]?.title ?? "Chapters"}
+				</span>
 			</button>
 			{open ? (
 				<ul className="chat-chapters__list">

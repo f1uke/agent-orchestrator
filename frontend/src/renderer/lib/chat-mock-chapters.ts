@@ -42,6 +42,34 @@ const finish = (turns: number): Step => [
 	{ type: "result", subtype: "success", is_error: false, num_turns: turns, total_cost_usd: 0.04 },
 ];
 
+const FINDINGS = [
+	"The fold already keeps tool inputs, so the renderer reads them directly.",
+	"Four places decide how a tool call reaches the screen:",
+	[
+		"`chat-fold.ts` pairs each call with its result and keeps the raw input.",
+		"`chat-rows.ts` turns the transcript into rows and folds a finished turn into one line.",
+		"`chat-tools.ts` words the summary line for a group of calls.",
+		"`ChatPane.tsx` draws each row, and a few tools get a row of their own.",
+		"`chat-rail.ts` lists the turns for the rail in the right gutter.",
+		"`chat-inspect.ts` derives the task list from TaskCreate and TaskUpdate.",
+	]
+		.map((line) => `- ${line}`)
+		.join("\n"),
+	"A tool that has something to show on its own, such as a visual, must stay out of the fold. Otherwise it disappears the moment the turn ends and the reader has to open the fold to find it. The same holds for a chapter divider and for the wrap-up box, which is why one predicate decides what stays in view.",
+	"A chapter divider also has to split the fold. If the whole turn folded into one line, the divider would sit above a single summary and say nothing about where each part of the work begins. One fold per chapter keeps the dividers in order with the work they name.",
+	"Things to check once the renderer exists:",
+	[
+		"The divider keeps its place when a turn folds and when it unfolds.",
+		"The contents list stays out of the turn rail and out of the text column.",
+		"The task list moves to the newest turn after the next message.",
+		"Only the latest wrap-up box has live reply buttons.",
+		"A reply fills the composer and never sends.",
+	]
+		.map((line) => `- ${line}`)
+		.join("\n"),
+	"None of these need a new tool. The three tools from the previous change already carry everything the screen needs, so the work is in how rows are chosen and drawn.",
+].join("\n\n");
+
 const TASKS = [
 	"Read the chat fold",
 	"Add the sandboxed frame",
@@ -65,7 +93,7 @@ export function chapterEntries(): ChatEntry[] {
 		result("c-r2", "export function chatRows() {}"),
 		tool("c-g1", "msg_c4", "Grep", { pattern: "OWN_ROW_TOOLS" }),
 		result("c-g1", "src/chat-rows.ts:42"),
-		say("msg_c5", "The fold already keeps tool inputs, so the renderer reads them directly."),
+		say("msg_c5", FINDINGS),
 		finish(3),
 		lifecycle("c-1", "completed"),
 		asked("c-2", "Go ahead and build it"),
@@ -103,10 +131,8 @@ export function chapterEntries(): ChatEntry[] {
 		lifecycle("c-3", "started"),
 		tool("c-ch3", "msg_c15", MARK_CHAPTER, { title: "Verification" }),
 		result("c-ch3", 'Chapter marked: "Verification". Continue your work.'),
-		tool("c-v1", "msg_c16", "TaskUpdate", { taskId: "3", status: "completed" }),
+		tool("c-v1", "msg_c16", "TaskUpdate", { taskId: "3", status: "in_progress" }),
 		result("c-v1", "Updated task #3 status"),
-		tool("c-v2", "msg_c17", "TaskUpdate", { taskId: "4", status: "in_progress" }),
-		result("c-v2", "Updated task #4 status"),
 		tool("c-v3", "msg_c18", "Bash", {
 			command: "npx playwright test chat-widgets",
 			description: "Run the browser spec",

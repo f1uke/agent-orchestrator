@@ -20,7 +20,7 @@ export function ChatWrapUp({
 						<button
 							aria-disabled={live ? undefined : true}
 							className={cn("chat-wrap__reply", i === 0 && "chat-wrap__reply--primary")}
-							key={reply}
+							key={`${i}:${reply}`}
 							onClick={live ? () => onPrompt(reply) : undefined}
 							type="button"
 						>
