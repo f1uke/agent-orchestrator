@@ -53,6 +53,10 @@ type MCPReply struct {
 	Message   json.RawMessage
 }
 
+// GetContextUsage asks claude for the /context breakdown of its context
+// window. The request is undocumented, so callers must expect no answer.
+type GetContextUsage struct{ RequestID string }
+
 // PermissionAnswer answers a can_use_tool request.
 type PermissionAnswer struct {
 	RequestID string
@@ -66,6 +70,7 @@ func (SetPermissionMode) isOutbound() {}
 func (SetModel) isOutbound()          {}
 func (PermissionAnswer) isOutbound()  {}
 func (MCPReply) isOutbound()          {}
+func (GetContextUsage) isOutbound()   {}
 
 // Decision is the verdict in a PermissionAnswer.
 type Decision interface{ isDecision() }
@@ -132,6 +137,8 @@ func Encode(o Outbound) ([]byte, error) {
 			return nil, errors.New("chatproto: set_model needs a model")
 		}
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "set_model", "model": m.Model})
+	case GetContextUsage:
+		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "get_context_usage"})
 	case PermissionAnswer:
 		return encodePermissionAnswer(m)
 	case MCPReply:
