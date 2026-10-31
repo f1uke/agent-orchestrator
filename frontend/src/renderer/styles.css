@@ -8128,15 +8128,6 @@ ol.note-prose__list {
 	color: var(--fg-muted);
 }
 
-.chat-think__tail {
-	min-width: 0;
-	overflow: hidden;
-	margin-left: 4px;
-	font-style: italic;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
 .chat-chev--open {
 	transform: rotate(90deg);
 }
@@ -8201,6 +8192,11 @@ ol.note-prose__list {
 	color: var(--fg-passive);
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* A thinking stream's latest line, as the closed Thinking row's detail. */
+[data-thinking] .chat-live__detail {
+	font-style: italic;
 }
 
 .chat-dots {

@@ -541,6 +541,57 @@ function liveEntries(): ChatEntry[] {
 	}));
 }
 
+/**
+ * The preview session where claude thinks after a tool result with nothing
+ * else on screen: only system/thinking_tokens events arrive, as with a model
+ * whose thinking text is redacted.
+ */
+export const MOCK_THINKING_CHAT_SESSION = "demo-chat-thinking";
+
+const thinkingTokens = (estimated: number, delta: number): Step => [
+	"out",
+	{
+		type: "system",
+		subtype: "thinking_tokens",
+		estimated_tokens: estimated,
+		estimated_tokens_delta: delta,
+		session_id: SESSION,
+		user_message_uuid: "thinking-brief",
+	},
+];
+
+function thinkingEntries(): ChatEntry[] {
+	const steps: Step[] = [
+		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],
+		sent("thinking-brief", "Find why the parked-event counter drifts under load, then fix it."),
+		lifecycle("thinking-brief", "started"),
+		say("msg_k1", "Reading the counter and its callers first."),
+		tool("t-think-1", "msg_k2", "Read", { file_path: "/work/project/internal/webhook/metrics.go" }),
+		result("t-think-1", "package webhook\n..."),
+		tool("t-think-2", "msg_k3", "Grep", { pattern: "parkedTotal", path: "/work/project/internal" }),
+		result("t-think-2", "Found 4 matches"),
+		thinkingTokens(50, 50),
+		thinkingTokens(195, 145),
+		thinkingTokens(410, 215),
+	];
+	const at = (i: number) => new Date(Date.now() - (steps.length - i) * 2_000).toISOString();
+	return steps.map(([dir, payload], i) => ({ seq: i + 1, ts: at(i), dir, payload }));
+}
+
+const THINKING_TICK_MS = 1_500;
+const thinkingTails = new Set<string>();
+
+/** Keeps the thinking session thinking: a thinking_tokens burst every tick, and nothing else. */
+function playThinkingTail(id: string, session: StubSession): void {
+	if (thinkingTails.has(id)) return;
+	thinkingTails.add(id);
+	let estimated = 410;
+	setInterval(() => {
+		estimated += 120;
+		append(id, session, [thinkingTokens(estimated, 120)]);
+	}, THINKING_TICK_MS);
+}
+
 const liveTails = new Set<string>();
 
 function playLiveTail(id: string, session: StubSession): void {
@@ -627,9 +678,11 @@ function stubSession(id: string): Promise<StubSession> {
 					? tallEntries()
 					: id === MOCK_LIVE_CHAT_SESSION
 						? liveEntries()
-						: long
-							? fixture
-							: mockChatEntries(fixture);
+						: id === MOCK_THINKING_CHAT_SESSION
+							? thinkingEntries()
+							: long
+								? fixture
+								: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -759,6 +812,7 @@ export function createStubChatMux(): ChatMux {
 		connection.forEach((l) => l("open"));
 		if (id === MOCK_TALL_CHAT_SESSION) playTallTail(id, session);
 		else if (id === MOCK_LIVE_CHAT_SESSION) playLiveTail(id, session);
+		else if (id === MOCK_THINKING_CHAT_SESSION) playThinkingTail(id, session);
 		else if (session.folder.transcript().busy) {
 			mockChatDeltas().forEach((delta, i) => later(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));
 		}

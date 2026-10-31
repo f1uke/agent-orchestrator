@@ -148,6 +148,13 @@ export type Transcript = {
 	tasks: BackgroundTask[];
 	/** The size of the context the latest top-level response saw, known before the turn's result. */
 	contextTokens?: number;
+	/**
+	 * When claude started its current stretch of top-level thinking: the first
+	 * thinking signal (a thinking_tokens event or a thinking block) since the
+	 * last input, tool result, tool use, text or turn end. Absent once any of
+	 * those follows, so it is set only while the newest signal is thinking.
+	 */
+	thinkingSince?: string;
 	lastSeq: number;
 };
 
@@ -230,6 +237,7 @@ export class ChatFolder {
 	private ts = "";
 	private context: number | undefined;
 	private turnStart: string | undefined;
+	private thinkingSince: string | undefined;
 	private awaitingBrief = false;
 
 	get lastSeq(): number {
@@ -279,6 +287,7 @@ export class ChatFolder {
 			model: this.model,
 			tasks: [...this.tasks.values()],
 			contextTokens: this.context,
+			thinkingSince: this.thinkingSince,
 			lastSeq: this.last,
 		};
 	}
@@ -291,6 +300,7 @@ export class ChatFolder {
 				if (event.model !== "") this.model = event.model;
 				break;
 			case "system":
+				if (event.subtype === "thinking_tokens" && event.parentToolUseId === "") this.thinkingSince ??= this.ts;
 				if (event.permissionMode !== "") this.mode = event.permissionMode;
 				if (event.subtype === "compact_boundary") this.notice("compacted", "");
 				if (event.task) this.applyTask(event.task);
@@ -300,10 +310,12 @@ export class ChatFolder {
 				if (event.parentToolUseId === "" && event.contextTokens !== undefined) this.context = event.contextTokens;
 				break;
 			case "user":
+				if (event.parentToolUseId === "") this.thinkingSince = undefined;
 				if (event.isReplay) this.applyTaskMessage(event.blocks);
 				else this.applyToolResults(event.blocks);
 				break;
 			case "result":
+				this.thinkingSince = undefined;
 				this.cost = event.totalCostUsd;
 				if (event.contextTokens !== undefined) this.context = event.contextTokens;
 				this.items.push({
@@ -338,8 +350,10 @@ export class ChatFolder {
 	}
 
 	private applyIn(event: ChatEvent): void {
-		if (event.type === "user") this.addUserInput(event.uuid, event.blocks);
-		else if (event.type === "control_response") this.answerPermission(event);
+		if (event.type === "user") {
+			this.thinkingSince = undefined;
+			this.addUserInput(event.uuid, event.blocks);
+		} else if (event.type === "control_response") this.answerPermission(event);
 		else if (event.type === "control_request" && (event.subtype === "initialize" || event.subtype === "set_model")) {
 			this.controls.set(event.requestId, event.subtype);
 		}
@@ -361,6 +375,10 @@ export class ChatFolder {
 
 	private applyAssistant(messageId: string, parentToolUseId: string, blocks: Block[]): void {
 		for (const block of blocks) {
+			if (parentToolUseId === "" && block.type === "thinking") this.thinkingSince ??= this.ts;
+			else if (parentToolUseId === "" && (block.type === "text" || block.type === "tool_use")) {
+				this.thinkingSince = undefined;
+			}
 			if (block.type === "text") {
 				this.items.push({ kind: "assistant_text", messageId, text: block.text, parentToolUseId });
 			} else if (block.type === "thinking") {
@@ -517,6 +535,7 @@ export class ChatFolder {
 	}
 
 	private endProcess(): void {
+		this.thinkingSince = undefined;
 		for (const [id, task] of this.tasks) {
 			if (unfinished(task.state)) this.tasks.set(id, { ...task, state: "stopped" });
 		}

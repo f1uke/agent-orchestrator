@@ -77,7 +77,7 @@ export function parseTaskNotification(text: string): TaskNotification | undefine
 
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
-	| { type: "system"; subtype: string; permissionMode: string; task?: TaskEvent }
+	| { type: "system"; subtype: string; permissionMode: string; parentToolUseId: string; task?: TaskEvent }
 	| {
 			type: "assistant";
 			messageId: string;
@@ -86,7 +86,7 @@ export type ChatEvent =
 			/** input + cache read + cache creation of message.usage: the context this response saw. */
 			contextTokens?: number;
 	  }
-	| { type: "user"; uuid: string; isReplay: boolean; blocks: Block[] }
+	| { type: "user"; uuid: string; parentToolUseId: string; isReplay: boolean; blocks: Block[] }
 	| {
 			type: "result";
 			subtype: string;
@@ -256,6 +256,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				type: "system",
 				subtype: str(line.subtype),
 				permissionMode: str(line.permissionMode),
+				parentToolUseId: str(line.parent_tool_use_id),
 				task: decodeTask(line),
 			};
 		case "assistant":
@@ -270,6 +271,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			return {
 				type: "user",
 				uuid: str(line.uuid),
+				parentToolUseId: str(line.parent_tool_use_id),
 				isReplay: line.isReplay === true,
 				blocks: decodeBlocks(message.content),
 			};

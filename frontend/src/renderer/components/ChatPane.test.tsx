@@ -581,6 +581,125 @@ describe("ChatPane calm view", () => {
 		expect(head).toHaveTextContent(/^Running a command 1m 26s$/);
 	});
 
+	describe("the live Thinking row", () => {
+		const at = (sec: number, e: ChatEntry): ChatEntry => ({
+			...e,
+			ts: new Date(Date.parse("2026-10-31T11:53:00.000Z") + sec * 1000).toISOString(),
+		});
+		const tokens = (sec: number) =>
+			at(sec, out({ type: "system", subtype: "thinking_tokens", estimated_tokens: 50, estimated_tokens_delta: 50 }));
+		const afterTools = () => [
+			at(0, userIn("u1", "find the drift")),
+			at(0, lifecycle("u1", "started")),
+			at(1, toolUse("a", "Read", { file_path: "/work/project/a.go" })),
+			at(2, toolDone("a")),
+			at(3, toolUse("b", "Grep", { pattern: "parked" })),
+			at(10, toolDone("b")),
+		];
+		const liveRows = () => [...document.querySelectorAll(".chat-live-row")];
+		const thinkingRow = () => liveRows().find((r) => r.querySelector(".chat-live__verb")?.textContent === "Thinking");
+
+		beforeEach(() => {
+			vi.useFakeTimers({
+				toFake: ["Date", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"],
+			});
+			vi.setSystemTime(Date.parse("2026-10-31T11:53:40.000Z"));
+		});
+
+		it("appears with only thinking_tokens after a tool result, ticks, and goes on the next tool_use", () => {
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools());
+			expect(thinkingRow()).toBeUndefined();
+
+			feed(tokens(12), tokens(12), tokens(20));
+			expect(liveRows()).toHaveLength(1);
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 28s$/);
+			act(() => vi.advanceTimersByTime(1000));
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 29s$/);
+
+			feed(at(41, toolUse("c", "Bash", { command: "go test ./internal/webhook/..." })));
+			expect(thinkingRow()).toBeUndefined();
+			expect(liveRows()).toHaveLength(1);
+		});
+
+		it("goes when claude starts to answer", () => {
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools(), tokens(12));
+			expect(thinkingRow()).toBeDefined();
+			feed(at(30, saying("The reset races the read.")));
+			expect(thinkingRow()).toBeUndefined();
+		});
+
+		it("shows the latest line of streamed thinking text while collapsed", () => {
+			const { feed, delta } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools(), tokens(12));
+			delta(
+				{ type: "message_start", message: { id: "m9" } },
+				{ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
+				{
+					type: "content_block_delta",
+					index: 0,
+					delta: { type: "thinking_delta", thinking: "The counter is read twice.\n\nMaybe the reset races.\n" },
+				},
+			);
+			expect(liveRows()).toHaveLength(1);
+			expect(thinkingRow()?.querySelector(".chat-live__detail")).toHaveTextContent(/^Maybe the reset races\.$/);
+			expect(screen.queryByRole("button", { name: /Thinking…/ })).toBeNull();
+		});
+
+		it("renders through the same live row as the Waiting on and Running rows", () => {
+			const shapeOf = (row: Element) => ({
+				classes: row.getAttribute("class"),
+				children: [...row.children].map((c) => c.getAttribute("class")),
+				parts: [...row.querySelectorAll("[class]")]
+					.map((c) => (c.getAttribute("class") ?? "").split(" ").find((n) => /^chat-(dots|live|chev)/.test(n)))
+					.filter((n) => n !== undefined),
+			});
+			const thinking = renderPane("chat", fakeApi(), rooted);
+			thinking.feed(...afterTools(), tokens(12));
+			const thinkingShape = shapeOf(liveRows()[0]);
+			thinking.unmount();
+
+			const running = renderPane("chat", fakeApi(), rooted);
+			running.feed(...afterTools(), at(30, toolUse("c", "Bash", { command: "go test" })));
+			const runningShape = shapeOf(liveRows()[0]);
+			running.unmount();
+
+			const waiting = renderPane("chat", fakeApi(), rooted);
+			waiting.feed(
+				userIn("u1", "soak"),
+				toolUse("bg", "Bash", { command: "go test -run Soak ./...", run_in_background: true }),
+				out({
+					type: "system",
+					subtype: "task_started",
+					task_id: "t1",
+					tool_use_id: "bg",
+					task_type: "local_bash",
+					is_backgrounded: true,
+					description: "soak",
+				}),
+				toolDone("bg", "Command running in background with ID: t1."),
+				saying("started it"),
+				out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			);
+			const waitingShape = shapeOf(liveRows()[0]);
+
+			expect(thinkingShape.classes).toContain("chat-live-row");
+			expect(thinkingShape.parts).toEqual([
+				"chat-live",
+				"chat-dots",
+				"chat-live__verb",
+				"chat-live__time",
+				"chat-chev",
+			]);
+			for (const other of [runningShape, waitingShape]) {
+				expect(other.classes).toBe(thinkingShape.classes);
+				expect(other.children).toEqual(thinkingShape.children);
+				expect(other.parts).toEqual(thinkingShape.parts);
+			}
+		});
+	});
+
 	it("folds a finished turn's work between the user's message and the last reply", async () => {
 		const { feed, user } = renderPane();
 		feed(

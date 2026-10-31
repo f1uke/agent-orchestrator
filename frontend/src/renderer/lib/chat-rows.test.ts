@@ -418,3 +418,71 @@ describe("chatRows on the recorded long session", () => {
 		expect(rows.some((r) => r.kind === "turn")).toBe(true);
 	});
 });
+
+describe("chatRows live thinking", () => {
+	const SINCE = "2026-10-31T11:53:12.000Z";
+	const afterTool = () => [user(), tool("Read"), tool("Grep")];
+	const overlayOf = (...blocks: Array<{ kind: "text" | "thinking"; text: string }>) => ({
+		...emptyOverlay,
+		blocks: blocks.map((b, index) => ({ messageId: "m9", index, ...b })),
+	});
+	const live = (rows: ChatRow[]) => rows.filter((r) => r.kind === "thinking_live");
+
+	it("ends the rows with one Thinking row when only thinking_tokens followed a tool result", () => {
+		const rows = rowsOf(afterTool(), { busy: true, thinkingSince: SINCE });
+		expect(rows.at(-1)).toEqual({ key: "thinking-live", kind: "thinking_live", since: SINCE, text: "" });
+	});
+
+	it("needs a real thinking signal and a running turn", () => {
+		expect(live(rowsOf(afterTool(), { busy: true }))).toEqual([]);
+		expect(live(rowsOf(afterTool(), { busy: false, thinkingSince: SINCE }))).toEqual([]);
+	});
+
+	it("never shows while a tool runs, a request waits, or claude streams text", () => {
+		const running = [user(), tool("Read"), tool("Bash", { command: "go test ./..." }, "none")];
+		expect(live(rowsOf(running, { busy: true, thinkingSince: SINCE }))).toEqual([]);
+		const pending = {
+			requestId: "r1",
+			toolName: "Bash",
+			toolUseId: "x",
+			kind: "permission" as const,
+			input: {},
+			suggestions: [],
+			defaultToNo: false,
+		};
+		expect(live(rowsOf(afterTool(), { busy: true, thinkingSince: SINCE, pending: [pending] }))).toEqual([]);
+		const streamingText = chatRows(
+			transcript(afterTool(), { busy: true, thinkingSince: SINCE }),
+			overlayOf({ kind: "thinking", text: "hmm" }, { kind: "text", text: "Found it" }),
+		);
+		expect(live(streamingText)).toEqual([]);
+	});
+
+	it("never stacks with the Waiting on row", () => {
+		const soak = { ...tool("Bash", { command: "soak", run_in_background: true }), id: "bg" };
+		const task = {
+			id: "k1",
+			toolUseId: "bg",
+			description: "soak",
+			taskType: "local_bash",
+			state: "running" as const,
+			background: true,
+			startedTs: SINCE,
+		};
+		const rows = rowsOf([user(), soak, say("started"), turnEnd()], { tasks: [task], thinkingSince: SINCE });
+		expect(rows.filter((r) => r.kind === "waiting" || r.kind === "thinking_live").map((r) => r.kind)).toEqual([
+			"waiting",
+		]);
+	});
+
+	it("takes over a streaming thinking block, so its text shows in the one live row", () => {
+		const rows = chatRows(
+			transcript(afterTool(), { busy: true }),
+			overlayOf({ kind: "thinking", text: "The counter is read twice.\n\nMaybe the reset races.\n" }),
+		);
+		expect(rows.filter((r) => r.kind === "streaming")).toEqual([]);
+		expect(live(rows)).toEqual([
+			{ key: "thinking-live", kind: "thinking_live", text: "The counter is read twice.\n\nMaybe the reset races.\n" },
+		]);
+	});
+});

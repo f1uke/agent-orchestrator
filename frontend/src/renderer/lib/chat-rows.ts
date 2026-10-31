@@ -23,6 +23,8 @@ export type ChatRow =
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
 	| { key: string; kind: "waiting"; tasks: WaitingTask[] }
+	/** Claude thinks with nothing else running. `since` is absent when only streamed thinking says so. */
+	| { key: string; kind: "thinking_live"; since?: string; text: string }
 	| {
 			key: string;
 			kind: "turn";
@@ -162,6 +164,24 @@ function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow |
 	return { key: "waiting", kind: "waiting", tasks };
 }
 
+// The one live row while claude thinks: no tool runs, nothing waits on the
+// user or on background work, and the newest signal is thinking. That signal
+// is a thinking_tokens event during a running turn, or an open thinking
+// stream, which only a running turn has.
+function thinkingRow(transcript: Transcript, overlay: StreamOverlay, rows: readonly ChatRow[]): ChatRow | undefined {
+	if (transcript.pending.length > 0 || rows.at(-1)?.kind === "waiting") return undefined;
+	const running = transcript.items.some((i) => i.kind === "tool_call" && i.parentToolUseId === "" && toolRunning(i));
+	if (running) return undefined;
+	const last = overlay.blocks.at(-1);
+	if (last?.kind === "text") return undefined;
+	const text = last?.kind === "thinking" ? last.text : "";
+	const since = transcript.busy ? transcript.thinkingSince : undefined;
+	if (since === undefined && text.trim() === "") return undefined;
+	const row: ChatRow = { key: "thinking-live", kind: "thinking_live", text };
+	if (since !== undefined) row.since = since;
+	return row;
+}
+
 export function chatRows(
 	transcript: Transcript,
 	overlay: StreamOverlay,
@@ -248,14 +268,17 @@ export function chatRows(
 	for (const pending of transcript.pending) {
 		if (!toolIds.has(pending.toolUseId)) rows.push({ key: `p${pending.requestId}`, kind: "pending", pending });
 	}
+	const thinking = thinkingRow(transcript, overlay, rows);
+	const streamed = thinking ? overlay.blocks.slice(0, -1) : overlay.blocks;
 	let lastText = -1;
-	overlay.blocks.forEach((block, i) => {
+	streamed.forEach((block, i) => {
 		if (block.kind === "text") lastText = i;
 	});
-	overlay.blocks.forEach((block, i) => {
+	streamed.forEach((block, i) => {
 		if (block.kind === "thinking" && block.text.trim() === "") return;
 		rows.push({ key: `s${block.messageId}:${block.index}`, kind: "streaming", block, caret: i === lastText });
 	});
+	if (thinking) rows.push(thinking);
 	return rows;
 }
 

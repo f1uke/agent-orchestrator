@@ -30,7 +30,15 @@ import type { WorkspaceSession } from "../types/workspace";
 import { ChatComposer } from "./ChatComposer";
 import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
-import { GroupRow, type OpenRows, ThinkingRow, type ToggleRow, TurnRow, WaitingRow } from "./ChatProcessRows";
+import {
+	GroupRow,
+	LiveThinkingRow,
+	type OpenRows,
+	ThinkingRow,
+	type ToggleRow,
+	TurnRow,
+	WaitingRow,
+} from "./ChatProcessRows";
 import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
@@ -601,12 +609,7 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			return <RequestCard answers={answers} request={row.pending} theme={theme} />;
 		case "streaming":
 			return row.block.kind === "thinking" ? (
-				<ThinkingRow
-					onToggle={(open) => toggleRow(row.key, open)}
-					open={openRows[row.key]}
-					streaming
-					text={row.block.text}
-				/>
+				<ThinkingRow onToggle={(open) => toggleRow(row.key, open)} open={openRows[row.key]} text={row.block.text} />
 			) : (
 				<div className="chat-stream-text" data-streaming>
 					{row.block.text}
@@ -617,6 +620,8 @@ const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			return <GroupRow openRows={openRows} root={root} row={row} theme={theme} toggleRow={toggleRow} />;
 		case "waiting":
 			return <WaitingRow openRows={openRows} root={root} row={row} toggleRow={toggleRow} />;
+		case "thinking_live":
+			return <LiveThinkingRow openRows={openRows} row={row} toggleRow={toggleRow} />;
 		case "turn":
 			return (
 				<TurnRow
