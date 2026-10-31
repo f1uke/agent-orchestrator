@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/storetree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatusage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
@@ -568,6 +569,7 @@ func Run() error {
 		log.Warn("simowner: initial sync of simulator leases failed", "err", err)
 	}
 
+	chatUsage := &chatusage.Store{}
 	learningSvc := learningService(ctx, store, cfg.DataDir, learnCollector, learnSettings, learnRules, learnDecider)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects: projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink, ClaudeProfiles: claudeProfiles}),
@@ -579,6 +581,7 @@ func Run() error {
 			Drive: rcloneadapter.New(rcloneadapter.Options{}), Evidence: qaEvidenceSettings,
 		}),
 		Chat:               chatsvc.New(store, cfg.DataDir),
+		ChatUsage:          chatUsage,
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
 		Scripts:            scriptsSvc,
@@ -769,7 +772,7 @@ func Run() error {
 		queueRec.Tick()
 		return messageQueue.Drain(ctx)
 	}, log)
-	chatWatchDone := startChatWatch(ctx, store, cfg.DataDir, lcStack.LCM, activityHub, loopReg, log)
+	chatWatchDone := startChatWatch(ctx, store, cfg.DataDir, lcStack.LCM, activityHub, chatUsage, loopReg, log)
 
 	restartRec := loopReg.Register(looptelemetry.Spec{
 		Name:        "claude-profile-restart",

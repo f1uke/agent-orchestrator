@@ -1,7 +1,6 @@
 import { chapterOf, MARK_CHAPTER } from "./chat-chapters";
 import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
-import { latestTodos, type Todo } from "./chat-inspect";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
 import { SHOW_WIDGET, widgetOf } from "./chat-widget";
 import { WRAP_UP, wrapUpOf } from "./chat-wrapup";
@@ -27,7 +26,7 @@ export type ChatRow =
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
 	| { key: string; kind: "waiting"; tasks: WaitingTask[] }
-	| { key: "tasks"; kind: "tasks"; todos: Todo[] }
+	| { key: string; kind: "thinking_live"; since?: string; text: string }
 	| {
 			key: string;
 			kind: "turn";
@@ -188,19 +187,6 @@ function staysInView(row: ChatRow): boolean {
 	return widgetOf(call) !== undefined || chapterOf(call) !== undefined || wrapUpOf(call) !== undefined;
 }
 
-const TODO_TOOLS = new Set(["TodoWrite", "TaskCreate", "TaskUpdate"]);
-
-function tasksRow(transcript: Transcript, queued: ReadonlySet<string>): ChatRow | undefined {
-	let touched = false;
-	for (let i = transcript.items.length - 1; i >= 0; i--) {
-		const item = transcript.items[i];
-		if ((item.kind === "user" && !queued.has(item.uuid)) || (item.kind === "task_message" && item.opensTurn)) break;
-		if (item.kind === "tool_call" && item.parentToolUseId === "" && TODO_TOOLS.has(item.name)) touched = true;
-	}
-	const todos = touched ? latestTodos(transcript) : undefined;
-	return todos?.length ? { key: "tasks", kind: "tasks", todos } : undefined;
-}
-
 function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {
 	const last = rows.at(-1);
 	if (transcript.busy || !last || !isItem(last, "turn_end")) return undefined;
@@ -216,6 +202,20 @@ function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow |
 		return { task, command, since: task.startedTs || call?.startedTs || "" };
 	});
 	return { key: "waiting", kind: "waiting", tasks };
+}
+
+function thinkingRow(transcript: Transcript, overlay: StreamOverlay, rows: readonly ChatRow[]): ChatRow | undefined {
+	if (transcript.pending.length > 0 || rows.at(-1)?.kind === "waiting") return undefined;
+	const running = transcript.items.some((i) => i.kind === "tool_call" && i.parentToolUseId === "" && toolRunning(i));
+	if (running) return undefined;
+	const last = overlay.blocks.at(-1);
+	if (last?.kind === "text") return undefined;
+	const text = last?.kind === "thinking" ? last.text : "";
+	const since = transcript.busy ? transcript.thinkingSince : undefined;
+	if (since === undefined && text.trim() === "") return undefined;
+	const row: ChatRow = { key: "thinking-live", kind: "thinking_live", text };
+	if (since !== undefined) row.since = since;
+	return row;
 }
 
 export function chatRows(
@@ -300,37 +300,20 @@ export function chatRows(
 	rows = foldTurns(rows);
 	const waiting = waitingRow(transcript, rows);
 	if (waiting) rows.push(waiting);
-	const tasks = tasksRow(transcript, queued);
-	if (tasks) rows.push(tasks);
 
 	for (const pending of transcript.pending) {
 		if (!toolIds.has(pending.toolUseId)) rows.push({ key: `p${pending.requestId}`, kind: "pending", pending });
 	}
+	const thinking = thinkingRow(transcript, overlay, rows);
+	const streamed = thinking ? overlay.blocks.slice(0, -1) : overlay.blocks;
 	let lastText = -1;
-	overlay.blocks.forEach((block, i) => {
+	streamed.forEach((block, i) => {
 		if (block.kind === "text") lastText = i;
 	});
-	overlay.blocks.forEach((block, i) => {
+	streamed.forEach((block, i) => {
 		if (block.kind === "thinking" && block.text.trim() === "") return;
 		rows.push({ key: `s${block.messageId}:${block.index}`, kind: "streaming", block, caret: i === lastText });
 	});
+	if (thinking) rows.push(thinking);
 	return rows;
-}
-
-function holdsItem(row: ChatRow, itemIndex: number): boolean {
-	switch (row.kind) {
-		case "item":
-			return row.key === itemRowKey(itemIndex);
-		case "group":
-			return row.members.some((m) => m.itemIndex === itemIndex);
-		case "turn":
-			return row.rows.some((inner) => holdsItem(inner, itemIndex));
-		default:
-			return false;
-	}
-}
-
-/** The top-level row that shows an item, whether it stands alone or sits in a group or a folded turn. */
-export function rowIndexOfItem(rows: readonly ChatRow[], itemIndex: number): number {
-	return rows.findIndex((row) => holdsItem(row, itemIndex));
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatusage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
@@ -262,6 +263,7 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 }
 
 type watcherRig struct {
+	usage *chatusage.Store
 	host  *fakeChatHost
 	sigs  *signalLog
 	waits chan time.Duration
@@ -270,9 +272,9 @@ type watcherRig struct {
 
 func startWatcher(t *testing.T, host *fakeChatHost, stored domain.ActivityState) *watcherRig {
 	t.Helper()
-	r := &watcherRig{host: host, sigs: &signalLog{}, waits: make(chan time.Duration, 64), fire: make(chan time.Time)}
+	r := &watcherRig{usage: &chatusage.Store{}, host: host, sigs: &signalLog{}, waits: make(chan time.Duration, 64), fire: make(chan time.Time)}
 	w := &chatWatcher{
-		id: "p-1", host: host, rec: r.sigs, feed: r.sigs, log: slog.New(slog.DiscardHandler),
+		id: "p-1", host: host, rec: r.sigs, feed: r.sigs, usage: r.usage, log: slog.New(slog.DiscardHandler),
 		after: func(d time.Duration) <-chan time.Time {
 			r.waits <- d
 			return r.fire
@@ -353,6 +355,22 @@ func TestChatWatcher_PendingRequestSignalsWaitingOnce(t *testing.T) {
 	defer r.sigs.mu.Unlock()
 	if len(r.sigs.events) != 1 || r.sigs.events[0].SessionID != "p-1" || r.sigs.events[0].Coarse != domain.CoarseWaiting {
 		t.Fatalf("feed got %+v, want one waiting frame for p-1", r.sigs.events)
+	}
+}
+
+const rateLimitEvent = `{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.01,"resetsAt":1793374200,"status":"allowed"},"seven_day":{"utilization":0.36,"resetsAt":1793692800,"status":"allowed"}}}}`
+
+func TestChatWatcher_RecordsSubscriptionUsage(t *testing.T) {
+	r := startWatcher(t, spawned(t), domain.ActivityIdle)
+	r.subscribed(t, 1)
+	r.add(t, chatproto.DirOut, assistantText)
+	if got, ok := r.usage.Latest(); ok {
+		t.Fatalf("usage %+v before any rate_limit_event", got)
+	}
+	r.add(t, chatproto.DirOut, rateLimitEvent)
+	got, ok := r.usage.Latest()
+	if !ok || got.SevenDay == nil || got.SevenDay.Utilization != 0.36 || got.UpdatedAt.IsZero() {
+		t.Fatalf("usage = %+v, %v; want the event's weekly 36%% with the time it was logged", got, ok)
 	}
 }
 

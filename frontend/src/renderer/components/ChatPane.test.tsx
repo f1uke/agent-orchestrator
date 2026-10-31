@@ -8,12 +8,16 @@ import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import { emptyOverlay } from "../lib/chat-stream";
 import { aoBridge } from "../lib/bridge";
 import { useUiStore } from "../stores/ui-store";
+import type { SubscriptionUsage } from "../lib/chat-usage";
 import type { WorkspaceSession } from "../types/workspace";
 import { ChatPane, ChatViewToggle } from "./ChatPane";
 
 vi.mock("../hooks/useSessionNames", () => ({
 	useSessionNames: () => new Map([["billing-portal-12", "invoice CSV export"]]),
 }));
+
+let sharedUsage: SubscriptionUsage | undefined;
+vi.mock("../hooks/useChatUsage", () => ({ useChatUsage: () => sharedUsage }));
 
 vi.mock("../hooks/useWorkspaceFiles", () => ({
 	useWorkspaceFiles: () => ({ isPending: false, data: { available: true, paths: [], truncated: false } }),
@@ -56,6 +60,7 @@ const out = (payload: object) => entry("out", payload);
 beforeEach(() => {
 	vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
 	listeners = undefined;
+	sharedUsage = undefined;
 	seq = 0;
 	useUiStore.setState({ chatViews: {}, inspectorViewRequest: null });
 	return () => vi.useRealTimers();
@@ -607,6 +612,125 @@ describe("ChatPane calm view", () => {
 		expect(head).toHaveTextContent(/^Running a command 1m 26s$/);
 	});
 
+	describe("the live Thinking row", () => {
+		const at = (sec: number, e: ChatEntry): ChatEntry => ({
+			...e,
+			ts: new Date(Date.parse("2026-10-31T11:53:00.000Z") + sec * 1000).toISOString(),
+		});
+		const tokens = (sec: number) =>
+			at(sec, out({ type: "system", subtype: "thinking_tokens", estimated_tokens: 50, estimated_tokens_delta: 50 }));
+		const afterTools = () => [
+			at(0, userIn("u1", "find the drift")),
+			at(0, lifecycle("u1", "started")),
+			at(1, toolUse("a", "Read", { file_path: "/work/project/a.go" })),
+			at(2, toolDone("a")),
+			at(3, toolUse("b", "Grep", { pattern: "parked" })),
+			at(10, toolDone("b")),
+		];
+		const liveRows = () => [...document.querySelectorAll(".chat-live-row")];
+		const thinkingRow = () => liveRows().find((r) => r.querySelector(".chat-live__verb")?.textContent === "Thinking");
+
+		beforeEach(() => {
+			vi.useFakeTimers({
+				toFake: ["Date", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"],
+			});
+			vi.setSystemTime(Date.parse("2026-10-31T11:53:40.000Z"));
+		});
+
+		it("appears with only thinking_tokens after a tool result, ticks, and goes on the next tool_use", () => {
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools());
+			expect(thinkingRow()).toBeUndefined();
+
+			feed(tokens(12), tokens(12), tokens(20));
+			expect(liveRows()).toHaveLength(1);
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 28s$/);
+			act(() => vi.advanceTimersByTime(1000));
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 29s$/);
+
+			feed(at(41, toolUse("c", "Bash", { command: "go test ./internal/webhook/..." })));
+			expect(thinkingRow()).toBeUndefined();
+			expect(liveRows()).toHaveLength(1);
+		});
+
+		it("goes when claude starts to answer", () => {
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools(), tokens(12));
+			expect(thinkingRow()).toBeDefined();
+			feed(at(30, saying("The reset races the read.")));
+			expect(thinkingRow()).toBeUndefined();
+		});
+
+		it("shows the latest line of streamed thinking text while collapsed", () => {
+			const { feed, delta } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools(), tokens(12));
+			delta(
+				{ type: "message_start", message: { id: "m9" } },
+				{ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
+				{
+					type: "content_block_delta",
+					index: 0,
+					delta: { type: "thinking_delta", thinking: "The counter is read twice.\n\nMaybe the reset races.\n" },
+				},
+			);
+			expect(liveRows()).toHaveLength(1);
+			expect(thinkingRow()?.querySelector(".chat-live__detail")).toHaveTextContent(/^Maybe the reset races\.$/);
+			expect(screen.queryByRole("button", { name: /Thinking…/ })).toBeNull();
+		});
+
+		it("renders through the same live row as the Waiting on and Running rows", () => {
+			const shapeOf = (row: Element) => ({
+				classes: row.getAttribute("class"),
+				children: [...row.children].map((c) => c.getAttribute("class")),
+				parts: [...row.querySelectorAll("[class]")]
+					.map((c) => (c.getAttribute("class") ?? "").split(" ").find((n) => /^chat-(dots|live|chev)/.test(n)))
+					.filter((n) => n !== undefined),
+			});
+			const thinking = renderPane("chat", fakeApi(), rooted);
+			thinking.feed(...afterTools(), tokens(12));
+			const thinkingShape = shapeOf(liveRows()[0]);
+			thinking.unmount();
+
+			const running = renderPane("chat", fakeApi(), rooted);
+			running.feed(...afterTools(), at(30, toolUse("c", "Bash", { command: "go test" })));
+			const runningShape = shapeOf(liveRows()[0]);
+			running.unmount();
+
+			const waiting = renderPane("chat", fakeApi(), rooted);
+			waiting.feed(
+				userIn("u1", "soak"),
+				toolUse("bg", "Bash", { command: "go test -run Soak ./...", run_in_background: true }),
+				out({
+					type: "system",
+					subtype: "task_started",
+					task_id: "t1",
+					tool_use_id: "bg",
+					task_type: "local_bash",
+					is_backgrounded: true,
+					description: "soak",
+				}),
+				toolDone("bg", "Command running in background with ID: t1."),
+				saying("started it"),
+				out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 }),
+			);
+			const waitingShape = shapeOf(liveRows()[0]);
+
+			expect(thinkingShape.classes).toContain("chat-live-row");
+			expect(thinkingShape.parts).toEqual([
+				"chat-live",
+				"chat-dots",
+				"chat-live__verb",
+				"chat-live__time",
+				"chat-chev",
+			]);
+			for (const other of [runningShape, waitingShape]) {
+				expect(other.classes).toBe(thinkingShape.classes);
+				expect(other.children).toEqual(thinkingShape.children);
+				expect(other.parts).toEqual(thinkingShape.parts);
+			}
+		});
+	});
+
 	it("folds a finished turn's work between the user's message and the last reply", async () => {
 		const { feed, user } = renderPane();
 		feed(
@@ -901,9 +1025,11 @@ describe("ChatPane calm view", () => {
 			toolDone("bg", "Command running in background with ID: k1"),
 		);
 		expect(document.querySelector('[data-tool="Bash"]')).toHaveTextContent("running in background");
-		const chip = screen.getByRole("button", { name: /1 running in background/ });
+		const statusLine = document.querySelector(".chat-statusline") as HTMLElement;
+		const chip = within(statusLine).getByText("1 running in background");
+		expect(within(statusLine).queryByRole("button", { name: /running in background/ })).toBeNull();
 		await user.click(chip);
-		expect(useUiStore.getState().inspectorViewRequest).toBe("session");
+		expect(useUiStore.getState().inspectorViewRequest).toBeNull();
 
 		feed(
 			out({
@@ -916,7 +1042,84 @@ describe("ChatPane calm view", () => {
 			}),
 		);
 		expect(document.querySelector('[data-tool="Bash"]')).toHaveTextContent("done · exit 0");
-		expect(screen.queryByRole("button", { name: /running in background/ })).toBeNull();
+		expect(screen.queryByText(/running in background/)).toBeNull();
+	});
+});
+
+describe("ChatPane composer footer and todo bar", () => {
+	const rateLimit = (ts: string, fiveHour: number) => ({
+		...out({
+			type: "rate_limit_event",
+			rate_limit_info: {
+				unifiedWindows: { five_hour: { utilization: fiveHour, resetsAt: 1793428800, status: "allowed" } },
+			},
+		}),
+		ts,
+	});
+	const usageAt = (updatedAt: string, fiveHour: number): SubscriptionUsage => ({
+		fiveHour: { utilization: fiveHour, resetsAt: "2026-10-31T06:40:00Z", status: "allowed" },
+		updatedAt,
+	});
+	const ctxAnswer = (percentage: number) =>
+		out({
+			type: "control_response",
+			response: {
+				subtype: "success",
+				request_id: "ctx-1",
+				response: {
+					categories: [{ id: "messages", name: "Messages", tokens: 30_000, kind: "used" }],
+					totalTokens: 30_000,
+					maxTokens: 1_000_000,
+					percentage,
+				},
+			},
+		});
+	const assistantUsage = () =>
+		out({
+			type: "assistant",
+			message: {
+				id: "m-u",
+				content: [{ type: "text", text: "hi" }],
+				usage: { input_tokens: 10, cache_read_input_tokens: 41_990 },
+			},
+		});
+	const meter = (name: RegExp) => screen.queryByRole("button", { name });
+
+	it("shows nothing in the footer before any context or usage is known", () => {
+		renderPane();
+		expect(meter(/Context window/)).toBeNull();
+		expect(meter(/Subscription usage/)).toBeNull();
+	});
+
+	it("shows the exact context percent once claude answers, and the estimate before that", () => {
+		const { feed } = renderPane();
+		feed(assistantUsage());
+		expect(meter(/Context window/)).toHaveTextContent(/^~42k$/);
+		feed(ctxAnswer(3));
+		expect(meter(/Context window/)).toHaveTextContent(/^3%$/);
+	});
+
+	it("shows the daemon's account usage, and the session's own when it is newer", () => {
+		sharedUsage = usageAt("2026-10-31T04:00:00Z", 0.2);
+		const { feed } = renderPane();
+		expect(meter(/Subscription usage/)).toHaveTextContent(/^5h 20%$/);
+		feed(rateLimit("2026-10-31T03:00:00.000Z", 0.1));
+		expect(meter(/Subscription usage/)).toHaveTextContent(/^5h 20%$/);
+		feed(rateLimit("2026-10-31T05:00:00.000Z", 0.3));
+		expect(meter(/Subscription usage/)).toHaveTextContent(/^5h 30%$/);
+	});
+
+	it("puts the todo bar right above the composer", () => {
+		const { feed } = renderPane();
+		expect(screen.queryByRole("button", { name: /To-dos/ })).toBeNull();
+		feed(
+			toolUse("w", "TodoWrite", { todos: [{ content: "Read", activeForm: "Reading", status: "in_progress" }] }),
+			toolDone("w"),
+		);
+		const bar = screen.getByRole("button", { name: /To-dos/ });
+		expect(bar).toHaveTextContent("1 in progress");
+		const composer = screen.getByRole("textbox", { name: "Message Claude" });
+		expect(bar.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 });
 
@@ -1046,7 +1249,7 @@ describe("ChatPane chapters, tasks and wrap-up", () => {
 		expect(screen.getByRole("navigation", { name: "Chapters" })).toBeInTheDocument();
 	});
 
-	it("shows the task list under the latest message", () => {
+	it("shows the todos once, in the bar above the composer, not again in the stream", () => {
 		const { feed } = renderPane();
 		feed(
 			userIn("u1", "go"),
@@ -1057,9 +1260,8 @@ describe("ChatPane chapters, tasks and wrap-up", () => {
 			toolUse("t3", "TaskUpdate", { taskId: "1", status: "completed" }),
 			toolDone("t3"),
 		);
-		const list = screen.getByRole("list", { name: "Tasks" });
-		expect(within(list).getAllByRole("listitem")).toHaveLength(2);
-		expect(screen.getByText("Tasks · 1 of 2")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /To-dos/ })).toHaveTextContent("1 completed · 1 pending");
+		expect(screen.getByTestId("chat-stream")).not.toHaveTextContent("Read the fold");
 	});
 
 	it("fills the composer from a wrap-up reply and sends nothing", async () => {

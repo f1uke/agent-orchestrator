@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatusage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
@@ -31,14 +32,15 @@ import (
 
 // APIDeps bundles every service the API layer's controllers depend on.
 type APIDeps struct {
-	Agents   controllers.AgentCatalog
-	Projects projectsvc.Manager
-	Sessions controllers.SessionService
-	Activity controllers.ActivityRecorder
-	Chat     controllers.ChatService
-	Jira     controllers.JiraService
-	PRs      prsvc.ActionManager
-	Reviews  reviewsvc.Manager
+	Agents    controllers.AgentCatalog
+	Projects  projectsvc.Manager
+	Sessions  controllers.SessionService
+	Activity  controllers.ActivityRecorder
+	Chat      controllers.ChatService
+	ChatUsage *chatusage.Store
+	Jira      controllers.JiraService
+	PRs       prsvc.ActionManager
+	Reviews   reviewsvc.Manager
 	// Testiny is a task's Testiny tab: the test runs linked to the task, read
 	// live from Testiny. nil answers 501.
 	Testiny controllers.TestinyService
@@ -144,6 +146,7 @@ type API struct {
 	sessions       *controllers.SessionsController
 	chat           *controllers.ChatController
 	chatFiles      *controllers.ChatFilesController
+	chatUsage      *controllers.ChatUsageController
 	jira           *controllers.JiraController
 	prs            *controllers.PRsController
 	reviews        *controllers.ReviewsController
@@ -201,6 +204,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		},
 		chat:           &controllers.ChatController{Svc: deps.Chat},
 		chatFiles:      &controllers.ChatFilesController{Sessions: deps.Sessions, KnowledgeDir: cfg.KnowledgeDir, DataDir: cfg.DataDir},
+		chatUsage:      &controllers.ChatUsageController{Store: deps.ChatUsage},
 		jira:           &controllers.JiraController{Svc: deps.Jira},
 		prs:            &controllers.PRsController{Svc: deps.PRs},
 		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},
@@ -262,6 +266,7 @@ func (a *API) Register(root chi.Router) {
 			a.sessions.Register(r)
 			a.chat.Register(r)
 			a.chatFiles.Register(r)
+			a.chatUsage.Register(r)
 			a.jira.Register(r)
 			a.prs.Register(r)
 			a.crewRuns.Register(r)

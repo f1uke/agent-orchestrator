@@ -80,7 +80,7 @@ export function parseTaskNotification(text: string): TaskNotification | undefine
 
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
-	| { type: "system"; subtype: string; permissionMode: string; task?: TaskEvent }
+	| { type: "system"; subtype: string; permissionMode: string; parentToolUseId: string; task?: TaskEvent }
 	| {
 			type: "assistant";
 			messageId: string;
@@ -89,7 +89,14 @@ export type ChatEvent =
 			/** input + cache read + cache creation of message.usage: the context this response saw. */
 			contextTokens?: number;
 	  }
-	| { type: "user"; uuid: string; isReplay: boolean; blocks: Block[]; structuredPatch?: PatchHunk[] }
+	| {
+			type: "user";
+			uuid: string;
+			parentToolUseId: string;
+			isReplay: boolean;
+			blocks: Block[];
+			structuredPatch?: PatchHunk[];
+	  }
 	| {
 			type: "result";
 			subtype: string;
@@ -105,6 +112,7 @@ export type ChatEvent =
 	| { type: "control_response"; requestId: string; ok: boolean; error: string; response: unknown }
 	| { type: "control_cancel"; requestId: string }
 	| { type: "command_lifecycle"; commandUuid: string; state: CommandState }
+	| { type: "rate_limit"; info: unknown }
 	| { type: "unknown"; eventType: string };
 
 export type Origin = { via: string; from: string };
@@ -282,6 +290,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				type: "system",
 				subtype: str(line.subtype),
 				permissionMode: str(line.permissionMode),
+				parentToolUseId: str(line.parent_tool_use_id),
 				task: decodeTask(line),
 			};
 		case "assistant":
@@ -296,6 +305,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			return {
 				type: "user",
 				uuid: str(line.uuid),
+				parentToolUseId: str(line.parent_tool_use_id),
 				isReplay: line.isReplay === true,
 				blocks: decodeBlocks(message.content),
 				structuredPatch: decodePatch(line.tool_use_result),
@@ -346,6 +356,8 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			return { type: "control_cancel", requestId: str(line.request_id) };
 		case "command_lifecycle":
 			return { type: "command_lifecycle", commandUuid: str(line.command_uuid), state: str(line.state) };
+		case "rate_limit_event":
+			return { type: "rate_limit", info: line.rate_limit_info };
 	}
 	return undefined;
 }

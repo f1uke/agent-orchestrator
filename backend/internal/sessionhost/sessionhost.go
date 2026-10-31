@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,12 +38,16 @@ type Config struct {
 	stdinGrace     time.Duration
 	killGrace      time.Duration
 	controlTimeout time.Duration
+	contextTimeout time.Duration
 }
 
 const (
 	defaultStdinGrace     = 5 * time.Second
 	defaultKillGrace      = 2 * time.Second
 	defaultControlTimeout = requestTimeout / 2
+	// Claude may not know get_context_usage, so a missing answer is dropped, not retried.
+	defaultContextTimeout = 5 * time.Second
+	contextRequestPrefix  = "ctx-"
 	// stdoutDrain bounds the wait for claude's stdout to reach EOF after it
 	// exits, in case a leftover subprocess still holds the pipe open.
 	stdoutDrain = 2 * time.Second
@@ -104,6 +109,7 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 		subs:            map[*subscriber]struct{}{},
 		answers:         map[string]chan chatproto.ControlResponse{},
 		controlTimeout:  orDefault(cfg.controlTimeout, defaultControlTimeout),
+		contextTimeout:  orDefault(cfg.contextTimeout, defaultContextTimeout),
 		promptAfterInit: prompt,
 	}
 	return h.run(ctx, cfg, ln, resume, model)
@@ -163,6 +169,8 @@ type host struct {
 	promptAfterInit string
 	answers         map[string]chan chatproto.ControlResponse
 	controlTimeout  time.Duration
+	contextTimeout  time.Duration
+	contextID       string
 }
 
 func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, model string) (int, error) {
@@ -300,6 +308,7 @@ func (h *host) finish(code *int, signal *string) {
 	h.stdin, h.pid = nil, 0
 	h.noteLocked(exitNote{Kind: chatproto.NoteExit, Code: code, Signal: signal})
 	h.closed = true
+	h.contextID = ""
 	for s := range h.subs {
 		h.dropLocked(s)
 	}
@@ -339,6 +348,12 @@ func (h *host) handleLine(line []byte) {
 	if isMCP {
 		logged = mcp.logLine
 	}
+	r, isResponse := ev.(chatproto.ControlResponse)
+	isContext := isResponse && h.contextID != "" && r.RequestID == h.contextID
+	if isContext {
+		h.contextID = ""
+		logged = withoutGridRows(line)
+	}
 	if err := h.appendLocked(chatproto.DirOut, logged); err != nil {
 		h.pane.line(dim("sessionhost: " + err.Error()))
 		return
@@ -349,13 +364,16 @@ func (h *host) handleLine(line []byte) {
 		}
 		return
 	}
-	r, isResponse := ev.(chatproto.ControlResponse)
+	if _, ok := ev.(chatproto.Result); ok {
+		h.askContextLocked()
+	}
 	if ch := h.answers[r.RequestID]; isResponse && ch != nil {
 		ch <- r
 		delete(h.answers, r.RequestID)
 	}
 	if isResponse && h.initID != "" && r.RequestID == h.initID {
 		h.initID = ""
+		h.askContextLocked()
 		if h.promptAfterInit != "" {
 			if err := h.writeThenLogLocked(chatproto.UserInput{UUID: uuid.NewString(), Text: h.promptAfterInit}); err != nil {
 				h.pane.line(dim("sessionhost: send prompt: " + err.Error()))
@@ -363,6 +381,48 @@ func (h *host) handleLine(line []byte) {
 			h.promptAfterInit = ""
 		}
 	}
+}
+
+func (h *host) askContextLocked() {
+	if h.contextID != "" {
+		return
+	}
+	id := contextRequestPrefix + uuid.NewString()
+	if err := h.writeThenLogLocked(chatproto.GetContextUsage{RequestID: id}); err != nil {
+		h.pane.line(dim("sessionhost: get_context_usage: " + err.Error()))
+		return
+	}
+	h.contextID = id
+	time.AfterFunc(h.contextTimeout, func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.contextID == id {
+			h.contextID = ""
+		}
+	})
+}
+
+// The CLI's own /context drawing repeats the categories square by square and is
+// most of a get_context_usage answer.
+func withoutGridRows(line []byte) []byte {
+	var w struct {
+		Type     string `json:"type"`
+		Response struct {
+			Subtype   string                     `json:"subtype"`
+			RequestID string                     `json:"request_id"`
+			Error     json.RawMessage            `json:"error,omitempty"`
+			Response  map[string]json.RawMessage `json:"response,omitempty"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(line, &w) != nil || w.Response.Response["gridRows"] == nil {
+		return line
+	}
+	delete(w.Response.Response, "gridRows")
+	b, err := json.Marshal(w)
+	if err != nil {
+		return line
+	}
+	return b
 }
 
 func (h *host) writeThenLogLocked(o chatproto.Outbound) error {
