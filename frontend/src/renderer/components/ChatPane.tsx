@@ -10,7 +10,7 @@ import {
 	MessageSquare,
 	SquareTerminal,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
@@ -166,7 +166,7 @@ export function ChatPane({ session, view, theme, daemonReady, chat: given, creat
 			) : (
 				<ChatStream
 					disabled={actions.hostDown}
-					replaying={chat.connection === "connecting"}
+					replaying={chat.replaying}
 					onAnswer={onAnswer}
 					onPrompt={onPrompt}
 					pending={transcript.pending}
@@ -405,14 +405,35 @@ function ChatStream({ rows, replaying, root, pending, theme, requests, disabled,
 		onChange: pinToEnd,
 	});
 
-	useLayoutEffect(pinToEnd);
+	// Rows were placed from the offset the virtualizer last saw; when pinning
+	// moves the scroll, it learns the new offset before the frame is painted,
+	// not a scroll event later, so no frame shows rows from the old position.
+	const [, repaint] = useReducer((n: number) => n + 1, 0);
+	useLayoutEffect(() => {
+		pinToEnd();
+		const el = scrollRef.current;
+		if (el && virtualizer.scrollOffset !== el.scrollTop) {
+			virtualizer.scrollOffset = el.scrollTop;
+			repaint();
+		}
+	});
 
 	const [revealed, setRevealed] = useState(false);
-	useLayoutEffect(() => {
+	const atEnd = () => {
 		const el = scrollRef.current;
-		if (revealed || !el || replaying) return;
 		const last = virtualizer.getVirtualItems().at(-1);
-		if (rows.length === 0 || (last?.index === rows.length - 1 && distanceFromEnd(el) <= AT_END_PX)) setRevealed(true);
+		return !!el && (rows.length === 0 || (last?.index === rows.length - 1 && distanceFromEnd(el) <= AT_END_PX));
+	};
+	const atEndRef = useRef(atEnd);
+	atEndRef.current = atEnd;
+	// Rows that mount in the same commit as the reveal would paint once at their
+	// estimated heights; the check runs again a frame later, once they are placed.
+	useLayoutEffect(() => {
+		if (revealed || replaying || !atEnd()) return;
+		const frame = requestAnimationFrame(() => {
+			if (atEndRef.current()) setRevealed(true);
+		});
+		return () => cancelAnimationFrame(frame);
 	});
 
 	// Opening a row is reading it: the stream stops pinning the end, so the row

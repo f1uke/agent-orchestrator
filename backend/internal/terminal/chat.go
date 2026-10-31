@@ -46,13 +46,22 @@ func (s *chatStream) stop() {
 func (c *connState) handleChat(msg clientMsg) {
 	switch msg.Type {
 	case msgOpen:
-		c.openChat(msg.ID, msg.FromSeq, msg.BlobRefs)
+		c.openChat(msg.ID, chatOpen{fromSeq: msg.FromSeq, blobRefs: msg.BlobRefs, tail: msg.Tail})
 	case msgClose:
 		c.closeChat(msg.ID)
 	}
 }
 
-func (c *connState) openChat(id string, fromSeq uint64, blobRefs bool) {
+// chatOpen is what a client asked for when it opened a chat stream.
+type chatOpen struct {
+	fromSeq  uint64
+	blobRefs bool
+	// tail sends the last turns of a full replay first, then a history
+	// marker, then the older entries, so the newest message shows at once.
+	tail bool
+}
+
+func (c *connState) openChat(id string, open chatOpen) {
 	if id == "" {
 		c.enqueue(serverMsg{Ch: chChat, Type: msgError, Error: "missing session id"})
 		return
@@ -70,7 +79,7 @@ func (c *connState) openChat(id string, fromSeq uint64, blobRefs bool) {
 	go func() {
 		defer close(s.done)
 		defer cancel()
-		c.streamChat(ctx, s, id, fromSeq, blobRefs)
+		c.streamChat(ctx, s, id, open)
 	}()
 }
 
@@ -84,12 +93,12 @@ func (c *connState) closeChat(id string) {
 	}
 }
 
-func (c *connState) streamChat(ctx context.Context, s *chatStream, id string, fromSeq uint64, blobRefs bool) {
+func (c *connState) streamChat(ctx context.Context, s *chatStream, id string, open chatOpen) {
 	var blobs chatblob.Store
 	send := func(m serverMsg) bool {
 		m.Ch, m.ID = chChat, id
 		if m.Entry != nil {
-			e, err := shapeImages(blobs, *m.Entry, blobRefs)
+			e, err := shapeImages(blobs, *m.Entry, open.blobRefs)
 			if err != nil {
 				c.mgr.log.Warn("chat: entry images", "session", id, "seq", m.Entry.Seq, "err", err)
 			}
@@ -119,17 +128,41 @@ func (c *connState) streamChat(ctx context.Context, s *chatStream, id string, fr
 		return
 	}
 	blobs = chatblob.ForLog(logPath)
-	entries, err := chatLogAfter(logPath, fromSeq)
+	data, err := readChatLog(logPath)
 	if err != nil {
 		end(serverMsg{Type: msgError, Error: err.Error()})
 		return
 	}
-	last := fromSeq
-	for i := range entries {
-		if !send(serverMsg{Type: msgEntry, Entry: &entries[i]}) {
+	cut := 0
+	if open.tail && open.fromSeq == 0 {
+		cut = tailStart(data, tailTurns)
+	}
+	newest, err := decodeAfter(data[cut:], open.fromSeq)
+	if err != nil {
+		end(serverMsg{Type: msgError, Error: err.Error()})
+		return
+	}
+	last := open.fromSeq
+	for i := range newest {
+		if !send(serverMsg{Type: msgEntry, Entry: &newest[i]}) {
 			return
 		}
-		last = entries[i].Seq
+		last = newest[i].Seq
+	}
+	if cut > 0 {
+		if !send(serverMsg{Type: msgHistory}) {
+			return
+		}
+		older, err := chatproto.DecodeLog(bytes.NewReader(data[:cut]))
+		if err != nil {
+			end(serverMsg{Type: msgError, Error: err.Error()})
+			return
+		}
+		for i := range older {
+			if !send(serverMsg{Type: msgEntry, Entry: &older[i]}) {
+				return
+			}
+		}
 	}
 	err = sessionhost.NewClient(socket).Subscribe(ctx, last, func() { send(serverMsg{Type: msgLive}) }, func(f sessionhost.Frame) error {
 		m := serverMsg{Type: msgDelta, Delta: f.Delta}
@@ -162,7 +195,9 @@ func (m *Manager) chatPaths(ctx context.Context, id string) (logPath, socketPath
 	return logPath, socketPath, nil
 }
 
-func chatLogAfter(path string, fromSeq uint64) ([]chatproto.Entry, error) {
+// readChatLog returns the whole lines of the log, leaving out a line the host
+// is still writing. A log not written yet is empty.
+func readChatLog(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -170,7 +205,11 @@ func chatLogAfter(path string, fromSeq uint64) ([]chatproto.Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read chat log: %w", err)
 	}
-	entries, err := chatproto.DecodeLog(bytes.NewReader(completeLines(data)))
+	return data[:bytes.LastIndexByte(data, '\n')+1], nil
+}
+
+func decodeAfter(data []byte, fromSeq uint64) ([]chatproto.Entry, error) {
+	entries, err := chatproto.DecodeLog(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +236,47 @@ func shapeImages(blobs chatblob.Store, e chatproto.Entry, refs bool) (chatproto.
 	return e, nil
 }
 
-func completeLines(data []byte) []byte {
-	return data[:bytes.LastIndexByte(data, '\n')+1]
+// tailTurns is how many of the newest human turns a tailed replay sends first.
+const tailTurns = 3
+
+// tailStart is the offset of the line that opens the nth-newest human turn
+// (its user_origin note, or the user message itself), found from the end of
+// the log without decoding the rest of it; 0 when the log holds n turns or
+// fewer.
+func tailStart(data []byte, n int) int {
+	for end := len(data); end > 0; {
+		start := bytes.LastIndexByte(data[:end-1], '\n') + 1
+		if opensTurn(data[start:end]) {
+			n--
+			if n == 0 {
+				if start > 0 {
+					prev := bytes.LastIndexByte(data[:start-1], '\n') + 1
+					if isOriginNote(data[prev:start]) {
+						return prev
+					}
+				}
+				return start
+			}
+		}
+		end = start
+	}
+	return 0
+}
+
+type logLine struct {
+	Dir     chatproto.Direction `json:"dir"`
+	Payload struct {
+		Type string                 `json:"type"`
+		Kind chatproto.HostNoteKind `json:"kind"`
+	} `json:"payload"`
+}
+
+func opensTurn(line []byte) bool {
+	var w logLine
+	return json.Unmarshal(line, &w) == nil && w.Dir == chatproto.DirIn && w.Payload.Type == "user"
+}
+
+func isOriginNote(line []byte) bool {
+	var w logLine
+	return json.Unmarshal(line, &w) == nil && w.Dir == chatproto.DirHost && w.Payload.Kind == chatproto.NoteUserOrigin
 }

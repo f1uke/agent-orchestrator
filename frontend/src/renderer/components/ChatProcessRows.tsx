@@ -1,6 +1,6 @@
 import { Brain, ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { type ChatRow, itemRowKey, type ProcessMember } from "../lib/chat-rows";
+import type { ChatRow, ProcessMember } from "../lib/chat-rows";
 import { formatDuration } from "../lib/chat-time";
 import {
 	liveVerb,
@@ -138,7 +138,7 @@ type MembersProps = {
 
 function Member({ member, openRows, toggleRow, theme, root }: MembersProps & { member: ProcessMember }) {
 	if (member.kind === "thinking") {
-		const key = itemRowKey(member.itemIndex);
+		const key = member.key;
 		return <ThinkingRow onToggle={(open) => toggleRow(key, open)} open={openRows[key]} text={member.text} />;
 	}
 	return (
@@ -183,11 +183,11 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 				<div className="chat-group__body">
 					{shown.map((member) =>
 						member === running && member.kind === "tool" ? (
-							<div className="chat-group__running" key={itemRowKey(member.itemIndex)}>
+							<div className="chat-group__running" key={member.key}>
 								{liveVerb(member.call)}
 							</div>
 						) : (
-							<Member key={itemRowKey(member.itemIndex)} member={member} {...rest} />
+							<Member key={member.key} member={member} {...rest} />
 						),
 					)}
 				</div>

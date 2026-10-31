@@ -82,6 +82,7 @@ function renderPane(view: "chat" | "events" = "chat", api = fakeApi(), who: Work
 	const utils = render(
 		<ChatPane chatApi={api} createMux={createMux} daemonReady session={who} theme="dark" view={view} />,
 	);
+	act(() => listeners?.live());
 	const feed = (...entries: ChatEntry[]) =>
 		act(() => {
 			entries.forEach((e) => listeners!.entry(e));
@@ -107,6 +108,7 @@ describe("ChatPane", () => {
 			overlay: emptyOverlay,
 			entries: [],
 			connection: "live" as const,
+			replaying: false,
 		};
 		render(
 			<ChatPane

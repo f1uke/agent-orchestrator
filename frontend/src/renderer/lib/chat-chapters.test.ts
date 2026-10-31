@@ -35,6 +35,7 @@ const rowsOf = (items: ChatItem[]) =>
 		{
 			claudeSessionIds: [],
 			items,
+			itemKeys: items.map((_, i) => String(i)),
 			pending: [],
 			queued: [],
 			busy: false,

@@ -48,6 +48,7 @@ const (
 	msgDelta    = "delta"    // ch "chat": a partial-message stream event
 	msgLive     = "live"     // ch "chat": replay done, the host stream is attached
 	msgOffline  = "offline"  // ch "chat": replay done or host stream ended, no host
+	msgHistory  = "history"  // ch "chat": a tailed replay sent its last turns; older entries follow
 )
 
 // clientMsg is one inbound frame. Fields are shared across channels; which are
@@ -65,6 +66,7 @@ type clientMsg struct {
 	// BlobRefs asks ch "chat" / type "open" to send stored images as ao_blob
 	// references, fetched from the chat blob route, instead of inline base64.
 	BlobRefs bool `json:"blobRefs,omitempty"`
+	Tail     bool `json:"tail,omitempty"`
 }
 
 // serverMsg is one outbound frame.

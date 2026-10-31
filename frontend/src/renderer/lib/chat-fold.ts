@@ -137,6 +137,12 @@ export type ChatModel = {
 export type Transcript = {
 	claudeSessionIds: string[];
 	items: ChatItem[];
+	/**
+	 * One per item: the seq of the entry that added it and its place in that
+	 * entry. Unlike the item's index it stays the same when older entries are
+	 * folded in, so a row keyed by it keeps its measured height.
+	 */
+	itemKeys: string[];
 	pending: Pending[];
 	queued: string[];
 	busy: boolean;
@@ -219,6 +225,10 @@ export class ChatFolder {
 	private last = 0;
 	private sessions: string[] = [];
 	private items: ChatItem[] = [];
+	private itemKeys: string[] = [];
+	// The entry being folded, and how many items it has added so far.
+	private seq = 0;
+	private added = 0;
 	private tools = new Map<string, number>();
 	private users = new Map<string, number>();
 	private origins = new Map<string, Origin>();
@@ -254,6 +264,8 @@ export class ChatFolder {
 	apply(entry: ChatEntry): void {
 		if (entry.seq <= this.last) return;
 		this.ts = entry.ts;
+		this.seq = entry.seq;
+		this.added = 0;
 		switch (entry.dir) {
 			case "out":
 			case "in": {
@@ -271,6 +283,11 @@ export class ChatFolder {
 		this.last = entry.seq;
 	}
 
+	private push(item: ChatItem): void {
+		this.items.push(item);
+		this.itemKeys.push(`${this.seq}.${this.added++}`);
+	}
+
 	transcript(): Transcript {
 		const queued: string[] = [];
 		for (const item of this.items) {
@@ -279,6 +296,7 @@ export class ChatFolder {
 		return {
 			claudeSessionIds: [...this.sessions],
 			items: [...this.items],
+			itemKeys: [...this.itemKeys],
 			pending: [...this.pending],
 			queued,
 			busy: [...this.commands.values()].includes("started"),
@@ -322,7 +340,7 @@ export class ChatFolder {
 				this.thinkingSince = undefined;
 				this.cost = event.totalCostUsd;
 				if (event.contextTokens !== undefined) this.context = event.contextTokens;
-				this.items.push({
+				this.push({
 					ts: this.ts,
 					durationMs: elapsedMs(this.turnStart, this.ts),
 					kind: "turn_end",
@@ -391,12 +409,12 @@ export class ChatFolder {
 				this.thinkingSince = undefined;
 			}
 			if (block.type === "text") {
-				this.items.push({ kind: "assistant_text", messageId, text: block.text, parentToolUseId });
+				this.push({ kind: "assistant_text", messageId, text: block.text, parentToolUseId });
 			} else if (block.type === "thinking") {
-				this.items.push({ kind: "thinking", text: block.text, parentToolUseId });
+				this.push({ kind: "thinking", text: block.text, parentToolUseId });
 			} else if (block.type === "tool_use" && !this.tools.has(block.id)) {
 				this.tools.set(block.id, this.items.length);
-				this.items.push({
+				this.push({
 					kind: "tool_call",
 					id: block.id,
 					name: block.name,
@@ -427,7 +445,7 @@ export class ChatFolder {
 		const text = blocks.map((b) => (b.type === "text" ? b.text : "")).join("");
 		const note = parseTaskNotification(text);
 		if (!note) return;
-		this.items.push({ kind: "task_message", ts: this.ts, ...note, opensTurn: this.turnStart === undefined });
+		this.push({ kind: "task_message", ts: this.ts, ...note, opensTurn: this.turnStart === undefined });
 		this.turnStart ??= this.ts;
 	}
 
@@ -454,7 +472,7 @@ export class ChatFolder {
 		else if (this.awaitingBrief) item.brief = true;
 		this.awaitingBrief = false;
 		if (uuid !== "") this.users.set(uuid, this.items.length);
-		this.items.push(item);
+		this.push(item);
 	}
 
 	private setCommand(uuid: string, state: CommandState): void {
@@ -530,7 +548,7 @@ export class ChatFolder {
 	}
 
 	private notice(notice: NoticeKind, text: string): void {
-		this.items.push({ kind: "notice", notice, text, ts: this.ts });
+		this.push({ kind: "notice", notice, text, ts: this.ts });
 	}
 
 	private applyTask(event: TaskEvent): void {
