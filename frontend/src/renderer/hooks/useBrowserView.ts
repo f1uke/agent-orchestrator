@@ -5,6 +5,13 @@ export type { BrowserNavState };
 
 type UseBrowserViewOptions = {
 	sessionId: string;
+	/**
+	 * Names this view apart from the session's Browser tab, which owns the one keyed by the bare session
+	 * id and the `ao preview` target. The Document tab passes `doc:<sessionId>`.
+	 */
+	viewName?: string;
+	/** Destroy the native view when the hook unmounts or the name changes, instead of keeping it for the next visit. */
+	disposable?: boolean;
 	active: boolean;
 	poppedOut: boolean;
 	/**
@@ -72,6 +79,8 @@ function visibleSlotRect(node: HTMLElement): BrowserRect {
 
 export function useBrowserView({
 	sessionId,
+	viewName = sessionId,
+	disposable = false,
 	active,
 	poppedOut,
 	terminated,
@@ -180,7 +189,7 @@ export function useBrowserView({
 		if (!hasNativeBrowser) {
 			const state = {
 				...EMPTY_NAV_STATE,
-				viewId: `preview-${sessionId}`,
+				viewId: `preview-${viewName}`,
 				url: "",
 				title: "",
 			};
@@ -192,7 +201,7 @@ export function useBrowserView({
 				viewIdRef.current = "";
 			};
 		}
-		window.ao?.browser.ensure(sessionId).then((state) => {
+		window.ao?.browser.ensure(viewName).then((state) => {
 			if (disposed) return;
 			viewIdRef.current = state.viewId;
 			setViewId(state.viewId);
@@ -204,10 +213,11 @@ export function useBrowserView({
 			const id = viewIdRef.current;
 			if (id) {
 				sendHiddenBounds(id);
+				if (disposable) window.ao?.browser.destroy(id);
 			}
 			viewIdRef.current = "";
 		};
-	}, [hasNativeBrowser, scheduleSettleMeasure, sendHiddenBounds, sessionId]);
+	}, [disposable, hasNativeBrowser, scheduleSettleMeasure, sendHiddenBounds, viewName]);
 
 	useEffect(() => {
 		return window.ao?.browser.onNavState((state) => {

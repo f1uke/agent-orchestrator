@@ -2,7 +2,8 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundTask, Pending, PermissionOutcome, ToolCallItem } from "../lib/chat-fold";
-import { image, stubChatFiles } from "../test/chat-files-stub";
+import { file, image, stubChatFiles } from "../test/chat-files-stub";
+import { ChatDocsProvider } from "./ChatDocs";
 import { ChatRefsProvider } from "./RefImages";
 import { PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 
@@ -659,5 +660,73 @@ describe("image refs in a request card", () => {
 			</ChatRefsProvider>,
 		);
 		expect(await screen.findByRole("img", { name: "compare-1920x1080.png" })).toBeInTheDocument();
+	});
+});
+
+describe("ToolCard document action", () => {
+	const write = call("Write", { file_path: "/work/project/docs/plan.md", content: "# Plan\n" });
+
+	function withDocs(item: ToolCallItem, found: ReturnType<typeof file> | undefined) {
+		const onOpen = vi.fn();
+		stubChatFiles({ "/work/project/docs/plan.md": found ? [found] : [] });
+		render(
+			<ChatRefsProvider sessionId="s1">
+				<ChatDocsProvider onOpen={onOpen}>
+					<ToolCard call={item} onToggle={vi.fn()} open={false} root="/work/project" subagentTools={0} theme="dark" />
+				</ChatDocsProvider>
+			</ChatRefsProvider>,
+		);
+		return { onOpen };
+	}
+
+	it("adds an Open action to a Write the daemon confirmed, and it opens that file without toggling the row", async () => {
+		const { onOpen } = withDocs(write, file("docs/plan.md", "markdown"));
+		const open = await screen.findByRole("button", { name: "Open plan.md" });
+		await userEvent.click(open);
+		expect(onOpen).toHaveBeenCalledWith(
+			expect.objectContaining({ source: "file", root: "worktree", path: "docs/plan.md", kind: "markdown" }),
+		);
+		expect(document.querySelector(".chat-tool--open")).toBeNull();
+		expect(open.closest(".chat-tool__head")).toBeNull();
+	});
+
+	it("keeps the Open action when the row is an Edit", async () => {
+		withDocs(
+			call("Edit", { file_path: "/work/project/docs/plan.md", old_string: "a", new_string: "b" }),
+			file("docs/plan.md", "markdown"),
+		);
+		expect(await screen.findByRole("button", { name: "Open plan.md" })).toBeInTheDocument();
+	});
+
+	it.each(["html", "pdf", "image"] as const)("offers it for a %s file too", async (kind) => {
+		withDocs(write, file("docs/plan.md", kind));
+		expect(await screen.findByRole("button", { name: "Open plan.md" })).toBeInTheDocument();
+	});
+
+	it.each(["json", "text", "log", "diff"] as const)("keeps a %s file to its code box, with no action", async (kind) => {
+		const fetchMock = stubChatFiles({ "/work/project/docs/plan.md": [file("docs/plan.md", kind)] });
+		render(
+			<ChatRefsProvider sessionId="s1">
+				<ChatDocsProvider onOpen={vi.fn()}>
+					<ToolCard call={write} onToggle={vi.fn()} open={false} root="/work/project" subagentTools={0} theme="dark" />
+				</ChatDocsProvider>
+			</ChatRefsProvider>,
+		);
+		await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		await new Promise((r) => setTimeout(r, 20));
+		expect(screen.queryByRole("button", { name: /^Open/ })).toBeNull();
+	});
+
+	it("adds nothing for a file the daemon did not confirm, a Bash row, or outside a document provider", async () => {
+		withDocs(write, undefined);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(screen.queryByRole("button", { name: /^Open/ })).toBeNull();
+		cleanup();
+		withDocs(call("Bash", { command: "ls" }), file("docs/plan.md", "markdown"));
+		await new Promise((r) => setTimeout(r, 20));
+		expect(screen.queryByRole("button", { name: /^Open/ })).toBeNull();
+		cleanup();
+		render(<ToolCard call={write} onToggle={vi.fn()} open={false} root="" subagentTools={0} theme="dark" />);
+		expect(screen.queryByRole("button", { name: /^Open/ })).toBeNull();
 	});
 });

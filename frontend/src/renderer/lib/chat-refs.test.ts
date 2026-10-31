@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IMAGE_EXT, imageRefs } from "./chat-refs";
+import { DOC_EXT, docRefs, IMAGE_EXT, imageRefs } from "./chat-refs";
 
 describe("imageRefs", () => {
 	it("takes an inline code span that ends in an image extension, as a path, a glob, ~/ or an absolute path", () => {
@@ -94,5 +94,67 @@ describe("imageRefs", () => {
 	it("finds nothing in text without refs", () => {
 		expect(imageRefs("")).toEqual([]);
 		expect(imageRefs("plain words only")).toEqual([]);
+	});
+});
+
+describe("docRefs", () => {
+	it("takes inline code and link targets that name a document, as a path, ~/ or an absolute path", () => {
+		const md =
+			"Plan in `docs/plan.md`, survey in `plans/demo--survey.md`, [the log](logs/export.log) and `/work/project/spec.pdf`. See [tmp/batch.json](tmp/batch.json) and ~/notes/today.md.";
+		expect(docRefs(md)).toEqual([
+			"docs/plan.md",
+			"plans/demo--survey.md",
+			"logs/export.log",
+			"/work/project/spec.pdf",
+			"tmp/batch.json",
+			"~/notes/today.md",
+		]);
+	});
+
+	it("takes every extension in DOC_EXT in any case, and a bare name in a code span", () => {
+		const md = DOC_EXT.map((ext) => `\`file.${ext}\``).join(" ") + " `UP.MD`";
+		expect(docRefs(md)).toEqual([...DOC_EXT.map((ext) => `file.${ext}`), "UP.MD"]);
+	});
+
+	it("leaves images to imageRefs, and documents to docRefs", () => {
+		const md = "`shots/a.png` `docs/b.md` ![x](shots/c.svg) [y](docs/d.html)";
+		expect(docRefs(md)).toEqual(["docs/b.md", "docs/d.html"]);
+		expect(imageRefs(md)).toEqual(["shots/a.png", "shots/c.svg"]);
+	});
+
+	it("skips URLs, globs, commands, source files, a bare stem-less extension and a bare prose name", () => {
+		const md = [
+			"`https://example.test/a.md` [site](https://example.test/page.html) `//cdn.test/c.md`",
+			"`docs/*.md` `go test ./...` `main.go` `v1.2` `.md` `docs/` `notes.docx`",
+			"A lone readme.md in prose has no slash.",
+		].join("\n");
+		expect(docRefs(md)).toEqual([]);
+	});
+
+	it("takes a path in prose when it has a slash or starts with ~/, and drops sentence punctuation", () => {
+		expect(docRefs("Saved to docs/a.md, then (~/b.md) and **docs/c.html**.")).toEqual([
+			"docs/a.md",
+			"~/b.md",
+			"docs/c.html",
+		]);
+	});
+
+	it("takes the document words of a fenced block, one line at a time", () => {
+		const md = ["```sh", "ls docs", "cat docs/one.md >> out/two.log", "  notes.txt  ", "```"].join("\n");
+		expect(docRefs(md)).toEqual(["docs/one.md", "out/two.log", "notes.txt"]);
+	});
+
+	it("joins a bare name to the directory a code span named before it, and keeps the bare form too, but never a glob", () => {
+		expect(docRefs("in `plans/x--survey/` the file `survey.md` and `*.md`")).toEqual([
+			"survey.md",
+			"plans/x--survey/survey.md",
+		]);
+	});
+
+	it("keeps the order of appearance, each ref once, within the resolve endpoint's limits", () => {
+		expect(docRefs("`z/1.md` then [a](z/2.md) then z/3.md then `z/1.md`")).toEqual(["z/1.md", "z/2.md", "z/3.md"]);
+		const many = Array.from({ length: 80 }, (_, i) => `\`s/${i}.md\``).join(" ");
+		expect(docRefs(many)).toHaveLength(64);
+		expect(docRefs(`\`${"a".repeat(1100)}.md\` \`ok.md\``)).toEqual(["ok.md"]);
 	});
 });
