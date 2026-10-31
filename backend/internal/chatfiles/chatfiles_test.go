@@ -359,3 +359,24 @@ func TestResolveCapsGlobMatches(t *testing.T) {
 		t.Errorf("capped glob = %d matches %v, want the first 24 sorted", len(got), got)
 	}
 }
+
+func TestClaudeTempRootsFollowClaudeCode(t *testing.T) {
+	uid := fmt.Sprintf("claude-%d", os.Getuid())
+	tmp, err := filepath.EvalSymlinks("/tmp")
+	if err != nil {
+		t.Skip("no /tmp on this system")
+	}
+	t.Setenv("CLAUDE_CODE_TMPDIR", "")
+	if got, want := chatfiles.ClaudeTempRoots(), []string{filepath.Join(tmp, uid)}; !slices.Equal(got, want) {
+		t.Errorf("unset: roots = %q, want %q", got, want)
+	}
+	custom := t.TempDir()
+	t.Setenv("CLAUDE_CODE_TMPDIR", custom)
+	resolved, err := filepath.EvalSymlinks(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := chatfiles.ClaudeTempRoots(), []string{filepath.Join(resolved, uid), filepath.Join(tmp, uid)}; !slices.Equal(got, want) {
+		t.Errorf("set: roots = %q, want %q", got, want)
+	}
+}

@@ -1411,6 +1411,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The end of a background task's output, at most the last 64 KiB, with the file's size and mtime. The daemon finds the file in the session's own event log and serves it only when, after symlinks, it is a regular file named <taskId>.output in a tasks directory of one of the session's claude sessions, under Claude Code's temp root. 404 for an unknown session or task, a task id outside [A-Za-z0-9_-], a file not written yet, and any file that fails the rule */
+        get: operations["getChatTaskOutput"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/children": {
         parameters: {
             query?: never;
@@ -3497,6 +3514,19 @@ export interface components {
              * @enum {string}
              */
             via?: "app" | "cli" | "api";
+        };
+        ControllersChatTaskOutputResponse: {
+            /** Format: date-time */
+            modifiedAt: string;
+            /**
+             * Format: int64
+             * @description The whole file's size in bytes.
+             */
+            size: number;
+            /** @description The end of the output file, at most the last 64 KiB. */
+            text: string;
+            /** @description True when text is only the end of the file. */
+            truncated: boolean;
         };
         ControllersChatUsageResponse: {
             /** @description The five-hour window; absent when the event did not report it. */
@@ -12578,6 +12608,58 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getChatTaskOutput: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description The background task id claude reported in task_started. */
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersChatTaskOutputResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
