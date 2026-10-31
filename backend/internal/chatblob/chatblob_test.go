@@ -24,7 +24,7 @@ func blobName(data []byte) string {
 }
 
 func TestExternalizeStoresAReadImageOnceAndDropsTheDuplicate(t *testing.T) {
-	s := New(t.TempDir())
+	s := Store{dir: t.TempDir()}
 	b64 := base64.StdEncoding.EncodeToString(png)
 	got, err := s.Externalize(json.RawMessage(readResult(b64)))
 	if err != nil {
@@ -39,18 +39,18 @@ func TestExternalizeStoresAReadImageOnceAndDropsTheDuplicate(t *testing.T) {
 	if !strings.Contains(string(got), `"a < b && c > d"`) || !strings.Contains(string(got), `1.50`) {
 		t.Errorf("re-encoding changed text or numbers: %s", got)
 	}
-	stored, err := os.ReadFile(filepath.Join(s.Dir(), name))
+	stored, err := os.ReadFile(filepath.Join(s.dir, name))
 	if err != nil || !bytes.Equal(stored, png) {
 		t.Fatalf("blob %s = %q, %v; want the decoded image", name, stored, err)
 	}
-	entries, _ := os.ReadDir(s.Dir())
+	entries, _ := os.ReadDir(s.dir)
 	if len(entries) != 1 {
 		t.Errorf("blob dir holds %d files, want 1", len(entries))
 	}
 }
 
 func TestExternalizeIsIdempotent(t *testing.T) {
-	s := New(t.TempDir())
+	s := Store{dir: t.TempDir()}
 	once, err := s.Externalize(json.RawMessage(readResult(base64.StdEncoding.EncodeToString(png))))
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestExternalizeIsIdempotent(t *testing.T) {
 }
 
 func TestExternalizeLeavesPayloadsWithoutImagesByteForByte(t *testing.T) {
-	s := New(filepath.Join(t.TempDir(), "blobs"))
+	s := Store{dir: filepath.Join(t.TempDir(), "blobs")}
 	for _, p := range []string{
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"the word base64 <b>"}]}}`,
 		`{"type":"user","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"!!not base64!!"}}]}}`,
@@ -79,13 +79,13 @@ func TestExternalizeLeavesPayloadsWithoutImagesByteForByte(t *testing.T) {
 			t.Errorf("changed:\n got %s\nwant %s", got, p)
 		}
 	}
-	if _, err := os.Stat(s.Dir()); !os.IsNotExist(err) {
+	if _, err := os.Stat(s.dir); !os.IsNotExist(err) {
 		t.Errorf("blob dir created for payloads with nothing to store: %v", err)
 	}
 }
 
 func TestInlineRestoresOneCopyOfTheImage(t *testing.T) {
-	s := New(t.TempDir())
+	s := Store{dir: t.TempDir()}
 	b64 := base64.StdEncoding.EncodeToString(png)
 	ref, err := s.Externalize(json.RawMessage(readResult(b64)))
 	if err != nil {
@@ -122,7 +122,7 @@ func TestInlineRestoresOneCopyOfTheImage(t *testing.T) {
 }
 
 func TestInlineLeavesARefWhoseBlobIsMissing(t *testing.T) {
-	s := New(t.TempDir())
+	s := Store{dir: t.TempDir()}
 	p := `{"type":"user","message":{"content":[{"type":"image","source":{"type":"ao_blob","media_type":"image/png","blob":"` + blobName(png) + `","size":3}}]}}`
 	got, err := s.Inline(json.RawMessage(p))
 	if err != nil {
@@ -134,7 +134,7 @@ func TestInlineLeavesARefWhoseBlobIsMissing(t *testing.T) {
 }
 
 func TestPathAcceptsOnlyBlobNames(t *testing.T) {
-	s := New("/data/sessions/s1/blobs")
+	s := Store{dir: "/data/sessions/s1/blobs"}
 	name := blobName(png)
 	if p, ok := s.Path(name); !ok || p != filepath.Join("/data/sessions/s1/blobs", name) {
 		t.Errorf("Path(%q) = %q, %v", name, p, ok)
@@ -147,7 +147,7 @@ func TestPathAcceptsOnlyBlobNames(t *testing.T) {
 }
 
 func TestForLogPutsBlobsNextToTheLog(t *testing.T) {
-	if got, want := ForLog("/data/sessions/s1/events.jsonl").Dir(), "/data/sessions/s1/blobs"; got != want {
+	if got, want := ForLog("/data/sessions/s1/events.jsonl").dir, "/data/sessions/s1/blobs"; got != want {
 		t.Errorf("dir = %q, want %q", got, want)
 	}
 }

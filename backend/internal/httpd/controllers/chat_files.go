@@ -40,8 +40,7 @@ type ChatFilesController struct {
 	Sessions ChatFilesSessions
 	// KnowledgeDir is the knowledge store root; a session reads KnowledgeDir/<project>.
 	KnowledgeDir string
-	// DataDir holds each chat session's event log and the blobs it names.
-	DataDir string
+	DataDir      string
 }
 
 // Register mounts the chat file routes on the supplied router.
@@ -143,7 +142,7 @@ func (c *ChatFilesController) serve(w http.ResponseWriter, r *http.Request) {
 		chatFileNotFound(w, r)
 		return
 	}
-	f, err := os.Open(abs) //nolint:gosec // G304: abs is the symlink-resolved, root-confined path chatfiles.Open returned
+	f, err := os.Open(abs)
 	if err != nil {
 		chatFileNotFound(w, r)
 		return
@@ -157,8 +156,6 @@ func (c *ChatFilesController) serve(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", file.ModTime, f)
 }
 
-// blob serves an image the session's event log names by reference. A blob is
-// named by the hash of its bytes, so it never changes and may be cached.
 func (c *ChatFilesController) blob(w http.ResponseWriter, r *http.Request) {
 	if c.Sessions == nil || c.DataDir == "" {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/chat/blobs/{blob}")

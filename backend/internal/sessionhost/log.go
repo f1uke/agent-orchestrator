@@ -64,8 +64,6 @@ func openLog(path string) (*eventLog, *chatproto.Folder, error) {
 	return lg, folder, nil
 }
 
-// append writes e with its binary payloads moved to the blob store, and
-// returns the line it wrote and the entry as logged.
 func (l *eventLog) append(e chatproto.Entry) ([]byte, chatproto.Entry, error) {
 	payload, err := l.blobs.Externalize(e.Payload)
 	if err != nil {

@@ -32,8 +32,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/fsatomic"
 )
 
-// SourceType is the source type of a stored payload's reference.
-const SourceType = "ao_blob"
+const refType = "ao_blob"
 
 var extByMIME = map[string]string{
 	"image/png":       "png",
@@ -51,17 +50,11 @@ func init() {
 	}
 }
 
-// Store is one session's blob directory.
+// Store is one session's blob directory, created on first write.
 type Store struct{ dir string }
 
-// New returns the store kept in dir. The directory is created on first write.
-func New(dir string) Store { return Store{dir: dir} }
-
 // ForLog returns the store kept next to the event log at logPath.
-func ForLog(logPath string) Store { return New(filepath.Join(filepath.Dir(logPath), "blobs")) }
-
-// Dir is the blob directory.
-func (s Store) Dir() string { return s.dir }
+func ForLog(logPath string) Store { return Store{dir: filepath.Join(filepath.Dir(logPath), "blobs")} }
 
 // Path returns the file of the blob named name, or false when name is not a
 // blob name this package writes.
@@ -119,9 +112,9 @@ func (s Store) Externalize(p json.RawMessage) (json.RawMessage, error) {
 		if err != nil || !ok {
 			return nil, err
 		}
-		return map[string]any{"type": SourceType, "media_type": mime, "blob": name, "size": size}, nil
+		return map[string]any{"type": refType, "media_type": mime, "blob": name, "size": size}, nil
 	})
-	if err != nil || !(changed || sourced) {
+	if err != nil || (!changed && !sourced) {
 		return p, err
 	}
 	return encode(v)
@@ -132,7 +125,7 @@ func (s Store) Externalize(p json.RawMessage) (json.RawMessage, error) {
 // whose blob is missing stays a reference. The copy in
 // tool_use_result.file, inline or a reference, is dropped: nothing reads it.
 func (s Store) Inline(p json.RawMessage) (json.RawMessage, error) {
-	if !bytes.Contains(p, []byte(`"`+SourceType+`"`)) && !bytes.Contains(p, []byte(`"base64"`)) {
+	if !bytes.Contains(p, []byte(`"`+refType+`"`)) && !bytes.Contains(p, []byte(`"base64"`)) {
 		return p, nil
 	}
 	v, ok := decode(p)
@@ -150,7 +143,7 @@ func (s Store) Inline(p json.RawMessage) (json.RawMessage, error) {
 	sourced, err := eachSource(v, func(src map[string]any) (map[string]any, error) {
 		name, _ := src["blob"].(string)
 		path, ok := s.Path(name)
-		if src["type"] != SourceType || !ok {
+		if src["type"] != refType || !ok {
 			return nil, nil
 		}
 		data, err := os.ReadFile(path) //nolint:gosec // G304: Path accepts only <sha256>.<ext> names inside the store
@@ -163,14 +156,12 @@ func (s Store) Inline(p json.RawMessage) (json.RawMessage, error) {
 		mime, _ := src["media_type"].(string)
 		return map[string]any{"type": "base64", "media_type": mime, "data": base64.StdEncoding.EncodeToString(data)}, nil
 	})
-	if err != nil || !(changed || sourced) {
+	if err != nil || (!changed && !sourced) {
 		return p, err
 	}
 	return encode(v)
 }
 
-// resultFile is the tool_use_result.file object of a top-level payload, the
-// place claude puts its second copy of a Read image, or nil.
 func resultFile(v any) map[string]any {
 	top, _ := v.(map[string]any)
 	r, _ := top["tool_use_result"].(map[string]any)
@@ -178,9 +169,6 @@ func resultFile(v any) map[string]any {
 	return f
 }
 
-// eachSource calls fn on every "source" object in v and puts back the
-// replacement fn returns; nil keeps the source. It reports whether any
-// source was replaced.
 func eachSource(v any, fn func(map[string]any) (map[string]any, error)) (bool, error) {
 	changed := false
 	var children []any
@@ -212,9 +200,6 @@ func eachSource(v any, fn func(map[string]any) (map[string]any, error)) (bool, e
 	return changed, nil
 }
 
-// storeBase64 writes the decoded bytes of raw unless a blob with them exists,
-// and returns the blob's name and size. It reports false, and writes nothing,
-// when raw is not a non-empty base64 string.
 func (s Store) storeBase64(raw, mime string) (string, int, bool, error) {
 	if raw == "" {
 		return "", 0, false, nil
@@ -242,15 +227,11 @@ func (s Store) storeBase64(raw, mime string) (string, int, bool, error) {
 	return name, len(data), true, nil
 }
 
-// decodeBase64 reports false for data that is not standard base64, which
-// is left inline as written.
 func decodeBase64(s string) ([]byte, bool) {
 	data, err := base64.StdEncoding.DecodeString(s)
 	return data, err == nil
 }
 
-// decode parses p keeping numbers as written; false means p is not JSON
-// and is passed on untouched.
 func decode(p []byte) (any, bool) {
 	dec := json.NewDecoder(bytes.NewReader(p))
 	dec.UseNumber()

@@ -182,10 +182,6 @@ func chatLogAfter(path string, fromSeq uint64) ([]chatproto.Entry, error) {
 	return nil, nil
 }
 
-// shapeImages gives a client the images of e the way its open asked: as
-// blob references (storing any image an older log or host still inlines), or
-// as one inline base64 copy each. The log itself is never rewritten. On error
-// e goes out as logged.
 func shapeImages(blobs chatblob.Store, e chatproto.Entry, refs bool) (chatproto.Entry, error) {
 	var shaped json.RawMessage
 	var err error
