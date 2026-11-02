@@ -3592,6 +3592,69 @@ paths:
         is waiting on. Answers 409 CHAT_REQUEST_REJECTED when the request is not pending
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/attachments:
+    post:
+      operationId: uploadChatAttachment
+      parameters:
+      - description: 'The file name: no path, no control characters, at most 255 bytes.'
+        in: query
+        name: name
+        required: true
+        schema:
+          description: 'The file name: no path, no control characters, at most 255
+            bytes.'
+          type: string
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersChatAttachment'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Request Entity Too Large
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Save a file the human attached in a chat session's composer. The body
+        is the raw file bytes (application/octet-stream, at most 50 MiB). The file
+        lands in a fresh folder under the session's attachments directory, outside
+        every worktree; the session host gives claude that directory with --add-dir,
+        so the answered path can go in the message for claude to read
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/blobs/{blob}:
     get:
       operationId: getChatBlob
@@ -10675,6 +10738,22 @@ components:
           - api
           type: string
       type: object
+    ControllersChatAttachment:
+      properties:
+        name:
+          type: string
+        path:
+          description: 'Absolute path of the saved file. Claude can read it: the session
+            host adds its folder with --add-dir.'
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+      - path
+      - name
+      - size
+      type: object
     ControllersChatTaskOutputResponse:
       properties:
         modifiedAt:
@@ -17550,15 +17629,14 @@ components:
     SendChatMessageRequest:
       properties:
         images:
+          description: png, jpeg, gif or webp, base64, at most 5 MiB each.
           items:
             $ref: '#/components/schemas/ChatImage'
+          maxItems: 20
           type: array
         text:
-          description: What the human typed. Must not be blank.
-          minLength: 1
+          description: What the human typed. May be empty only when images are attached.
           type: string
-      required:
-      - text
       type: object
     SendChatMessageResponse:
       properties:

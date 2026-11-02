@@ -1291,6 +1291,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/chat/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save a file the human attached in a chat session's composer. The body is the raw file bytes (application/octet-stream, at most 50 MiB). The file lands in a fresh folder under the session's attachments directory, outside every worktree; the session host gives claude that directory with --add-dir, so the answered path can go in the message for claude to read */
+        post: operations["uploadChatAttachment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/chat/blobs/{blob}": {
         parameters: {
             query?: never;
@@ -3514,6 +3531,13 @@ export interface components {
              * @enum {string}
              */
             via?: "app" | "cli" | "api";
+        };
+        ControllersChatAttachment: {
+            name: string;
+            /** @description Absolute path of the saved file. Claude can read it: the session host adds its folder with --add-dir. */
+            path: string;
+            /** Format: int64 */
+            size: number;
         };
         ControllersChatTaskOutputResponse: {
             /** Format: date-time */
@@ -6301,9 +6325,10 @@ export interface components {
             unpublished: number;
         };
         SendChatMessageRequest: {
+            /** @description png, jpeg, gif or webp, base64, at most 5 MiB each. */
             images?: components["schemas"]["ChatImage"][];
-            /** @description What the human typed. Must not be blank. */
-            text: string;
+            /** @description What the human typed. May be empty only when images are attached. */
+            text?: string;
         };
         SendChatMessageResponse: {
             /** @description The id the host gave the message; its echo in the event log carries the same uuid. */
@@ -12097,6 +12122,77 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    uploadChatAttachment: {
+        parameters: {
+            query: {
+                /** @description The file name: no path, no control characters, at most 255 bytes. */
+                name: string;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersChatAttachment"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -2685,6 +2685,19 @@ func sessionOperations() []operation {
 			contentTypes: map[int]string{http.StatusOK: "application/octet-stream"},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/chat/attachments", id: "uploadChatAttachment", tag: "sessions",
+			summary:    "Save a file the human attached in a chat session's composer. The body is the raw file bytes (application/octet-stream, at most 50 MiB). The file lands in a fresh folder under the session's attachments directory, outside every worktree; the session host gives claude that directory with --add-dir, so the answered path can go in the message for claude to read",
+			pathParams: []any{controllers.ChatAttachmentParams{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ChatAttachment{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusRequestEntityTooLarge, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", id: "getChatTaskOutput", tag: "sessions",
 			summary:    "The end of a background task's output, at most the last 64 KiB, with the file's size and mtime. The daemon finds the file in the session's own event log and serves it only when, after symlinks, it is a regular file named <taskId>.output in a tasks directory of one of the session's claude sessions, under Claude Code's temp root. 404 for an unknown session or task, a task id outside [A-Za-z0-9_-], a file not written yet, and any file that fails the rule",
 			pathParams: []any{controllers.ChatTaskParam{}},

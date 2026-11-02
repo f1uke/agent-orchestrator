@@ -153,6 +153,20 @@ func TestChatInterruptAndMode(t *testing.T) {
 	}
 }
 
+func TestChatSendTakesAnImageWithoutText(t *testing.T) {
+	svc := &fakeChatService{uuid: "u-2"}
+	srv := newChatTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/messages",
+		`{"images":[{"mediaType":"image/webp","base64":"aGk="}]}`)
+	if status != http.StatusOK {
+		t.Fatalf("image-only send = %d, body=%s", status, body)
+	}
+	want := chatCall{op: "send", id: "s-1", input: chatproto.UserInput{Images: []chatproto.Image{{MediaType: "image/webp", Base64: "aGk="}}}}
+	if len(svc.calls) != 1 || !reflect.DeepEqual(svc.calls[0], want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
 func TestChatBadRequestsNeverReachTheService(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, path, body, code string
@@ -162,6 +176,10 @@ func TestChatBadRequestsNeverReachTheService(t *testing.T) {
 		{"send: blank text", "POST", "messages", `{"text":"  \n "}`, "TEXT_REQUIRED"},
 		{"send: image without data", "POST", "messages", `{"text":"x","images":[{"mediaType":"image/png"}]}`, "IMAGE_INVALID"},
 		{"send: image without type", "POST", "messages", `{"text":"x","images":[{"base64":"aGk="}]}`, "IMAGE_INVALID"},
+		{"send: image of a type claude cannot read", "POST", "messages", `{"text":"x","images":[{"mediaType":"image/svg+xml","base64":"aGk="}]}`, "IMAGE_INVALID"},
+		{"send: image that is not base64", "POST", "messages", `{"text":"x","images":[{"mediaType":"image/png","base64":"not base64!"}]}`, "IMAGE_INVALID"},
+		{"send: image over 5 MiB", "POST", "messages", `{"text":"x","images":[{"mediaType":"image/png","base64":"` + strings.Repeat("A", 5<<20/3*4+8) + `"}]}`, "IMAGE_TOO_LARGE"},
+		{"send: more than 20 images", "POST", "messages", `{"text":"x","images":[` + strings.TrimSuffix(strings.Repeat(`{"mediaType":"image/png","base64":"aGk="},`, 21), ",") + `]}`, "TOO_MANY_IMAGES"},
 		{"answer: not JSON", "POST", "answers", `[`, "INVALID_JSON"},
 		{"answer: no request id", "POST", "answers", `{"behavior":"allow"}`, "REQUEST_ID_REQUIRED"},
 		{"answer: no behavior", "POST", "answers", `{"requestId":"r-1"}`, "INVALID_BEHAVIOR"},

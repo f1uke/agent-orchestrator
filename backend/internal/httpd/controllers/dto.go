@@ -2412,8 +2412,21 @@ type ChatImage struct {
 
 // SendChatMessageRequest is the body of POST /api/v1/sessions/{sessionId}/chat/messages.
 type SendChatMessageRequest struct {
-	Text   string      `json:"text" minLength:"1" description:"What the human typed. Must not be blank."`
-	Images []ChatImage `json:"images,omitempty"`
+	Text   string      `json:"text,omitempty" description:"What the human typed. May be empty only when images are attached."`
+	Images []ChatImage `json:"images,omitempty" maxItems:"20" description:"png, jpeg, gif or webp, base64, at most 5 MiB each."`
+}
+
+// ChatAttachment is the body of POST /api/v1/sessions/{sessionId}/chat/attachments.
+type ChatAttachment struct {
+	Path string `json:"path" description:"Absolute path of the saved file. Claude can read it: the session host adds its folder with --add-dir."`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+// ChatAttachmentParams is the query of POST /api/v1/sessions/{sessionId}/chat/attachments.
+type ChatAttachmentParams struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	Name      string `query:"name" required:"true" description:"The file name: no path, no control characters, at most 255 bytes."`
 }
 
 // SendChatMessageResponse is the body of POST /api/v1/sessions/{sessionId}/chat/messages.
