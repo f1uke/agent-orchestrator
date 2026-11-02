@@ -137,3 +137,7 @@ export function useDocOf(path: string | undefined): { doc: FileDoc | undefined; 
 		return { doc, open: doc && onOpen ? () => onOpen(doc) : undefined };
 	}, [path, resolved, context]);
 }
+
+export function sessionDocs(_turns: readonly TurnDocs[], _known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] {
+	return [];
+}

@@ -46,6 +46,8 @@ export function DocumentPanel({
 	doc: FileDoc | null;
 	active: boolean;
 	onClose: () => void;
+	docs?: readonly FileDoc[];
+	onOpen?: (doc: FileDoc) => void;
 }) {
 	if (!doc) {
 		return (

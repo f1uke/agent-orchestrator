@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileDoc, TurnDocs } from "../lib/chat-docs";
 import { file, image, resolveCalls, stubChatFiles } from "../test/chat-files-stub";
-import { ChatDocsProvider, ChatDocStrip, useDocOf } from "./ChatDocs";
+import { ChatDocsProvider, ChatDocStrip, sessionDocs, useDocOf } from "./ChatDocs";
 import { ChatRefsProvider } from "./RefImages";
 
 afterEach(() => {
@@ -186,5 +186,32 @@ describe("useDocOf", () => {
 	it("offers nothing outside a document provider", () => {
 		render(<Probe path="x.md" />);
 		expect(screen.getByRole("button", { name: "none" })).toBeDisabled();
+	});
+});
+
+describe("sessionDocs", () => {
+	const plan = file("docs/plan.md", "markdown");
+	const shot = file("shots/a.png", "image");
+	const turns: TurnDocs[] = [
+		{ refs: ["docs/plan.md", "plans/demo--survey.md"], artifacts: [] },
+		{ refs: ["shots/a.png", "docs/gone.md"], artifacts: [] },
+		{ refs: ["plans/demo--survey.md"], artifacts: [] },
+	];
+	const known = new Map([
+		["docs/plan.md", [plan]],
+		["plans/demo--survey.md", [survey]],
+		["shots/a.png", [shot]],
+		["docs/gone.md", []],
+	]);
+
+	it("lists every confirmed document of the session, newest turn first, each once, without images", () => {
+		expect(sessionDocs(turns, known).map((d) => `${d.root}:${d.path}`)).toEqual([
+			"knowledge:plans/demo--survey.md",
+			"worktree:docs/plan.md",
+		]);
+	});
+
+	it("lists nothing before the daemon has answered", () => {
+		expect(sessionDocs(turns, new Map())).toEqual([]);
 	});
 });

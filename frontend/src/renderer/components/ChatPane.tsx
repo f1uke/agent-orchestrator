@@ -79,6 +79,7 @@ type ChatPaneProps = {
 	chatApi?: ChatApi;
 	onOpenDoc?: (doc: FileDoc) => void;
 	openDoc?: FileDoc | null;
+	onDocs?: (docs: FileDoc[]) => void;
 };
 
 type RequestStates = Readonly<Record<string, RequestState>>;
