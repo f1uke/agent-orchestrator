@@ -292,6 +292,8 @@ export function chatRows(
 					const docs = turnDocs(turnItems);
 					if (docs) row.docs = docs;
 					reply = undefined;
+					// A turn can start without a user message (a retry, a resumed run), so the next one starts here.
+					turnItems = [];
 				}
 				rows.push(row);
 				return;

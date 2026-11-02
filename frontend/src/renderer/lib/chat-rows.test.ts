@@ -335,6 +335,22 @@ describe("chatRows turn fold", () => {
 		]);
 	});
 
+	it("does not hand a later turn the documents of an earlier one when no user message comes between", () => {
+		const rows = rowsOf([
+			user(),
+			tool("Write", { file_path: "/w/docs/a.md" }),
+			say("Plan in `docs/b.md`."),
+			turnEnd(),
+			say("API Error: 503 rate_limit_error"),
+			turnEnd(true),
+		]);
+		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");
+		expect(ends.map((r) => r.kind === "item" && r.docs)).toEqual([
+			{ refs: ["/w/docs/a.md", "docs/b.md"], artifacts: [] },
+			undefined,
+		]);
+	});
+
 	it("hands each turn end the turn's last reply, for its answer bar", () => {
 		const rows = rowsOf([...finished(), user("u2", "and?"), tool("Read"), turnEnd()]);
 		const ends = rows.filter((r) => r.kind === "item" && r.item.kind === "turn_end");
