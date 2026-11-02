@@ -1,5 +1,5 @@
 import type { components } from "../../api/schema";
-import { apiClient } from "./api-client";
+import { apiClient, getApiBaseUrl } from "./api-client";
 import type { AnswerBody, PermissionMode } from "./chat-answers";
 import { isObject } from "./chat-event";
 
@@ -13,12 +13,18 @@ export type ChatActionError = { kind: ChatErrorKind; message: string };
 
 export type ChatResult = { ok: true } | { ok: false; error: ChatActionError };
 
+export type UploadedFile = components["schemas"]["ControllersChatAttachment"];
+
+export type UploadResult = { ok: true; file: UploadedFile } | { ok: false; error: ChatActionError };
+
 export type ChatApi = {
 	send: (sessionId: string, text: string, images: readonly ChatImage[]) => Promise<ChatResult>;
 	answer: (sessionId: string, body: AnswerBody) => Promise<ChatResult>;
 	interrupt: (sessionId: string) => Promise<ChatResult>;
 	setMode: (sessionId: string, mode: PermissionMode) => Promise<ChatResult>;
 	setModel: (sessionId: string, model: string) => Promise<ChatResult>;
+	/** Saves a file where claude can read it; the answered path goes into the message. */
+	upload: (sessionId: string, file: File) => Promise<UploadResult>;
 	/** The tail of a background task's output; null when the daemon has none for it. */
 	taskOutput: (sessionId: string, taskId: string) => Promise<TaskOutput | null>;
 };
@@ -48,6 +54,24 @@ async function settle(call: Promise<{ error?: unknown; response: Response }>): P
 	}
 }
 
+async function upload(sessionId: string, file: File): Promise<UploadResult> {
+	const name = file.name || "pasted file";
+	try {
+		const response = await fetch(
+			`${getApiBaseUrl()}/api/v1/sessions/${encodeURIComponent(sessionId)}/chat/attachments?name=${encodeURIComponent(name)}`,
+			{ method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file },
+		);
+		const body: unknown = await response.json().catch(() => undefined);
+		if (!response.ok) return { ok: false, error: chatError(response.status, body) };
+		if (!isObject(body) || typeof body.path !== "string" || body.path === "") {
+			return { ok: false, error: { kind: "failed", message: "The daemon did not say where it saved the file." } };
+		}
+		return { ok: true, file: body as UploadedFile };
+	} catch (err) {
+		return { ok: false, error: { kind: "failed", message: err instanceof Error ? err.message : String(err) } };
+	}
+}
+
 const path = (sessionId: string) => ({ params: { path: { sessionId } } });
 
 export const httpChatApi: ChatApi = {
@@ -65,6 +89,7 @@ export const httpChatApi: ChatApi = {
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/mode", { ...path(sessionId), body: { mode } })),
 	setModel: (sessionId, model) =>
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/model", { ...path(sessionId), body: { model } })),
+	upload,
 	taskOutput: async (sessionId, taskId) => {
 		try {
 			const { data } = await apiClient.GET("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", {

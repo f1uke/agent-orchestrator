@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AnswerBody, PermissionMode } from "../lib/chat-answers";
-import { type ChatApi, type ChatImage, type ChatResult, httpChatApi, type TaskOutput } from "../lib/chat-api";
+import {
+	type ChatApi,
+	type ChatImage,
+	type ChatResult,
+	httpChatApi,
+	type TaskOutput,
+	type UploadResult,
+} from "../lib/chat-api";
 import { stubChatApi } from "../lib/chat-mock";
 import type { ChatConnection } from "./useChatSession";
 
@@ -10,6 +17,7 @@ export type ChatActions = {
 	interrupt: () => Promise<ChatResult>;
 	setMode: (mode: PermissionMode) => Promise<ChatResult>;
 	setModel: (model: string) => Promise<ChatResult>;
+	upload: (file: File) => Promise<UploadResult>;
 	taskOutput: (taskId: string) => Promise<TaskOutput | null>;
 	hostDown: boolean;
 };
@@ -36,6 +44,7 @@ export function useChatActions(sessionId: string, connection: ChatConnection, ap
 			interrupt: () => run(api.interrupt(sessionId)),
 			setMode: (mode) => run(api.setMode(sessionId, mode)),
 			setModel: (model) => run(api.setModel(sessionId, model)),
+			upload: (file) => api.upload(sessionId, file),
 			taskOutput: (taskId) => api.taskOutput(sessionId, taskId),
 			hostDown,
 		}),

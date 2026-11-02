@@ -1,9 +1,10 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatActions } from "../hooks/useChatActions";
-import type { ChatResult } from "../lib/chat-api";
+import type { ChatResult, UploadResult } from "../lib/chat-api";
 import type { ChatCommand, ChatModel } from "../lib/chat-fold";
+import { stubImageDecoder } from "../test/chat-attach-stub";
 import { ChatComposer, type Prefill } from "./ChatComposer";
 
 const files = vi.hoisted(() => ({
@@ -20,6 +21,11 @@ const files = vi.hoisted(() => ({
 vi.mock("../hooks/useWorkspaceFiles", () => ({ useWorkspaceFiles: files.hook }));
 
 const OK: ChatResult = { ok: true };
+
+const saved = (file: File): UploadResult => ({
+	ok: true,
+	file: { path: `/data/attachments/ab12/${file.name}`, name: file.name, size: file.size },
+});
 
 const COMMANDS: ChatCommand[] = [
 	{ name: "compact", description: "Summarise the conversation", argumentHint: "<instructions>", builtin: true },
@@ -51,6 +57,7 @@ function renderComposer(over: Partial<ChatActions> = {}) {
 		setMode: vi.fn<ChatActions["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
 		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
+		upload: vi.fn<ChatActions["upload"]>(async (file) => saved(file)),
 		hostDown: false,
 		...over,
 	};
@@ -248,5 +255,206 @@ describe("ChatComposer prefill", () => {
 		expect(input).toHaveValue("");
 		prefill({ text: "Explain", seq: 2 });
 		expect(input).toHaveValue("Explain");
+	});
+});
+
+const MIB = 1024 * 1024;
+const pdf = (name = "spec.pdf") => new File(["%PDF"], name, { type: "application/pdf" });
+const png = (name = "sketch.png", bytes = 4) => new File([new Uint8Array(bytes).fill(7)], name, { type: "image/png" });
+const chipFor = (name: string) => screen.getByRole("group", { name: `Attachment ${name}` });
+const chips = () => screen.queryAllByTestId("chat-attachment");
+const fileInput = () => screen.getByTestId("chat-file-input");
+const sendButton = () => screen.getByRole("button", { name: "Send" });
+const drop = (files: File[]) =>
+	fireEvent.drop(document.querySelector(".chat-composer")!, { dataTransfer: { files, types: ["Files"] } });
+
+const failed = (message = "Request failed (HTTP 500)"): UploadResult => ({
+	ok: false,
+	error: { kind: "failed", message },
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
+});
+
+describe("ChatComposer attachments", () => {
+	it("says files can be attached", () => {
+		const { input } = renderComposer();
+		expect(input).toHaveAttribute(
+			"placeholder",
+			"Message Claude. / for commands and skills, @ for files, paste, drop or attach files.",
+		);
+	});
+
+	it("opens the file picker from the Attach button", async () => {
+		const { user } = renderComposer();
+		const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
+		await user.click(screen.getByRole("button", { name: "Attach files" }));
+		expect(click).toHaveBeenCalledTimes(1);
+		expect(fileInput()).toHaveAttribute("multiple");
+	});
+
+	it("shows a PDF picked through the input as a chip, uploads it once and ends the sent text with its path", async () => {
+		const { input, user, actions } = renderComposer();
+		const file = pdf();
+		await user.upload(fileInput(), file);
+
+		await waitFor(() => expect(chipFor("spec.pdf")).toHaveAttribute("data-state", "ready"));
+		expect(chipFor("spec.pdf")).toHaveTextContent("PDF");
+		expect(chipFor("spec.pdf")).toHaveTextContent("4 B");
+		expect(actions.upload).toHaveBeenCalledTimes(1);
+		expect(actions.upload).toHaveBeenCalledWith(file);
+
+		await user.type(input, "Summarise this");
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("Summarise this\nAttached: /data/attachments/ab12/spec.pdf", []);
+		await waitFor(() => expect(chips()).toHaveLength(0));
+		expect(actions.upload).toHaveBeenCalledTimes(1);
+	});
+
+	it("takes a PDF dropped on the composer the same way", async () => {
+		const { input, user, actions } = renderComposer();
+		drop([pdf("dropped.pdf")]);
+		await waitFor(() => expect(chipFor("dropped.pdf")).toHaveAttribute("data-state", "ready"));
+		expect(actions.upload).toHaveBeenCalledTimes(1);
+		await user.type(input, "Look");
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("Look\nAttached: /data/attachments/ab12/dropped.pdf", []);
+	});
+
+	it("takes a file pasted into the box", async () => {
+		const { input, actions } = renderComposer();
+		fireEvent.paste(input, { clipboardData: { files: [pdf("pasted.pdf")] } });
+		await waitFor(() => expect(chipFor("pasted.pdf")).toHaveAttribute("data-state", "ready"));
+		expect(actions.upload).toHaveBeenCalledTimes(1);
+	});
+
+	it("shows a spinner state and holds Send while an upload runs", async () => {
+		let finish: (r: UploadResult) => void = () => undefined;
+		const { input, user, actions } = renderComposer({
+			upload: vi.fn<ChatActions["upload"]>(() => new Promise((resolve) => (finish = resolve))),
+		});
+		await user.upload(fileInput(), pdf("slow.pdf"));
+		await user.type(input, "wait for it");
+		expect(chipFor("slow.pdf")).toHaveAttribute("data-state", "uploading");
+		expect(sendButton()).toBeDisabled();
+		await user.keyboard("{Enter}");
+		expect(actions.send).not.toHaveBeenCalled();
+
+		await act(async () => finish(saved(pdf("slow.pdf"))));
+		expect(chipFor("slow.pdf")).toHaveAttribute("data-state", "ready");
+		expect(sendButton()).toBeEnabled();
+	});
+
+	it("shows an error chip when an upload fails and holds Send until Retry succeeds", async () => {
+		const upload = vi
+			.fn<ChatActions["upload"]>()
+			.mockResolvedValueOnce(failed("File is too large"))
+			.mockImplementation(async (file) => saved(file));
+		const { input, user, actions } = renderComposer({ upload });
+		await user.upload(fileInput(), pdf("big.pdf"));
+		await waitFor(() => expect(chipFor("big.pdf")).toHaveAttribute("data-state", "failed"));
+		expect(chipFor("big.pdf")).toHaveTextContent("File is too large");
+		await user.type(input, "see attached");
+		expect(sendButton()).toBeDisabled();
+		await user.keyboard("{Enter}");
+		expect(actions.send).not.toHaveBeenCalled();
+
+		await user.click(screen.getByRole("button", { name: "Retry big.pdf" }));
+		await waitFor(() => expect(chipFor("big.pdf")).toHaveAttribute("data-state", "ready"));
+		expect(upload).toHaveBeenCalledTimes(2);
+		expect(sendButton()).toBeEnabled();
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("see attached\nAttached: /data/attachments/ab12/big.pdf", []);
+	});
+
+	it("lets Send through again once a failed upload is removed", async () => {
+		const { input, user, actions } = renderComposer({ upload: vi.fn<ChatActions["upload"]>(async () => failed()) });
+		await user.upload(fileInput(), pdf("bad.pdf"));
+		await waitFor(() => expect(chipFor("bad.pdf")).toHaveAttribute("data-state", "failed"));
+		await user.type(input, "never mind");
+		expect(sendButton()).toBeDisabled();
+
+		await user.click(screen.getByRole("button", { name: "Remove bad.pdf" }));
+		expect(chips()).toHaveLength(0);
+		expect(sendButton()).toBeEnabled();
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("never mind", []);
+	});
+
+	it("sends a message with only a file, no text", async () => {
+		const { user, actions } = renderComposer();
+		expect(sendButton()).toBeDisabled();
+		await user.upload(fileInput(), pdf("only.pdf"));
+		await waitFor(() => expect(sendButton()).toBeEnabled());
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("Attached: /data/attachments/ab12/only.pdf", []);
+	});
+
+	it("sends a message with only an image, no text, and does not upload the image", async () => {
+		const { user, actions } = renderComposer();
+		await user.upload(fileInput(), png("only.png"));
+		expect(await screen.findByRole("img", { name: "only.png" })).toBeVisible();
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("", [{ mediaType: "image/png", base64: "BwcHBw==" }]);
+		expect(actions.upload).not.toHaveBeenCalled();
+	});
+
+	it("sends images and files in one message", async () => {
+		const { input, user, actions } = renderComposer();
+		await user.upload(fileInput(), [png("a.png"), pdf("b.pdf")]);
+		await waitFor(() => expect(chipFor("b.pdf")).toHaveAttribute("data-state", "ready"));
+		await user.type(input, "both");
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("both\nAttached: /data/attachments/ab12/b.pdf", [
+			{ mediaType: "image/png", base64: "BwcHBw==" },
+		]);
+	});
+
+	it("treats an image type the daemon does not take as a file", async () => {
+		const { user, actions } = renderComposer();
+		const svg = new File(["<svg/>"], "logo.svg", { type: "image/svg+xml" });
+		await user.upload(fileInput(), svg);
+		await waitFor(() => expect(chipFor("logo.svg")).toHaveAttribute("data-state", "ready"));
+		expect(chipFor("logo.svg")).toHaveTextContent("SVG");
+		expect(actions.upload).toHaveBeenCalledWith(svg);
+	});
+
+	it("downsamples a large image before it is sent", async () => {
+		const seen = stubImageDecoder(4000, 3000);
+		const { user, actions } = renderComposer();
+		await user.upload(fileInput(), png("huge.png", 6 * MIB));
+		expect(await screen.findByRole("img", { name: "huge.png" })).toBeVisible();
+		expect(seen.drawn).toEqual([[0, 0, 2000, 1500]]);
+		await user.click(sendButton());
+		expect(actions.send).toHaveBeenCalledWith("", [{ mediaType: "image/png", base64: "AQID" }]);
+	});
+
+	it("refuses an image that is over 5 MiB after resizing, with a toast", async () => {
+		stubImageDecoder(1000, 1000);
+		const { user, onToast, actions } = renderComposer();
+		await user.upload(fileInput(), png("raw.png", 5 * MIB + 1));
+		await waitFor(() => expect(onToast).toHaveBeenCalledTimes(1));
+		expect(onToast.mock.calls[0][0]).toMatch(/raw\.png.*5 MB/);
+		expect(chips()).toHaveLength(0);
+		expect(actions.send).not.toHaveBeenCalled();
+	});
+
+	it("refuses the 21st image of a message with a toast", async () => {
+		stubImageDecoder(100, 100);
+		const { user, onToast } = renderComposer();
+		await user.upload(
+			fileInput(),
+			Array.from({ length: 21 }, (_, i) => png(`i${i}.png`)),
+		);
+		await waitFor(() => expect(chips()).toHaveLength(20));
+		expect(onToast).toHaveBeenCalledTimes(1);
+		expect(onToast.mock.calls[0][0]).toMatch(/at most 20 images/i);
+		expect(screen.queryByRole("img", { name: "i20.png" })).toBeNull();
+
+		await user.upload(fileInput(), png("late.png"));
+		await waitFor(() => expect(onToast).toHaveBeenCalledTimes(2));
+		expect(chips()).toHaveLength(20);
 	});
 });
