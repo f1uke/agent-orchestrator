@@ -11,7 +11,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { Check, Copy, Play } from "lucide-react";
+import { Check, Copy, Play, WrapText } from "lucide-react";
 import type { CodeAction } from "../lib/chat-run";
 import {
 	type Callout,
@@ -516,6 +516,7 @@ function CodeBlock({ code, theme }: { code: Tokens.Code; theme: Theme }) {
 	const language = (code.lang ?? "").trim();
 	const [lines, setLines] = useState<CodeToken[][] | null>(null);
 	const [copied, setCopied] = useState(false);
+	const [wrap, setWrap] = useState(false);
 	const action = useContext(CodeActionContext)?.({ lang: language, text });
 
 	useEffect(() => {
@@ -552,6 +553,16 @@ function CodeBlock({ code, theme }: { code: Tokens.Code; theme: Theme }) {
 				) : null}
 				<button
 					type="button"
+					className="note-prose__code-copy note-prose__code-wrap"
+					aria-label="Wrap lines"
+					aria-pressed={wrap}
+					title={wrap ? "Scroll long lines" : "Wrap long lines"}
+					onClick={() => setWrap((on) => !on)}
+				>
+					<WrapText aria-hidden="true" />
+				</button>
+				<button
+					type="button"
 					className="note-prose__code-copy"
 					aria-label={copied ? "Copied" : "Copy code"}
 					onClick={() => {
@@ -561,7 +572,7 @@ function CodeBlock({ code, theme }: { code: Tokens.Code; theme: Theme }) {
 					{copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
 				</button>
 			</div>
-			<pre className="note-prose__code-body">
+			<pre className={`note-prose__code-body${wrap ? " note-prose__code-body--wrap" : ""}`}>
 				<code>
 					{lines
 						? lines.map((line, lineIndex) => (

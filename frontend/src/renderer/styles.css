@@ -5959,8 +5959,14 @@ ol.note-prose__list {
 	margin-left: auto;
 }
 
-.note-prose__code-run + .note-prose__code-copy {
+.note-prose__code-run + .note-prose__code-copy,
+.note-prose__code-copy + .note-prose__code-copy {
 	margin-left: 2px;
+}
+
+.note-prose__code-wrap[aria-pressed="true"] {
+	background: var(--accent-weak);
+	color: var(--prose-accent-text);
 }
 
 .note-prose__code-body {
@@ -5976,6 +5982,11 @@ ol.note-prose__list {
 
 .note-prose__code-body code {
 	font: inherit;
+}
+
+.note-prose__code-body--wrap {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 /* Raw HTML in a note is shown as the literal text it is — never parsed, never
@@ -7813,6 +7824,33 @@ ol.note-prose__list {
 	margin-top: 0;
 }
 
+/* A chat reply sits on --bg, a step darker than a note's page, so --border
+   hairlines vanish; these rules use --border-1. */
+.chat-md .note-prose__code,
+.chat-md .note-prose__code-head,
+.chat-md .note-prose__code-inline {
+	border-color: var(--border-1);
+}
+
+.chat-md .note-prose__quote {
+	border-left-color: var(--fg-passive);
+}
+
+.chat-md .note-prose__rule {
+	background: var(--border-1);
+}
+
+.chat-md .note-prose__table {
+	width: max-content;
+	min-width: 100%;
+}
+
+.chat-md .note-prose__table th,
+.chat-md .note-prose__table td {
+	padding: 8px 12px;
+	border-color: var(--border-1);
+}
+
 .chat-caret {
 	display: inline-block;
 	width: 7px;
@@ -7827,11 +7865,6 @@ ol.note-prose__list {
 	50% {
 		opacity: 0;
 	}
-}
-
-.chat-stream-text {
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
 }
 
 .chat-think {
