@@ -182,8 +182,13 @@ for (const viewport of VIEWPORTS) {
 			await shot(page, info, "after-document-json");
 
 			await inspector.getByRole("button", { name: "Close document" }).click();
-			await expect(inspector.getByText(/Open a document from the chat/)).toBeVisible();
 			await expect(strip.locator('[data-open="true"]')).toHaveCount(0);
+			const list = inspector.getByRole("list", { name: "Documents in this session" });
+			await expect(list.getByRole("listitem")).toHaveCount(7);
+			await expect(list.getByRole("button", { name: "Open billing-export-spec.pdf" })).toBeVisible();
+			await shot(page, info, "after-document-list");
+			await list.getByRole("button", { name: "Open demo--survey.md" }).click();
+			await expect(inspector.getByRole("heading", { name: "Chat attachments survey" })).toBeVisible();
 		});
 
 		test("opens a Write row's file from the row, without expanding it", async ({ page }) => {

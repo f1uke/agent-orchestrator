@@ -64,7 +64,7 @@ import {
 import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
-import { ChatDocsProvider, ChatDocStrip } from "./ChatDocs";
+import { ChatDocsProvider, ChatDocStrip, SessionDocsReporter } from "./ChatDocs";
 import { ChatRefsProvider, RefImages } from "./RefImages";
 
 export type ChatPaneView = "chat" | "events";
@@ -79,6 +79,7 @@ type ChatPaneProps = {
 	chatApi?: ChatApi;
 	onOpenDoc?: (doc: FileDoc) => void;
 	openDoc?: FileDoc | null;
+	/** The session's documents, newest first, each time the list changes: the Document tab lists them. */
 	onDocs?: (docs: FileDoc[]) => void;
 };
 
@@ -113,6 +114,7 @@ export function ChatPane({
 	chatApi,
 	onOpenDoc,
 	openDoc,
+	onDocs,
 }: ChatPaneProps) {
 	const own = useChatSession(given ? undefined : session.id, {
 		daemonReady,
@@ -134,6 +136,7 @@ export function ChatPane({
 	);
 	const root = session.workspacePath ?? "";
 	const rows = useMemo(() => chatRows(transcript, chat.overlay, queuedIds), [transcript, chat.overlay, queuedIds]);
+	const turnDocs = useMemo(() => rows.flatMap((row) => (row.kind === "item" && row.docs ? [row.docs] : [])), [rows]);
 	const runningInBackground = useMemo(
 		() => sessionActivity(transcript).filter((a) => unfinished(a.state)).length,
 		[transcript],
@@ -190,6 +193,7 @@ export function ChatPane({
 		<ChatRefsProvider sessionId={session.id}>
 			<TaskOutputProvider read={actions.taskOutput}>
 				<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
+					<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
 					<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
 						{view === "events" ? (
 							<ChatEvents entries={chat.entries} />

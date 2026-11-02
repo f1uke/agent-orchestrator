@@ -1,7 +1,7 @@
 import { ArrowUpRight, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useBrowserView } from "../hooks/useBrowserView";
-import { docMeta, type FileDoc, textView } from "../lib/chat-docs";
+import { docMeta, docTag, type FileDoc, textView } from "../lib/chat-docs";
 import { chatFileUrl } from "../lib/chat-refs-store";
 import { useUiStore } from "../stores/ui-store";
 import { CodeBox } from "./ChatCodeBox";
@@ -41,6 +41,8 @@ export function DocumentPanel({
 	doc,
 	active,
 	onClose,
+	docs = [],
+	onOpen,
 }: {
 	sessionId: string;
 	doc: FileDoc | null;
@@ -52,7 +54,32 @@ export function DocumentPanel({
 	if (!doc) {
 		return (
 			<div className="document-panel" role="tabpanel">
-				<p className="inspector-empty">Open a document from the chat to read it here.</p>
+				{docs.length > 0 && onOpen ? (
+					<ul aria-label="Documents in this session" className="document-list">
+						{docs.map((d) => (
+							<li className="document-list__item" key={`${d.root}:${d.path}`}>
+								<button
+									aria-label={`Open ${d.title}`}
+									className="document-list__open"
+									onClick={() => onOpen(d)}
+									type="button"
+								>
+									<span aria-hidden="true" className="chat-doc__tag" data-kind={d.kind}>
+										{docTag(d)}
+									</span>
+									<span className="chat-doc__text">
+										<span className="chat-doc__title">{d.title}</span>
+										<span className="chat-doc__meta" title={d.path}>
+											{docMeta(d)}
+										</span>
+									</span>
+								</button>
+							</li>
+						))}
+					</ul>
+				) : (
+					<p className="inspector-empty">Open a document from the chat to read it here.</p>
+				)}
 			</div>
 		);
 	}
