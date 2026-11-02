@@ -91,6 +91,11 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// claude is given this folder with --add-dir, so it must exist before claude starts.
+	if err := os.MkdirAll(attachmentsBeside(cfg.LogPath), 0o700); err != nil {
+		_ = lg.file.Close()
+		return 0, fmt.Errorf("sessionhost: attachments: %w", err)
+	}
 	defer func() { _ = lg.file.Close() }()
 
 	t := folder.Transcript()
@@ -174,7 +179,7 @@ type host struct {
 }
 
 func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, model string) (int, error) {
-	argv := claudeArgv(cfg.Command, resume, model)
+	argv := claudeArgv(cfg.Command, resume, model, attachmentsBeside(cfg.LogPath))
 	cmd := process.Command(argv[0], argv[1:]...)
 	process.Detach(cmd)
 	cmd.Dir = cfg.Dir
@@ -237,7 +242,7 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, mod
 // which claude reads prompt text. Claude refuses --session-id beside --resume,
 // so a resume drops the pinned id the agent command carries. A model chosen
 // with set_model replaces the command's --model, so a respawn keeps it.
-func claudeArgv(command []string, resume, model string) []string {
+func claudeArgv(command []string, resume, model, attachDir string) []string {
 	flags, rest := command, []string(nil)
 	if i := slices.Index(command, "--"); i >= 0 {
 		flags, rest = command[:i], command[i:]
@@ -259,6 +264,9 @@ func claudeArgv(command []string, resume, model string) []string {
 		argv = append(argv, "--model", model)
 	}
 	argv = append(argv, protocolFlags...)
+	if attachDir != "" {
+		argv = append(argv, "--add-dir", attachDir)
+	}
 	if resume != "" {
 		argv = append(argv, "--resume", resume)
 	}

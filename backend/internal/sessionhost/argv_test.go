@@ -1,6 +1,7 @@
 package sessionhost
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -11,6 +12,7 @@ func TestClaudeArgv(t *testing.T) {
 		command []string
 		resume  string
 		model   string
+		attach  string
 		want    []string
 	}{
 		{
@@ -48,12 +50,33 @@ func TestClaudeArgv(t *testing.T) {
 			resume:  "pin",
 			want:    append(append([]string{"claude", "--model", "opus"}, protocolFlags...), "--resume", "pin", "--", "--session-id", "x"),
 		},
+		{
+			name:    "the attachments folder is added as a readable directory before any prompt text",
+			command: []string{"claude", "--model", "opus", "--", "hello"},
+			attach:  "/data/sessions/s1/attachments",
+			want: append(append([]string{"claude", "--model", "opus"}, protocolFlags...),
+				"--add-dir", "/data/sessions/s1/attachments", "--", "hello"),
+		},
+		{
+			name:    "--resume stays last after the attachments folder",
+			command: []string{"claude"},
+			resume:  "pin",
+			attach:  "/a",
+			want:    append(append([]string{"claude"}, protocolFlags...), "--add-dir", "/a", "--resume", "pin"),
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := claudeArgv(c.command, c.resume, c.model); !slices.Equal(got, c.want) {
-				t.Errorf("claudeArgv(%v, %q, %q) =\n %v\nwant\n %v", c.command, c.resume, c.model, got, c.want)
+			if got := claudeArgv(c.command, c.resume, c.model, c.attach); !slices.Equal(got, c.want) {
+				t.Errorf("claudeArgv(%v, %q, %q, %q) =\n %v\nwant\n %v", c.command, c.resume, c.model, c.attach, got, c.want)
 			}
 		})
+	}
+}
+
+func TestAttachmentsDirSitsBesideTheEventLog(t *testing.T) {
+	logPath, _ := Paths("/data", "s1")
+	if got, want := AttachmentsDir("/data", "s1"), filepath.Join(filepath.Dir(logPath), "attachments"); got != want {
+		t.Fatalf("AttachmentsDir = %q, want %q", got, want)
 	}
 }

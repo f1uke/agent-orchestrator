@@ -24,6 +24,17 @@ func Paths(dataDir, sessionID string) (logPath, socketPath string) {
 	return logPath, socketPath
 }
 
+// AttachmentsDir is where a session's host lets claude read the files the chat
+// uploads. It sits beside the event log, outside every worktree.
+func AttachmentsDir(dataDir, sessionID string) string {
+	logPath, _ := Paths(dataDir, sessionID)
+	return attachmentsBeside(logPath)
+}
+
+func attachmentsBeside(logPath string) string {
+	return filepath.Join(filepath.Dir(logPath), "attachments")
+}
+
 // PreparePaths is Paths with both parent directories created, private to the
 // user, so a host can be launched on them.
 func PreparePaths(dataDir, sessionID string) (logPath, socketPath string, err error) {
