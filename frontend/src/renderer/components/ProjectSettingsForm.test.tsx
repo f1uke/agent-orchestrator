@@ -590,6 +590,52 @@ describe("ProjectSettingsForm", () => {
 		expect(putMock.mock.calls[0][1].body.config.workerTransport).toBeUndefined();
 	});
 
+	it("keeps idle compaction on by default, and saves turning it off as noIdleCompaction", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "claude-code" }, orchestrator: { agent: "claude-code" }, env: { FOO: "bar" } },
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const toggle = await screen.findByRole("switch", { name: "Compact idle chat sessions" });
+		expect(toggle).toBeChecked();
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.noIdleCompaction).toBe(true);
+		expect(body.env).toEqual({ FOO: "bar" });
+	});
+
+	it("turns idle compaction back on by omitting noIdleCompaction", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "claude-code" }, orchestrator: { agent: "claude-code" }, noIdleCompaction: true },
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const toggle = await screen.findByRole("switch", { name: "Compact idle chat sessions" });
+		expect(toggle).not.toBeChecked();
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		expect(putMock.mock.calls[0][1].body.config.noIdleCompaction).toBeUndefined();
+	});
+
 	// One flag behind three effects (Browser tab, `ao preview` guidance, the
 	// `ao preview` command), so they can never be set to contradict each other.
 	it("turns the project's web UI on and saves it without dropping hidden config", async () => {

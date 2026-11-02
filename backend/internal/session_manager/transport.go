@@ -60,7 +60,7 @@ func validateTransport(harness domain.AgentHarness, t domain.Transport) error {
 	return nil
 }
 
-func (m *Manager) wrapForTransport(t domain.Transport, id domain.SessionID, agentArgv []string, stdinFile string) ([]string, string, error) {
+func (m *Manager) wrapForTransport(t domain.Transport, id domain.SessionID, agentArgv []string, stdinFile string, project domain.ProjectConfig) ([]string, string, error) {
 	if t != domain.TransportChat {
 		return agentArgv, stdinFile, nil
 	}
@@ -78,6 +78,9 @@ func (m *Manager) wrapForTransport(t domain.Transport, id domain.SessionID, agen
 	argv := []string{exe, "session-host", "--log", logPath, "--socket", socketPath}
 	if stdinFile != "" {
 		argv = append(argv, "--prompt-file", stdinFile)
+	}
+	if project.NoIdleCompaction {
+		argv = append(argv, "--no-idle-compact")
 	}
 	argv = append(argv, "--")
 	return append(argv, agentArgv...), "", nil

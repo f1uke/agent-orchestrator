@@ -70,6 +70,11 @@ type ProjectConfig struct {
 
 	WorkerTransport Transport `json:"workerTransport,omitempty" enum:"terminal,chat"`
 
+	// NoIdleCompaction stops a chat session's host from sending /compact when a
+	// conversation of 200k tokens or more sits idle for 50 minutes on a 1-hour
+	// prompt cache. False, the default, keeps idle compaction on.
+	NoIdleCompaction bool `json:"noIdleCompaction,omitempty"`
+
 	// HasWebUI records whether this project renders in a browser. It is the single
 	// fact behind three effects, so they can never contradict each other: the
 	// desktop inspector's Browser tab, the `ao preview` guidance injected into

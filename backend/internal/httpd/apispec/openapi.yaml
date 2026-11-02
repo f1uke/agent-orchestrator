@@ -14125,6 +14125,8 @@ components:
           type: boolean
         mobileScripts:
           $ref: '#/components/schemas/DomainMobileScriptsConfig'
+        noIdleCompaction:
+          type: boolean
         orchestrator:
           $ref: '#/components/schemas/RoleOverride'
         pauseBeforeImplementing:

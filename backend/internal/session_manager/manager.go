@@ -817,7 +817,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
-	argv, stdinFile, err = m.wrapForTransport(cfg.Transport, id, argv, stdinFile)
+	argv, stdinFile, err = m.wrapForTransport(cfg.Transport, id, argv, stdinFile, project.Config)
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
@@ -2120,7 +2120,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
-	argv, stdinFile, err = m.wrapForTransport(rec.Transport, rec.ID, argv, stdinFile)
+	argv, stdinFile, err = m.wrapForTransport(rec.Transport, rec.ID, argv, stdinFile, project.Config)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}

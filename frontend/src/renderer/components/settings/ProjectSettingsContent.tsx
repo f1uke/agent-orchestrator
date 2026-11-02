@@ -331,6 +331,27 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 				</SettingRow>
 
 				<SettingRow
+					name="Compact idle chat sessions"
+					summary="When a chat session of 200k tokens or more sits idle for 50 minutes, AO sends it /compact before its 1-hour prompt cache expires."
+					detail="Claude Code does this itself only in its own TUI or desktop app, not in AO's headless chat. It waits while a background task runs, a permission request is open, or the rate limit is not allowed. A running session keeps the setting it was started with."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.idleCompaction ? "On" : "Off"}
+					modified={isFieldDirty("idleCompaction")}
+				>
+					<div className="flex items-center gap-3">
+						<Switch
+							id="idleCompaction"
+							checked={draft.idleCompaction}
+							onCheckedChange={(v) => setField("idleCompaction", v)}
+						/>
+						<label htmlFor="idleCompaction" className="text-[12px] text-muted-foreground">
+							Compact idle chat sessions
+						</label>
+					</div>
+				</SettingRow>
+
+				<SettingRow
 					name="Orchestrator agent"
 					summary="Which agent runs this project's orchestrator."
 					detail="Changing this restarts the orchestrator as soon as you save - the running one is replaced."
