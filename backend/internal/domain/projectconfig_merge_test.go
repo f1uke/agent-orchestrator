@@ -33,6 +33,7 @@ func fullProjectConfig() ProjectConfig {
 		ResponseLanguage:        "Thai",
 		ClaudeProfile:           "OmniRoute",
 		WorkerTransport:         TransportChat,
+		NoIdleCompaction:        true,
 		HasWebUI:                true,
 		HasIOSSimulator:         true,
 		SimProfile:              &SimProfileConfig{Keep: []string{"com.apple.backboardd"}},
@@ -72,6 +73,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		TestinySkill:            "/skills/other-testiny",
 		ClaudeProfile:           "Work",
 		WorkerTransport:         TransportTerminal,
+		NoIdleCompaction:        false,
 		DisableAutoCrew:         false,
 		PauseBeforeImplementing: false,
 	}
@@ -110,6 +112,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		{"simTrust", func(c ProjectConfig) any { return c.SimTrust }},
 		{"mobileScripts", func(c ProjectConfig) any { return c.MobileScripts }},
 		{"usesTestiny", func(c ProjectConfig) any { return c.UsesTestiny }},
+		{"noIdleCompaction", func(c ProjectConfig) any { return c.NoIdleCompaction }},
 		{"testinySkill", func(c ProjectConfig) any { return c.TestinySkill }},
 		{"approvalRule", func(c ProjectConfig) any { return c.ApprovalRule }},
 		{"systemPromptAdditions", func(c ProjectConfig) any { return c.SystemPromptAdditions }},

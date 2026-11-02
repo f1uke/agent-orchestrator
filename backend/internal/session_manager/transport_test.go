@@ -162,3 +162,28 @@ func TestChatTodoStartsTheSessionHost(t *testing.T) {
 	}
 	f.assertHostLaunch(t, todo.ID, "todo start")
 }
+
+func TestChatHostSkipsIdleCompactionOnlyWhenTheProjectTurnsItOff(t *testing.T) {
+	f := newChatFixture(t)
+	rec, err := f.m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "do it", Transport: domain.TransportChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(f.rt.lastCfg.Argv, "--no-idle-compact") {
+		t.Fatalf("default spawn argv = %q, want idle compaction left on", f.rt.lastCfg.Argv)
+	}
+
+	cfg := f.st.projects["mer"]
+	cfg.Config.NoIdleCompaction = true
+	f.st.projects["mer"] = cfg
+	row := f.st.sessions[rec.ID]
+	row.IsTerminated = true
+	f.st.sessions[rec.ID] = row
+	if _, err := f.m.Restore(ctx, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	argv := f.rt.lastCfg.Argv
+	if i, dash := slices.Index(argv, "--no-idle-compact"), slices.Index(argv, "--"); i < 0 || i > dash {
+		t.Fatalf("restore argv = %q, want --no-idle-compact before the agent command", argv)
+	}
+}

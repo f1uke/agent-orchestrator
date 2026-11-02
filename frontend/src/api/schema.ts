@@ -4983,6 +4983,7 @@ export interface components {
             hasWebUI?: boolean;
             learnFromSessions?: boolean;
             mobileScripts?: components["schemas"]["DomainMobileScriptsConfig"];
+            noIdleCompaction?: boolean;
             orchestrator?: components["schemas"]["RoleOverride"];
             pauseBeforeImplementing?: boolean;
             postCreate?: string[];

@@ -34,6 +34,8 @@ type Config struct {
 	LogPath    string
 	SocketPath string
 	PromptFile string
+	// NoIdleCompact stops the host from compacting a large idle conversation.
+	NoIdleCompact bool
 
 	stdinGrace     time.Duration
 	killGrace      time.Duration
@@ -116,6 +118,8 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 		controlTimeout:  orDefault(cfg.controlTimeout, defaultControlTimeout),
 		contextTimeout:  orDefault(cfg.contextTimeout, defaultContextTimeout),
 		promptAfterInit: prompt,
+		idleOff:         cfg.NoIdleCompact,
+		afterFunc:       realAfterFunc,
 	}
 	return h.run(ctx, cfg, ln, resume, model)
 }
@@ -176,6 +180,9 @@ type host struct {
 	controlTimeout  time.Duration
 	contextTimeout  time.Duration
 	contextID       string
+	idleOff         bool
+	idle            idleState
+	afterFunc       afterFunc
 }
 
 func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, model string) (int, error) {
@@ -317,6 +324,7 @@ func (h *host) finish(code *int, signal *string) {
 	h.noteLocked(exitNote{Kind: chatproto.NoteExit, Code: code, Signal: signal})
 	h.closed = true
 	h.contextID = ""
+	h.disarmIdleLocked()
 	for s := range h.subs {
 		h.dropLocked(s)
 	}
@@ -366,6 +374,7 @@ func (h *host) handleLine(line []byte) {
 		h.pane.line(dim("sessionhost: " + err.Error()))
 		return
 	}
+	h.observeIdleLocked(ev, line)
 	if isMCP {
 		if err := h.writeThenLogLocked(chatproto.MCPReply{RequestID: mcp.requestID, Message: mcpReply(mcp.server, mcp.message)}); err != nil {
 			h.pane.line(dim("sessionhost: mcp reply: " + err.Error()))
