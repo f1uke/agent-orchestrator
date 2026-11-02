@@ -9,18 +9,14 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 )
 
-// claude compacts an idle conversation itself only when it runs interactively
-// or under a desktop entrypoint, never under `claude -p`, so the host does it:
-// before the 1-hour prompt cache expires, a large idle context is compacted
-// while the cache is still warm.
+// claude compacts an idle chat itself only interactively or from a desktop
+// entrypoint, never under `claude -p`, so the host does it.
 const (
 	idleCompactAfter     = 50 * time.Minute
 	idleCompactMinTokens = 200_000
 	compactCommand       = "/compact"
 )
 
-// idleState is what the host has read from claude's output that decides an
-// idle compaction. It is guarded by host.mu.
 type idleState struct {
 	contextTokens int
 	cacheTTL      string
@@ -34,8 +30,6 @@ type afterFunc func(d time.Duration, f func()) (stop func() bool)
 
 func realAfterFunc(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop }
 
-// observeIdleLocked updates the idle state from one line claude wrote, arms
-// the timer at the end of a turn, and disarms it when a request starts.
 func (h *host) observeIdleLocked(ev chatproto.Event, line []byte) {
 	if h.idleOff {
 		return
@@ -47,6 +41,9 @@ func (h *host) observeIdleLocked(ev chatproto.Event, line []byte) {
 			h.readUsageLocked(line)
 		}
 	case chatproto.System:
+		if ev.Subtype == "compact_boundary" {
+			h.idle.contextTokens = 0
+		}
 		h.readTaskLocked(ev)
 	case chatproto.Result:
 		h.armIdleLocked()
@@ -134,8 +131,6 @@ func (h *host) disarmIdleLocked() {
 	}
 }
 
-// fireIdleLocked sends /compact when every gate still holds. A compaction ends
-// in a result like any turn, which arms the timer again over a small context.
 func (h *host) fireIdleLocked() {
 	h.idle.stop = nil
 	if h.closed || h.idle.contextTokens < idleCompactMinTokens || h.idle.cacheTTL != "1h" ||

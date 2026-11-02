@@ -11,7 +11,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 )
 
-// fakeClock holds the timers a host arms, and fires them only when told.
 type fakeClock struct {
 	mu     sync.Mutex
 	timers []*fakeTimer
@@ -37,7 +36,6 @@ func (c *fakeClock) afterFunc(d time.Duration, f func()) func() bool {
 	}
 }
 
-// fire runs every live timer due within d.
 func (c *fakeClock) fire(d time.Duration) {
 	c.mu.Lock()
 	var due []func()
@@ -92,7 +90,6 @@ func assistantLine(contextTokens int, ttl string) string {
 
 const turnResult = `{"type":"result","subtype":"success","session_id":"s","is_error":false,"num_turns":1,"total_cost_usd":0.1,"duration_ms":10}`
 
-// turn plays one finished turn: a main-thread reply with this usage, then its result.
 func turn(h *host, contextTokens int, ttl string) {
 	h.handleLine([]byte(assistantLine(contextTokens, ttl)))
 	h.handleLine([]byte(turnResult))
@@ -171,5 +168,20 @@ func TestIdleCompactionStopsWhenClaudeExits(t *testing.T) {
 	clock.fire(time.Hour)
 	if got := stdin.compacts(); got != 0 {
 		t.Fatalf("sent /compact %d times after claude exited, want 0", got)
+	}
+}
+
+func TestIdleCompactionDoesNotRepeatOverTheCompactedContext(t *testing.T) {
+	h, clock, stdin := idleHost(t)
+	turn(h, 250_000, "1h")
+	clock.fire(time.Hour)
+	for _, id := range h.folder.Transcript().Queued {
+		h.handleLine([]byte(`{"type":"command_lifecycle","command_uuid":"` + id + `","state":"completed"}`))
+	}
+	h.handleLine([]byte(`{"type":"system","subtype":"compact_boundary","session_id":"s","compact_metadata":{"trigger":"manual","pre_tokens":250000,"post_tokens":30000}}`))
+	h.handleLine([]byte(turnResult))
+	clock.fire(time.Hour)
+	if got := stdin.compacts(); got != 1 {
+		t.Fatalf("sent /compact %d times, want 1: the compacted context is under the threshold", got)
 	}
 }
