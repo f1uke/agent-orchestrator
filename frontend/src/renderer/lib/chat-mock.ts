@@ -7,6 +7,7 @@ import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters
 import { markdownDeltas, markdownEntries, MOCK_MARKDOWN_CHAT_SESSION } from "./chat-mock-markdown";
 import { MOCK_SUGGEST_CHAT_SESSION, suggestEntries } from "./chat-mock-suggest";
 import { docsEntries, MOCK_DOCS_CHAT_SESSION } from "./chat-mock-docs";
+import { errorEntries, MOCK_ERRORS_CHAT_SESSION } from "./chat-mock-errors";
 import { MOCK_REFS_CHAT_SESSION, refsEntries } from "./chat-mock-refs";
 import { MOCK_WIDGETS_CHAT_SESSION, widgetEntries } from "./chat-mock-widgets";
 import type { ChatMux, ChatMuxListeners } from "./chat-mux";
@@ -902,9 +903,11 @@ function stubSession(id: string): Promise<StubSession> {
 														? markdownEntries()
 														: id === MOCK_DOCS_CHAT_SESSION
 															? docsEntries()
-															: long
-																? fixture
-																: mockChatEntries(fixture);
+															: id === MOCK_ERRORS_CHAT_SESSION
+																? errorEntries()
+																: long
+																	? fixture
+																	: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };

@@ -17,6 +17,7 @@ import {
 	parseTaskNotification,
 	parseHostNote,
 } from "./chat-event";
+import { describeTurnError, type TurnError } from "./chat-turn-error";
 import { CONTEXT_REQUEST_PREFIX, type ContextBreakdown, parseContextUsage } from "./chat-context";
 import { type ChatImage, isImageMime } from "./chat-images";
 import { elapsedMs } from "./chat-time";
@@ -33,7 +34,7 @@ export type PermissionOutcome = {
 
 export type ToolResult = { isError: boolean; content: unknown; structuredPatch?: PatchHunk[] };
 
-export type NoticeKind = "interrupted" | "spawn" | "resumed" | "exit" | "compacted";
+export type NoticeKind = "interrupted" | "spawn" | "resumed" | "exit" | "compacted" | "api_error";
 
 export type UserItem = {
 	kind: "user";
@@ -70,6 +71,7 @@ export type TurnEndItem = {
 	contextWindows: Record<string, number>;
 	ts: string;
 	durationMs?: number;
+	error?: TurnError;
 };
 
 export type TaskMessageItem = {
@@ -244,6 +246,7 @@ export class ChatFolder {
 	private model = "";
 	private tasks = new Map<string, BackgroundTask>();
 	private ts = "";
+	private pendingApiError: string | undefined;
 	private context: number | undefined;
 	private turnStart: string | undefined;
 	private thinkingSince: string | undefined;
@@ -283,6 +286,11 @@ export class ChatFolder {
 	}
 
 	private push(item: ChatItem): void {
+		const apiError = this.pendingApiError;
+		if (apiError !== undefined) {
+			this.pendingApiError = undefined;
+			this.push({ kind: "notice", notice: "api_error", text: apiError, ts: this.ts });
+		}
 		this.items.push(item);
 		this.itemKeys.push(`${this.entrySeq}.${this.entryItems++}`);
 	}
@@ -327,6 +335,10 @@ export class ChatFolder {
 				if (event.task) this.applyTask(event.task);
 				break;
 			case "assistant":
+				if (event.error !== "" && event.parentToolUseId === "") {
+					this.pendingApiError = event.blocks.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
+					break;
+				}
 				this.applyAssistant(event.messageId, event.parentToolUseId, event.blocks);
 				if (event.parentToolUseId === "" && event.contextTokens !== undefined) this.context = event.contextTokens;
 				break;
@@ -339,6 +351,8 @@ export class ChatFolder {
 				this.thinkingSince = undefined;
 				this.cost = event.totalCostUsd;
 				if (event.contextTokens !== undefined) this.context = event.contextTokens;
+				const errorText = event.errorText || this.pendingApiError || "";
+				if (event.isError) this.pendingApiError = undefined;
 				this.push({
 					ts: this.ts,
 					durationMs: elapsedMs(this.turnStart, this.ts),
@@ -351,6 +365,7 @@ export class ChatFolder {
 					usage: event.usage,
 					contextTokens: event.contextTokens,
 					contextWindows: event.contextWindows,
+					...(event.isError && { error: describeTurnError(event.subtype, errorText) }),
 				});
 				this.turnStart = undefined;
 				break;

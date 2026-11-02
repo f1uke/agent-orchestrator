@@ -88,6 +88,8 @@ export type ChatEvent =
 			blocks: Block[];
 			/** input + cache read + cache creation of message.usage: the context this response saw. */
 			contextTokens?: number;
+			/** Set on the synthetic message claude writes when an API call failed, e.g. "rate_limit". */
+			error: string;
 	  }
 	| {
 			type: "user";
@@ -101,6 +103,7 @@ export type ChatEvent =
 			type: "result";
 			subtype: string;
 			isError: boolean;
+			errorText: string;
 			numTurns: number;
 			totalCostUsd: number;
 			sessionId: string;
@@ -300,6 +303,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				parentToolUseId: str(line.parent_tool_use_id),
 				blocks: decodeBlocks(message.content),
 				contextTokens: decodeMessageContext(message.usage),
+				error: str(line.error),
 			};
 		case "user":
 			return {
@@ -315,6 +319,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				type: "result",
 				subtype: str(line.subtype),
 				isError: line.is_error === true,
+				errorText: line.is_error === true ? str(line.result) : "",
 				numTurns: num(line.num_turns),
 				totalCostUsd: num(line.total_cost_usd),
 				sessionId: str(line.session_id),

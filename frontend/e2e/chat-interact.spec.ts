@@ -107,7 +107,7 @@ for (const viewport of VIEWPORTS) {
 
 			await stop.click();
 			await expect(queued).toHaveCount(0);
-			await expect(stream.locator('[data-notice="interrupted"]').last()).toBeVisible();
+			await expect(stream.locator('[data-notice="turn_end"]').last()).toHaveText(/^Interrupted/);
 			await expect(stream.locator('.chat-user[data-state="started"]')).toContainText(QUEUED_TEXT);
 			await expect(stop).toBeVisible();
 			await stop.click();

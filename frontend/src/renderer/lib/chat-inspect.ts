@@ -108,7 +108,13 @@ export function sessionActivity(tr: Transcript): Activity[] {
 		if (item.kind === "tool_call" && item.parentToolUseId !== "") {
 			subagentTools.set(item.parentToolUseId, (subagentTools.get(item.parentToolUseId) ?? 0) + 1);
 		}
-		if (item.kind === "notice" && item.notice !== "compacted" && item.notice !== "interrupted") lastBoundary = i;
+		if (
+			item.kind === "notice" &&
+			item.notice !== "compacted" &&
+			item.notice !== "interrupted" &&
+			item.notice !== "api_error"
+		)
+			lastBoundary = i;
 	});
 
 	const out: Activity[] = [];
