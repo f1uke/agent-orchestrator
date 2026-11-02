@@ -985,3 +985,30 @@ describe("tool_use_result on a tool call", () => {
 		expect(edit.result?.structuredPatch).toBeUndefined();
 	});
 });
+
+describe("a failed API call", () => {
+	it("shows a failed API call on its own when no error result follows it", () => {
+		const tr = foldEntries([
+			{ seq: 1, ts: "t1", dir: "in", payload: { type: "user", uuid: "u1", message: { content: "go" } } },
+			{
+				seq: 2,
+				ts: "t2",
+				dir: "out",
+				payload: {
+					type: "assistant",
+					error: "unknown",
+					message: { id: "m1", model: "<synthetic>", content: [{ type: "text", text: "API Error: connection lost" }] },
+				},
+			},
+			{
+				seq: 3,
+				ts: "t3",
+				dir: "out",
+				payload: { type: "assistant", message: { id: "m2", content: [{ type: "text", text: "retried" }] } },
+			},
+			{ seq: 4, ts: "t4", dir: "out", payload: { type: "result", subtype: "success", is_error: false } },
+		]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["user", "notice", "assistant_text", "turn_end"]);
+		expect(notices(tr)[0]).toMatchObject({ notice: "api_error", text: "API Error: connection lost" });
+	});
+});

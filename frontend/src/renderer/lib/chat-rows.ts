@@ -288,6 +288,16 @@ export function chatRows(
 					turnItems = [item];
 				} else if (item.kind === "assistant_text") reply = item.text;
 				else if (item.kind === "turn_end") {
+					const prev = rows.at(-1);
+					// An interrupted turn's end already reads "Interrupted", so the notice before it would say it twice.
+					if (
+						item.isError &&
+						prev &&
+						isItem(prev, "notice") &&
+						prev.item.kind === "notice" &&
+						prev.item.notice === "interrupted"
+					)
+						rows.pop();
 					if (reply !== undefined) row.reply = reply;
 					const docs = turnDocs(turnItems);
 					if (docs) row.docs = docs;

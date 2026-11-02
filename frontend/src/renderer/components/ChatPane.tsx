@@ -18,6 +18,7 @@ import type { ChatEntry } from "../lib/chat-event";
 import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
+import { describeTurnError, type TurnError } from "../lib/chat-turn-error";
 import type { FileDoc, TurnDocs } from "../lib/chat-docs";
 import { clockTime, formatDuration } from "../lib/chat-time";
 import { contextUsage, formatTokens, sessionActivity, shownTodos } from "../lib/chat-inspect";
@@ -833,9 +834,16 @@ function ItemRow({
 				<>
 					{reply !== undefined ? <AnswerBar end={item} reply={reply} /> : null}
 					{docs ? <ChatDocStrip docs={docs} /> : null}
-					<div className={cn("chat-sys", item.isError && "chat-sys--error")} data-notice="turn_end">
+					<div
+						className={cn(
+							"chat-sys",
+							item.isError && (item.subtype === "error_during_execution" ? "chat-sys--warn" : "chat-sys--error"),
+						)}
+						data-notice="turn_end"
+					>
 						{turnEndText(item)}
 					</div>
+					{item.error ? <TurnErrorDetail error={item.error} /> : null}
 				</>
 			);
 		case "task_message":
@@ -933,8 +941,23 @@ function AnswerBar({ end, reply }: { end: TurnEndItem; reply: string }) {
 function turnEndText(item: TurnEndItem): string {
 	const took = item.durationMs === undefined ? undefined : formatDuration(item.durationMs);
 	if (!item.isError) return took ? `Completed in ${took}` : "Completed";
-	const ended = `Turn ended: ${item.subtype.replace(/_/g, " ")}`;
-	return took ? `${ended} · ${took}` : ended;
+	const label = item.error?.label ?? "Turn failed";
+	return took ? `${label} · ${took}` : label;
+}
+
+function TurnErrorDetail({ error }: { error: TurnError }) {
+	if (!error.detail) return null;
+	return (
+		<div className="chat-turn-error" data-turn-error>
+			<span className="chat-turn-error__detail">{error.detail}</span>
+			{error.raw ? (
+				<details className="chat-turn-error__raw">
+					<summary>Raw error</summary>
+					<pre>{error.raw}</pre>
+				</details>
+			) : null}
+		</div>
+	);
 }
 
 const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id);
@@ -946,9 +969,17 @@ function NoticeRow({ notice }: { notice: Extract<ChatItem, { kind: "notice" }> }
 		exit: `Claude exited · ${notice.text}`,
 		compacted: "Conversation compacted",
 		interrupted: "Interrupted",
+		api_error: describeTurnError("", notice.text).label,
 	}[notice.notice];
 	return (
-		<div className={cn("chat-sys", notice.notice === "interrupted" && "chat-sys--warn")} data-notice={notice.notice}>
+		<div
+			className={cn(
+				"chat-sys",
+				notice.notice === "interrupted" && "chat-sys--warn",
+				notice.notice === "api_error" && "chat-sys--error",
+			)}
+			data-notice={notice.notice}
+		>
 			{text}
 		</div>
 	);

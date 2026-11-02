@@ -219,9 +219,47 @@ describe("ChatPane", () => {
 		const ends = [...rowOf("turn_end")];
 		expect(ends.map((e) => e.querySelector("[data-notice]")?.textContent)).toEqual([
 			"Completed in 2m 14s",
-			"Turn ended: error during execution · 12s",
+			"Interrupted · 12s",
 		]);
 		expect(ends.every((e) => !e.textContent?.includes("$"))).toBe(true);
+	});
+
+	it("names a failed API call in plain words and folds the raw gateway error", () => {
+		const { feed } = renderPane();
+		const raw =
+			'API Error: 503 [claude/claude-opus-5-5] [429]: {"type":"error","error":{"type":"rate_limit_error","message":"Synthetic limit message."}} (reset after 1m 45s). Try again later.';
+		feed(
+			{
+				seq: ++seq,
+				ts: "2026-10-30T10:00:00.000Z",
+				dir: "in",
+				payload: { type: "user", uuid: "u1", message: { content: "go" } },
+			},
+			{
+				seq: ++seq,
+				ts: "2026-10-30T10:00:05.000Z",
+				dir: "out",
+				payload: {
+					type: "assistant",
+					error: "server_error",
+					message: { id: "m1", model: "<synthetic>", content: [{ type: "text", text: raw }] },
+				},
+			},
+			{
+				seq: ++seq,
+				ts: "2026-10-30T10:00:05.000Z",
+				dir: "out",
+				payload: { type: "result", subtype: "success", is_error: true, api_error_status: 503, result: raw },
+			},
+		);
+		const end = rowOf("turn_end")[0];
+		expect(end.querySelector("[data-notice]")).toHaveTextContent("Rate limited - resets in 1m 45s");
+		expect(end).not.toHaveTextContent("success");
+		expect(end.querySelector(".chat-turn-error__detail")).toHaveTextContent("Synthetic limit message.");
+		const details = end.querySelector("details")!;
+		expect(details.open).toBe(false);
+		expect(details.querySelector("pre")).toHaveTextContent('"rate_limit_error"');
+		expect(rowOf("assistant_text")).toHaveLength(0);
 	});
 
 	it("renders a streaming reply as markdown, with a half-written fence as a code block", () => {
