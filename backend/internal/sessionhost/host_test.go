@@ -239,7 +239,8 @@ func TestClaudeSeesHostAsAgentParent(t *testing.T) {
 func TestFreshSessionEndToEnd(t *testing.T) {
 	cfg, fixture, argvFile := runFirstSession(t, shortDir(t))
 
-	if got, want := readArgv(t, argvFile), append([]string{"--model", "sonnet"}, wantProtocolFlags...); !slices.Equal(got, want) {
+	want := append(append([]string{"--model", "sonnet"}, wantProtocolFlags...), "--add-dir", attachmentsBeside(cfg.LogPath))
+	if got := readArgv(t, argvFile); !slices.Equal(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
 	}
 	got := loadEntries(t, cfg.LogPath)
@@ -273,6 +274,9 @@ func TestRestartResumes(t *testing.T) {
 	}
 
 	argv := readArgv(t, argvFile)
+	if info, err := os.Stat(attachmentsBeside(cfg.LogPath)); err != nil || !info.IsDir() {
+		t.Errorf("attachments folder %s was not created: %v", attachmentsBeside(cfg.LogPath), err)
+	}
 	if n := len(argv); n < 2 || argv[n-2] != "--resume" || argv[n-1] != firstSessionID {
 		t.Errorf("argv = %v, want it to end with --resume %s", argv, firstSessionID)
 	}

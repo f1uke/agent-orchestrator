@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"strings"
 
@@ -50,14 +51,18 @@ func (c *ChatController) send(w http.ResponseWriter, r *http.Request) {
 		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
 		return
 	}
-	if strings.TrimSpace(body.Text) == "" {
-		chatBadRequest(w, r, "TEXT_REQUIRED", "Text is required")
+	if strings.TrimSpace(body.Text) == "" && len(body.Images) == 0 {
+		chatBadRequest(w, r, "TEXT_REQUIRED", "Text or an image is required")
+		return
+	}
+	if len(body.Images) > maxChatImages {
+		chatBadRequest(w, r, "TOO_MANY_IMAGES", "A message carries at most 20 images")
 		return
 	}
 	in := chatproto.UserInput{Text: body.Text}
 	for _, img := range body.Images {
-		if img.MediaType == "" || img.Base64 == "" {
-			chatBadRequest(w, r, "IMAGE_INVALID", "Each image needs mediaType and base64")
+		if code, msg := checkChatImage(img); code != "" {
+			chatBadRequest(w, r, code, msg)
 			return
 		}
 		in.Images = append(in.Images, chatproto.Image{MediaType: img.MediaType, Base64: img.Base64})
@@ -68,6 +73,31 @@ func (c *ChatController) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SendChatMessageResponse{UUID: uuid})
+}
+
+const (
+	maxChatImages     = 20
+	maxChatImageBytes = 5 << 20
+)
+
+// chatImageTypes are the image types claude reads; anything else is refused before it reaches the host.
+var chatImageTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
+
+func checkChatImage(img ChatImage) (code, message string) {
+	if !chatImageTypes[img.MediaType] || img.Base64 == "" {
+		return "IMAGE_INVALID", "Each image needs a png, jpeg, gif or webp mediaType and base64 data"
+	}
+	if base64.StdEncoding.DecodedLen(len(img.Base64)) > maxChatImageBytes+2 {
+		return "IMAGE_TOO_LARGE", "Each image is at most 5 MiB"
+	}
+	data, err := base64.StdEncoding.DecodeString(img.Base64)
+	if err != nil {
+		return "IMAGE_INVALID", "Image data is not base64"
+	}
+	if len(data) > maxChatImageBytes {
+		return "IMAGE_TOO_LARGE", "Each image is at most 5 MiB"
+	}
+	return "", ""
 }
 
 func (c *ChatController) answer(w http.ResponseWriter, r *http.Request) {

@@ -1,31 +1,20 @@
-import { ArrowUp, AtSign, History, Slash, X } from "lucide-react";
+import { ArrowUp, AtSign, History, Paperclip, Slash } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatActions } from "../hooks/useChatActions";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import type { PermissionMode } from "../lib/chat-answers";
-import type { ChatImage, ChatResult } from "../lib/chat-api";
+import type { ChatResult } from "../lib/chat-api";
+import { MAX_IMAGES, prepareImage, withAttachedPaths } from "../lib/chat-attach";
 import type { ChatCommand, ChatModel, UserItem } from "../lib/chat-fold";
+import { isImageMime } from "../lib/chat-images";
 import { type ComposerToken, replaceToken, slashGroups, tokenAt } from "../lib/chat-menus";
 import { rankFiles } from "../lib/open-quickly";
+import { ChatAttachments, type Chip, type Upload } from "./ChatAttachments";
 import { type MenuSection, ModelModePicker, optionId, TokenMenu } from "./ChatComposerMenus";
 import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover";
 
-export type Attachment = ChatImage & { id: number; name: string };
-
 const MENU_ID = "chat-token-menu";
 const MAX_FILES = 8;
-
-function readImage(file: File, id: number): Promise<Attachment> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onload = () => {
-			const url = String(reader.result);
-			resolve({ id, name: file.name || "pasted image", mediaType: file.type, base64: url.slice(url.indexOf(",") + 1) });
-		};
-		reader.onerror = () => reject(reader.error ?? new Error(`could not read ${file.name}`));
-		reader.readAsDataURL(file);
-	});
-}
 
 type Choice = { insert: string; hint?: string };
 type TokenMenuModel = { label: string; sections: MenuSection[]; choices: Choice[]; empty: string };
@@ -90,7 +79,8 @@ export function ChatComposer({
 }: ComposerProps) {
 	const [text, setText] = useState("");
 	const [caret, setCaret] = useState(0);
-	const [images, setImages] = useState<Attachment[]>([]);
+	const [chips, setChips] = useState<Chip[]>([]);
+	const [preparing, setPreparing] = useState(0);
 	const [sending, setSending] = useState(false);
 	const [dismissedForText, setDismissedForText] = useState<string | null>(null);
 	const [active, setActive] = useState(0);
@@ -98,10 +88,14 @@ export function ChatComposer({
 	const [wantFiles, setWantFiles] = useState(false);
 	const nextId = useRef(0);
 	const input = useRef<HTMLTextAreaElement>(null);
+	const picker = useRef<HTMLInputElement>(null);
 	const composer = useRef<HTMLDivElement>(null);
 	const pendingCaret = useRef<number | null>(null);
 	const disabled = actions.hostDown;
-	const canSend = !disabled && !sending && text.trim() !== "";
+	const images = chips.flatMap((c) => (c.kind === "image" ? [c.image] : []));
+	const uploaded = chips.flatMap((c) => (c.kind === "file" && c.upload.phase === "ready" ? [c.upload.path] : []));
+	const settled = preparing === 0 && chips.every((c) => c.kind === "image" || c.upload.phase === "ready");
+	const canSend = !disabled && !sending && settled && (text.trim() !== "" || chips.length > 0);
 
 	const token: ComposerToken | null = disabled || dismissedForText === text ? null : tokenAt(text, caret);
 	if (token?.kind === "mention" && !wantFiles) setWantFiles(true);
@@ -154,31 +148,62 @@ export function ChatComposer({
 		setArgHint(choice.hint ? { after: next.text, hint: choice.hint } : null);
 	};
 
+	const setUpload = (id: number, upload: Upload) =>
+		setChips((prev) => prev.map((c) => (c.id === id && c.kind === "file" ? { ...c, upload } : c)));
+
+	const upload = async (id: number, file: File) => {
+		const result = await actions.upload(file);
+		if (result.ok) setUpload(id, { phase: "ready", path: result.file.path });
+		else setUpload(id, { phase: "failed", message: result.error.message });
+	};
+
+	const addImage = async (file: File, id: number) => {
+		const name = file.name || "pasted image";
+		setPreparing((n) => n + 1);
+		const prepared = await prepareImage(file);
+		setPreparing((n) => n - 1);
+		if (prepared.ok) setChips((prev) => [...prev, { kind: "image", id, name, image: prepared.image }]);
+		else onToast(prepared.reason === "too_large" ? `${name} is larger than 5 MB.` : `Could not read ${name}.`);
+	};
+
 	const attach = (files: readonly File[]) => {
-		const refused = files.filter((f) => !f.type.startsWith("image/"));
-		if (refused.length) {
-			onToast(`Only images can be attached. Skipped ${refused.map((f) => f.name || "a file").join(", ")}.`);
+		let room = MAX_IMAGES - images.length - preparing;
+		const skipped: string[] = [];
+		for (const file of files) {
+			const id = ++nextId.current;
+			if (!isImageMime(file.type)) {
+				const name = file.name || "pasted file";
+				setChips((prev) => [
+					...prev,
+					{ kind: "file", id, name, size: file.size, file, upload: { phase: "uploading" } },
+				]);
+				void upload(id, file);
+			} else if (room > 0) {
+				room -= 1;
+				void addImage(file, id);
+			} else {
+				skipped.push(file.name || "pasted image");
+			}
 		}
-		const reads = files.filter((f) => f.type.startsWith("image/")).map((f) => readImage(f, ++nextId.current));
-		void Promise.allSettled(reads).then((settled) => {
-			const read = settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));
-			if (read.length) setImages((prev) => [...prev, ...read]);
-			if (read.length < reads.length) onToast("Could not read an image.");
-		});
+		if (skipped.length) onToast(`At most ${MAX_IMAGES} images per message. Skipped ${skipped.join(", ")}.`);
+	};
+
+	const retry = (id: number) => {
+		const chip = chips.find((c) => c.id === id);
+		if (chip?.kind !== "file") return;
+		setUpload(id, { phase: "uploading" });
+		void upload(id, chip.file);
 	};
 
 	const submit = async () => {
 		if (!canSend) return;
 		setSending(true);
-		const result = await actions.send(
-			text,
-			images.map(({ mediaType, base64 }) => ({ mediaType, base64 })),
-		);
+		const result = await actions.send(withAttachedPaths(text, uploaded), images);
 		setSending(false);
 		if (result.ok) {
 			setText("");
 			setCaret(0);
-			setImages([]);
+			setChips([]);
 			setArgHint(null);
 		} else if (result.error.kind !== "host_not_running") {
 			onToast(result.error.message);
@@ -258,28 +283,11 @@ export function ChatComposer({
 						}}
 						ref={composer}
 					>
-						{images.length ? (
-							<div className="chat-attach">
-								{images.map((img) => (
-									<span className="chat-attach__item" data-testid="chat-attachment" key={img.id}>
-										<img
-											alt={img.name}
-											className="chat-attach__thumb"
-											src={`data:${img.mediaType};base64,${img.base64}`}
-										/>
-										<span className="chat-attach__name">{img.name}</span>
-										<button
-											aria-label={`Remove ${img.name}`}
-											className="chat-attach__remove"
-											onClick={() => setImages((prev) => prev.filter((i) => i.id !== img.id))}
-											type="button"
-										>
-											<X className="chat-icon" aria-hidden="true" />
-										</button>
-									</span>
-								))}
-							</div>
-						) : null}
+						<ChatAttachments
+							chips={chips}
+							onRemove={(id) => setChips((prev) => prev.filter((c) => c.id !== id))}
+							onRetry={retry}
+						/>
 						<div className="chat-composer__field">
 							<textarea
 								aria-activedescendant={menu && activeIndex >= 0 ? optionId(MENU_ID, activeIndex) : undefined}
@@ -302,7 +310,7 @@ export function ChatComposer({
 								placeholder={
 									busy
 										? "Message Claude. It queues until the current turn ends."
-										: "Message Claude. / for commands and skills, @ for files, paste or drop images."
+										: "Message Claude. / for commands and skills, @ for files, paste, drop or attach files."
 								}
 								ref={input}
 								value={text}
@@ -315,6 +323,30 @@ export function ChatComposer({
 							) : null}
 						</div>
 						<div className="chat-composer__tools">
+							<button
+								aria-label="Attach files"
+								className="chat-composer__tool"
+								disabled={disabled}
+								onClick={() => picker.current?.click()}
+								title="Attach files"
+								type="button"
+							>
+								<Paperclip className="chat-icon" aria-hidden="true" />
+							</button>
+							<input
+								data-testid="chat-file-input"
+								disabled={disabled}
+								hidden
+								multiple
+								onChange={(e) => {
+									const picked = [...(e.target.files ?? [])];
+									e.target.value = "";
+									if (picked.length) attach(picked);
+								}}
+								ref={picker}
+								tabIndex={-1}
+								type="file"
+							/>
 							<button
 								aria-label="Commands and skills"
 								className="chat-composer__tool"

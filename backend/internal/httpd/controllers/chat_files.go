@@ -52,6 +52,7 @@ func (c *ChatFilesController) Register(r chi.Router) {
 	r.Head("/sessions/{sessionId}/chat/files/{root}/*", c.serve)
 	r.Get("/sessions/{sessionId}/chat/blobs/{blob}", c.blob)
 	r.Get("/sessions/{sessionId}/chat/tasks/{taskId}/output", c.taskOutput)
+	r.Post("/sessions/{sessionId}/chat/attachments", c.attach)
 }
 
 func (c *ChatFilesController) roots(r *http.Request) (chatfiles.Roots, error) {

@@ -78,6 +78,10 @@ function fakeApi() {
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
 		taskOutput: vi.fn<ChatApi["taskOutput"]>(async () => null),
+		upload: vi.fn<ChatApi["upload"]>(async (_id, file) => ({
+			ok: true,
+			file: { path: `/data/attachments/ab12/${file.name}`, name: file.name, size: file.size },
+		})),
 	};
 }
 
@@ -404,7 +408,7 @@ describe("ChatPane composer", () => {
 		expect(api.interrupt).not.toHaveBeenCalled();
 	});
 
-	it("attaches a pasted image as a thumbnail, sends it, and refuses other files", async () => {
+	it("attaches a pasted image as a thumbnail and a pasted file as an uploaded chip, and sends both", async () => {
 		vi.useRealTimers();
 		const api = fakeApi();
 		render(<ChatPane chatApi={api} createMux={createMux} daemonReady session={session} theme="dark" view="chat" />);
@@ -415,12 +419,16 @@ describe("ChatPane composer", () => {
 
 		const thumb = await screen.findByRole("img", { name: "sketch.png" });
 		expect(thumb).toHaveAttribute("src", "data:image/png;base64,iVBORw==");
-		expect(screen.getByRole("status")).toHaveTextContent("Only images can be attached. Skipped spec.pdf.");
-		expect(screen.getAllByTestId("chat-attachment")).toHaveLength(1);
+		await waitFor(() =>
+			expect(screen.getByRole("group", { name: "Attachment spec.pdf" })).toHaveAttribute("data-state", "ready"),
+		);
+		expect(screen.queryByRole("status")).toBeNull();
+		expect(screen.getAllByTestId("chat-attachment")).toHaveLength(2);
+		expect(api.upload).toHaveBeenCalledWith("chat-1", pdf);
 
 		await userEvent.type(input, "Use this sketch{Enter}");
 		await settle();
-		expect(api.send).toHaveBeenCalledWith("chat-1", "Use this sketch", [
+		expect(api.send).toHaveBeenCalledWith("chat-1", "Use this sketch\nAttached: /data/attachments/ab12/spec.pdf", [
 			{ mediaType: "image/png", base64: "iVBORw==" },
 		]);
 		expect(screen.queryByTestId("chat-attachment")).toBeNull();

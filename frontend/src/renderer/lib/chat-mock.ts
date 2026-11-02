@@ -1010,6 +1010,10 @@ export const stubChatApi: ChatApi = {
 		]);
 		return OK;
 	},
+	upload: async (_id, file) => ({
+		ok: true,
+		file: { path: `/preview/attachments/${file.name || "pasted file"}`, name: file.name, size: file.size },
+	}),
 	taskOutput: async (id, taskId) => {
 		const session = await stubSession(id);
 		const task = session.folder.transcript().tasks.find((t) => t.id === taskId);
