@@ -1,5 +1,5 @@
 import { ArrowUpRight, FileText } from "lucide-react";
-import { createContext, type ReactNode, useContext, useMemo } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef } from "react";
 import { type ArtifactDoc, docMeta, docTag, type FileDoc, fileDocOf, type TurnDocs } from "../lib/chat-docs";
 import { isShowablePath } from "../lib/chat-refs";
 import type { ResolvedFile } from "../lib/chat-refs-store";
@@ -136,4 +136,37 @@ export function useDocOf(path: string | undefined): { doc: FileDoc | undefined; 
 		const onOpen = context?.onOpen;
 		return { doc, open: doc && onOpen ? () => onOpen(doc) : undefined };
 	}, [path, resolved, context]);
+}
+
+/** Every confirmed document the session's turns wrote or named, newest turn first, each once: the cards' set. */
+export function sessionDocs(turns: readonly TurnDocs[], known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] {
+	const docs: FileDoc[] = [];
+	for (const turn of [...turns].reverse()) {
+		for (const doc of cardFiles(turn.refs, known)) {
+			if (!docs.some((d) => sameFile(d, doc))) docs.push(doc);
+		}
+	}
+	return docs;
+}
+
+/** Hands the session's document list up to whoever draws it outside the chat, each time it changes. */
+export function SessionDocsReporter({
+	turns,
+	onDocs,
+}: {
+	turns: readonly TurnDocs[];
+	onDocs?: (docs: FileDoc[]) => void;
+}) {
+	const refs = useMemo(() => [...new Set(turns.flatMap((t) => t.refs))], [turns]);
+	const resolved = useResolved(refs);
+	const docs = useMemo(() => (resolved ? sessionDocs(turns, resolved.known) : []), [resolved, turns]);
+	// Rows rebuild on every chat event; report only when the list itself changes.
+	const reported = useRef("");
+	useEffect(() => {
+		const key = docs.map((d) => `${d.root}:${d.path}:${d.size}`).join("|");
+		if (key === reported.current) return;
+		reported.current = key;
+		onDocs?.(docs);
+	}, [docs, onDocs]);
+	return null;
 }

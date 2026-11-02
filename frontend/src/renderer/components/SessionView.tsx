@@ -95,6 +95,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const [terminalTarget, setTerminalTarget] = useState<TerminalTarget>({ kind: "worker" });
 	const [browserPoppedOut, setBrowserPoppedOut] = useState(false);
 	const [openDoc, setOpenDoc] = useState<FileDoc | null>(null);
+	const [sessionDocs, setSessionDocs] = useState<FileDoc[]>([]);
 	const [inspectorView, setInspectorView] = useState<InspectorView>("summary");
 	// A review comment "expanded to full file" takes over the center pane (in
 	// place of the terminal) until dismissed; cleared on session switch below.
@@ -257,6 +258,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setTerminalTarget({ kind: "worker" });
 		setBrowserPoppedOut(false);
 		setOpenDoc(null);
+		setSessionDocs([]);
 		setFileView(null);
 		setWorkspaceFile(null);
 		setChangesFocus(null);
@@ -784,6 +786,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					key={session.id}
 					onOpenDoc={openDocument}
 					openDoc={openDoc}
+					onDocs={setSessionDocs}
 					session={session}
 					theme={theme}
 					view={centerView}
@@ -888,6 +891,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 								<SessionInspector
 									onCloseDoc={() => setOpenDoc(null)}
 									openDoc={openDoc}
+									sessionDocs={sessionDocs}
+									onOpenDoc={openDocument}
 									browserPoppedOut={browserPoppedOut}
 									hasIOSSimulator={hasIOSSimulator}
 									hasWebUI={hasWebUI}

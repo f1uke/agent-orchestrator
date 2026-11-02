@@ -142,6 +142,8 @@ export function SessionInspector({
 	onToggleBrowserPopOut,
 	browserView,
 	openDoc = null,
+	sessionDocs,
+	onOpenDoc,
 	onCloseDoc,
 	view: viewProp,
 	onViewChange,
@@ -182,6 +184,8 @@ export function SessionInspector({
 	browserView?: BrowserViewModel;
 	openDoc?: FileDoc | null;
 	onCloseDoc?: () => void;
+	sessionDocs?: readonly FileDoc[];
+	onOpenDoc?: (doc: FileDoc) => void;
 	/** Controlled active tab. Omit to let the inspector own its own selection. */
 	view?: InspectorView;
 	onViewChange?: (view: InspectorView) => void;
@@ -317,7 +321,9 @@ export function SessionInspector({
 					<DocumentPanel
 						active={isInspectorVisible}
 						doc={openDoc}
+						docs={sessionDocs}
 						onClose={() => onCloseDoc?.()}
+						onOpen={onOpenDoc}
 						sessionId={session.id}
 					/>
 				) : null}

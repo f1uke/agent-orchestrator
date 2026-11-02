@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiBaseUrl } from "../lib/api-client";
@@ -42,6 +42,22 @@ describe("DocumentPanel", () => {
 	it("says what to do while no document is open", () => {
 		panel(null);
 		expect(screen.getByText(/Open a document from the chat/)).toBeInTheDocument();
+	});
+
+	it("lists the session's documents while none is open, and opens the one clicked", async () => {
+		const onOpen = vi.fn();
+		const newest = doc({ path: "tmp/batch.json", kind: "json", title: "batch.json", size: 900 });
+		const older = doc({ root: "knowledge", path: "plans/x--survey.md", title: "x--survey.md" });
+		render(<DocumentPanel active doc={null} docs={[newest, older]} onClose={vi.fn()} onOpen={onOpen} sessionId="s1" />);
+		const list = screen.getByRole("list", { name: "Documents in this session" });
+		const items = within(list).getAllByRole("listitem");
+		expect(items.map((item) => item.textContent)).toEqual([
+			expect.stringContaining("batch.json"),
+			expect.stringContaining("x--survey.md"),
+		]);
+		await userEvent.setup().click(within(list).getByRole("button", { name: "Open x--survey.md" }));
+		expect(onOpen).toHaveBeenCalledWith(older);
+		expect(screen.queryByText(/Open a document from the chat/)).toBeNull();
 	});
 
 	it("names the file in the header with its place and size", async () => {

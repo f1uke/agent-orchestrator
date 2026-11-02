@@ -10151,6 +10151,36 @@ ol.note-prose__list {
 	white-space: nowrap;
 }
 
+.document-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin: 0;
+	padding: 14px;
+	list-style: none;
+	overflow: auto;
+}
+
+.document-list__open {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--border-1);
+	border-radius: 12px;
+	background: var(--bg-1);
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.document-list__open:hover,
+.document-list__open:focus-visible {
+	border-color: var(--accent);
+	background: var(--bg-2);
+}
+
 .document-panel__body {
 	position: relative;
 	min-height: 0;

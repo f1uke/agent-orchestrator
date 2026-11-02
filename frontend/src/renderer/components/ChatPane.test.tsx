@@ -892,6 +892,23 @@ describe("ChatPane calm view", () => {
 			expect(asked.filter((ref) => ref === "/work/project/docs/plan.md")).toHaveLength(1);
 		});
 
+		it("reports the session's confirmed documents for the Document tab, once per change", async () => {
+			stubChatFiles({
+				"/work/project/docs/plan.md": [file("docs/plan.md", "markdown")],
+				"plans/demo--survey.md": [file("plans/demo--survey.md", "markdown", "knowledge")],
+			});
+			const onDocs = vi.fn();
+			const { feed } = renderPane("chat", fakeApi(), session, { onDocs });
+			feed(...turn("Done. See `plans/demo--survey.md`."));
+			await settle();
+			const reported = onDocs.mock.calls.map(([docs]) => (docs as { path: string }[]).map((d) => d.path));
+			expect(reported.at(-1)).toEqual(["docs/plan.md", "plans/demo--survey.md"]);
+			const before = onDocs.mock.calls.length;
+			feed(lifecycle("u1", "completed"));
+			await settle();
+			expect(onDocs.mock.calls.length).toBe(before);
+		});
+
 		it("asks once for a finished turn however often the pane draws again", async () => {
 			const fetchMock = stubChatFiles({});
 			const { feed } = renderPane();
