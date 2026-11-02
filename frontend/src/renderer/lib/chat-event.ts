@@ -103,7 +103,6 @@ export type ChatEvent =
 			type: "result";
 			subtype: string;
 			isError: boolean;
-			/** What claude says went wrong, when isError. */
 			errorText: string;
 			numTurns: number;
 			totalCostUsd: number;

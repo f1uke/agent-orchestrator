@@ -71,7 +71,6 @@ export type TurnEndItem = {
 	contextWindows: Record<string, number>;
 	ts: string;
 	durationMs?: number;
-	/** Set when isError: what went wrong, in plain words. */
 	error?: TurnError;
 };
 
@@ -247,9 +246,7 @@ export class ChatFolder {
 	private model = "";
 	private tasks = new Map<string, BackgroundTask>();
 	private ts = "";
-	// The synthetic message claude writes when an API call fails. The error result that
-	// follows carries the same text, so it is held here and only shown on its own if no such result comes.
-	private apiError: string | undefined;
+	private pendingApiError: string | undefined;
 	private context: number | undefined;
 	private turnStart: string | undefined;
 	private thinkingSince: string | undefined;
@@ -289,9 +286,9 @@ export class ChatFolder {
 	}
 
 	private push(item: ChatItem): void {
-		const apiError = this.apiError;
+		const apiError = this.pendingApiError;
 		if (apiError !== undefined) {
-			this.apiError = undefined;
+			this.pendingApiError = undefined;
 			this.push({ kind: "notice", notice: "api_error", text: apiError, ts: this.ts });
 		}
 		this.items.push(item);
@@ -339,7 +336,7 @@ export class ChatFolder {
 				break;
 			case "assistant":
 				if (event.error !== "" && event.parentToolUseId === "") {
-					this.apiError = event.blocks.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
+					this.pendingApiError = event.blocks.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
 					break;
 				}
 				this.applyAssistant(event.messageId, event.parentToolUseId, event.blocks);
@@ -354,8 +351,8 @@ export class ChatFolder {
 				this.thinkingSince = undefined;
 				this.cost = event.totalCostUsd;
 				if (event.contextTokens !== undefined) this.context = event.contextTokens;
-				const errorText = event.errorText || this.apiError || "";
-				if (event.isError) this.apiError = undefined;
+				const errorText = event.errorText || this.pendingApiError || "";
+				if (event.isError) this.pendingApiError = undefined;
 				this.push({
 					ts: this.ts,
 					durationMs: elapsedMs(this.turnStart, this.ts),

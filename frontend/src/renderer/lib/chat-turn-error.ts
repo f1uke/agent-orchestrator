@@ -1,4 +1,5 @@
-/** A failed turn in plain words: a short label, an optional one-line detail, and the raw text when it is too noisy to show. */
+import { isObject } from "./chat-event";
+
 export type TurnError = { label: string; detail?: string; raw?: string };
 
 const SUBTYPE_LABEL: Record<string, string> = {
@@ -17,7 +18,6 @@ const NESTED_TYPE_LABEL: Record<string, string> = {
 const API_ERROR_PREFIX = /^API Error:\s*/;
 const MAX_DETAIL = 200;
 
-/** Reads the text claude puts in a failed result (or its synthetic error message) into a label a person can scan. */
 export function describeTurnError(subtype: string, text: string): TurnError {
 	const trimmed = text.trim();
 	const nested = nestedError(trimmed);
@@ -64,7 +64,7 @@ function nestedError(text: string): { type: string; message: string } | undefine
 	if (!body) return undefined;
 	try {
 		const parsed: unknown = JSON.parse(body);
-		const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : undefined;
+		const error = isObject(parsed) && isObject(parsed.error) ? parsed.error : undefined;
 		if (!error) return undefined;
 		return {
 			type: typeof error.type === "string" ? error.type : "",
@@ -75,7 +75,6 @@ function nestedError(text: string): { type: string; message: string } | undefine
 	}
 }
 
-// The JSON sits mid-sentence with prose after it, so cut it at its matching brace before parsing.
 function balancedObject(text: string, start: number): string | undefined {
 	let depth = 0;
 	let inString = false;
@@ -89,8 +88,4 @@ function balancedObject(text: string, start: number): string | undefined {
 		else if (ch === "}" && --depth === 0) return text.slice(start, i + 1);
 	}
 	return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
