@@ -41,6 +41,7 @@ func newSessionHostCommand() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.LogPath, "log", "", "event log to append to (created if missing)")
 	cmd.Flags().StringVar(&cfg.SocketPath, "socket", "", "unix socket to serve the session on")
 	cmd.Flags().BoolVar(&cfg.NoIdleCompact, "no-idle-compact", false, "do not send /compact when a large conversation sits idle")
+	cmd.Flags().BoolVar(&cfg.NoPromptSuggestions, "no-prompt-suggestions", false, "do not ask claude for a guess at the user's next message after each turn")
 	cmd.Flags().StringVar(&cfg.PromptFile, "prompt-file", "", "first user message, sent only when the log has no user input yet")
 	return cmd
 }

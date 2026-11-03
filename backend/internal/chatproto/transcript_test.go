@@ -751,3 +751,53 @@ func TestSpawnTakesTheModelFromItsCommandLine(t *testing.T) {
 		}
 	}
 }
+
+const suggestionLine = `{"type":"prompt_suggestion","suggestion":"what happens if I forget to cancel it?","uuid":"s1","session_id":"s"}`
+
+func TestFoldKeepsTheLatestPromptSuggestion(t *testing.T) {
+	tr := foldEntries(t, []Entry{
+		synth(1, DirOut, `{"type":"result","subtype":"success","num_turns":1}`),
+		synth(2, DirOut, `{"type":"prompt_suggestion","suggestion":"first"}`),
+		synth(3, DirOut, suggestionLine),
+	})
+	if tr.Suggestion != "what happens if I forget to cancel it?" {
+		t.Errorf("Suggestion = %q, want the latest", tr.Suggestion)
+	}
+	if len(tr.Items) != 1 {
+		t.Errorf("a suggestion is not a transcript row: Items = %+v", tr.Items)
+	}
+}
+
+func TestPromptSuggestionIsClearedByWhatStartsTheNextTurn(t *testing.T) {
+	for name, payload := range map[string]struct {
+		dir     Direction
+		payload string
+	}{
+		"user input":    {DirIn, `{"type":"user","uuid":"u2","message":{"role":"user","content":"yes"}}`},
+		"turn start":    {DirOut, `{"type":"command_lifecycle","command_uuid":"u2","state":"started"}`},
+		"interrupt":     {DirOut, `{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}`},
+		"process spawn": {DirHost, `{"kind":"spawn","argv":["claude"],"pid":1}`},
+		"process exit":  {DirHost, `{"kind":"exit","code":0}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := foldEntries(t, []Entry{
+				synth(1, DirOut, suggestionLine),
+				synth(2, payload.dir, payload.payload),
+			})
+			if tr.Suggestion != "" {
+				t.Errorf("Suggestion = %q, want cleared", tr.Suggestion)
+			}
+		})
+	}
+}
+
+func TestPromptSuggestionSurvivesEventsThatAreNotInput(t *testing.T) {
+	tr := foldEntries(t, []Entry{
+		synth(1, DirOut, suggestionLine),
+		synth(2, DirOut, `{"type":"command_lifecycle","command_uuid":"u1","state":"completed"}`),
+		synth(3, DirOut, `{"type":"rate_limit_event"}`),
+	})
+	if tr.Suggestion == "" {
+		t.Error("Suggestion was cleared by an event that starts nothing")
+	}
+}

@@ -13,6 +13,7 @@ func TestClaudeArgv(t *testing.T) {
 		resume  string
 		model   string
 		attach  string
+		suggest bool
 		want    []string
 	}{
 		{
@@ -64,11 +65,26 @@ func TestClaudeArgv(t *testing.T) {
 			attach:  "/a",
 			want:    append(append([]string{"claude"}, protocolFlags...), "--add-dir", "/a", "--resume", "pin"),
 		},
+		{
+			name:    "prompt suggestions are asked for beside the protocol flags, before the attachments folder",
+			command: []string{"claude", "--model", "opus", "--", "hello"},
+			attach:  "/a",
+			suggest: true,
+			want: append(append(append([]string{"claude", "--model", "opus"}, protocolFlags...), "--prompt-suggestions"),
+				"--add-dir", "/a", "--", "hello"),
+		},
+		{
+			name:    "a resume keeps asking for prompt suggestions",
+			command: []string{"claude"},
+			resume:  "pin",
+			suggest: true,
+			want:    append(append(append([]string{"claude"}, protocolFlags...), "--prompt-suggestions"), "--resume", "pin"),
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := claudeArgv(c.command, c.resume, c.model, c.attach); !slices.Equal(got, c.want) {
-				t.Errorf("claudeArgv(%v, %q, %q, %q) =\n %v\nwant\n %v", c.command, c.resume, c.model, c.attach, got, c.want)
+			if got := claudeArgv(c.command, c.resume, c.model, c.attach, c.suggest); !slices.Equal(got, c.want) {
+				t.Errorf("claudeArgv(%v, %q, %q, %q, %v) =\n %v\nwant\n %v", c.command, c.resume, c.model, c.attach, c.suggest, got, c.want)
 			}
 		})
 	}
