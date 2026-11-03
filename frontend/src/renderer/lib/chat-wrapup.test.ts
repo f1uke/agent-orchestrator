@@ -59,6 +59,7 @@ describe("latestWrapUpId", () => {
 					models: [],
 					model: "",
 					tasks: [],
+					agentModels: {},
 					lastSeq: 0,
 				},
 				emptyOverlay,

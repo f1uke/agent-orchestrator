@@ -86,6 +86,7 @@ function transcript(items: ChatItem[], extra: Partial<Transcript> = {}): Transcr
 		models: [],
 		model: "",
 		tasks: [],
+		agentModels: {},
 		lastSeq: 0,
 		...extra,
 	};

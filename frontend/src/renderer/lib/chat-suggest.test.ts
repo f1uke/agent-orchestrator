@@ -105,6 +105,7 @@ describe("liveSuggestions", () => {
 				models: [],
 				model: "",
 				tasks: [],
+				agentModels: {},
 				lastSeq: 0,
 			},
 			emptyOverlay,
