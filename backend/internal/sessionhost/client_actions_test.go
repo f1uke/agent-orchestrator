@@ -201,6 +201,66 @@ func TestClientSetModelEndsWhenClaudeExits(t *testing.T) {
 	}
 }
 
+func TestClientStopTask(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir,
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.StopTask{RequestID: "st-1", TaskID: "bq3k9x1ab"})},
+		fixtureLine{chatproto.DirOut, `{"type":"control_response","response":{"subtype":"success","request_id":"st-1"}}`},
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.StopTask{RequestID: "st-2", TaskID: "a5e1c0de"})},
+		fixtureLine{chatproto.DirOut, `{"type":"control_response","response":{"subtype":"error","request_id":"st-2","error":"stop_task is not supported in this context"}}`},
+	))
+	startHost(t, cfg)
+	c := NewClient(cfg.SocketPath)
+	ctx := context.Background()
+
+	if err := c.StopTask(ctx, "bq3k9x1ab"); err != nil {
+		t.Fatalf("StopTask(bq3k9x1ab) = %v, want claude's success", err)
+	}
+	got := loggedInputs(t, cfg.LogPath, "control_request/stop_task")
+	if len(got) != 1 || !strings.Contains(got[0], `"task_id":"bq3k9x1ab"`) {
+		t.Errorf("logged stop_task requests = %v, want one for bq3k9x1ab", got)
+	}
+
+	err := c.StopTask(ctx, "a5e1c0de")
+	var refused *RefusedError
+	if !errors.As(err, &refused) || refused.Reason != "stop_task is not supported in this context" {
+		t.Fatalf("StopTask(a5e1c0de) err = %v, want claude's refusal as the reason", err)
+	}
+}
+
+func TestClientStopTaskRefusesABadTaskID(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir))
+	startHost(t, cfg)
+	c := NewClient(cfg.SocketPath)
+
+	for _, id := range []string{"", "../etc", "a b", "t\"x"} {
+		err := c.StopTask(context.Background(), id)
+		var refused *RefusedError
+		if !errors.As(err, &refused) {
+			t.Errorf("StopTask(%q) err = %v, want a refusal", id, err)
+		}
+	}
+	if got := loggedInputs(t, cfg.LogPath, "control_request/stop_task"); len(got) != 0 {
+		t.Errorf("a bad task id reached claude: %v", got)
+	}
+}
+
+func TestClientStopTaskGivesUpWhenClaudeIsSilent(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir,
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.StopTask{RequestID: "st", TaskID: "t1"})},
+	))
+	cfg.controlTimeout = 50 * time.Millisecond
+	startHost(t, cfg)
+
+	err := NewClient(cfg.SocketPath).StopTask(context.Background(), "t1")
+	var refused *RefusedError
+	if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "did not answer stop_task") {
+		t.Fatalf("err = %v, want a refusal saying claude did not answer", err)
+	}
+}
+
 func TestClientWithNoHostIsNotReachable(t *testing.T) {
 	c := NewClient(filepath.Join(shortDir(t), "none.sock"))
 	ctx := context.Background()
@@ -211,6 +271,7 @@ func TestClientWithNoHostIsNotReachable(t *testing.T) {
 		"Interrupt": c.Interrupt(ctx),
 		"SetMode":   c.SetMode(ctx, chatproto.ModePlan),
 		"SetModel":  c.SetModel(ctx, "haiku"),
+		"StopTask":  c.StopTask(ctx, "t1"),
 	} {
 		if !errors.Is(err, ErrNotReachable) {
 			t.Errorf("%s err = %v, want ErrNotReachable", name, err)
