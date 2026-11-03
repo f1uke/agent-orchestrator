@@ -1026,3 +1026,43 @@ describe("a failed API call", () => {
 		expect(notices(tr)[0]).toMatchObject({ notice: "api_error", text: "API Error: connection lost" });
 	});
 });
+
+describe("prompt suggestion", () => {
+	const suggestion = (text: string) => ({ type: "prompt_suggestion", suggestion: text, uuid: "s", session_id: "s" });
+	const fold = (...rest: Array<[Direction, unknown]>) =>
+		foldEntries(rest.map(([dir, payload], i) => synth(i + 1, dir, payload)));
+
+	it("keeps the latest suggestion and adds no row", () => {
+		const tr = fold(
+			["out", { type: "result", subtype: "success", num_turns: 1 }],
+			["out", suggestion("first")],
+			["out", suggestion("what happens if I forget to cancel it?")],
+		);
+		expect(tr.suggestion).toBe("what happens if I forget to cancel it?");
+		expect(tr.items).toHaveLength(1);
+	});
+
+	it.each<[string, Direction, unknown]>([
+		["user input", "in", { type: "user", uuid: "u2", message: { role: "user", content: "yes" } }],
+		["a turn start", "out", { type: "command_lifecycle", command_uuid: "u2", state: "started" }],
+		[
+			"an interrupt",
+			"out",
+			{ type: "user", message: { content: [{ type: "text", text: "[Request interrupted by user]" }] } },
+		],
+		["a process spawn", "host", { kind: "spawn", argv: ["claude"], pid: 1 }],
+		["a process exit", "host", { kind: "exit", code: 0 }],
+	])("is cleared by %s", (_name, dir, payload) => {
+		const tr = fold(["out", suggestion("what next?")], [dir, payload]);
+		expect(tr.suggestion).toBe("");
+	});
+
+	it("survives events that start nothing", () => {
+		const tr = fold(
+			["out", suggestion("what next?")],
+			["out", { type: "command_lifecycle", command_uuid: "u1", state: "completed" }],
+			["out", { type: "rate_limit_event" }],
+		);
+		expect(tr.suggestion).toBe("what next?");
+	});
+});

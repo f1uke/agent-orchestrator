@@ -68,4 +68,24 @@ describe("parseEvent", () => {
 			expect(patchOf(user(undefined))).toBeUndefined();
 		});
 	});
+
+	describe("prompt_suggestion", () => {
+		it("reads the suggested next message", () => {
+			expect(
+				parseEvent({
+					type: "prompt_suggestion",
+					suggestion: "what happens if I forget to cancel it?",
+					uuid: "24f24088-0c81-468b-97eb-3bfbaac2f6b9",
+					session_id: "88b935b5-28d7-433b-a75a-bd12d380a5f1",
+				}),
+			).toEqual({ type: "prompt_suggestion", text: "what happens if I forget to cancel it?" });
+		});
+
+		it("degrades to unknown when the suggestion is not text", () => {
+			expect(parseEvent({ type: "prompt_suggestion", suggestion: 7 })).toEqual({
+				type: "unknown",
+				eventType: "prompt_suggestion",
+			});
+		});
+	});
 });

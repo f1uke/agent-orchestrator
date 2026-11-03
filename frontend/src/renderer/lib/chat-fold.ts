@@ -172,6 +172,8 @@ export type Transcript = {
 	thinkingSince?: string;
 	contextBreakdown?: ContextBreakdown;
 	usage?: SubscriptionUsage;
+	/** Claude's guess at the next user message. Empty once input, a turn start, an interrupt or a process change follows it. */
+	suggestion: string;
 	lastSeq: number;
 };
 
@@ -263,6 +265,7 @@ export class ChatFolder {
 	private breakdown: ContextBreakdown | undefined;
 	private usage: SubscriptionUsage | undefined;
 	private awaitingBrief = false;
+	private suggestion = "";
 
 	get lastSeq(): number {
 		return this.last;
@@ -328,6 +331,7 @@ export class ChatFolder {
 			thinkingSince: this.thinkingSince,
 			contextBreakdown: this.breakdown,
 			usage: this.usage,
+			suggestion: this.suggestion,
 			lastSeq: this.last,
 		};
 	}
@@ -401,12 +405,16 @@ export class ChatFolder {
 			case "rate_limit":
 				this.usage = parseRateLimit(event.info, this.ts) ?? this.usage;
 				break;
+			case "prompt_suggestion":
+				this.suggestion = event.text;
+				break;
 		}
 	}
 
 	private applyIn(event: ChatEvent): void {
 		if (event.type === "user") {
 			this.thinkingSince = undefined;
+			this.suggestion = "";
 			this.addUserInput(event.uuid, event.blocks);
 		} else if (event.type === "control_response") this.answerPermission(event);
 		else if (event.type === "control_request" && (event.subtype === "initialize" || event.subtype === "set_model")) {
@@ -462,6 +470,7 @@ export class ChatFolder {
 					endedTs: this.ts,
 				});
 			} else if (block.type === "text" && block.text.startsWith(INTERRUPT_MARKER)) {
+				this.suggestion = "";
 				this.notice("interrupted", "");
 			}
 		}
@@ -502,6 +511,7 @@ export class ChatFolder {
 	}
 
 	private setCommand(uuid: string, state: CommandState): void {
+		if (state === "started") this.suggestion = "";
 		if (state === "started" && this.commands.get(uuid) !== "started") this.turnStart = this.ts;
 		this.commands.set(uuid, state);
 		this.updateUser(uuid, { state });
@@ -594,6 +604,7 @@ export class ChatFolder {
 	}
 
 	private endProcess(): void {
+		this.suggestion = "";
 		this.thinkingSince = undefined;
 		for (const [id, task] of this.tasks) {
 			if (unfinished(task.state)) this.tasks.set(id, { ...task, state: "stopped" });

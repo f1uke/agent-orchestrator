@@ -134,6 +134,7 @@ export type ChatEvent =
 	| { type: "control_cancel"; requestId: string }
 	| { type: "command_lifecycle"; commandUuid: string; state: CommandState }
 	| { type: "rate_limit"; info: unknown }
+	| { type: "prompt_suggestion"; text: string }
 	| { type: "unknown"; eventType: string };
 
 export type Origin = { via: string; from: string };
@@ -383,6 +384,9 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			return { type: "command_lifecycle", commandUuid: str(line.command_uuid), state: str(line.state) };
 		case "rate_limit_event":
 			return { type: "rate_limit", info: line.rate_limit_info };
+		case "prompt_suggestion":
+			if (typeof line.suggestion !== "string") return undefined;
+			return { type: "prompt_suggestion", text: line.suggestion };
 	}
 	return undefined;
 }

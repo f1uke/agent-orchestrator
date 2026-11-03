@@ -179,6 +179,7 @@ export function subagentTranscript(tr: Transcript, agentCallId: string): Transcr
 		model: tr.agentModels[agentCallId] ?? "",
 		tasks: tr.tasks.filter((t) => calls.has(t.toolUseId)),
 		agentModels: tr.agentModels,
+		suggestion: "",
 		lastSeq: tr.lastSeq,
 	};
 }
