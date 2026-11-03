@@ -78,9 +78,26 @@ export function parseTaskNotification(text: string): TaskNotification | undefine
 	};
 }
 
+export type CompactTokens = { pre: number; post?: number };
+
+function decodeCompact(line: Obj): CompactTokens | undefined {
+	if (line.subtype !== "compact_boundary" || !isObject(line.compact_metadata)) return undefined;
+	const { pre_tokens: pre, post_tokens: post } = line.compact_metadata;
+	if (typeof pre !== "number") return undefined;
+	return typeof post === "number" ? { pre, post } : { pre };
+}
+
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
-	| { type: "system"; subtype: string; permissionMode: string; parentToolUseId: string; task?: TaskEvent }
+	| {
+			type: "system";
+			subtype: string;
+			permissionMode: string;
+			parentToolUseId: string;
+			task?: TaskEvent;
+			/** On a compact_boundary: the context size before and, when claude says, after. */
+			compact?: CompactTokens;
+	  }
 	| {
 			type: "assistant";
 			messageId: string;
@@ -295,6 +312,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				permissionMode: str(line.permissionMode),
 				parentToolUseId: str(line.parent_tool_use_id),
 				task: decodeTask(line),
+				compact: decodeCompact(line),
 			};
 		case "assistant":
 			return {

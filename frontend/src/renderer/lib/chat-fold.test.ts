@@ -578,6 +578,20 @@ describe("chat fold rules", () => {
 		expect(tr.items).toEqual([{ kind: "notice", notice: "compacted", text: "", ts: "" }]);
 	});
 
+	it("carries the token sizes a compact boundary reports, and only those", () => {
+		const boundary = (metadata: unknown) =>
+			foldEntries([
+				synth(1, "out", { type: "system", subtype: "compact_boundary", session_id: "s", compact_metadata: metadata }),
+			]).items;
+		expect(boundary({ trigger: "auto", pre_tokens: 250000, post_tokens: 30000 })).toEqual([
+			{ kind: "notice", notice: "compacted", text: "", ts: "", tokens: { pre: 250000, post: 30000 } },
+		]);
+		expect(boundary({ pre_tokens: 12000 })).toEqual([
+			{ kind: "notice", notice: "compacted", text: "", ts: "", tokens: { pre: 12000 } },
+		]);
+		expect(boundary({ pre_tokens: "many" })).toEqual([{ kind: "notice", notice: "compacted", text: "", ts: "" }]);
+	});
+
 	it("lets unknown events change nothing but the seq", () => {
 		const entries = upTo(loadFixture("first_session.jsonl"), 12);
 		const base = foldEntries(entries);
