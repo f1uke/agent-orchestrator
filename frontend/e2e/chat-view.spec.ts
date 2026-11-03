@@ -19,7 +19,7 @@ for (const viewport of VIEWPORTS) {
 	test.describe(`chat view at ${viewport.width}x${viewport.height}`, () => {
 		test.use({ viewport, colorScheme: "dark" });
 
-		test("shows the stream, a diff opened by click, a pending question and the events", async ({ page }, info) => {
+		test("shows the stream, a diff opened by click, a pending question and the trajectory", async ({ page }, info) => {
 			const shot = (name: string) => page.screenshot({ path: info.outputPath(`chat-${name}-${viewport.width}.png`) });
 
 			const stream = await openChat(page);
@@ -61,11 +61,11 @@ for (const viewport of VIEWPORTS) {
 			await expect(stream.locator('[data-resolved="allowed"]').first()).toContainText("Allowed Write");
 			await shot("top");
 
-			await toggle.getByRole("button", { name: "Events" }).click();
-			const events = page.getByTestId("chat-events");
-			await expect(events).toBeVisible();
-			await expect(events.locator(".chat-ev").filter({ hasText: "control_request/can_use_tool" }).last()).toBeVisible();
-			await shot("events");
+			await toggle.getByRole("button", { name: "Trajectory" }).click();
+			const trajectory = page.getByTestId("chat-trajectory");
+			await expect(trajectory).toBeVisible();
+			await expect(trajectory.locator(".chat-traj__row").filter({ hasText: "AskUserQuestion" }).first()).toBeVisible();
+			await shot("trajectory");
 
 			await toggle.getByRole("button", { name: "Terminal" }).click();
 			await expect(page.getByTestId("chat-pane")).toHaveCount(0);
