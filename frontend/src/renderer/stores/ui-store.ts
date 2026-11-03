@@ -5,7 +5,9 @@ import { parseSplitLayouts, serializeSplitLayouts, type SplitNode } from "../lib
 export type Theme = "light" | "dark";
 /** Worker detail view toggles — Changes (Git rail) is the default. */
 export type WorkbenchTab = "changes" | "files" | "terminal";
-export type ChatView = "chat" | "terminal" | "events";
+export type ChatView = "chat" | "terminal" | "trajectory";
+/** What a store can hold: "events" is what the Trajectory view was called before the rename. */
+export type StoredChatView = ChatView | "events";
 
 // Selection (which project/session is open) now lives in the URL — the router
 // is the single source of truth, read via route params. This store holds only
@@ -61,7 +63,7 @@ type UiState = {
 	 * honours it once, opens the rail if it is shut, and clears it.
 	 */
 	inspectorViewRequest: InspectorView | null;
-	chatViews: Readonly<Record<string, ChatView>>;
+	chatViews: Readonly<Record<string, StoredChatView>>;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	setTheme: (theme: Theme) => void;
 	toggleTheme: () => void;
@@ -287,8 +289,9 @@ export const useUiStore = create<UiState>((set) => ({
 
 export function centerViewOf(
 	session: { id: string; transport?: "terminal" | "chat" } | undefined,
-	chatViews: Readonly<Record<string, ChatView>>,
+	chatViews: Readonly<Record<string, StoredChatView>>,
 ): ChatView {
 	if (session?.transport !== "chat") return "terminal";
-	return chatViews[session.id] ?? "chat";
+	const stored = chatViews[session.id];
+	return stored === "events" ? "trajectory" : (stored ?? "chat");
 }

@@ -3,19 +3,18 @@ import {
 	ArrowDown,
 	Bot,
 	ChevronRight,
-	Code,
 	CloudOff,
 	Database,
 	type LucideIcon,
 	MessageSquare,
+	Route,
 	SquareTerminal,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
-import type { ChatEntry } from "../lib/chat-event";
-import { isObject, unfinished } from "../lib/chat-event";
+import { unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
 import { noticeText } from "../lib/chat-notice";
@@ -44,6 +43,7 @@ import {
 } from "../lib/chat-suggest";
 import { latestWrapUpId, wrapUpOf } from "../lib/chat-wrapup";
 import { ChatChapters } from "./ChatChapters";
+import { ChatTrajectory } from "./ChatTrajectory";
 import { ChatWrapUp } from "./ChatWrapUp";
 import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
 import { ChatComposer, type Prefill } from "./ChatComposer";
@@ -69,7 +69,7 @@ import { NoteMarkdown } from "./NoteMarkdown";
 import { ChatDocsProvider, ChatDocStrip, SessionDocsReporter } from "./ChatDocs";
 import { ChatRefsProvider, RefImages } from "./RefImages";
 
-export type ChatPaneView = "chat" | "events";
+export type ChatPaneView = "chat" | "trajectory";
 
 type ChatPaneProps = {
 	session: WorkspaceSession;
@@ -197,8 +197,8 @@ export function ChatPane({
 				<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
 					<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
 					<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-						{view === "events" ? (
-							<ChatEvents entries={chat.entries} />
+						{view === "trajectory" ? (
+							<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
 						) : (
 							<ChatStream
 								disabled={actions.hostDown}
@@ -275,8 +275,8 @@ export function ChatPane({
 
 const VIEW_OPTIONS: Array<{ view: ChatView; label: string; Icon: LucideIcon }> = [
 	{ view: "chat", label: "Chat", Icon: MessageSquare },
+	{ view: "trajectory", label: "Trajectory", Icon: Route },
 	{ view: "terminal", label: "Terminal", Icon: SquareTerminal },
-	{ view: "events", label: "Events", Icon: Code },
 ];
 
 export function ChatViewToggle({ session, style }: { session: WorkspaceSession; style?: React.CSSProperties }) {
@@ -324,9 +324,6 @@ function ConnectionLabel({ connection, error }: { connection: ChatConnection; er
 		</span>
 	);
 }
-
-
-const STICK_TO_BOTTOM_PX = 48;
 
 type StreamProps = {
 	rows: ChatRow[];
@@ -1059,66 +1056,6 @@ function PeerMessage({
 				<NoteMarkdown source={body} theme={theme} />
 			</div>
 			<RefImages source={body} />
-		</div>
-	);
-}
-
-const EVENT_ROW_PX = 24;
-const JSON_PREVIEW_CHARS = 400;
-
-function eventType(entry: ChatEntry): { label: string; tone: "control" | "host" | "" } {
-	const payload = isObject(entry.payload) ? entry.payload : {};
-	if (entry.dir === "host") return { label: `host/${String(payload.kind ?? "?")}`, tone: "host" };
-	const type = typeof payload.type === "string" ? payload.type : "?";
-	const request = isObject(payload.request) ? payload.request : undefined;
-	const subtype = typeof payload.subtype === "string" ? payload.subtype : request?.subtype;
-	const label = typeof subtype === "string" && subtype !== "" ? `${type}/${subtype}` : type;
-	return { label, tone: type.startsWith("control_") ? "control" : "" };
-}
-
-function formatTime(ts: string): string {
-	const d = new Date(ts);
-	if (Number.isNaN(d.getTime())) return ts;
-	const pad = (n: number, w = 2) => String(n).padStart(w, "0");
-	return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
-}
-
-function ChatEvents({ entries }: { entries: readonly ChatEntry[] }) {
-	const scrollRef = useRef<HTMLDivElement | null>(null);
-	const virtualizer = useVirtualizer({
-		count: entries.length,
-		getScrollElement: () => scrollRef.current,
-		estimateSize: () => EVENT_ROW_PX,
-		overscan: 20,
-		observeElementRect: measuredOrFallbackRect,
-	});
-	const atBottomRef = useRef(true);
-	useEffect(() => {
-		if (entries.length > 0 && atBottomRef.current) virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
-	}, [entries.length, virtualizer]);
-	const onScroll = () => {
-		const el = scrollRef.current;
-		if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_PX;
-	};
-	return (
-		<div className="chat-events" data-testid="chat-events" onScroll={onScroll} ref={scrollRef}>
-			<div className="relative" style={{ height: virtualizer.getTotalSize() }}>
-				{virtualizer.getVirtualItems().map((v) => {
-					const entry = entries[v.index];
-					const { label, tone } = eventType(entry);
-					return (
-						<div className="chat-ev" data-seq={entry.seq} key={v.key} style={{ transform: `translateY(${v.start}px)` }}>
-							<span className="chat-ev__seq">{entry.seq}</span>
-							<span className="chat-ev__ts">{formatTime(entry.ts)}</span>
-							<span className="chat-ev__dir">{entry.dir}</span>
-							<span className={cn("chat-ev__type", tone && `chat-ev__type--${tone}`)} title={label}>
-								{label}
-							</span>
-							<span className="chat-ev__json">{JSON.stringify(entry.payload).slice(0, JSON_PREVIEW_CHARS)}</span>
-						</div>
-					);
-				})}
-			</div>
 		</div>
 	);
 }

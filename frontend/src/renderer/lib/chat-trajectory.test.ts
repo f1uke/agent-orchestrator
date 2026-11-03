@@ -6,7 +6,10 @@ import type { ChatEntry } from "./chat-event";
 import { foldEntries } from "./chat-fold";
 import {
 	buildTrajectory,
+	capText,
 	filterRows,
+	formatSpan,
+	fullText,
 	layoutBars,
 	rawEntries,
 	type Trajectory,
@@ -112,7 +115,12 @@ describe("buildTrajectory on the recorded long session", () => {
 describe("buildTrajectory on a crafted session", () => {
 	let seq = 0;
 	const at = (sec: number) => new Date(Date.UTC(2026, 9, 30, 10, 0, sec)).toISOString();
-	const e = (sec: number, dir: ChatEntry["dir"], payload: object): ChatEntry => ({ seq: ++seq, ts: at(sec), dir, payload });
+	const e = (sec: number, dir: ChatEntry["dir"], payload: object): ChatEntry => ({
+		seq: ++seq,
+		ts: at(sec),
+		dir,
+		payload,
+	});
 	const use = (sec: number, id: string, name: string, input: object, parent: string | null = null) =>
 		e(sec, "out", {
 			type: "assistant",
@@ -127,7 +135,8 @@ describe("buildTrajectory on a crafted session", () => {
 		});
 	const say = (sec: number, id: string, text: string) =>
 		e(sec, "out", { type: "assistant", message: { id, content: [{ type: "text", text }] } });
-	const asked = (sec: number, uuid: string, text: string) => e(sec, "in", { type: "user", uuid, message: { content: text } });
+	const asked = (sec: number, uuid: string, text: string) =>
+		e(sec, "in", { type: "user", uuid, message: { content: text } });
 	const lifecycle = (sec: number, uuid: string, state: string) =>
 		e(sec, "out", { type: "command_lifecycle", command_uuid: uuid, state });
 	const ask = (sec: number, uuid: string, text: string) => [asked(sec, uuid, text), lifecycle(sec, uuid, "started")];
@@ -149,7 +158,11 @@ describe("buildTrajectory on a crafted session", () => {
 			done(10, "t4", "Exit code 1\nFAIL", true),
 			result(11, 0.5),
 			...ask(12, "u2", "again"),
-			e(13, "out", { type: "system", subtype: "compact_boundary", compact_metadata: { pre_tokens: 200000, post_tokens: 20000 } }),
+			e(13, "out", {
+				type: "system",
+				subtype: "compact_boundary",
+				compact_metadata: { pre_tokens: 200000, post_tokens: 20000 },
+			}),
 			use(14, "t5", "Bash", { command: "sleep 9" }),
 		];
 	};
@@ -285,16 +298,48 @@ describe("buildTrajectory on a crafted session", () => {
 
 	it("shows a queued message dim, and not as the start of a turn", () => {
 		seq = 0;
-		const entries = [
-			...ask(0, "u1", "first"),
-			asked(1, "u2", "second"),
-			lifecycle(1.5, "u2", "queued"),
-		];
+		const entries = [...ask(0, "u1", "first"), asked(1, "u2", "second"), lifecycle(1.5, "u2", "queued")];
 		const t = trajectoryOf(entries);
 		expect(t.rows.map((r) => [r.detail, r.title, r.startsTurn, r.tone])).toEqual([
 			["first", "", true, "normal"],
 			["second", "queued", false, "dim"],
 		]);
 		expect(t.turns).toBe(1);
+	});
+});
+
+describe("fullText, capText and formatSpan", () => {
+	it("opens a tool row to its whole input and result, and a command to the command itself", () => {
+		const t = trajectoryOf(loadFixture("long_session.jsonl"), "/work/project");
+		const edit = t.rows.find((r) => r.title === "Edit")!;
+		const text = fullText(edit);
+		expect(JSON.parse(text.input).file_path).toBe("/work/project/ledger/ledger.go");
+		expect(text.result).not.toBe("");
+		const bash = t.rows.find((r) => r.title === "Bash")!;
+		expect(fullText(bash).input).toBe("scripts/slow-check.sh");
+		const failed = t.rows.find((r) => r.tone === "error" && r.kind === "tool")!;
+		expect(fullText(failed).resultIsError).toBe(true);
+		const user = t.rows.find((r) => r.kind === "user")!;
+		expect(fullText(user).input).toMatch(/^The tests in this repo fail/);
+		const end = t.rows.find((r) => r.kind === "turn_end")!;
+		expect(fullText(end).input).toMatch(/in · .* out/);
+	});
+
+	it("caps by lines and by characters and says how many lines it left out", () => {
+		const text = Array.from({ length: 10 }, (_, i) => `line ${i}`).join("\n");
+		expect(capText(text, 4, 1000)).toEqual({ text: "line 0\nline 1\nline 2\nline 3", hidden: 6 });
+		expect(capText(text, 100, 1000)).toEqual({ text, hidden: 0 });
+		const long = capText("x".repeat(50), 5, 10);
+		expect(long.text).toBe("x".repeat(10));
+		expect(long.hidden).toBe(1);
+	});
+
+	it("writes milliseconds below a second and the chat's duration above it", () => {
+		expect([formatSpan(0), formatSpan(412), formatSpan(1500), formatSpan(81000)]).toEqual([
+			"0ms",
+			"412ms",
+			"1s",
+			"1m 21s",
+		]);
 	});
 });

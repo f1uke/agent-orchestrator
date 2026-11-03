@@ -1,4 +1,4 @@
-import type { ChatEntry } from "./chat-event";
+import { type ChatEntry, isObject } from "./chat-event";
 import type { ChatItem, ToolCallItem, Transcript } from "./chat-fold";
 import { formatCost, formatTokens } from "./chat-inspect";
 import { noticeText } from "./chat-notice";
@@ -279,8 +279,7 @@ export function filterRows(rows: readonly TrajectoryRow[], { query, kind }: RowF
 	const kindTest = KIND_TEST[kind];
 	return rows.filter(
 		(row) =>
-			kindTest(row) &&
-			(needle === "" || `${row.title} ${row.detail} ${row.outcome}`.toLowerCase().includes(needle)),
+			kindTest(row) && (needle === "" || `${row.title} ${row.detail} ${row.outcome}`.toLowerCase().includes(needle)),
 	);
 }
 
@@ -310,14 +309,26 @@ export type Bar = {
 	running?: boolean;
 };
 
-type Span = { key: string; lane: Lane; t0: number; t1: number; turn: number; callsBefore: number; label: string; ordinal: number };
+type Span = {
+	key: string;
+	lane: Lane;
+	t0: number;
+	t1: number;
+	turn: number;
+	callsBefore: number;
+	label: string;
+	ordinal: number;
+};
 
 /**
  * Who did what, when: user input, the model working toward a message or call,
  * and tools running. A model bar runs from the newest input before it (the user
  * or a tool result) to the moment its message arrived.
  */
-function spansOf(rows: readonly TrajectoryRow[], now: number): { spans: Span[]; errors: Set<string>; running: Set<string> } {
+function spansOf(
+	rows: readonly TrajectoryRow[],
+	now: number,
+): { spans: Span[]; errors: Set<string>; running: Set<string> } {
 	const chrono = [...rows].sort((a, b) => a.order - b.order);
 	const errors = new Set<string>();
 	const running = new Set<string>();
@@ -336,19 +347,47 @@ function spansOf(rows: readonly TrajectoryRow[], now: number): { spans: Span[]; 
 		const turn = Math.max(1, row.turn);
 		const label = `${row.title} ${row.detail}`.trim();
 		if (row.startsTurn && !Number.isNaN(row.t0)) {
-			spans.push({ key: row.key, lane: "input", t0: row.t0, t1: row.t0, turn, callsBefore: row.callsBefore, label: row.title || "Input", ordinal });
+			spans.push({
+				key: row.key,
+				lane: "input",
+				t0: row.t0,
+				t1: row.t0,
+				turn,
+				callsBefore: row.callsBefore,
+				label: row.title || "Input",
+				ordinal,
+			});
 		}
-		const modelRow = row.parent === undefined && (row.kind === "assistant" || row.kind === "thinking" || row.kind === "tool");
+		const modelRow =
+			row.parent === undefined && (row.kind === "assistant" || row.kind === "thinking" || row.kind === "tool");
 		if (modelRow && !Number.isNaN(row.t0) && row.seq !== modelSeq) {
 			modelSeq = row.seq;
 			const before = inputs.filter((t) => t <= row.t0).at(-1) ?? row.t0;
 			const start = Math.min(row.t0, Math.max(before, modelEnd));
 			modelEnd = row.t0;
-			spans.push({ key: row.key, lane: "model", t0: start, t1: row.t0, turn, callsBefore: row.callsBefore, label: "Model", ordinal });
+			spans.push({
+				key: row.key,
+				lane: "model",
+				t0: start,
+				t1: row.t0,
+				turn,
+				callsBefore: row.callsBefore,
+				label: "Model",
+				ordinal,
+			});
 		}
 		if (row.kind === "tool" && !Number.isNaN(row.t0)) {
 			const t1 = Number.isNaN(row.t1) ? (row.running ? Math.max(now, row.t0) : row.t0) : row.t1;
-			spans.push({ key: row.key, lane: "tools", t0: row.t0, t1, turn, callsBefore: row.callsBefore, label, ordinal: ordinal++ });
+			spans.push({
+				key: row.key,
+				lane: "tools",
+				t0: row.t0,
+				t1,
+				turn,
+				callsBefore: row.callsBefore,
+				label,
+				ordinal: ordinal++,
+			});
 			if (row.tone === "error") errors.add(row.key);
 			if (row.running) running.add(row.key);
 		}
@@ -422,3 +461,58 @@ export function rawEntries(row: TrajectoryRow, entries: readonly ChatEntry[]): C
 	const id = row.item.id;
 	return entries.filter((e) => e.seq === row.seq || JSON.stringify(e.payload).includes(id));
 }
+
+export type RowText = { input: string; result: string; resultIsError: boolean };
+
+const pretty = (value: unknown): string => (value === undefined ? "" : JSON.stringify(value, null, 2));
+
+/** The whole of what a row opens to: a tool's input and result, or the text of a message. */
+export function fullText(row: TrajectoryRow): RowText {
+	const item = row.item;
+	switch (item.kind) {
+		case "tool_call": {
+			const input = isObject(item.input) ? item.input : undefined;
+			const text = resultText(item.result);
+			return {
+				input: typeof input?.command === "string" ? input.command : pretty(item.input),
+				result: text !== "" ? text : item.result?.content === undefined ? "" : pretty(item.result.content),
+				resultIsError: row.tone === "error",
+			};
+		}
+		case "user":
+			return { input: item.text, result: "", resultIsError: false };
+		case "assistant_text":
+		case "thinking":
+			return { input: item.text, result: "", resultIsError: false };
+		case "task_message":
+			return { input: item.summary, result: item.result, resultIsError: row.tone === "error" };
+		case "turn_end": {
+			const u = item.usage;
+			const lines = [
+				`${formatTokens(u.inputTokens)} in · ${formatTokens(u.outputTokens)} out`,
+				`${formatTokens(u.cacheReadTokens)} cache read · ${formatTokens(u.cacheCreationTokens)} cache write`,
+			];
+			if (item.error?.detail) lines.push(item.error.detail);
+			return { input: lines.join("\n"), result: item.error?.raw ?? "", resultIsError: item.isError };
+		}
+		case "notice":
+			return { input: item.text, result: "", resultIsError: row.tone === "error" };
+	}
+}
+
+export type Capped = { text: string; hidden: number };
+
+/** The first `lines` lines of `text`, at most `chars` characters, and how many lines were left out. */
+export function capText(text: string, lines: number, chars: number): Capped {
+	const all = text.split("\n");
+	let kept = all.slice(0, lines).join("\n");
+	let dropped = Math.max(0, all.length - lines);
+	if (kept.length > chars) {
+		kept = kept.slice(0, chars);
+		dropped = Math.max(dropped, all.length - kept.split("\n").length + 1, 1);
+	}
+	return { text: kept, hidden: dropped };
+}
+
+/** A span of time as a person reads it: milliseconds below a second, then the chat's own format. */
+export const formatSpan = (ms: number): string => (ms < 1000 ? `${Math.max(0, Math.round(ms))}ms` : formatDuration(ms));

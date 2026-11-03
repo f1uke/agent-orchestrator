@@ -86,7 +86,7 @@ function fakeApi() {
 }
 
 function renderPane(
-	view: "chat" | "events" = "chat",
+	view: "chat" | "trajectory" = "chat",
 	api = fakeApi(),
 	who: WorkspaceSession = session,
 	extra: Partial<ComponentProps<typeof ChatPane>> = {},
@@ -339,18 +339,21 @@ describe("ChatPane", () => {
 		expect(document.querySelector('[data-resolved="denied"]')).toHaveTextContent("Denied Bash: no");
 	});
 
-	it("lists raw entries in the Events view", () => {
-		const { feed } = renderPane("events");
+	it("draws the Trajectory view from the same log, one row per step", () => {
+		const { feed } = renderPane("trajectory");
 		feed(
-			out({ type: "system", subtype: "init", session_id: "s" }),
-			out({ type: "control_request", request_id: "r", request: { subtype: "can_use_tool", tool_name: "Bash" } }),
+			userIn("u1", "list the files"),
+			lifecycle("u1", "started"),
+			toolUse("t1", "Bash", { command: "ls" }),
+			toolDone("t1", "a.go\nb.go"),
 			entry("host", { kind: "exit", code: 1 }),
 		);
-		const types = [...screen.getByTestId("chat-events").querySelectorAll(".chat-ev__type")];
-		expect(types.map((t) => t.textContent)).toEqual(["system/init", "control_request/can_use_tool", "host/exit"]);
-		expect(types[1]).toHaveClass("chat-ev__type--control");
-		expect(types[2]).toHaveClass("chat-ev__type--host");
-		expect(document.querySelector('[data-seq="3"]')).toHaveTextContent("host");
+		const rows = [...screen.getByTestId("chat-trajectory").querySelectorAll(".chat-traj__row")];
+		expect(rows.map((r) => r.getAttribute("data-kind"))).toEqual(["user", "tool", "notice"]);
+		expect(rows[1]).toHaveTextContent("Bash");
+		expect(rows[1]).toHaveTextContent("a.go");
+		expect(screen.queryByTestId("chat-events")).toBeNull();
+		expect(screen.queryByRole("textbox", { name: "Message Claude" })).toBeNull();
 	});
 });
 
@@ -570,13 +573,27 @@ describe("ChatPane answers", () => {
 });
 
 describe("ChatViewToggle", () => {
+	it("reads Chat, Trajectory, Terminal, in that order", () => {
+		render(<ChatViewToggle session={session} />);
+		const group = screen.getByRole("group", { name: "Session view" });
+		expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Chat", "Trajectory", "Terminal"]);
+		expect(screen.queryByRole("button", { name: "Events" })).toBeNull();
+	});
+
 	it("switches a chat session's view in the store", async () => {
 		vi.useRealTimers();
 		render(<ChatViewToggle session={session} />);
 		expect(screen.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-pressed", "true");
-		await userEvent.click(screen.getByRole("button", { name: "Events" }));
-		expect(useUiStore.getState().chatViews["chat-1"]).toBe("events");
-		expect(screen.getByRole("button", { name: "Events" })).toHaveAttribute("aria-pressed", "true");
+		await userEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+		expect(useUiStore.getState().chatViews["chat-1"]).toBe("trajectory");
+		expect(screen.getByRole("button", { name: "Trajectory" })).toHaveAttribute("aria-pressed", "true");
+	});
+
+	it('shows a stored "events" view as Trajectory', () => {
+		useUiStore.setState({ chatViews: { "chat-1": "events" } });
+		render(<ChatViewToggle session={session} />);
+		expect(screen.getByRole("button", { name: "Trajectory" })).toHaveAttribute("aria-pressed", "true");
+		expect(screen.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-pressed", "false");
 	});
 
 	it("is absent for a terminal session", () => {
