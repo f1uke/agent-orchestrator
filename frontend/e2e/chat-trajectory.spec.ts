@@ -5,8 +5,6 @@ const VIEWPORTS = [
 	{ width: 2560, height: 1440 },
 ];
 
-const SCREENS = "/Users/fluke/.ao/knowledge/agent-orchestrator/plans/feature-chat-trajectory--screens-pr2";
-
 async function openTrajectory(page: Page) {
 	await page.goto("/#/projects/ao-demo/sessions/demo-chat-long");
 	await expect(page.getByTestId("chat-stream")).toBeVisible();
@@ -64,7 +62,7 @@ for (const viewport of VIEWPORTS) {
 			page,
 		}, info) => {
 			const shot = (name: string) =>
-				page.screenshot({ path: `${SCREENS}/after-${name}-${viewport.width}x${viewport.height}.png` });
+				page.screenshot({ path: info.outputPath(`trajectory-${name}-${viewport.width}x${viewport.height}.png`) });
 			const trajectory = await openTrajectory(page);
 			await shot("trajectory");
 
