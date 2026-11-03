@@ -240,7 +240,6 @@ export function SessionInspector({
 	const showFiles = session?.kind !== "orchestrator";
 	// Documents come from chat cards, so a terminal session has nothing to put in the tab.
 	const showDocument = session?.transport === "chat";
-	// Background tasks are claude's, so a terminal session has none to list.
 	const showTasks = session?.transport === "chat";
 	// A project with no web UI has nothing to preview, so the Browser tab is not
 	// offered at all — an always-empty tab is worse than one tab fewer.

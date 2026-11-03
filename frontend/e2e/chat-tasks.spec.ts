@@ -26,7 +26,6 @@ async function settledWidth(page: Page, selector: string) {
 const noPageScroll = (page: Page) =>
 	page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
-/** The agent rows sit in the finished turn's fold, inside its process group. */
 async function openAgentRows(page: Page) {
 	await page.locator("[data-waiting]").waitFor({ timeout: 20_000 });
 	await page

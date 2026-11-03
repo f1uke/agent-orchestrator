@@ -10625,7 +10625,6 @@ ol.note-prose__list {
 	padding-top: 10px;
 }
 
-/* A subagent's call in the chat: one line, "Ran agent <description>". */
 .chat-agent {
 	display: flex;
 	min-width: 0;
@@ -10686,7 +10685,6 @@ ol.note-prose__list {
 	color: var(--fg);
 }
 
-/* The inspector's Tasks tab. */
 .tasks-panel {
 	display: flex;
 	min-height: 0;

@@ -166,7 +166,6 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 	const open = rest.openRows[row.key] ?? false;
 	const { summary } = row;
 	const running = summary.live ? row.members.filter((m) => m.kind === "tool" && toolRunning(m.call)).at(-1) : undefined;
-	// A subagent still running is its own link into the Tasks tab, so it stays in view with the group shut.
 	const runningAgent = running?.kind === "tool" && isAgentCall(running.call) ? running : undefined;
 	const shown = open
 		? row.members

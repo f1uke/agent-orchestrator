@@ -58,10 +58,8 @@ import { isOrchestratorSession } from "../types/workspace";
 import type { TerminalTarget } from "../types/terminal";
 
 const INSPECTOR_MIN_PERCENT = 22;
-// What a stored or dragged-to split can be restored to, and what the panel itself may grow to.
 const INSPECTOR_MAX_PERCENT = 60;
 const INSPECTOR_SAVED_MAX_PERCENT = 45;
-// The Tasks tab's expand button widens the inspector to this, and the next press restores the saved split.
 const INSPECTOR_EXPANDED_PERCENT = 60;
 const TERMINAL_MIN_PERCENT = 100 - INSPECTOR_MAX_PERCENT;
 const inspectorSplitStorageKey = "ao.inspector.split";
@@ -260,8 +258,6 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		[toggleInspector],
 	);
 
-	// A `Ran agent` row, the status line's count and the Waiting on row all land here: the Tasks tab, on one job
-	// or on the list.
 	const focusTask = useTasksUi((state) => state.focus);
 	const openTasks = useCallback(
 		(ref: string | null) => {
