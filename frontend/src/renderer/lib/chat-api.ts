@@ -76,16 +76,6 @@ async function upload(sessionId: string, file: File): Promise<UploadResult> {
 
 const path = (sessionId: string) => ({ params: { path: { sessionId } } });
 
-// The stop route is not in the generated schema yet. Replace this local type with the generated one, and drop
-// the cast, once api:ts has it.
-type StopTaskRoute = "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop";
-type StopTaskClient = {
-	POST: (
-		route: StopTaskRoute,
-		init: { params: { path: { sessionId: string; taskId: string } } },
-	) => Promise<{ error?: unknown; response: Response }>;
-};
-
 export const httpChatApi: ChatApi = {
 	send: (sessionId, text, images) =>
 		settle(
@@ -104,7 +94,7 @@ export const httpChatApi: ChatApi = {
 	upload,
 	stopTask: (sessionId, taskId) =>
 		settle(
-			(apiClient as unknown as StopTaskClient).POST("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop", {
+			apiClient.POST("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop", {
 				params: { path: { sessionId, taskId } },
 			}),
 		),
