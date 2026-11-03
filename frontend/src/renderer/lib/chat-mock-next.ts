@@ -26,7 +26,6 @@ const finished = (turns: number): Step => [
 	{ type: "result", subtype: "success", is_error: false, num_turns: turns, total_cost_usd: 0.02 * turns },
 ];
 
-/** Two finished turns, then claude's guess at the third, as it emits one after the second turn's result. */
 export function nextEntries(): ChatEntry[] {
 	const steps: Step[] = [
 		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],
