@@ -4,6 +4,7 @@ import {
 	type ChatEntry,
 	type ChatEvent,
 	type CommandState,
+	type CompactTokens,
 	type HostNote,
 	type Origin,
 	type PatchHunk,
@@ -85,7 +86,13 @@ export type TaskMessageItem = {
 	opensTurn: boolean;
 };
 
-export type NoticeItem = { kind: "notice"; notice: NoticeKind; text: string; ts: string };
+export type NoticeItem = {
+	kind: "notice";
+	notice: NoticeKind;
+	text: string;
+	ts: string;
+	tokens?: CompactTokens;
+};
 
 export type ChatItem =
 	| UserItem
@@ -331,7 +338,7 @@ export class ChatFolder {
 			case "system":
 				if (event.subtype === "thinking_tokens" && event.parentToolUseId === "") this.thinkingSince ??= this.ts;
 				if (event.permissionMode !== "") this.mode = event.permissionMode;
-				if (event.subtype === "compact_boundary") this.notice("compacted", "");
+				if (event.subtype === "compact_boundary") this.notice("compacted", "", event.compact);
 				if (event.task) this.applyTask(event.task);
 				break;
 			case "assistant":
@@ -561,8 +568,8 @@ export class ChatFolder {
 		}
 	}
 
-	private notice(notice: NoticeKind, text: string): void {
-		this.push({ kind: "notice", notice, text, ts: this.ts });
+	private notice(notice: NoticeKind, text: string, tokens?: CompactTokens): void {
+		this.push({ kind: "notice", notice, text, ts: this.ts, ...(tokens && { tokens }) });
 	}
 
 	private applyTask(event: TaskEvent): void {

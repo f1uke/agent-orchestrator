@@ -955,19 +955,19 @@ describe("SessionView — chat sessions", () => {
 	});
 
 	it("renders a terminal session's terminal, and no chat pane, whatever views are stored", () => {
-		useUiStore.setState({ chatViews: { "sess-1": "events" } });
+		useUiStore.setState({ chatViews: { "sess-1": "trajectory" } });
 		render(<SessionView sessionId="sess-1" />);
 		expect(screen.getByTestId("center-sess-1")).toBeInTheDocument();
 		expect(screen.queryByTestId("chat-sess-1")).toBeNull();
 	});
 
-	it("opens a chat session on Chat and follows the stored view to Events and Terminal", () => {
+	it("opens a chat session on Chat and follows the stored view to Trajectory and Terminal", () => {
 		render(<SessionView sessionId="sess-chat" />);
 		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: chat");
 		expect(screen.queryByTestId("center-sess-chat")).toBeNull();
 
-		act(() => useUiStore.getState().setChatView("sess-chat", "events"));
-		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: events");
+		act(() => useUiStore.getState().setChatView("sess-chat", "trajectory"));
+		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: trajectory");
 
 		act(() => useUiStore.getState().setChatView("sess-chat", "terminal"));
 		expect(screen.queryByTestId("chat-sess-chat")).toBeNull();
