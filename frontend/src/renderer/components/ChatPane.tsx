@@ -230,6 +230,7 @@ export function ChatPane({
 										commands={transcript.commands}
 										model={transcript.model}
 										models={transcript.models}
+										suggestion={transcript.suggestion}
 										onToast={showToast}
 										permissionMode={transcript.permissionMode}
 										prefill={prefill}

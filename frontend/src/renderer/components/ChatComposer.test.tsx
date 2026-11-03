@@ -49,7 +49,7 @@ const MODELS: ChatModel[] = [
 	model("claude-opus-4-8", "claude-opus-4-8", "Opus 4.8"),
 ];
 
-function renderComposer(over: Partial<ChatActions> = {}) {
+function renderComposer(over: Partial<ChatActions> = {}, props: { suggestion?: string; busy?: boolean } = {}) {
 	const actions = {
 		send: vi.fn<ChatActions["send"]>(async () => OK),
 		answer: vi.fn<ChatActions["answer"]>(async () => OK),
@@ -64,11 +64,12 @@ function renderComposer(over: Partial<ChatActions> = {}) {
 	};
 	const onToast = vi.fn();
 	const parentKeys = vi.fn((e: React.KeyboardEvent) => e.defaultPrevented);
-	const tree = (prefill?: Prefill) => (
+	const tree = (prefill?: Prefill, suggestion = props.suggestion ?? "") => (
 		<div onKeyDown={parentKeys}>
 			<ChatComposer
 				actions={actions}
-				busy={false}
+				busy={props.busy ?? false}
+				suggestion={suggestion}
 				commands={COMMANDS}
 				model="claude-opus-5-5"
 				models={MODELS}
@@ -89,6 +90,7 @@ function renderComposer(over: Partial<ChatActions> = {}) {
 		input,
 		user: userEvent.setup(),
 		prefill: (next: Prefill) => rerender(tree(next)),
+		suggest: (next: string) => rerender(tree(undefined, next)),
 	};
 }
 
@@ -256,6 +258,115 @@ describe("ChatComposer prefill", () => {
 		expect(input).toHaveValue("");
 		prefill({ text: "Explain", seq: 2 });
 		expect(input).toHaveValue("Explain");
+	});
+});
+
+const SUGGESTION = "what happens if I forget to cancel it?";
+const ghost = () => screen.queryByTestId("chat-suggestion");
+
+describe("ChatComposer prompt suggestion", () => {
+	it("shows the suggestion as ghost text in an empty box and says how to use it", () => {
+		const { input } = renderComposer({}, { suggestion: SUGGESTION });
+		expect(ghost()).toHaveTextContent(SUGGESTION);
+		expect(input).toHaveValue("");
+		expect(input).toHaveAccessibleDescription(`Suggestion: ${SUGGESTION}, press Tab to use`);
+		expect(input).not.toHaveAttribute("placeholder", expect.stringContaining("Message Claude"));
+	});
+
+	it("shows nothing without a suggestion, and keeps the placeholder", () => {
+		const { input } = renderComposer();
+		expect(ghost()).toBeNull();
+		expect(input).toHaveAttribute("placeholder", expect.stringContaining("Message Claude"));
+		expect(input).not.toHaveAccessibleDescription();
+	});
+
+	it("is not shown while the session works", () => {
+		renderComposer({}, { suggestion: SUGGESTION, busy: true });
+		expect(ghost()).toBeNull();
+	});
+
+	it("is not shown while the host is down", () => {
+		renderComposer({ hostDown: true }, { suggestion: SUGGESTION });
+		expect(ghost()).toBeNull();
+	});
+
+	it("fills the box on Tab without sending, with the caret at the end and focus kept", async () => {
+		const { input, user, actions } = renderComposer({}, { suggestion: SUGGESTION });
+		input.focus();
+		await user.tab();
+		expect(input).toHaveValue(SUGGESTION);
+		expect(input).toHaveFocus();
+		expect((input as HTMLTextAreaElement).selectionStart).toBe(SUGGESTION.length);
+		expect(ghost()).toBeNull();
+		expect(actions.send).not.toHaveBeenCalled();
+	});
+
+	it("lets the person edit the accepted text and send it", async () => {
+		const { input, user, actions } = renderComposer({}, { suggestion: SUGGESTION });
+		input.focus();
+		await user.tab();
+		await user.type(input, " now");
+		await user.keyboard("{Enter}");
+		expect(actions.send).toHaveBeenCalledWith(`${SUGGESTION} now`, []);
+	});
+
+	it("hides as soon as anything is typed, and leaves Tab to move focus", async () => {
+		const { input, user } = renderComposer({}, { suggestion: SUGGESTION });
+		await user.type(input, "x");
+		expect(ghost()).toBeNull();
+		await user.tab();
+		expect(input).toHaveValue("x");
+		expect(input).not.toHaveFocus();
+	});
+
+	it("comes back when the box is emptied again", async () => {
+		const { input, user } = renderComposer({}, { suggestion: SUGGESTION });
+		await user.type(input, "x");
+		await user.clear(input);
+		expect(ghost()).toHaveTextContent(SUGGESTION);
+	});
+
+	it("is dismissed by Escape for that suggestion, and a new suggestion shows again", async () => {
+		const { input, user, suggest, parentKeys } = renderComposer({}, { suggestion: SUGGESTION });
+		input.focus();
+		await user.keyboard("{Escape}");
+		expect(ghost()).toBeNull();
+		expect(parentKeys).toHaveLastReturnedWith(true);
+		await user.tab();
+		expect(input).toHaveValue("");
+		suggest("");
+		suggest(SUGGESTION);
+		expect(ghost()).toHaveTextContent(SUGGESTION);
+	});
+
+	it("sends nothing on Enter in an empty box", async () => {
+		const { input, user, actions } = renderComposer({}, { suggestion: SUGGESTION });
+		input.focus();
+		await user.keyboard("{Enter}");
+		expect(actions.send).not.toHaveBeenCalled();
+		expect(input).toHaveValue("");
+		expect(ghost()).toHaveTextContent(SUGGESTION);
+	});
+
+	it("leaves Shift+Tab alone", async () => {
+		const { input, user } = renderComposer({}, { suggestion: SUGGESTION });
+		input.focus();
+		await user.tab({ shift: true });
+		expect(input).toHaveValue("");
+	});
+
+	it("does not take Tab from an open slash menu", async () => {
+		const { input, user } = renderComposer({}, { suggestion: SUGGESTION });
+		await user.type(input, "/co");
+		await user.keyboard("{Tab}");
+		expect(input).toHaveValue("/compact ");
+	});
+
+	it("does not take Tab from an open @ menu", async () => {
+		const { input, user } = renderComposer({}, { suggestion: SUGGESTION });
+		await user.type(input, "@sen");
+		await user.keyboard("{Tab}");
+		expect(input).toHaveValue("@internal/webhook/sender.go ");
 	});
 });
 
