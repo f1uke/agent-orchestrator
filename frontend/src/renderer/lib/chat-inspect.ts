@@ -1,25 +1,13 @@
-import { isObject, type TaskState, unfinished } from "./chat-event";
+import { isObject } from "./chat-event";
 import type { ChatItem, ToolCallItem, Transcript, TurnEndItem } from "./chat-fold";
-import { resultText, taskLabel } from "./chat-tools";
+import { resultText } from "./chat-tools";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
 export type Todo = { content: string; activeForm: string; status: TodoStatus };
 
-export type ActivityKind = "agent" | "background" | "task";
-
-export type Activity = {
-	key: string;
-	kind: ActivityKind;
-	title: string;
-	detail: string;
-	state: TaskState;
-	tools: number;
-};
-
 export type ContextUsage = { tokens: number; window?: number };
 
-const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
 const TODO_STATUSES = new Set<string>(["pending", "in_progress", "completed"]);
 
 function str(value: unknown): string {
@@ -93,73 +81,6 @@ export function shownTodos(tr: Transcript): Todo[] | undefined {
 	if (!state || state.todos.length === 0) return undefined;
 	if (state.todos.some((t) => t.status !== "completed")) return state.todos;
 	return tr.items.slice(state.at + 1).some(turnStarted) ? undefined : state.todos;
-}
-
-function callState(call: ToolCallItem, processEnded: boolean): TaskState {
-	if (call.result) return call.result.isError ? "error" : "done";
-	return processEnded ? "stopped" : "running";
-}
-
-export function sessionActivity(tr: Transcript): Activity[] {
-	const taskByToolUse = new Map(tr.tasks.filter((t) => t.toolUseId !== "").map((t) => [t.toolUseId, t]));
-	const subagentTools = new Map<string, number>();
-	let lastBoundary = -1;
-	tr.items.forEach((item, i) => {
-		if (item.kind === "tool_call" && item.parentToolUseId !== "") {
-			subagentTools.set(item.parentToolUseId, (subagentTools.get(item.parentToolUseId) ?? 0) + 1);
-		}
-		if (
-			item.kind === "notice" &&
-			item.notice !== "compacted" &&
-			item.notice !== "interrupted" &&
-			item.notice !== "api_error"
-		)
-			lastBoundary = i;
-	});
-
-	const out: Activity[] = [];
-	const linked = new Set<string>();
-	tr.items.forEach((item, i) => {
-		if (item.kind !== "tool_call" || item.parentToolUseId !== "") return;
-		const input = isObject(item.input) ? item.input : {};
-		const task = taskByToolUse.get(item.id);
-		let kind: ActivityKind;
-		let title: string;
-		let detail: string;
-		if (SUBAGENT_TOOLS.has(item.name)) {
-			kind = "agent";
-			title = str(input.subagent_type) || "Agent";
-			detail = str(input.description);
-		} else if (item.name === "Bash" && input.run_in_background === true && (task || !item.result)) {
-			kind = "background";
-			title = taskLabel("local_bash");
-			detail = str(input.command);
-		} else {
-			return;
-		}
-		if (task) linked.add(task.id);
-		out.push({
-			key: item.id,
-			kind,
-			title,
-			detail,
-			state: task?.state ?? callState(item, i < lastBoundary),
-			tools: Math.max(subagentTools.get(item.id) ?? 0, task?.usage?.toolUses ?? 0),
-		});
-	});
-	for (const task of tr.tasks) {
-		if (linked.has(task.id) || task.background === false) continue;
-		out.push({
-			key: task.id,
-			kind: "task",
-			title: taskLabel(task.taskType),
-			detail: task.description || task.id,
-			state: task.state,
-			tools: 0,
-		});
-	}
-	const newest = out.reverse();
-	return [...newest.filter((a) => unfinished(a.state)), ...newest.filter((a) => !unfinished(a.state))];
 }
 
 export function contextUsage(tr: Transcript): ContextUsage | undefined {
