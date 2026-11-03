@@ -159,7 +159,6 @@ export function buildTrajectory(
 					tone: queued ? "dim" : "normal",
 					startsTurn: !queued,
 					t0: ms(item.ts),
-					turn: queued ? turn : turn,
 				});
 				return;
 			}
