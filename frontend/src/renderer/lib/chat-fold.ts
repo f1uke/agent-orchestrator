@@ -91,7 +91,6 @@ export type NoticeItem = {
 	notice: NoticeKind;
 	text: string;
 	ts: string;
-	/** On "compacted": the context size before and after, when the log says. */
 	tokens?: CompactTokens;
 };
 

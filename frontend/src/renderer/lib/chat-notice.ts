@@ -3,7 +3,6 @@ import { describeTurnError } from "./chat-turn-error";
 
 const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id);
 
-/** The plain-words line for a session notice, as the chat and the trajectory both show it. */
 export function noticeText(notice: NoticeItem): string {
 	switch (notice.notice) {
 		case "spawn":

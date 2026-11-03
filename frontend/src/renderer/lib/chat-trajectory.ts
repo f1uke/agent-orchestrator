@@ -7,33 +7,24 @@ import { inputSummary, resultText, toolFailed, toolRunning } from "./chat-tools"
 
 export type RowKind = "user" | "assistant" | "thinking" | "tool" | "task" | "turn_end" | "notice";
 
-/** How a row is drawn: `dim` for what is not the model's own output, `warn` and `error` for what went wrong. */
 export type Tone = "normal" | "dim" | "warn" | "error";
 
 export type TrajectoryRow = {
 	/** The item's key in the transcript: stable as older entries are folded in. */
 	key: string;
-	/** The seq of the log entry that added the item. */
 	seq: number;
-	/** Position of the item in the transcript, which is the order things happened in. */
 	order: number;
 	kind: RowKind;
-	/** The tool's name, a notice's words, a turn end's verdict, or a small label on a user row. */
 	title: string;
-	/** The one-line input summary, the first line of a message, or the figures of a turn end. */
 	detail: string;
-	/** A tool's first result line. */
 	outcome: string;
 	tone: Tone;
 	running: boolean;
 	/** 1-based; 0 before the first turn. */
 	turn: number;
 	startsTurn: boolean;
-	/** Tool calls started before this item, so a row has a place on the Calls axis. */
 	callsBefore: number;
-	/** The key of the Agent or Task row this call runs under. */
 	parent?: string;
-	/** How many calls run under this row. */
 	children: number;
 	/** Epoch ms of the row, NaN when the log does not say. */
 	t0: number;
@@ -97,13 +88,7 @@ function toolOutcome(call: ToolCallItem, live: boolean): { outcome: string; tone
 	return { outcome: firstLine(resultText(call.result)), tone: toolFailed(call) ? "error" : "normal", running: false };
 }
 
-/**
- * The rows of the Trajectory tab, from the same transcript the chat draws. One
- * row per thing that happened, in the order it did, except that a sub-agent's
- * calls follow the Agent row that started them. `entries` is the raw log: an
- * assistant message has no time of its own in the transcript, so its row takes
- * the time of the entry it came from.
- */
+// An assistant message has no time of its own in the transcript, so its row takes the time of its log entry.
 export function buildTrajectory(
 	transcript: Transcript,
 	entries: readonly ChatEntry[],
@@ -235,7 +220,6 @@ export function buildTrajectory(
 		}
 	});
 
-	// A call's key is the id of its tool_use, which is what its sub-agent's calls name as parent.
 	const keyOfTool = new Map(rows.flatMap((r) => (r.item.kind === "tool_call" ? [[r.item.id, r.key] as const] : [])));
 	const nested = new Map<string, TrajectoryRow[]>();
 	const top: TrajectoryRow[] = [];
@@ -272,7 +256,6 @@ const KIND_TEST: Record<KindFilter, (row: TrajectoryRow) => boolean> = {
 	turns: (row) => row.startsTurn || row.kind === "turn_end",
 };
 
-/** The rows that match the toolbar. A sub-agent's calls are matched like any other row. */
 export function filterRows(rows: readonly TrajectoryRow[], { query, kind }: RowFilter): TrajectoryRow[] {
 	const needle = query.trim().toLowerCase();
 	const kindTest = KIND_TEST[kind];
@@ -282,7 +265,6 @@ export function filterRows(rows: readonly TrajectoryRow[], { query, kind }: RowF
 	);
 }
 
-/** The rows that show with nothing filtered: a sub-agent's calls only under an Agent row that is open. */
 export function visibleRows(rows: readonly TrajectoryRow[], open: ReadonlySet<string>): TrajectoryRow[] {
 	return rows.filter((row) => row.parent === undefined || open.has(row.parent));
 }
@@ -294,15 +276,12 @@ export type Lane = "input" | "model" | "tools";
 export const LANES: readonly Lane[] = ["input", "model", "tools"];
 
 export type Bar = {
-	/** The key of the row the bar opens. */
 	key: string;
 	lane: Lane;
-	/** Both in 0..1 of the strip's width. */
 	start: number;
 	end: number;
 	label: string;
 	turn: number;
-	/** Real time the bar covers, whichever axis places it. */
 	ms: number;
 	error?: boolean;
 	running?: boolean;
@@ -319,11 +298,6 @@ type Span = {
 	ordinal: number;
 };
 
-/**
- * Who did what, when: user input, the model working toward a message or call,
- * and tools running. A model bar runs from the newest input before it (the user
- * or a tool result) to the moment its message arrived.
- */
 function spansOf(
 	rows: readonly TrajectoryRow[],
 	now: number,
@@ -394,12 +368,6 @@ function spansOf(
 	return { spans, errors, running };
 }
 
-/**
- * The timeline strip's bars. `duration` places them by real time, `turns` gives
- * each turn an equal slot with its bars placed by time inside it, and `calls`
- * gives each tool call an equal slot, with the other bars sharing the slot of
- * the call that follows them.
- */
 export function layoutBars(trajectory: Trajectory, axis: Axis, now: number): Bar[] {
 	const { spans, errors, running } = spansOf(trajectory.rows, now);
 	if (spans.length === 0) return [];
@@ -454,7 +422,6 @@ export function layoutBars(trajectory: Trajectory, axis: Axis, now: number): Bar
 	});
 }
 
-/** The log entries a row came from: the one that added it, and for a tool call every entry that names the call. */
 export function rawEntries(row: TrajectoryRow, entries: readonly ChatEntry[]): ChatEntry[] {
 	if (row.item.kind !== "tool_call") return entries.filter((e) => e.seq === row.seq);
 	const id = row.item.id;
@@ -465,7 +432,6 @@ export type RowText = { input: string; result: string; resultIsError: boolean };
 
 const pretty = (value: unknown): string => (value === undefined ? "" : JSON.stringify(value, null, 2));
 
-/** The whole of what a row opens to: a tool's input and result, or the text of a message. */
 export function fullText(row: TrajectoryRow): RowText {
 	const item = row.item;
 	switch (item.kind) {
@@ -501,7 +467,6 @@ export function fullText(row: TrajectoryRow): RowText {
 
 export type Capped = { text: string; hidden: number };
 
-/** The first `lines` lines of `text`, at most `chars` characters, and how many lines were left out. */
 export function capText(text: string, lines: number, chars: number): Capped {
 	const all = text.split("\n");
 	let kept = all.slice(0, lines).join("\n");
@@ -513,5 +478,4 @@ export function capText(text: string, lines: number, chars: number): Capped {
 	return { text: kept, hidden: dropped };
 }
 
-/** A span of time as a person reads it: milliseconds below a second, then the chat's own format. */
 export const formatSpan = (ms: number): string => (ms < 1000 ? `${Math.max(0, Math.round(ms))}ms` : formatDuration(ms));

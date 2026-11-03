@@ -77,9 +77,8 @@ for (const viewport of VIEWPORTS) {
 			await expect(row).toHaveAttribute("data-flash", "");
 			await expect(row).toBeInViewport();
 
-			// Every painted frame after the click counts, not only the settled one. A requestAnimationFrame
-			// callback runs before the frame's layout and resize observers, so each sample is a task queued
-			// from it, which runs after that frame paints.
+			// A requestAnimationFrame callback runs before the frame's layout and resize observers, so each
+			// sample is a task queued from it, which runs after that frame paints.
 			await page.evaluate(() => {
 				const w = window as unknown as { __overlapFrames: number; __watch: boolean };
 				w.__overlapFrames = 0;

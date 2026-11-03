@@ -571,11 +571,6 @@ const SUMMARY_KEYS = ["command", "file_path", "path", "pattern", "url", "query",
 
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
-/**
- * What one tool call did, in a line: the path of a file tool, the command of
- * Bash, the pattern of a search. A tool this file has no rule for shows its
- * first familiar input field, or else the input as compact JSON.
- */
 export function inputSummary(call: ToolCallItem, root?: string): string {
 	const input = isObject(call.input) ? call.input : {};
 	const short = (text: string) => shortenPaths(text, root);

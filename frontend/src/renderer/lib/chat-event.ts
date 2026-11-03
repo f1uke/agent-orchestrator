@@ -95,7 +95,6 @@ export type ChatEvent =
 			permissionMode: string;
 			parentToolUseId: string;
 			task?: TaskEvent;
-			/** On a compact_boundary: the context size before and, when claude says, after. */
 			compact?: CompactTokens;
 	  }
 	| {

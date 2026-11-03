@@ -67,7 +67,6 @@ type Props = {
 	root: string;
 };
 
-/** What the worker did, step by step: a timeline strip over one dense line per step, drawn from the chat's own transcript. */
 export function ChatTrajectory({ transcript, entries, root }: Props) {
 	const trajectory = useMemo(() => buildTrajectory(transcript, entries, { root }), [transcript, entries, root]);
 	const [axis, setAxis] = useState<Axis>("duration");
