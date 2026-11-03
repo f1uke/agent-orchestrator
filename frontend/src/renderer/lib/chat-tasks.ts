@@ -36,7 +36,43 @@ function callState(call: ToolCallItem, processEnded: boolean): TaskState {
 	return processEnded ? "stopped" : "running";
 }
 
-function entries(tr: Transcript): TaskEntry[] {
+const kindOf = (call: ToolCallItem, task?: BackgroundTask): TaskKind | undefined => {
+	if (SUBAGENT_TOOLS.has(call.name)) return "agent";
+	const input = isObject(call.input) ? call.input : {};
+	return call.name === "Bash" && input.run_in_background === true && (task || !call.result) ? "bash" : undefined;
+};
+
+function fromCall(
+	call: ToolCallItem,
+	kind: TaskKind,
+	task: BackgroundTask | undefined,
+	state: TaskState,
+	tools: number,
+) {
+	const input = isObject(call.input) ? call.input : {};
+	const description = task?.description ?? "";
+	const subagentType = str(input.subagent_type);
+	const entry: TaskEntry = {
+		ref: call.id,
+		kind,
+		title:
+			kind === "agent"
+				? str(input.description) || description || subagentType || "Agent"
+				: description || str(input.description) || str(input.command) || taskLabel("local_bash"),
+		state,
+		running: unfinished(state),
+		task,
+		description,
+		command: str(input.command),
+		prompt: str(input.prompt),
+		subagentType,
+		toolUses: Math.max(tools, task?.usage?.toolUses ?? 0),
+		startedTs: task?.startedTs || call.startedTs,
+	};
+	return entry;
+}
+
+function scan(tr: Transcript): { top: TaskEntry[]; nested: TaskEntry[] } {
 	const taskByToolUse = new Map(tr.tasks.filter((t) => t.toolUseId !== "").map((t) => [t.toolUseId, t]));
 	const subagentTools = new Map<string, number>();
 	let lastBoundary = -1;
@@ -53,42 +89,28 @@ function entries(tr: Transcript): TaskEntry[] {
 			lastBoundary = i;
 	});
 
-	const out: TaskEntry[] = [];
+	const top: TaskEntry[] = [];
+	const nested: TaskEntry[] = [];
 	const linked = new Set<string>();
 	tr.items.forEach((item, i) => {
 		if (item.kind !== "tool_call") return;
-		const input = isObject(item.input) ? item.input : {};
 		const task = taskByToolUse.get(item.id);
-		let kind: TaskKind;
-		if (SUBAGENT_TOOLS.has(item.name)) kind = "agent";
-		else if (item.name === "Bash" && input.run_in_background === true && (task || !item.result)) kind = "bash";
-		else return;
+		const kind = kindOf(item, task);
+		if (!kind) return;
 		if (task) linked.add(task.id);
 		if (kind !== "agent" && task?.background === false) return;
-		const state = task?.state ?? callState(item, i < lastBoundary);
-		const description = task?.description ?? "";
-		const subagentType = str(input.subagent_type);
-		out.push({
-			ref: item.id,
+		const entry = fromCall(
+			item,
 			kind,
-			title:
-				kind === "agent"
-					? str(input.description) || description || subagentType || "Agent"
-					: description || str(input.description) || str(input.command) || taskLabel("local_bash"),
-			state,
-			running: unfinished(state),
 			task,
-			description,
-			command: str(input.command),
-			prompt: str(input.prompt),
-			subagentType,
-			toolUses: Math.max(subagentTools.get(item.id) ?? 0, task?.usage?.toolUses ?? 0),
-			startedTs: task?.startedTs || item.startedTs,
-		});
+			task?.state ?? callState(item, i < lastBoundary),
+			subagentTools.get(item.id) ?? 0,
+		);
+		(item.parentToolUseId === "" ? top : nested).push(entry);
 	});
 	for (const task of tr.tasks) {
 		if (linked.has(task.id) || task.background === false) continue;
-		out.push({
+		top.push({
 			ref: task.id,
 			kind: task.taskType.includes("agent") ? "agent" : task.taskType === "local_bash" ? "bash" : "other",
 			title: task.description || task.id,
@@ -103,7 +125,7 @@ function entries(tr: Transcript): TaskEntry[] {
 			startedTs: task.startedTs ?? "",
 		});
 	}
-	return out.reverse();
+	return { top: top.reverse(), nested };
 }
 
 /**
@@ -111,13 +133,18 @@ function entries(tr: Transcript): TaskEntry[] {
  * status line's count and the Waiting on row all read this one list, so none of them counts a job twice.
  */
 export function taskList(tr: Transcript): TaskList {
-	const all = entries(tr);
-	return { running: all.filter((e) => e.running), finished: all.filter((e) => !e.running) };
+	const { top } = scan(tr);
+	return { running: top.filter((e) => e.running), finished: top.filter((e) => !e.running) };
 }
 
-/** A job by the tool_use id of its call or by its task id: a `Ran agent` row knows the first, claude's events the second. */
+/**
+ * A job by the tool_use id of its call or by its task id: a `Ran agent` row knows the first, claude's events the
+ * second. A subagent's own agent call is not in the list, but a row inside the subagent's view can still drill in.
+ */
 export function taskTarget(tr: Transcript, key: string): TaskEntry | undefined {
-	return entries(tr).find((e) => e.ref === key || e.task?.id === key);
+	const { top, nested } = scan(tr);
+	const known = (e: TaskEntry) => e.ref === key || e.task?.id === key || e.task?.toolUseId === key;
+	return top.find(known) ?? nested.find(known);
 }
 
 /**

@@ -17,7 +17,12 @@ function loadFixture(name: string): ChatEntry[] {
 }
 
 let seq = 0;
-const at = (dir: Direction, payload: unknown): ChatEntry => ({ seq: ++seq, ts: "2026-11-03T09:00:00.000Z", dir, payload });
+const at = (dir: Direction, payload: unknown): ChatEntry => ({
+	seq: ++seq,
+	ts: "2026-11-03T09:00:00.000Z",
+	dir,
+	payload,
+});
 const toolUse = (id: string, name: string, input: object, parent: string | null = null) =>
 	at("out", {
 		type: "assistant",
@@ -72,10 +77,7 @@ describe("taskList", () => {
 	it("leaves a foreground task out, since only background work waits", () => {
 		reset();
 		const list = taskList(
-			foldEntries([
-				toolUse("b9", "Bash", { command: "ls" }),
-				started("tb9", "b9", "local_bash", "List files", false),
-			]),
+			foldEntries([toolUse("b9", "Bash", { command: "ls" }), started("tb9", "b9", "local_bash", "List files", false)]),
 		);
 		expect(list.running).toEqual([]);
 		expect(list.finished).toEqual([]);
@@ -118,7 +120,9 @@ describe("taskList", () => {
 		];
 		const tr = foldEntries(log);
 		const waiting = chatRows(tr, emptyOverlay).find((r) => r.kind === "waiting");
-		expect(waiting?.kind === "waiting" && waiting.tasks.map((t) => t.task.id)).toEqual(taskList(tr).running.map((t) => t.task.id));
+		expect(waiting?.kind === "waiting" && waiting.tasks.map((t) => t.task.id)).toEqual(
+			taskList(tr).running.map((t) => t.task?.id),
+		);
 	});
 });
 
@@ -129,6 +133,16 @@ describe("taskTarget", () => {
 		expect(taskTarget(tr, "a1")?.task?.id).toBe("ta1");
 		expect(taskTarget(tr, "ta1")?.ref).toBe("a1");
 		expect(taskTarget(tr, "nope")).toBeUndefined();
+	});
+
+	it("keeps a nested agent out of the list but still finds it, so its row inside the subagent view can drill in", () => {
+		reset();
+		const tr = foldEntries([
+			toolUse("outer", "Agent", { description: "outer" }),
+			toolUse("inner", "Agent", { description: "inner" }, "outer"),
+		]);
+		expect(taskList(tr).running.map((t) => t.ref)).toEqual(["outer"]);
+		expect(taskTarget(tr, "inner")).toMatchObject({ ref: "inner", kind: "agent", title: "inner" });
 	});
 
 	it("finds an Agent call no task event names, running until it has a result", () => {
@@ -146,7 +160,9 @@ describe("subagentTranscript on the recorded long session", () => {
 	it("keeps only the lines whose parent is the Agent call, at the top level", () => {
 		const sub = subagentTranscript(tr, AGENT);
 		expect(sub.items.map((i) => i.kind)).toEqual(["tool_call", "tool_call", "assistant_text"]);
-		expect(sub.items.every((i) => i.kind === "turn_end" || ("parentToolUseId" in i && i.parentToolUseId === ""))).toBe(true);
+		expect(sub.items.every((i) => i.kind === "turn_end" || ("parentToolUseId" in i && i.parentToolUseId === ""))).toBe(
+			true,
+		);
 		const calls = sub.items.flatMap((i) => (i.kind === "tool_call" ? [i] : []));
 		expect(calls.map((c) => c.name)).toEqual(["Bash", "Bash"]);
 		expect(calls[0].result?.isError).toBe(false);

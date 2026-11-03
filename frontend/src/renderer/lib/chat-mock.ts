@@ -1,6 +1,6 @@
 import type { AnswerBody } from "./chat-answers";
 import type { ChatApi, ChatResult } from "./chat-api";
-import { type ChatEntry, type Direction, isObject } from "./chat-event";
+import { type ChatEntry, type Direction, isObject, unfinished } from "./chat-event";
 import { ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
@@ -1020,6 +1020,32 @@ export const stubChatApi: ChatApi = {
 		ok: true,
 		file: { path: `/preview/attachments/${file.name || "pasted file"}`, name: file.name, size: file.size },
 	}),
+	stopTask: async (id, taskId) => {
+		const session = await stubSession(id);
+		const task = session.folder.transcript().tasks.find((t) => t.id === taskId);
+		if (!task || !unfinished(task.state)) {
+			return { ok: false, error: { kind: "rejected", message: `task ${taskId} is not running` } };
+		}
+		append(id, session, [
+			[
+				"out",
+				{ type: "system", subtype: "task_updated", task_id: taskId, patch: { status: "killed" }, session_id: SESSION },
+			],
+			[
+				"out",
+				{
+					type: "system",
+					subtype: "task_notification",
+					task_id: taskId,
+					tool_use_id: task.toolUseId,
+					status: "stopped",
+					summary: "Stopped by the user",
+					session_id: SESSION,
+				},
+			],
+		]);
+		return OK;
+	},
 	taskOutput: async (id, taskId) => {
 		const session = await stubSession(id);
 		const task = session.folder.transcript().tasks.find((t) => t.id === taskId);
