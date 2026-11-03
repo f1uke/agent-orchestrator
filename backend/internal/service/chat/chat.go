@@ -78,6 +78,16 @@ func (s *Service) SetModel(ctx context.Context, id domain.SessionID, model strin
 	return hostError(id, c.SetModel(ctx, model))
 }
 
+// StopTask ends the background task taskID of the session. Claude may refuse,
+// in a mode that cannot stop tasks: that is CHAT_REQUEST_REJECTED with its reason.
+func (s *Service) StopTask(ctx context.Context, id domain.SessionID, taskID string) error {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hostError(id, c.StopTask(ctx, taskID))
+}
+
 func (s *Service) client(ctx context.Context, id domain.SessionID) (sessionhost.Client, error) {
 	rec, ok, err := s.sessions.GetSession(ctx, id)
 	switch {

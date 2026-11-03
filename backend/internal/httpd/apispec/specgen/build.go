@@ -2709,6 +2709,19 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop", id: "stopChatTask", tag: "sessions",
+			summary:    "Stop a background task (a Bash command or a subagent) of a chat session's agent and wait for claude's answer. 400 for a task id outside [A-Za-z0-9_-]; 409 when the session is not a chat session, its host is not running, or claude refuses, such as in a mode that cannot stop tasks, with claude's reason in the message",
+			pathParams: []any{controllers.ChatTaskParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ChatAckResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/mode", id: "setChatMode", tag: "sessions",
 			summary:    "Change the permission mode of a chat session's agent",
 			pathParams: []any{controllers.SessionIDParam{}},
