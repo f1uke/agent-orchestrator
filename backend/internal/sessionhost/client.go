@@ -143,6 +143,13 @@ func (c Client) SetModel(ctx context.Context, model string) error {
 	return c.call(ctx, map[string]string{"op": "set_model", "model": model}, &okResponse{})
 }
 
+// StopTask ends the background task taskID, a Bash command or a subagent, and
+// returns once claude has answered. Claude's refusal, such as a mode that cannot
+// stop tasks, is a RefusedError.
+func (c Client) StopTask(ctx context.Context, taskID string) error {
+	return c.call(ctx, map[string]string{"op": "stop_task", "task_id": taskID}, &okResponse{})
+}
+
 // State reports what the host knows about its session right now.
 func (c Client) State(ctx context.Context) (State, error) {
 	var resp stateResponse

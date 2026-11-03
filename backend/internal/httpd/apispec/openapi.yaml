@@ -4134,6 +4134,69 @@ paths:
         the rule
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop:
+    post:
+      operationId: stopChatTask
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: The background task id claude reported in task_started.
+        in: path
+        name: taskId
+        required: true
+        schema:
+          description: The background task id claude reported in task_started.
+          pattern: ^[A-Za-z0-9_-]+$
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop a background task (a Bash command or a subagent) of a chat session's
+        agent and wait for claude's answer. 400 for a task id outside [A-Za-z0-9_-];
+        409 when the session is not a chat session, its host is not running, or claude
+        refuses, such as in a mode that cannot stop tasks, with claude's reason in
+        the message
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/children:
     get:
       operationId: listChildren

@@ -29,6 +29,7 @@ type chatCall struct {
 	decision  chatproto.Decision
 	mode      chatproto.PermissionMode
 	model     string
+	taskID    string
 }
 
 type fakeChatService struct {
@@ -62,6 +63,11 @@ func (f *fakeChatService) SetModel(_ context.Context, id domain.SessionID, model
 	return f.err
 }
 
+func (f *fakeChatService) StopTask(_ context.Context, id domain.SessionID, taskID string) error {
+	f.calls = append(f.calls, chatCall{op: "stop_task", id: id, taskID: taskID})
+	return f.err
+}
+
 func newChatTestServer(t *testing.T, svc controllers.ChatService) *httptest.Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -80,6 +86,7 @@ var chatRoutes = []chatRoute{
 	{"interrupt", "POST", "/api/v1/sessions/s-1/chat/interrupt", ``},
 	{"mode", "PUT", "/api/v1/sessions/s-1/chat/mode", `{"mode":"plan"}`},
 	{"model", "PUT", "/api/v1/sessions/s-1/chat/model", `{"model":"haiku"}`},
+	{"stop task", "POST", "/api/v1/sessions/s-1/chat/tasks/bq3k9x1ab/stop", ``},
 }
 
 func TestChatSend(t *testing.T) {
@@ -150,6 +157,38 @@ func TestChatInterruptAndMode(t *testing.T) {
 	}
 	if !reflect.DeepEqual(svc.calls, want) {
 		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
+func TestChatStopTask(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/tasks/bq3k9x1ab/stop", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", status, body)
+	}
+	var resp controllers.ChatAckResponse
+	mustJSON(t, body, &resp)
+	if !resp.OK {
+		t.Errorf("body = %s, want ok", body)
+	}
+	want := []chatCall{{op: "stop_task", id: "s-1", taskID: "bq3k9x1ab"}}
+	if !reflect.DeepEqual(svc.calls, want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
+func TestChatStopTaskRefusesABadTaskID(t *testing.T) {
+	for _, taskID := range []string{"a%20b", "a.b", "a%2Fb", "x%22y"} {
+		t.Run(taskID, func(t *testing.T) {
+			svc := &fakeChatService{}
+			srv := newChatTestServer(t, svc)
+			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/tasks/"+taskID+"/stop", "")
+			assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_TASK_ID")
+			if len(svc.calls) != 0 {
+				t.Errorf("service was called for a bad task id: %+v", svc.calls)
+			}
+		})
 	}
 }
 
