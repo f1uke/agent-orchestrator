@@ -293,6 +293,23 @@ function todoArg(call: ToolCallItem, input: Record<string, unknown>): string {
 	return Array.isArray(input.todos) ? plural(input.todos.length, "item") : "";
 }
 
+type Input = Record<string, unknown>;
+
+const grepArg = (input: Input, short: (text: string) => string): string => {
+	const pattern = str(input.pattern);
+	const where = short(str(input.path) || str(input.glob));
+	return where ? `"${pattern}" in ${where}` : `"${pattern}"`;
+};
+
+const globArg = (input: Input, short: (text: string) => string): string =>
+	str(input.path) ? `${str(input.pattern)} in ${short(str(input.path))}` : str(input.pattern);
+
+const agentArg = (input: Input): string => {
+	const kind = str(input.subagent_type) || "agent";
+	const description = str(input.description);
+	return description ? `${kind} · "${description}"` : kind;
+};
+
 const TODO_TITLE: Record<string, string> = { TaskCreate: "Add todo", TaskUpdate: "Update todo", TodoWrite: "Todos" };
 
 export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolView {
@@ -396,13 +413,11 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 			};
 		}
 		case "Grep": {
-			const pattern = str(input.pattern);
-			const where = short(str(input.path) || str(input.glob));
 			const found = /^Found \d+ (?:files?|match(?:es)?|lines?)/.exec(output);
 			return {
 				...base,
 				family: "search",
-				arg: where ? `"${pattern}" in ${where}` : `"${pattern}"`,
+				arg: grepArg(input, short),
 				status: outcome(call, () => (found ? found[0].replace(/^Found /, "") : plural(lineCount(output), "line"))),
 				body: { kind: "output", text: output },
 				compact: true,
@@ -412,20 +427,18 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 			return {
 				...base,
 				family: "search",
-				arg: str(input.path) ? `${str(input.pattern)} in ${short(str(input.path))}` : str(input.pattern),
+				arg: globArg(input, short),
 				status: outcome(call, () => plural(lineCount(output), "file")),
 				body: { kind: "output", text: output },
 				compact: true,
 			};
 		case "Agent":
 		case "Task": {
-			const kind = str(input.subagent_type) || "agent";
-			const description = str(input.description);
 			return {
 				...base,
 				title: "Agent",
 				family: "agent",
-				arg: description ? `${kind} · "${description}"` : kind,
+				arg: agentArg(input),
 				status: agentStatus(call, ctx),
 				body: { kind: "output", text: ctx.task?.summary || output },
 				compact: true,
@@ -552,4 +565,51 @@ export function describeSettled(call: ToolCallItem, permission: PermissionOutcom
 	if (rules.length) return { tone: "ok", text: `Always allowed ${call.name} with`, code: rules.join(", ") };
 	if (mode) return { tone: "ok", text: `Allowed ${call.name} and switched to ${mode} mode` };
 	return { tone: "ok", text: `Allowed ${call.name} once` };
+}
+
+const SUMMARY_KEYS = ["command", "file_path", "path", "pattern", "url", "query", "skill", "prompt", "description"];
+
+const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
+
+/**
+ * What one tool call did, in a line: the path of a file tool, the command of
+ * Bash, the pattern of a search. A tool this file has no rule for shows its
+ * first familiar input field, or else the input as compact JSON.
+ */
+export function inputSummary(call: ToolCallItem, root?: string): string {
+	const input = isObject(call.input) ? call.input : {};
+	const short = (text: string) => shortenPaths(text, root);
+	switch (call.name) {
+		case "Bash":
+			return oneLine(short(str(input.command)));
+		case "Read":
+		case "Edit":
+		case "MultiEdit":
+		case "Write":
+			return short(str(input.file_path));
+		case "NotebookEdit":
+			return short(str(input.notebook_path));
+		case "Grep":
+			return grepArg(input, short);
+		case "Glob":
+			return globArg(input, short);
+		case "Agent":
+		case "Task":
+			return agentArg(input);
+		case "TaskCreate":
+		case "TaskUpdate":
+		case "TodoWrite":
+			return todoArg(call, input);
+		case "AskUserQuestion":
+			return parseQuestions(call.input)
+				.map((q) => q.header || q.question)
+				.join(" · ");
+		case "ExitPlanMode":
+			return parsePlan(call.input).path;
+	}
+	for (const key of SUMMARY_KEYS) {
+		const value = str(input[key]);
+		if (value !== "") return oneLine(short(value));
+	}
+	return Object.keys(input).length === 0 ? "" : JSON.stringify(input);
 }

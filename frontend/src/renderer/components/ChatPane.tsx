@@ -18,10 +18,11 @@ import type { ChatEntry } from "../lib/chat-event";
 import { isObject, unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
-import { describeTurnError, type TurnError } from "../lib/chat-turn-error";
+import { noticeText } from "../lib/chat-notice";
+import type { TurnError } from "../lib/chat-turn-error";
 import type { FileDoc, TurnDocs } from "../lib/chat-docs";
 import { clockTime, formatDuration } from "../lib/chat-time";
-import { contextUsage, formatTokens, sessionActivity, shownTodos } from "../lib/chat-inspect";
+import { contextUsage, formatCost, formatTokens, sessionActivity, shownTodos } from "../lib/chat-inspect";
 import { newestUsage } from "../lib/chat-usage";
 import { useChatUsage } from "../hooks/useChatUsage";
 import { activeTurnIndex, railTurns } from "../lib/chat-rail";
@@ -324,9 +325,6 @@ function ConnectionLabel({ connection, error }: { connection: ChatConnection; er
 	);
 }
 
-export function formatCost(usd: number): string {
-	return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
-}
 
 const STICK_TO_BOTTOM_PX = 48;
 
@@ -960,17 +958,8 @@ function TurnErrorDetail({ error }: { error: TurnError }) {
 	);
 }
 
-const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id);
-
 function NoticeRow({ notice }: { notice: Extract<ChatItem, { kind: "notice" }> }) {
-	const text = {
-		spawn: "Session started",
-		resumed: `Resumed claude session ${shortId(notice.text)}`,
-		exit: `Claude exited · ${notice.text}`,
-		compacted: "Conversation compacted",
-		interrupted: "Interrupted",
-		api_error: describeTurnError("", notice.text).label,
-	}[notice.notice];
+	const text = noticeText(notice);
 	return (
 		<div
 			className={cn(

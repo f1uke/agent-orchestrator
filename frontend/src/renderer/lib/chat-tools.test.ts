@@ -3,6 +3,7 @@ import type { TaskState } from "./chat-event";
 import type { BackgroundTask, ToolCallItem } from "./chat-fold";
 import {
 	describeTool,
+	inputSummary,
 	processKind,
 	type ProcessKind,
 	processSentence,
@@ -396,5 +397,23 @@ describe("waitingVerb", () => {
 		["a command and an agent", [command("a"), agent("b")], "Waiting on 2 background tasks"],
 	])("says %s", (_, tasks, want) => {
 		expect(waitingVerb(tasks)).toBe(want);
+	});
+});
+
+describe("inputSummary", () => {
+	it("names what a known tool touches, with paths shortened to the worktree", () => {
+		expect(inputSummary(call("Read", { file_path: `${ROOT}/ledger/ledger.go` }), ROOT)).toBe("ledger/ledger.go");
+		expect(inputSummary(call("Bash", { command: `cd ${ROOT}\n  go test ./...` }), ROOT)).toBe("cd . go test ./...");
+		expect(inputSummary(call("Grep", { pattern: "foo", path: `${ROOT}/src` }), ROOT)).toBe('"foo" in src');
+		expect(inputSummary(call("Glob", { pattern: "*.go" }))).toBe("*.go");
+		expect(inputSummary(call("Agent", { subagent_type: "Explore", description: "scan" }))).toBe('Explore · "scan"');
+		expect(inputSummary(call("TaskCreate", { subject: "Find failing tests" }))).toBe("Find failing tests");
+	});
+
+	it("falls back to the first familiar field, then to compact JSON, then to nothing", () => {
+		expect(inputSummary(call("WebFetch", { url: "https://x.test/a", prompt: "p" }))).toBe("https://x.test/a");
+		expect(inputSummary(call("Mystery", { depth: 3 }))).toBe('{"depth":3}');
+		expect(inputSummary(call("Mystery", {}))).toBe("");
+		expect(inputSummary(call("Mystery", null))).toBe("");
 	});
 });
