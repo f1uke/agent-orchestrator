@@ -432,15 +432,20 @@ describe("SessionInspector tabs", () => {
 
 	it("shows a chat session the same tabs as a terminal one, opening on Summary", () => {
 		renderWithQuery(<SessionInspector session={{ ...session([]), transport: "chat" }} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Document"]);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Document", "Tasks"]);
 		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 		expect(screen.queryByRole("region", { name: "Todo" })).toBeNull();
 	});
 
-	it("puts Document between Files and Browser for a chat session, and counts it in the strip", () => {
+	it("puts Document and Tasks between Files and Browser for a chat session, and counts them in the strip", () => {
 		renderWithQuery(<SessionInspector hasWebUI session={{ ...session([]), transport: "chat" }} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Document", "Browser"]);
-		expect(screen.getByRole("tablist")).toHaveAttribute("data-tab-count", "5");
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Document", "Tasks", "Browser"]);
+		expect(screen.getByRole("tablist")).toHaveAttribute("data-tab-count", "6");
+	});
+
+	it("offers no Tasks tab to a terminal session, which has no claude tasks to list", () => {
+		renderWithQuery(<SessionInspector hasWebUI session={session([])} />);
+		expect(tabNames()).not.toContain("Tasks");
 	});
 
 	it("offers no Document tab to a terminal session, which has no chat to open a document from", () => {

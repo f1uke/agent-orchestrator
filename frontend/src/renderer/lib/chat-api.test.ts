@@ -103,6 +103,31 @@ describe("httpChatApi.taskOutput", () => {
 	});
 });
 
+describe("httpChatApi.stopTask", () => {
+	it("posts to the task's own stop route by session and task id, with no body", async () => {
+		POST.mockResolvedValue(reply(200));
+		expect(await httpChatApi.stopTask("s1", "b7x")).toEqual({ ok: true });
+		expect(POST).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop", {
+			params: { path: { sessionId: "s1", taskId: "b7x" } },
+		});
+	});
+
+	it("keeps the answer's message when claude refuses, and names a thrown fetch as failed", async () => {
+		POST.mockResolvedValueOnce(
+			reply(409, { code: "CHAT_REQUEST_REJECTED", message: "stop_task is not supported in this context" }),
+		);
+		expect(await httpChatApi.stopTask("s1", "b7x")).toEqual({
+			ok: false,
+			error: { kind: "rejected", message: "stop_task is not supported in this context" },
+		});
+		POST.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+		expect(await httpChatApi.stopTask("s1", "b7x")).toEqual({
+			ok: false,
+			error: { kind: "failed", message: "Failed to fetch" },
+		});
+	});
+});
+
 describe("httpChatApi.upload", () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();

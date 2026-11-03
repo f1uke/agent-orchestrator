@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { SessionView } from "./SessionView";
 import { useUiStore } from "../stores/ui-store";
+import { useTasksUi } from "../stores/tasks-ui";
 import { __resetFileHistories } from "../hooks/useFileHistory";
 import { leaf, paneSessionIds, splitPane, type SplitNode } from "../lib/split-layout";
 import { startSplitDrag } from "../lib/split-drag";
@@ -130,8 +131,24 @@ vi.mock("./CenterPane", () => ({
 	),
 }));
 vi.mock("./ChatPane", () => ({
-	ChatPane: ({ session, view }: { session: { id: string }; view: string }) => (
-		<div data-testid={`chat-${session.id}`}>chat pane: {view}</div>
+	ChatPane: ({
+		session,
+		view,
+		onOpenTasks,
+	}: {
+		session: { id: string };
+		view: string;
+		onOpenTasks?: (ref: string | null) => void;
+	}) => (
+		<div data-testid={`chat-${session.id}`}>
+			chat pane: {view}
+			<button type="button" onClick={() => onOpenTasks?.("t-agent")}>
+				open agent task
+			</button>
+			<button type="button" onClick={() => onOpenTasks?.(null)}>
+				open task list
+			</button>
+		</div>
 	),
 }));
 const { chatSessionIds } = vi.hoisted(() => ({ chatSessionIds: [] as Array<string | undefined> }));
@@ -985,6 +1002,38 @@ describe("SessionView — chat sessions", () => {
 		render(<SessionView sessionId="sess-chat" />);
 		expect(new Set(chatSessionIds)).toEqual(new Set(["sess-chat"]));
 		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
+	});
+
+	it("opens the rail on the Tasks tab, drilled into the agent a Ran agent row named, even from a shut rail", () => {
+		useUiStore.setState({ isInspectorOpen: false });
+		useTasksUi.setState({ bySession: {} });
+		render(<SessionView sessionId="sess-chat" />);
+		fireEvent.click(screen.getByRole("button", { name: "open agent task" }));
+		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "tasks");
+		expect(useUiStore.getState().isInspectorOpen).toBe(true);
+		expect(useTasksUi.getState().bySession["sess-chat"].focus).toBe("t-agent");
+	});
+
+	it("opens the Tasks list, not a job, from the status line's count or the Waiting on row", () => {
+		useUiStore.setState({ isInspectorOpen: true });
+		useTasksUi.setState({ bySession: { "sess-chat": { focus: "t-agent", expanded: false, cleared: [] } } });
+		render(<SessionView sessionId="sess-chat" />);
+		fireEvent.click(screen.getByRole("button", { name: "open task list" }));
+		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "tasks");
+		expect(useTasksUi.getState().bySession["sess-chat"].focus).toBeNull();
+	});
+
+	it("widens the inspector while the Tasks tab is expanded, and restores the saved split after", () => {
+		useUiStore.setState({ isInspectorOpen: true });
+		useTasksUi.setState({ bySession: {} });
+		render(<SessionView sessionId="sess-chat" />);
+		const inspector = panels.get("inspector")!.handle;
+		inspector.resize.mockClear();
+		fireEvent.click(screen.getByRole("button", { name: "open task list" }));
+		act(() => useTasksUi.getState().setExpanded("sess-chat", true));
+		expect(inspector.resize).toHaveBeenLastCalledWith("60%");
+		act(() => useTasksUi.getState().setExpanded("sess-chat", false));
+		expect(inspector.resize).toHaveBeenLastCalledWith("28%");
 	});
 
 	it("shows an unfocused chat pane in a split as chat too", () => {

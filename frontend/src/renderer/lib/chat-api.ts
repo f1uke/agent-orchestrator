@@ -25,6 +25,8 @@ export type ChatApi = {
 	setModel: (sessionId: string, model: string) => Promise<ChatResult>;
 	/** Saves a file where claude can read it; the answered path goes into the message. */
 	upload: (sessionId: string, file: File) => Promise<UploadResult>;
+	/** Ends a background task: a subagent or a background Bash. Resolves once claude has answered. */
+	stopTask: (sessionId: string, taskId: string) => Promise<ChatResult>;
 	/** The tail of a background task's output; null when the daemon has none for it. */
 	taskOutput: (sessionId: string, taskId: string) => Promise<TaskOutput | null>;
 };
@@ -90,6 +92,12 @@ export const httpChatApi: ChatApi = {
 	setModel: (sessionId, model) =>
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/model", { ...path(sessionId), body: { model } })),
 	upload,
+	stopTask: (sessionId, taskId) =>
+		settle(
+			apiClient.POST("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop", {
+				params: { path: { sessionId, taskId } },
+			}),
+		),
 	taskOutput: async (sessionId, taskId) => {
 		try {
 			const { data } = await apiClient.GET("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", {

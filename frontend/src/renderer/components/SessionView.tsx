@@ -24,6 +24,7 @@ import { useProjectSearchShortcut } from "../hooks/useProjectSearchShortcut";
 import { taskKeyOf } from "../lib/task-key";
 import { isMacPlatform } from "../lib/platform";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
+import { useSessionTasksUi, useTasksUi } from "../stores/tasks-ui";
 import { SplitSessionPicker } from "./SplitSessionPicker";
 import { SplitTreeView } from "./SplitTreeView";
 import { Toast } from "./inbox-ui";
@@ -57,14 +58,17 @@ import { isOrchestratorSession } from "../types/workspace";
 import type { TerminalTarget } from "../types/terminal";
 
 const INSPECTOR_MIN_PERCENT = 22;
-const INSPECTOR_MAX_PERCENT = 45;
+const INSPECTOR_MAX_PERCENT = 60;
+const INSPECTOR_SAVED_MAX_PERCENT = 45;
+const INSPECTOR_EXPANDED_PERCENT = 60;
+const TERMINAL_MIN_PERCENT = 100 - INSPECTOR_MAX_PERCENT;
 const inspectorSplitStorageKey = "ao.inspector.split";
 
 function initialSplitPercent(): number {
 	const raw = typeof window === "undefined" ? null : window.localStorage?.getItem(inspectorSplitStorageKey);
 	const parsed = raw === null ? Number.NaN : Number(raw);
 	if (!Number.isFinite(parsed)) return 28;
-	return Math.min(INSPECTOR_MAX_PERCENT, Math.max(INSPECTOR_MIN_PERCENT, parsed));
+	return Math.min(INSPECTOR_SAVED_MAX_PERCENT, Math.max(INSPECTOR_MIN_PERCENT, parsed));
 }
 
 type SessionViewProps = {
@@ -253,6 +257,17 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		},
 		[toggleInspector],
 	);
+
+	const focusTask = useTasksUi((state) => state.focus);
+	const openTasks = useCallback(
+		(ref: string | null) => {
+			focusTask(sessionId, ref);
+			setInspectorView("tasks");
+			if (!useUiStore.getState().isInspectorOpen) toggleInspector();
+		},
+		[focusTask, sessionId, toggleInspector],
+	);
+	const tasksExpanded = useSessionTasksUi(sessionId).expanded && inspectorView === "tasks";
 
 	useEffect(() => {
 		setTerminalTarget({ kind: "worker" });
@@ -663,6 +678,12 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// includes onResize in its dep array, so an unstable reference would
 	// de-register/re-register the inspector panel on every render and race
 	// with the expand()/collapse() effect above.
+	useEffect(() => {
+		const panel = inspectorRef.current;
+		if (!panel || !isInspectorOpen) return;
+		panel.resize(`${tasksExpanded ? INSPECTOR_EXPANDED_PERCENT : initialSplitPercent()}%`);
+	}, [tasksExpanded, isInspectorOpen]);
+
 	const handleInspectorResize = useCallback(
 		(size: PanelSize) => {
 			if (inspectorSeparatorRef.current?.getAttribute("data-separator") !== "active") return;
@@ -787,6 +808,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					onOpenDoc={openDocument}
 					openDoc={openDoc}
 					onDocs={setSessionDocs}
+					onOpenTasks={openTasks}
 					session={session}
 					theme={theme}
 					view={centerView}
@@ -850,7 +872,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 			<ResizablePanelGroup className="session-split min-h-0 flex-1" id="session-workspace" orientation="horizontal">
 				{/* react-resizable-panels v4: bare numbers are PIXELS; percentages must
             be strings. Numeric sizes here once clamped the inspector to 45px. */}
-				<ResizablePanel defaultSize="72%" id="terminal" minSize="45%">
+				<ResizablePanel defaultSize="72%" id="terminal" minSize={`${TERMINAL_MIN_PERCENT}%`}>
 					<div className="flex h-full min-h-0 flex-col">
 						<div className="min-h-0 flex-1">
 							{splitRoot ? (
@@ -889,6 +911,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
                   the pane clips instead of reflowing the inspector mid-collapse. */}
 							<div className="h-full min-w-[280px]">
 								<SessionInspector
+									chat={isChat ? chat : undefined}
+									theme={theme}
 									onCloseDoc={() => setOpenDoc(null)}
 									openDoc={openDoc}
 									sessionDocs={sessionDocs}

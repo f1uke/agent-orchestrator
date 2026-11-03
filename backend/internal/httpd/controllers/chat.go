@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatfiles"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
@@ -21,6 +22,7 @@ type ChatService interface {
 	Interrupt(ctx context.Context, id domain.SessionID) error
 	SetMode(ctx context.Context, id domain.SessionID, mode chatproto.PermissionMode) error
 	SetModel(ctx context.Context, id domain.SessionID, model string) error
+	StopTask(ctx context.Context, id domain.SessionID, taskID string) error
 }
 
 // ChatController owns the routes the chat view drives a session with.
@@ -33,6 +35,7 @@ func (c *ChatController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/chat/messages", c.send)
 	r.Post("/sessions/{sessionId}/chat/answers", c.answer)
 	r.Post("/sessions/{sessionId}/chat/interrupt", c.interrupt)
+	r.Post("/sessions/{sessionId}/chat/tasks/{taskId}/stop", c.stopTask)
 	r.Put("/sessions/{sessionId}/chat/mode", c.setMode)
 	r.Put("/sessions/{sessionId}/chat/model", c.setModel)
 }
@@ -137,6 +140,23 @@ func (c *ChatController) interrupt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.Svc.Interrupt(r.Context(), sessionID(r)); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+func (c *ChatController) stopTask(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop")
+		return
+	}
+	taskID := chi.URLParam(r, "taskId")
+	if !chatfiles.ValidTaskID(taskID) {
+		chatBadRequest(w, r, "INVALID_TASK_ID", "taskId must use only letters, digits, underscore and dash")
+		return
+	}
+	if err := c.Svc.StopTask(r.Context(), sessionID(r), taskID); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}

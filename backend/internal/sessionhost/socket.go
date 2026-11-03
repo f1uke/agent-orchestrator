@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/chatfiles"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatproto"
 )
 
@@ -41,6 +42,8 @@ type setModeRequest struct{ Mode chatproto.PermissionMode }
 
 type setModelRequest struct{ Model string }
 
+type stopTaskRequest struct{ TaskID string }
+
 type stateRequest struct{}
 
 type subscribeRequest struct{ FromSeq uint64 }
@@ -50,6 +53,7 @@ func (answerRequest) isRequest()    {}
 func (interruptRequest) isRequest() {}
 func (setModeRequest) isRequest()   {}
 func (setModelRequest) isRequest()  {}
+func (stopTaskRequest) isRequest()  {}
 func (stateRequest) isRequest()     {}
 func (subscribeRequest) isRequest() {}
 
@@ -70,6 +74,7 @@ func parseRequest(line []byte) (request, error) {
 		Interrupt          bool              `json:"interrupt"`
 		Mode               string            `json:"mode"`
 		Model              string            `json:"model"`
+		TaskID             string            `json:"task_id"`
 		FromSeq            uint64            `json:"from_seq"`
 	}
 	if err := json.Unmarshal(line, &w); err != nil {
@@ -119,6 +124,11 @@ func parseRequest(line []byte) (request, error) {
 			return nil, errors.New("set_model needs model")
 		}
 		return setModelRequest{Model: w.Model}, nil
+	case "stop_task":
+		if !chatfiles.ValidTaskID(w.TaskID) {
+			return nil, errors.New("stop_task needs a valid task_id")
+		}
+		return stopTaskRequest{TaskID: w.TaskID}, nil
 	case "state":
 		return stateRequest{}, nil
 	case "subscribe":
@@ -276,8 +286,15 @@ func respond(conn net.Conn, v any) {
 }
 
 func (h *host) do(req request) (any, error) {
-	if r, ok := req.(setModelRequest); ok {
-		return h.setModel(r.Model)
+	switch r := req.(type) {
+	case setModelRequest:
+		return h.control("set_model", func(id string) chatproto.Outbound {
+			return chatproto.SetModel{RequestID: id, Model: r.Model}
+		})
+	case stopTaskRequest:
+		return h.control("stop_task", func(id string) chatproto.Outbound {
+			return chatproto.StopTask{RequestID: id, TaskID: r.TaskID}
+		})
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -307,12 +324,15 @@ func (h *host) do(req request) (any, error) {
 	return nil, fmt.Errorf("unhandled request %T", req)
 }
 
-func (h *host) setModel(model string) (any, error) {
+// control writes the request build makes to claude and waits for claude's
+// control_response, so a refusal comes back as the error. subtype names the
+// request in the timeout message.
+func (h *host) control(subtype string, build func(requestID string) chatproto.Outbound) (any, error) {
 	id := uuid.NewString()
 	answer := make(chan chatproto.ControlResponse, 1)
 	h.mu.Lock()
 	h.answers[id] = answer
-	err := h.writeThenLogLocked(chatproto.SetModel{RequestID: id, Model: model})
+	err := h.writeThenLogLocked(build(id))
 	if err != nil {
 		delete(h.answers, id)
 	}
@@ -335,7 +355,7 @@ func (h *host) setModel(model string) (any, error) {
 		h.mu.Lock()
 		delete(h.answers, id)
 		h.mu.Unlock()
-		return nil, fmt.Errorf("claude did not answer set_model within %s", h.controlTimeout)
+		return nil, fmt.Errorf("claude did not answer %s within %s", subtype, h.controlTimeout)
 	}
 }
 

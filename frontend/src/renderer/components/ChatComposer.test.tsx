@@ -56,6 +56,7 @@ function renderComposer(over: Partial<ChatActions> = {}) {
 		interrupt: vi.fn<ChatActions["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatActions["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
+		stopTask: vi.fn<ChatActions["stopTask"]>(async () => ({ ok: true })),
 		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
 		upload: vi.fn<ChatActions["upload"]>(async (file) => saved(file)),
 		hostDown: false,

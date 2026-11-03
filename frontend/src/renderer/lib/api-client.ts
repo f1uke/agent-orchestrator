@@ -72,6 +72,7 @@ const ROUTE_TEMPLATES = [
 	"/api/v1/sessions/{sessionId}/chat/files/resolve",
 	"/api/v1/sessions/{sessionId}/chat/files/{root}/*",
 	"/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output",
+	"/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop",
 	"/api/v1/sessions/{sessionId}/comment-dispatch",
 	"/api/v1/sessions/{sessionId}/comment-reply",
 	"/api/v1/sessions/{sessionId}/comment-resolve",

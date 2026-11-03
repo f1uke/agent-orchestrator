@@ -104,6 +104,7 @@ var ops = []op{
 	{"interrupt", func(s *Service) error { return s.Interrupt(context.Background(), "s-1") }, map[string]any{"op": "interrupt"}},
 	{"set mode", func(s *Service) error { return s.SetMode(context.Background(), "s-1", chatproto.ModePlan) }, map[string]any{"op": "set_mode", "mode": "plan"}},
 	{"set model", func(s *Service) error { return s.SetModel(context.Background(), "s-1", "haiku") }, map[string]any{"op": "set_model", "model": "haiku"}},
+	{"stop task", func(s *Service) error { return s.StopTask(context.Background(), "s-1", "bq3k9x1ab") }, map[string]any{"op": "stop_task", "task_id": "bq3k9x1ab"}},
 }
 
 func wantAPIError(t *testing.T, err error, kind apierr.Kind, code string) *apierr.Error {

@@ -47,6 +47,14 @@ type SetModel struct {
 	Model     string
 }
 
+// StopTask ends the background task TaskID, a Bash command or a subagent. Claude
+// answers success, then reports the task killed; it may answer an error in a
+// mode that cannot stop tasks.
+type StopTask struct {
+	RequestID string
+	TaskID    string
+}
+
 // MCPReply answers an mcp_message control request with one JSON-RPC message.
 type MCPReply struct {
 	RequestID string
@@ -68,6 +76,7 @@ func (Interrupt) isOutbound()         {}
 func (SetPermissionMode) isOutbound() {}
 func (SetModel) isOutbound()          {}
 func (PermissionAnswer) isOutbound()  {}
+func (StopTask) isOutbound()          {}
 func (MCPReply) isOutbound()          {}
 func (GetContextUsage) isOutbound()   {}
 
@@ -136,6 +145,11 @@ func Encode(o Outbound) ([]byte, error) {
 			return nil, errors.New("chatproto: set_model needs a model")
 		}
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "set_model", "model": m.Model})
+	case StopTask:
+		if m.TaskID == "" {
+			return nil, errors.New("chatproto: stop_task needs a task id")
+		}
+		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "stop_task", "task_id": m.TaskID})
 	case GetContextUsage:
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "get_context_usage"})
 	case PermissionAnswer:

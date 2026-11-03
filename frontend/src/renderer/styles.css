@@ -1095,7 +1095,8 @@ body.is-resizing-x [data-slot="sidebar-container"] {
    bar, toast). */
 .session-inspector__body.session-inspector__body--reviews,
 .session-inspector__body.session-inspector__body--files,
-.session-inspector__body.session-inspector__body--document {
+.session-inspector__body.session-inspector__body--document,
+.session-inspector__body.session-inspector__body--tasks {
 	padding: 0;
 	overflow: hidden;
 	display: flex;
@@ -1112,7 +1113,7 @@ body.is-resizing-x [data-slot="sidebar-container"] {
  *   required = n × (icon 14 + gap 6 + padding 12 + widest label) + 22 + 3×(n−1)
  *
  * with the widest label being "Summary" at 54px (11.5px/600). That gives 3 tabs
- * 286px · 4 tabs 375px · 5 tabs 464px · 6 tabs 553px · 7 tabs 642px, matching the measured
+ * 286px · 4 tabs 375px · 5 tabs 464px · 6 tabs 553px · 7 tabs 642px · 8 tabs 731px, matching the measured
  * 285px and 373px. The Simulator tab is labelled "Device" precisely so
  * "Summary" stays the widest label and this derivation still holds.
  * The breakpoints below add a few px of margin. Re-derive if a label is renamed
@@ -1126,6 +1127,16 @@ body.is-resizing-x [data-slot="sidebar-container"] {
  * A single 360px breakpoint used to serve all counts, which was wrong in both
  * directions: it truncated 5 tabs to "Summa…"/"Review…" from 361px all the way
  * to 464px, and it hid 4 labels from 330px that only truncate below 373px. */
+@container (max-width: 739px) {
+	.session-inspector__tabs[data-tab-count="8"] .session-inspector__tab-label {
+		display: none;
+	}
+
+	.session-inspector__tabs[data-tab-count="8"] .session-inspector__tab {
+		padding-inline: 0;
+	}
+}
+
 @container (max-width: 649px) {
 	.session-inspector__tabs[data-tab-count="7"] .session-inspector__tab-label {
 		display: none;
@@ -10612,4 +10623,279 @@ ol.note-prose__list {
 .document-panel .chat-codebox__body {
 	max-height: none;
 	padding-top: 10px;
+}
+
+.chat-agent {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 0;
+	color: var(--fg-passive);
+	font-size: 13px;
+}
+
+.chat-agent__dot {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--green);
+	animation: chat-dots-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-agent__verb {
+	flex: none;
+}
+
+.chat-agent__link,
+.chat-agent__name {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--fg-muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-agent__link {
+	text-align: left;
+	text-decoration: underline;
+	text-decoration-color: var(--border-1);
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+
+.chat-agent__link:hover {
+	color: var(--fg);
+	text-decoration-color: currentColor;
+}
+
+.chat-agent .chat-tool__status {
+	margin-left: auto;
+}
+
+.chat-statusline__tasks {
+	display: inline;
+	padding: 0;
+	color: inherit;
+	cursor: pointer;
+}
+
+.chat-statusline__tasks:hover {
+	color: var(--fg);
+}
+
+.tasks-panel {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.tasks-panel__head {
+	display: flex;
+	height: 44px;
+	flex: none;
+	align-items: center;
+	gap: 4px;
+	padding: 0 10px 0 12px;
+	border-bottom: 1px solid var(--border);
+}
+
+.tasks-panel__heading {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	font-size: 13px;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tasks-panel__icon {
+	width: 14px;
+	height: 14px;
+}
+
+.tasks-panel__body {
+	min-height: 0;
+	flex: 1;
+	overflow-y: auto;
+	padding: 14px 12px 32px;
+}
+
+.tasks-panel__section {
+	margin: 0 0 6px;
+	color: var(--fg-passive);
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.tasks-panel__section:not(:first-child),
+.tasks-panel section + section {
+	margin-top: 18px;
+}
+
+.tasks-panel__list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.tasks-panel__item {
+	border-radius: 8px;
+	background: var(--bg-1);
+}
+
+.tasks-panel__row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding-right: 8px;
+}
+
+.tasks-panel__open {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 8px 10px 12px;
+	border-radius: 8px;
+	font-size: 13px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.tasks-panel__open:hover {
+	background: var(--interactive-hover);
+}
+
+.tasks-panel__title {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tasks-panel__state {
+	flex: none;
+	color: var(--fg-passive);
+	font-size: 11.5px;
+}
+
+.tasks-panel__chev {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.tasks-panel__stop {
+	display: inline-flex;
+	width: 26px;
+	height: 26px;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	border-radius: 6px;
+	background: var(--interactive-active);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+.tasks-panel__stop:hover {
+	background: var(--interactive-hover);
+}
+
+.tasks-panel__stop-icon {
+	width: 10px;
+	height: 10px;
+	fill: currentColor;
+}
+
+.tasks-panel__stopping {
+	flex: none;
+	color: var(--fg-passive);
+	font-size: 12px;
+}
+
+.tasks-panel__error {
+	margin: 0 12px 10px;
+	color: var(--red);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+
+.tasks-panel__live {
+	width: 7px;
+	height: 7px;
+	flex: none;
+	margin: 0 6px;
+	border-radius: 50%;
+	background: var(--green);
+	animation: chat-dots-pulse 1.2s ease-in-out infinite;
+}
+
+.tasks-panel__detail {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.tasks-panel__prompt {
+	padding: 12px;
+	border-radius: 10px;
+	background: var(--bg-1);
+	font-size: 13px;
+}
+
+.tasks-panel__prompt-text {
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+.tasks-panel__prompt-text--folded {
+	display: -webkit-box;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 6;
+}
+
+.tasks-panel__more {
+	margin-top: 8px;
+	color: var(--fg-muted);
+	font-size: 12.5px;
+	cursor: pointer;
+}
+
+.tasks-panel__more:hover {
+	color: var(--fg);
+}
+
+.tasks-panel__model {
+	color: var(--fg-passive);
+	font-size: 12.5px;
+}
+
+.tasks-panel__command {
+	border-radius: 8px;
+}
+
+.chat-readonly {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 12px;
+	font-size: 13.5px;
+	line-height: 1.5;
+}
+
+.chat-readonly__row {
+	min-width: 0;
 }
