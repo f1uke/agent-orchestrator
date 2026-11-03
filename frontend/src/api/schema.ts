@@ -5001,6 +5001,7 @@ export interface components {
             learnFromSessions?: boolean;
             mobileScripts?: components["schemas"]["DomainMobileScriptsConfig"];
             noIdleCompaction?: boolean;
+            noPromptSuggestions?: boolean;
             orchestrator?: components["schemas"]["RoleOverride"];
             pauseBeforeImplementing?: boolean;
             postCreate?: string[];

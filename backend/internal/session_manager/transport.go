@@ -82,6 +82,9 @@ func (m *Manager) wrapForTransport(t domain.Transport, id domain.SessionID, agen
 	if project.NoIdleCompaction {
 		argv = append(argv, "--no-idle-compact")
 	}
+	if project.NoPromptSuggestions {
+		argv = append(argv, "--no-prompt-suggestions")
+	}
 	argv = append(argv, "--")
 	return append(argv, agentArgv...), "", nil
 }

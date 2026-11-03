@@ -97,6 +97,10 @@ type CommandLifecycle struct {
 	State       CommandState
 }
 
+// PromptSuggestion is claude's guess at the user's next message, which it
+// emits after a turn when started with --prompt-suggestions.
+type PromptSuggestion struct{ Text string }
+
 // Unknown is any event type this package does not model, or a modelled type
 // whose body did not have the expected shape. Raw is the whole line.
 type Unknown struct {
@@ -115,6 +119,7 @@ func (ControlRequest) isEvent()   {}
 func (ControlResponse) isEvent()  {}
 func (ControlCancel) isEvent()    {}
 func (CommandLifecycle) isEvent() {}
+func (PromptSuggestion) isEvent() {}
 func (Unknown) isEvent()          {}
 
 // CommandState is the lifecycle state of a user message. Values beyond the
@@ -267,6 +272,14 @@ func decodeKnown(typ, subtype string, line []byte) (Event, bool) {
 			return nil, false
 		}
 		return CommandLifecycle{CommandUUID: w.CommandUUID, State: w.State}, true
+	case "prompt_suggestion":
+		var w struct {
+			Suggestion string `json:"suggestion"`
+		}
+		if json.Unmarshal(line, &w) != nil {
+			return nil, false
+		}
+		return PromptSuggestion{Text: w.Suggestion}, true
 	}
 	return nil, false
 }

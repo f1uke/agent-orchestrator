@@ -75,6 +75,11 @@ type ProjectConfig struct {
 	// prompt cache. False, the default, keeps idle compaction on.
 	NoIdleCompaction bool `json:"noIdleCompaction,omitempty"`
 
+	// NoPromptSuggestions stops a chat session's host from asking claude for a
+	// guess at the user's next message after each turn, which the composer shows
+	// as ghost text. False, the default, keeps suggestions on.
+	NoPromptSuggestions bool `json:"noPromptSuggestions,omitempty"`
+
 	// HasWebUI records whether this project renders in a browser. It is the single
 	// fact behind three effects, so they can never contradict each other: the
 	// desktop inspector's Browser tab, the `ao preview` guidance injected into

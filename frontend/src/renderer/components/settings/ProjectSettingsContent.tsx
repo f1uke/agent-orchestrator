@@ -352,6 +352,27 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 				</SettingRow>
 
 				<SettingRow
+					name="Suggest my next message"
+					summary="After a chat turn, Claude guesses what you will say next and the composer shows it as grey text. Tab puts it in the box; it is never sent by itself."
+					detail="It costs one small extra model request per turn, and Claude backs off on its own when suggestions go unused. It starts after the second reply, and stays quiet during plan mode and while a permission request is open. A running session keeps the setting it was started with."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.promptSuggestions ? "On" : "Off"}
+					modified={isFieldDirty("promptSuggestions")}
+				>
+					<div className="flex items-center gap-3">
+						<Switch
+							id="promptSuggestions"
+							checked={draft.promptSuggestions}
+							onCheckedChange={(v) => setField("promptSuggestions", v)}
+						/>
+						<label htmlFor="promptSuggestions" className="text-[12px] text-muted-foreground">
+							Suggest my next message
+						</label>
+					</div>
+				</SettingRow>
+
+				<SettingRow
 					name="Orchestrator agent"
 					summary="Which agent runs this project's orchestrator."
 					detail="Changing this restarts the orchestrator as soon as you save - the running one is replaced."

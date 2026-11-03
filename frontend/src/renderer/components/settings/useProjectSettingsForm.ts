@@ -78,6 +78,7 @@ export type ProjectSettingsFormState = {
 	responseLanguage: string;
 	workerTransport: WorkerTransport | "";
 	idleCompaction: boolean;
+	promptSuggestions: boolean;
 };
 
 export type ProjectSettingsFieldKey = keyof ProjectSettingsFormState;
@@ -123,6 +124,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		responseLanguage: config.responseLanguage ?? "",
 		workerTransport: config.workerTransport ?? "",
 		idleCompaction: !config.noIdleCompaction,
+		promptSuggestions: !config.noPromptSuggestions,
 	};
 }
 
@@ -349,6 +351,7 @@ export function useProjectSettingsForm({
 				responseLanguage: form.responseLanguage || undefined,
 				workerTransport: form.workerTransport || undefined,
 				noIdleCompaction: !form.idleCompaction || undefined,
+				noPromptSuggestions: !form.promptSuggestions || undefined,
 				claudeProfile: form.claudeProfile || undefined,
 			};
 			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {

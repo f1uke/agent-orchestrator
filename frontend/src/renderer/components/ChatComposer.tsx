@@ -14,6 +14,7 @@ import { type MenuSection, ModelModePicker, optionId, TokenMenu } from "./ChatCo
 import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover";
 
 const MENU_ID = "chat-token-menu";
+const SUGGESTION_ID = "chat-suggestion-description";
 const MAX_FILES = 8;
 
 type Choice = { insert: string; hint?: string };
@@ -61,6 +62,8 @@ type ComposerProps = {
 	commands: readonly ChatCommand[];
 	models: readonly ChatModel[];
 	model: string;
+	/** Claude's guess at the next message; shown as ghost text while the box is empty and the session idle. */
+	suggestion: string;
 	onToast: (message: string) => void;
 	prefill?: Prefill;
 };
@@ -74,6 +77,7 @@ export function ChatComposer({
 	commands,
 	models,
 	model,
+	suggestion,
 	onToast,
 	prefill,
 }: ComposerProps) {
@@ -86,6 +90,7 @@ export function ChatComposer({
 	const [active, setActive] = useState(0);
 	const [argHint, setArgHint] = useState<{ after: string; hint: string } | null>(null);
 	const [wantFiles, setWantFiles] = useState(false);
+	const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
 	const nextId = useRef(0);
 	const input = useRef<HTMLTextAreaElement>(null);
 	const picker = useRef<HTMLInputElement>(null);
@@ -96,6 +101,9 @@ export function ChatComposer({
 	const uploaded = chips.flatMap((c) => (c.kind === "file" && c.upload.phase === "ready" ? [c.upload.path] : []));
 	const settled = preparing === 0 && chips.every((c) => c.kind === "image" || c.upload.phase === "ready");
 	const canSend = !disabled && !sending && settled && (text.trim() !== "" || chips.length > 0);
+
+	if (suggestion === "" && dismissedSuggestion !== null) setDismissedSuggestion(null);
+	const suggesting = suggestion !== "" && text === "" && !busy && !disabled && dismissedSuggestion !== suggestion;
 
 	const token: ComposerToken | null = disabled || dismissedForText === text ? null : tokenAt(text, caret);
 	if (token?.kind === "mention" && !wantFiles) setWantFiles(true);
@@ -235,6 +243,18 @@ export function ChatComposer({
 				return;
 			}
 		}
+		if (suggesting) {
+			if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+				e.preventDefault();
+				edit(suggestion, suggestion.length);
+				return;
+			}
+			if (e.key === "Escape") {
+				e.preventDefault();
+				setDismissedSuggestion(suggestion);
+				return;
+			}
+		}
 		if (e.key !== "Enter" || e.shiftKey) return;
 		e.preventDefault();
 		void submit();
@@ -292,6 +312,7 @@ export function ChatComposer({
 							<textarea
 								aria-activedescendant={menu && activeIndex >= 0 ? optionId(MENU_ID, activeIndex) : undefined}
 								aria-controls={menu ? MENU_ID : undefined}
+								aria-describedby={suggesting ? SUGGESTION_ID : undefined}
 								aria-label="Message Claude"
 								className="chat-composer__input"
 								disabled={disabled}
@@ -308,13 +329,26 @@ export function ChatComposer({
 								}}
 								onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
 								placeholder={
-									busy
-										? "Message Claude. It queues until the current turn ends."
-										: "Message Claude. / for commands and skills, @ for files, paste, drop or attach files."
+									suggesting
+										? ""
+										: busy
+											? "Message Claude. It queues until the current turn ends."
+											: "Message Claude. / for commands and skills, @ for files, paste, drop or attach files."
 								}
 								ref={input}
 								value={text}
 							/>
+							{suggesting ? (
+								<>
+									<span className="sr-only" id={SUGGESTION_ID}>
+										Suggestion: {suggestion}, press Tab to use
+									</span>
+									<div aria-hidden="true" className="chat-composer__suggestion" data-testid="chat-suggestion">
+										<span className="chat-composer__suggestion-text">{suggestion}</span>
+										<span className="chat-kbd">Tab</span>
+									</div>
+								</>
+							) : null}
 							{argHint && argHint.after === text ? (
 								<div aria-hidden="true" className="chat-composer__ghost" data-testid="chat-arg-hint">
 									<span className="chat-composer__ghost-text">{text}</span>

@@ -207,9 +207,15 @@ func writePrompt(t *testing.T, dir string, fixture []chatproto.Entry) string {
 
 func runFirstSession(t *testing.T, dir string) (Config, []chatproto.Entry, string) {
 	t.Helper()
+	return runFirstSessionWith(t, dir, func(*Config) {})
+}
+
+func runFirstSessionWith(t *testing.T, dir string, tweak func(*Config)) (Config, []chatproto.Entry, string) {
+	t.Helper()
 	fixture := loadEntries(t, fixturePath(t, "first_session.jsonl"))
 	cfg, argvFile := fakeConfig(t, dir, fixturePath(t, "first_session.jsonl"))
 	cfg.PromptFile = writePrompt(t, dir, fixture)
+	tweak(&cfg)
 	r := startHost(t, cfg)
 	replayInputs(t, cfg.SocketPath, 0, fixture, 1)
 	if res := r.wait(t); res.err != nil || res.code != 0 {
@@ -236,10 +242,17 @@ func TestClaudeSeesHostAsAgentParent(t *testing.T) {
 	}
 }
 
+func TestClaudeIsNotAskedForPromptSuggestionsWhenTheProjectTurnsThemOff(t *testing.T) {
+	_, _, argvFile := runFirstSessionWith(t, shortDir(t), func(c *Config) { c.NoPromptSuggestions = true })
+	if argv := readArgv(t, argvFile); slices.Contains(argv, "--prompt-suggestions") {
+		t.Errorf("argv = %v, want no --prompt-suggestions", argv)
+	}
+}
+
 func TestFreshSessionEndToEnd(t *testing.T) {
 	cfg, fixture, argvFile := runFirstSession(t, shortDir(t))
 
-	want := append(append([]string{"--model", "sonnet"}, wantProtocolFlags...), "--add-dir", attachmentsBeside(cfg.LogPath))
+	want := append(append(append([]string{"--model", "sonnet"}, wantProtocolFlags...), "--prompt-suggestions"), "--add-dir", attachmentsBeside(cfg.LogPath))
 	if got := readArgv(t, argvFile); !slices.Equal(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
 	}

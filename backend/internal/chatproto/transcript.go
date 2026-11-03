@@ -20,6 +20,7 @@ type Transcript struct {
 	Models           []Model   // from the latest initialize response
 	Model            string    // in use: the spawn's --model, then system/init or an accepted set_model
 	ChosenModel      string    // the latest accepted set_model, which a respawn passes as --model
+	Suggestion       string    // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
 	LastSeq          uint64
 }
 
@@ -189,6 +190,7 @@ type Folder struct {
 	models   []Model
 	model    string
 	chosen   string
+	suggest  string
 }
 
 // NewFolder returns an empty Folder.
@@ -255,6 +257,8 @@ func (f *Folder) applyOut(ev Event) {
 		}
 	case Assistant:
 		f.applyAssistant(ev)
+	case PromptSuggestion:
+		f.suggest = ev.Text
 	case User:
 		if !ev.IsReplay {
 			f.applyToolResults(ev)
@@ -348,6 +352,7 @@ func (f *Folder) applyToolResults(u User) {
 			}
 		case TextBlock:
 			if strings.HasPrefix(b.Text, interruptMarker) {
+				f.suggest = ""
 				f.items = append(f.items, Notice{Kind: NoticeInterrupted})
 			}
 		}
@@ -358,6 +363,7 @@ func (f *Folder) addUserInput(u User) {
 	if u.UUID != "" && f.users[u.UUID] != nil {
 		return
 	}
+	f.suggest = ""
 	var text strings.Builder
 	images := 0
 	for _, b := range u.Blocks {
@@ -383,6 +389,9 @@ func (f *Folder) addUserInput(u User) {
 }
 
 func (f *Folder) setCommand(uuid string, state CommandState) {
+	if state == CommandStarted {
+		f.suggest = ""
+	}
 	f.commands[uuid] = state
 	if item := f.users[uuid]; item != nil {
 		item.State = state
@@ -492,6 +501,7 @@ func exitText(code *int) string {
 }
 
 func (f *Folder) endProcess() {
+	f.suggest = ""
 	for id := range f.perms {
 		f.settle(id, PermissionCancelled, "", nil)
 	}
@@ -524,6 +534,7 @@ func (f *Folder) Transcript() Transcript {
 		Models:           slices.Clone(f.models),
 		Model:            f.model,
 		ChosenModel:      f.chosen,
+		Suggestion:       f.suggest,
 		LastSeq:          f.last,
 	}
 	for _, it := range f.items {

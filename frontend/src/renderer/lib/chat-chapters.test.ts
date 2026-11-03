@@ -46,6 +46,7 @@ const rowsOf = (items: ChatItem[]) =>
 			model: "",
 			tasks: [],
 			agentModels: {},
+			suggestion: "",
 			lastSeq: 0,
 		} satisfies Transcript,
 		emptyOverlay,

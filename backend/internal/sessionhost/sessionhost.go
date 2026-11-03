@@ -36,6 +36,9 @@ type Config struct {
 	PromptFile string
 	// NoIdleCompact stops the host from compacting a large idle conversation.
 	NoIdleCompact bool
+	// NoPromptSuggestions stops the host from asking claude for a guess at the
+	// user's next message after each turn.
+	NoPromptSuggestions bool
 
 	stdinGrace     time.Duration
 	killGrace      time.Duration
@@ -186,7 +189,7 @@ type host struct {
 }
 
 func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, model string) (int, error) {
-	argv := claudeArgv(cfg.Command, resume, model, attachmentsBeside(cfg.LogPath))
+	argv := claudeArgv(cfg.Command, resume, model, attachmentsBeside(cfg.LogPath), !cfg.NoPromptSuggestions)
 	cmd := process.Command(argv[0], argv[1:]...)
 	process.Detach(cmd)
 	cmd.Dir = cfg.Dir
@@ -249,7 +252,7 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, mod
 // which claude reads prompt text. Claude refuses --session-id beside --resume,
 // so a resume drops the pinned id the agent command carries. A model chosen
 // with set_model replaces the command's --model, so a respawn keeps it.
-func claudeArgv(command []string, resume, model, attachDir string) []string {
+func claudeArgv(command []string, resume, model, attachDir string, suggestions bool) []string {
 	flags, rest := command, []string(nil)
 	if i := slices.Index(command, "--"); i >= 0 {
 		flags, rest = command[:i], command[i:]
@@ -271,6 +274,9 @@ func claudeArgv(command []string, resume, model, attachDir string) []string {
 		argv = append(argv, "--model", model)
 	}
 	argv = append(argv, protocolFlags...)
+	if suggestions {
+		argv = append(argv, "--prompt-suggestions")
+	}
 	if attachDir != "" {
 		argv = append(argv, "--add-dir", attachDir)
 	}
