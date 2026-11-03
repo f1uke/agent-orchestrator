@@ -636,6 +636,52 @@ describe("ProjectSettingsForm", () => {
 		expect(putMock.mock.calls[0][1].body.config.noIdleCompaction).toBeUndefined();
 	});
 
+	it("keeps prompt suggestions on by default, and saves turning them off as noPromptSuggestions", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "claude-code" }, orchestrator: { agent: "claude-code" }, env: { FOO: "bar" } },
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const toggle = await screen.findByRole("switch", { name: "Suggest my next message" });
+		expect(toggle).toBeChecked();
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.noPromptSuggestions).toBe(true);
+		expect(body.env).toEqual({ FOO: "bar" });
+	});
+
+	it("turns prompt suggestions back on by omitting noPromptSuggestions", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "claude-code" }, orchestrator: { agent: "claude-code" }, noPromptSuggestions: true },
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const toggle = await screen.findByRole("switch", { name: "Suggest my next message" });
+		expect(toggle).not.toBeChecked();
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		expect(putMock.mock.calls[0][1].body.config.noPromptSuggestions).toBeUndefined();
+	});
+
 	// One flag behind three effects (Browser tab, `ao preview` guidance, the
 	// `ao preview` command), so they can never be set to contradict each other.
 	it("turns the project's web UI on and saves it without dropping hidden config", async () => {
