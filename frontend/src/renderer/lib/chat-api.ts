@@ -25,6 +25,8 @@ export type ChatApi = {
 	setModel: (sessionId: string, model: string) => Promise<ChatResult>;
 	/** Saves a file where claude can read it; the answered path goes into the message. */
 	upload: (sessionId: string, file: File) => Promise<UploadResult>;
+	/** Ends a background task: a subagent or a background Bash. Resolves once claude has answered. */
+	stopTask: (sessionId: string, taskId: string) => Promise<ChatResult>;
 	/** The tail of a background task's output; null when the daemon has none for it. */
 	taskOutput: (sessionId: string, taskId: string) => Promise<TaskOutput | null>;
 };
@@ -74,6 +76,16 @@ async function upload(sessionId: string, file: File): Promise<UploadResult> {
 
 const path = (sessionId: string) => ({ params: { path: { sessionId } } });
 
+// The stop route is not in the generated schema yet. Replace this local type with the generated one, and drop
+// the cast, once api:ts has it.
+type StopTaskRoute = "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop";
+type StopTaskClient = {
+	POST: (
+		route: StopTaskRoute,
+		init: { params: { path: { sessionId: string; taskId: string } } },
+	) => Promise<{ error?: unknown; response: Response }>;
+};
+
 export const httpChatApi: ChatApi = {
 	send: (sessionId, text, images) =>
 		settle(
@@ -90,6 +102,12 @@ export const httpChatApi: ChatApi = {
 	setModel: (sessionId, model) =>
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/model", { ...path(sessionId), body: { model } })),
 	upload,
+	stopTask: (sessionId, taskId) =>
+		settle(
+			(apiClient as unknown as StopTaskClient).POST("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/stop", {
+				params: { path: { sessionId, taskId } },
+			}),
+		),
 	taskOutput: async (sessionId, taskId) => {
 		try {
 			const { data } = await apiClient.GET("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", {

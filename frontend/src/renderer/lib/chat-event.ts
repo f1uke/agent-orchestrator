@@ -101,6 +101,8 @@ export type ChatEvent =
 			type: "assistant";
 			messageId: string;
 			parentToolUseId: string;
+			/** The model that wrote the message, when it says. */
+			model: string;
 			blocks: Block[];
 			/** input + cache read + cache creation of message.usage: the context this response saw. */
 			contextTokens?: number;
@@ -318,6 +320,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				type: "assistant",
 				messageId: str(message.id),
 				parentToolUseId: str(line.parent_tool_use_id),
+				model: str(message.model),
 				blocks: decodeBlocks(message.content),
 				contextTokens: decodeMessageContext(message.usage),
 				error: str(line.error),

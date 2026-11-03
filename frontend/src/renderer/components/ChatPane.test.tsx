@@ -77,6 +77,7 @@ function fakeApi() {
 		interrupt: vi.fn<ChatApi["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
+		stopTask: vi.fn<ChatApi["stopTask"]>(async () => OK),
 		taskOutput: vi.fn<ChatApi["taskOutput"]>(async () => null),
 		upload: vi.fn<ChatApi["upload"]>(async (_id, file) => ({
 			ok: true,
@@ -1766,5 +1767,71 @@ describe("ChatPane image refs", () => {
 		);
 		await waitFor(() => expect(thumbs()).toHaveLength(1));
 		expect(resolveCalls(fetchMock)).toEqual([["shots/a.png"]]);
+	});
+});
+
+describe("ChatPane links into the Tasks tab", () => {
+	const background = (): ChatEntry[] => [
+		userIn("u1", "go"),
+		toolUse("agent", "Agent", { description: "Map callers", prompt: "p" }),
+		out({
+			type: "system",
+			subtype: "task_started",
+			task_id: "ta",
+			tool_use_id: "agent",
+			task_type: "local_agent",
+			is_backgrounded: true,
+			description: "Map callers",
+		}),
+		toolUse("bg", "Bash", { command: "./slow.sh", run_in_background: true }),
+		out({
+			type: "system",
+			subtype: "task_started",
+			task_id: "tb",
+			tool_use_id: "bg",
+			task_type: "local_bash",
+			is_backgrounded: true,
+			description: "slow",
+		}),
+		toolDone("bg", "Command running in background with ID: tb"),
+	];
+
+	it("opens the Tasks tab on the subagent when its Ran agent description is pressed", async () => {
+		const onOpenTasks = vi.fn();
+		const { feed, user } = renderPane("chat", fakeApi(), session, { onOpenTasks });
+		feed(...background());
+		const row = document.querySelector<HTMLElement>('[data-tool="Agent"]')!;
+		expect(row).toHaveTextContent("Running agent");
+		await user.click(within(row).getByRole("button", { name: "Map callers" }));
+		expect(onOpenTasks).toHaveBeenCalledWith("agent");
+	});
+
+	it("counts the running jobs once, and opens the list from the status line count", async () => {
+		const onOpenTasks = vi.fn();
+		const { feed, user } = renderPane("chat", fakeApi(), session, { onOpenTasks });
+		feed(...background());
+		const statusLine = document.querySelector(".chat-statusline") as HTMLElement;
+		const chip = within(statusLine).getByRole("button", { name: /running in background/ });
+		expect(chip).toHaveTextContent("2 running in background");
+		await user.click(chip);
+		expect(onOpenTasks).toHaveBeenCalledWith(null);
+	});
+
+	it("opens the list from the Waiting on row instead of unfolding it, and its count agrees with the chip", async () => {
+		const onOpenTasks = vi.fn();
+		const { feed, user } = renderPane("chat", fakeApi(), session, { onOpenTasks });
+		feed(
+			...background(),
+			saying("started both"),
+			out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0 }),
+		);
+		const waiting = document.querySelector<HTMLElement>("[data-waiting]")!;
+		expect(waiting).toHaveTextContent("Waiting on 2 background tasks");
+		await user.click(waiting.querySelector(".chat-group__head")!);
+		expect(onOpenTasks).toHaveBeenCalledWith(null);
+		expect(waiting.querySelector(".chat-group__body")).toBeNull();
+		expect(within(document.querySelector(".chat-statusline") as HTMLElement).getByRole("button")).toHaveTextContent(
+			"2 running",
+		);
 	});
 });

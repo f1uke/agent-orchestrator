@@ -1,8 +1,8 @@
 import { chapterOf, MARK_CHAPTER } from "./chat-chapters";
 import { type TurnDocs, turnDocs } from "./chat-docs";
-import { isObject, unfinished } from "./chat-event";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
 import type { StreamingBlock, StreamOverlay } from "./chat-stream";
+import { taskList } from "./chat-tasks";
 import { isSuggestion, SUGGEST_SESSION, SUGGEST_SKILL } from "./chat-suggest";
 import { SHOW_WIDGET, widgetOf } from "./chat-widget";
 import { WRAP_UP, wrapUpOf } from "./chat-wrapup";
@@ -201,18 +201,10 @@ function staysInView(row: ChatRow): boolean {
 function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow | undefined {
 	const last = rows.at(-1);
 	if (transcript.busy || !last || !isItem(last, "turn_end")) return undefined;
-	const running = transcript.tasks.filter((t) => unfinished(t.state) && t.background !== false);
-	if (running.length === 0) return undefined;
-	const calls = new Map(
-		transcript.items.flatMap((item) => (item.kind === "tool_call" ? [[item.id, item] as const] : [])),
+	const tasks = taskList(transcript).running.flatMap(({ task, command, startedTs }) =>
+		task ? [{ task, command, since: startedTs }] : [],
 	);
-	const tasks = running.map((task) => {
-		const call = calls.get(task.toolUseId);
-		const input = call && isObject(call.input) ? call.input : {};
-		const command = typeof input.command === "string" ? input.command : "";
-		return { task, command, since: task.startedTs || call?.startedTs || "" };
-	});
-	return { key: "waiting", kind: "waiting", tasks };
+	return tasks.length === 0 ? undefined : { key: "waiting", kind: "waiting", tasks };
 }
 
 function thinkingRow(transcript: Transcript, overlay: StreamOverlay, rows: readonly ChatRow[]): ChatRow | undefined {

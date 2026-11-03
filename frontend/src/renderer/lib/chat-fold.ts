@@ -165,6 +165,8 @@ export type Transcript = {
 	/** In use: the spawn's --model, then system/init or an accepted set_model. */
 	model: string;
 	tasks: BackgroundTask[];
+	/** The model each subagent's messages name, by the Agent call's tool_use id. */
+	agentModels: Record<string, string>;
 	/** The size of the context the latest top-level response saw, known before the turn's result. */
 	contextTokens?: number;
 	thinkingSince?: string;
@@ -252,6 +254,7 @@ export class ChatFolder {
 	private models: ChatModel[] = [];
 	private model = "";
 	private tasks = new Map<string, BackgroundTask>();
+	private agentModels: Record<string, string> = {};
 	private ts = "";
 	private pendingApiError: string | undefined;
 	private context: number | undefined;
@@ -320,6 +323,7 @@ export class ChatFolder {
 			models: [...this.models],
 			model: this.model,
 			tasks: [...this.tasks.values()],
+			agentModels: { ...this.agentModels },
 			contextTokens: this.context,
 			thinkingSince: this.thinkingSince,
 			contextBreakdown: this.breakdown,
@@ -346,6 +350,7 @@ export class ChatFolder {
 					this.pendingApiError = event.blocks.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
 					break;
 				}
+				if (event.parentToolUseId !== "" && event.model !== "") this.agentModels[event.parentToolUseId] = event.model;
 				this.applyAssistant(event.messageId, event.parentToolUseId, event.blocks);
 				if (event.parentToolUseId === "" && event.contextTokens !== undefined) this.context = event.contextTokens;
 				break;

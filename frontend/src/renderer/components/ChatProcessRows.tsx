@@ -4,6 +4,7 @@ import { unfinished } from "../lib/chat-event";
 import type { ChatRow, ProcessMember } from "../lib/chat-rows";
 import { formatDuration } from "../lib/chat-time";
 import {
+	isAgentCall,
 	isAgentTask,
 	liveVerb,
 	processSentence,
@@ -15,6 +16,7 @@ import {
 } from "../lib/chat-tools";
 import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
+import { useOpenTasks } from "./ChatTasks";
 import { TaskOutputView } from "./ChatTaskOutput";
 import { ResolvedLine, ToolCard } from "./ChatToolCard";
 
@@ -163,8 +165,12 @@ function Member({ member, openRows, toggleRow, theme, root }: MembersProps & { m
 export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow, { kind: "group" }> }) {
 	const open = rest.openRows[row.key] ?? false;
 	const { summary } = row;
-	const shown = open ? row.members : row.members.filter((m) => m.kind === "tool" && toolFailed(m.call, m.task));
 	const running = summary.live ? row.members.filter((m) => m.kind === "tool" && toolRunning(m.call)).at(-1) : undefined;
+	// A subagent still running is its own link into the Tasks tab, so it stays in view with the group shut.
+	const runningAgent = running?.kind === "tool" && isAgentCall(running.call) ? running : undefined;
+	const shown = open
+		? row.members
+		: row.members.filter((m) => m === runningAgent || (m.kind === "tool" && toolFailed(m.call, m.task)));
 	return (
 		<div className="chat-group" data-group data-live={summary.live ? "" : undefined}>
 			{summary.live ? (
@@ -185,7 +191,7 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 			{shown.length > 0 ? (
 				<div className="chat-group__body">
 					{shown.map((member) =>
-						member === running && member.kind === "tool" ? (
+						member === running && member.kind === "tool" && member !== runningAgent ? (
 							<div className="chat-group__running" key={member.key}>
 								{liveVerb(member.call)}
 							</div>
@@ -206,7 +212,8 @@ export function WaitingRow({
 	toggleRow,
 	root,
 }: Omit<MembersProps, "theme"> & { row: Extract<ChatRow, { kind: "waiting" }> }) {
-	const open = openRows[row.key] ?? false;
+	const openTasks = useOpenTasks();
+	const open = !openTasks && (openRows[row.key] ?? false);
 	const since = row.tasks
 		.map((t) => t.since)
 		.filter((ts) => ts !== "")
@@ -214,7 +221,7 @@ export function WaitingRow({
 	return (
 		<div className="chat-group" data-live="" data-waiting>
 			<LiveRow
-				onToggle={(next) => toggleRow(row.key, next)}
+				onToggle={(next) => (openTasks ? openTasks(null) : toggleRow(row.key, next))}
 				open={open}
 				since={since}
 				verb={waitingVerb(row.tasks.map((t) => t.task))}

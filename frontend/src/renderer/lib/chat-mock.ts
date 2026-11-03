@@ -1,6 +1,6 @@
 import type { AnswerBody } from "./chat-answers";
 import type { ChatApi, ChatResult } from "./chat-api";
-import { type ChatEntry, type Direction, isObject } from "./chat-event";
+import { type ChatEntry, type Direction, isObject, unfinished } from "./chat-event";
 import { ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
@@ -9,6 +9,7 @@ import { MOCK_SUGGEST_CHAT_SESSION, suggestEntries } from "./chat-mock-suggest";
 import { docsEntries, MOCK_DOCS_CHAT_SESSION } from "./chat-mock-docs";
 import { errorEntries, MOCK_ERRORS_CHAT_SESSION } from "./chat-mock-errors";
 import { MOCK_REFS_CHAT_SESSION, refsEntries } from "./chat-mock-refs";
+import { MOCK_TASKS_CHAT_SESSION, TASKS_SOAK_TASK, tasksEntries } from "./chat-mock-tasks";
 import { MOCK_WIDGETS_CHAT_SESSION, widgetEntries } from "./chat-mock-widgets";
 import type { ChatMux, ChatMuxListeners } from "./chat-mux";
 import type { MuxConnectionState } from "./terminal-mux";
@@ -905,9 +906,11 @@ function stubSession(id: string): Promise<StubSession> {
 															? docsEntries()
 															: id === MOCK_ERRORS_CHAT_SESSION
 																? errorEntries()
-																: long
-																	? fixture
-																	: mockChatEntries(fixture);
+																: id === MOCK_TASKS_CHAT_SESSION
+																	? tasksEntries()
+																	: long
+																		? fixture
+																		: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -1017,10 +1020,39 @@ export const stubChatApi: ChatApi = {
 		ok: true,
 		file: { path: `/preview/attachments/${file.name || "pasted file"}`, name: file.name, size: file.size },
 	}),
+	stopTask: async (id, taskId) => {
+		const session = await stubSession(id);
+		const task = session.folder.transcript().tasks.find((t) => t.id === taskId);
+		if (!task || !unfinished(task.state)) {
+			return { ok: false, error: { kind: "rejected", message: `task ${taskId} is not running` } };
+		}
+		append(id, session, [
+			[
+				"out",
+				{ type: "system", subtype: "task_updated", task_id: taskId, patch: { status: "killed" }, session_id: SESSION },
+			],
+			[
+				"out",
+				{
+					type: "system",
+					subtype: "task_notification",
+					task_id: taskId,
+					tool_use_id: task.toolUseId,
+					status: "stopped",
+					summary: "Stopped by the user",
+					session_id: SESSION,
+				},
+			],
+		]);
+		return OK;
+	},
 	taskOutput: async (id, taskId) => {
 		const session = await stubSession(id);
 		const task = session.folder.transcript().tasks.find((t) => t.id === taskId);
-		if (id !== MOCK_LIVE_CHAT_SESSION || taskId !== "live-soak" || !task?.startedTs) return null;
+		const known =
+			(id === MOCK_LIVE_CHAT_SESSION && taskId === "live-soak") ||
+			(id === MOCK_TASKS_CHAT_SESSION && taskId === TASKS_SOAK_TASK);
+		if (!known || !task?.startedTs) return null;
 		const text = soakOutput(Math.floor((Date.now() - Date.parse(task.startedTs)) / SOAK_RUN_MS));
 		return { text, size: text.length, truncated: false, modifiedAt: new Date().toISOString() };
 	},

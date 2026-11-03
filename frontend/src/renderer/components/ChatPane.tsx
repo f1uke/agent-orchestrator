@@ -14,14 +14,14 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, use
 import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
-import { unfinished } from "../lib/chat-event";
 import type { ChatApi } from "../lib/chat-api";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
 import { noticeText } from "../lib/chat-notice";
 import type { TurnError } from "../lib/chat-turn-error";
 import type { FileDoc, TurnDocs } from "../lib/chat-docs";
 import { clockTime, formatDuration } from "../lib/chat-time";
-import { contextUsage, formatCost, formatTokens, sessionActivity, shownTodos } from "../lib/chat-inspect";
+import { contextUsage, formatCost, formatTokens, shownTodos } from "../lib/chat-inspect";
+import { taskList } from "../lib/chat-tasks";
 import { newestUsage } from "../lib/chat-usage";
 import { useChatUsage } from "../hooks/useChatUsage";
 import { activeTurnIndex, railTurns } from "../lib/chat-rail";
@@ -67,6 +67,7 @@ import { ChatTurnRail } from "./ChatTurnRail";
 import { OrchestratorIcon } from "./icons";
 import { NoteMarkdown } from "./NoteMarkdown";
 import { ChatDocsProvider, ChatDocStrip, SessionDocsReporter } from "./ChatDocs";
+import { ChatTasksProvider, type OpenTasks } from "./ChatTasks";
 import { ChatRefsProvider, RefImages } from "./RefImages";
 
 export type ChatPaneView = "chat" | "trajectory";
@@ -83,6 +84,8 @@ type ChatPaneProps = {
 	openDoc?: FileDoc | null;
 	/** The session's documents, newest first, each time the list changes: the Document tab lists them. */
 	onDocs?: (docs: FileDoc[]) => void;
+	/** Opens the inspector's Tasks tab: on one job, or on the list when given null. Absent, nothing links there. */
+	onOpenTasks?: OpenTasks;
 };
 
 type RequestStates = Readonly<Record<string, RequestState>>;
@@ -117,6 +120,7 @@ export function ChatPane({
 	onOpenDoc,
 	openDoc,
 	onDocs,
+	onOpenTasks,
 }: ChatPaneProps) {
 	const own = useChatSession(given ? undefined : session.id, {
 		daemonReady,
@@ -139,10 +143,7 @@ export function ChatPane({
 	const root = session.workspacePath ?? "";
 	const rows = useMemo(() => chatRows(transcript, chat.overlay, queuedIds), [transcript, chat.overlay, queuedIds]);
 	const turnDocs = useMemo(() => rows.flatMap((row) => (row.kind === "item" && row.docs ? [row.docs] : [])), [rows]);
-	const runningInBackground = useMemo(
-		() => sessionActivity(transcript).filter((a) => unfinished(a.state)).length,
-		[transcript],
-	);
+	const runningInBackground = useMemo(() => taskList(transcript).running.length, [transcript]);
 	const todos = useMemo(() => shownTodos(transcript), [transcript]);
 	const fallbackContext = useMemo(() => contextUsage(transcript), [transcript]);
 	const sharedUsage = useChatUsage(view === "chat" && daemonReady);
@@ -195,78 +196,87 @@ export function ChatPane({
 		<ChatRefsProvider sessionId={session.id}>
 			<TaskOutputProvider read={actions.taskOutput}>
 				<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
-					<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
-					<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-						{view === "trajectory" ? (
-							<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
-						) : (
-							<ChatStream
-								disabled={actions.hostDown}
-								replaying={chat.replaying}
-								onAnswer={onAnswer}
-								onNewSession={setSuggested}
-								onPrompt={onPrompt}
-								pending={transcript.pending}
-								requests={requests}
-								root={root}
-								rows={rows}
-								theme={theme}
-							/>
-						)}
-						<div className="chat-bottom">
-							{actions.hostDown ? (
-								<div className="chat-banner" role="alert">
-									<CloudOff className="chat-icon" aria-hidden="true" />
-									Session is asleep or restarting. Sending and answering resume once it is back.
+					<ChatTasksProvider onOpen={onOpenTasks}>
+						<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
+						<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
+							{view === "trajectory" ? (
+								<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
+							) : (
+								<ChatStream
+									disabled={actions.hostDown}
+									replaying={chat.replaying}
+									onAnswer={onAnswer}
+									onNewSession={setSuggested}
+									onPrompt={onPrompt}
+									pending={transcript.pending}
+									requests={requests}
+									root={root}
+									rows={rows}
+									theme={theme}
+								/>
+							)}
+							<div className="chat-bottom">
+								{actions.hostDown ? (
+									<div className="chat-banner" role="alert">
+										<CloudOff className="chat-icon" aria-hidden="true" />
+										Session is asleep or restarting. Sending and answering resume once it is back.
+									</div>
+								) : null}
+								{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
+								{view === "chat" ? (
+									<ChatComposer
+										actions={actions}
+										busy={transcript.busy}
+										commands={transcript.commands}
+										model={transcript.model}
+										models={transcript.models}
+										onToast={showToast}
+										permissionMode={transcript.permissionMode}
+										prefill={prefill}
+										queued={queued}
+										sessionId={session.id}
+									/>
+								) : null}
+								<div className="chat-statusline">
+									<ConnectionLabel connection={chat.connection} error={chat.error} />
+									{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+									{runningInBackground > 0 ? (
+										onOpenTasks ? (
+											<button className="chat-statusline__tasks" onClick={() => onOpenTasks(null)} type="button">
+												<span className="chat-statusline__dot chat-statusline__dot--live" />
+												{runningInBackground} running in background
+											</button>
+										) : (
+											<span>
+												<span className="chat-statusline__dot chat-statusline__dot--live" />
+												{runningInBackground} running in background
+											</span>
+										)
+									) : null}
+									<span className="chat-statusline__grow" />
+									{view === "chat" ? (
+										<>
+											<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+											<UsageMeter usage={usage} />
+											<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+										</>
+									) : null}
 								</div>
-							) : null}
-							{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
-							{view === "chat" ? (
-								<ChatComposer
-									actions={actions}
-									busy={transcript.busy}
-									commands={transcript.commands}
-									model={transcript.model}
-									models={transcript.models}
-									onToast={showToast}
-									permissionMode={transcript.permissionMode}
-									prefill={prefill}
-									queued={queued}
-									sessionId={session.id}
+							</div>
+							{suggested ? (
+								<SuggestedSessionDialog
+									onClose={() => setSuggested(undefined)}
+									projectId={session.workspaceId}
+									suggestion={suggested}
 								/>
 							) : null}
-							<div className="chat-statusline">
-								<ConnectionLabel connection={chat.connection} error={chat.error} />
-								{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
-								{runningInBackground > 0 ? (
-									<span>
-										<span className="chat-statusline__dot chat-statusline__dot--live" />
-										{runningInBackground} running in background
-									</span>
-								) : null}
-								<span className="chat-statusline__grow" />
-								{view === "chat" ? (
-									<>
-										<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
-										<UsageMeter usage={usage} />
-										<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
-									</>
-								) : null}
-							</div>
+							{toast ? (
+								<div className="chat-toast" role="status">
+									{toast}
+								</div>
+							) : null}
 						</div>
-						{suggested ? (
-							<SuggestedSessionDialog
-								onClose={() => setSuggested(undefined)}
-								projectId={session.workspaceId}
-								suggestion={suggested}
-							/>
-						) : null}
-						{toast ? (
-							<div className="chat-toast" role="status">
-								{toast}
-							</div>
-						) : null}
-					</div>
+					</ChatTasksProvider>
 				</ChatDocsProvider>
 			</TaskOutputProvider>
 		</ChatRefsProvider>
@@ -647,9 +657,9 @@ function ChatStream({
 	);
 }
 
-type CardAnswers = { requests: RequestStates; disabled: boolean; onAnswer: AnswerHandler };
+export type CardAnswers = { requests: RequestStates; disabled: boolean; onAnswer: AnswerHandler };
 
-type RowProps = {
+export type RowProps = {
 	row: ChatRow;
 	answers: CardAnswers;
 	theme: Theme;
@@ -677,7 +687,7 @@ function RequestCard({ request, theme, answers }: { request: Pending; theme: The
 	);
 }
 
-const ChatRowView = memo(function ChatRowView(props: RowProps) {
+export const ChatRowView = memo(function ChatRowView(props: RowProps) {
 	const { row, answers, theme, openRows, toggleRow, pendingByRequest, root } = props;
 	switch (row.kind) {
 		case "pending":
@@ -1056,6 +1066,42 @@ function PeerMessage({
 				<NoteMarkdown source={body} theme={theme} />
 			</div>
 			<RefImages source={body} />
+		</div>
+	);
+}
+
+const NO_ANSWERS: CardAnswers = { requests: {}, disabled: true, onAnswer: () => undefined };
+const NO_PENDING: ReadonlyMap<string, Pending> = new Map();
+const NO_NAMES: ReadonlyMap<string, string> = new Map();
+const NO_SUGGESTIONS: LiveSuggestions = {};
+const NO_PROMPT = () => undefined;
+
+/**
+ * Rows drawn with the main chat's own components and nothing to act on: no answers, no prompt, no new session.
+ * The subagent view reads its conversation through this.
+ */
+export function ReadOnlyRows({ rows, root, theme }: { rows: readonly ChatRow[]; root: string; theme: Theme }) {
+	const [openRows, setOpenRows] = useState<OpenRows>({});
+	const toggleRow = useCallback<ToggleRow>((key, open) => setOpenRows((prev) => ({ ...prev, [key]: open })), []);
+	return (
+		<div className="chat-readonly">
+			{rows.map((row) => (
+				<div className="chat-readonly__row" data-row={row.kind === "item" ? row.item.kind : row.kind} key={row.key}>
+					<ChatRowView
+						answers={NO_ANSWERS}
+						liveSuggest={NO_SUGGESTIONS}
+						onNewSession={NO_PROMPT}
+						onPrompt={NO_PROMPT}
+						openRows={openRows}
+						pendingByRequest={NO_PENDING}
+						root={root}
+						row={row}
+						sessionNames={NO_NAMES}
+						theme={theme}
+						toggleRow={toggleRow}
+					/>
+				</div>
+			))}
 		</div>
 	);
 }

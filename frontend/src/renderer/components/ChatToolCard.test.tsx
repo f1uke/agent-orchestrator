@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundTask, Pending, PermissionOutcome, ToolCallItem } from "../lib/chat-fold";
 import { file, image, stubChatFiles } from "../test/chat-files-stub";
 import { ChatDocsProvider } from "./ChatDocs";
+import { ChatTasksProvider } from "./ChatTasks";
 import { ChatRefsProvider } from "./RefImages";
 import { PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 
@@ -115,13 +116,15 @@ describe("ToolCard", () => {
 		expect(head).toHaveTextContent(summary);
 	});
 
-	it("sums up an Agent call with the tool calls its subagent made", () => {
-		const { head } = card(
-			call("Agent", { subagent_type: "Explore", description: "find callers" }, { isError: false, content: "3" }),
-			{ subagentTools: 9 },
-		);
-		expect(head).toHaveTextContent('Explore · "find callers"');
-		expect(head).toHaveTextContent("done · 9 tool uses");
+	it("reads an Agent call as `Ran agent <description>` with the tool calls its subagent made", () => {
+		card(call("Agent", { subagent_type: "Explore", description: "find callers" }, { isError: false, content: "3" }), {
+			subagentTools: 9,
+		});
+		const row = document.querySelector<HTMLElement>('[data-tool="Agent"]')!;
+		expect(row).toHaveTextContent("Ran agent");
+		expect(row).toHaveTextContent("find callers");
+		expect(row).toHaveTextContent("done · 9 tool uses");
+		expect(row.querySelector(".chat-tool__head")).toBeNull();
 	});
 
 	it("shortens the worktree root out of the head and the command", () => {
@@ -147,24 +150,40 @@ describe("ToolCard", () => {
 		expect(done.head).toHaveTextContent("done · exit 0");
 	});
 
-	it("keeps an Agent running until its task ends, then shows the task's final text", () => {
+	it("keeps an Agent running, with a live dot, until its task ends", () => {
 		const agent = call(
 			"Agent",
 			{ subagent_type: "Explore", description: "docs" },
 			{ isError: false, content: "Async agent launched successfully." },
 		);
 		const base = { id: "t", toolUseId: agent.id, description: "", taskType: "local_agent" };
-		const running = card(agent, { task: { ...base, state: "running" } });
-		expect(running.head).toHaveTextContent("running");
+		card(agent, { task: { ...base, state: "running" } });
+		const running = document.querySelector<HTMLElement>('[data-tool="Agent"]')!;
+		expect(running).toHaveTextContent("Running agent");
+		expect(running).toHaveAttribute("data-running");
+		expect(running.querySelector(".chat-agent__dot")).not.toBeNull();
 		cleanup();
-		const done = card(agent, {
-			open: true,
-			subagentTools: 2,
-			task: { ...base, state: "done", summary: "Two short files." },
-		});
-		expect(done.head).toHaveTextContent("done · 2 tool uses");
-		expect(screen.getByText("Two short files.")).toBeInTheDocument();
-		expect(screen.queryByText(/Async agent launched/)).toBeNull();
+		card(agent, { subagentTools: 2, task: { ...base, state: "done", summary: "Two short files." } });
+		const done = document.querySelector<HTMLElement>('[data-tool="Agent"]')!;
+		expect(done).toHaveTextContent("Ran agent");
+		expect(done).toHaveTextContent("done · 2 tool uses");
+		expect(done).not.toHaveAttribute("data-running");
+	});
+
+	it("opens the Tasks tab on the agent's own call when its description is pressed, and is plain text without one", async () => {
+		const agent = call("Agent", { description: "Map callers" }, { isError: false, content: "ok" });
+		const open = vi.fn();
+		render(
+			<ChatTasksProvider onOpen={open}>
+				<ToolCard call={agent} onToggle={vi.fn()} open={undefined} root="" subagentTools={0} theme="dark" />
+			</ChatTasksProvider>,
+		);
+		await userEvent.click(screen.getByRole("button", { name: "Map callers" }));
+		expect(open).toHaveBeenCalledWith(agent.id);
+		cleanup();
+		card(agent);
+		expect(screen.queryByRole("button", { name: "Map callers" })).toBeNull();
+		expect(screen.getByText("Map callers")).toBeInTheDocument();
 	});
 
 	it("shows any other tool as a generic card with its JSON input", () => {

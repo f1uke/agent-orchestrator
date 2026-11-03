@@ -42,6 +42,7 @@ import {
 	describeSettled,
 	describeSuggestions,
 	describeTool,
+	isAgentCall,
 	parsePlan,
 	parseQuestions,
 } from "../lib/chat-tools";
@@ -49,6 +50,7 @@ import { cn } from "../lib/utils";
 import type { Theme } from "../stores/ui-store";
 import { CodeBox } from "./ChatCodeBox";
 import { useDocOf } from "./ChatDocs";
+import { useOpenTasks } from "./ChatTasks";
 import { ChatImages, READ_THUMB } from "./ChatImages";
 import { CopyButton } from "./CopyButton";
 import { NoteMarkdown } from "./NoteMarkdown";
@@ -178,15 +180,7 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 	}
 }
 
-export function ToolCard({
-	call,
-	subagentTools,
-	task,
-	root,
-	open,
-	onToggle,
-	theme,
-}: {
+type ToolCardProps = {
 	call: ToolCallItem;
 	subagentTools: number;
 	task?: BackgroundTask;
@@ -194,7 +188,48 @@ export function ToolCard({
 	open: boolean | undefined;
 	onToggle: (open: boolean) => void;
 	theme: Theme;
-}) {
+};
+
+export function ToolCard(props: ToolCardProps) {
+	return isAgentCall(props.call) ? (
+		<AgentRow call={props.call} root={props.root} subagentTools={props.subagentTools} task={props.task} />
+	) : (
+		<PlainToolCard {...props} />
+	);
+}
+
+/** A subagent's call is one line, `Ran agent <description>`; the description opens the subagent in the Tasks tab. */
+function AgentRow({
+	call,
+	subagentTools,
+	task,
+	root,
+}: Pick<ToolCardProps, "call" | "subagentTools" | "task" | "root">) {
+	const openTasks = useOpenTasks();
+	const view = describeTool(call, { root, subagentTools, task });
+	const input = isObject(call.input) ? call.input : {};
+	const running = view.status.tone === "running";
+	const label =
+		(typeof input.description === "string" && input.description) ||
+		(typeof input.subagent_type === "string" && input.subagent_type) ||
+		"agent";
+	return (
+		<div className="chat-agent" data-running={running ? "" : undefined} data-tool={call.name}>
+			{running ? <span aria-hidden="true" className="chat-agent__dot" /> : null}
+			<span className="chat-agent__verb">{running ? "Running agent" : "Ran agent"}</span>
+			{openTasks ? (
+				<button className="chat-agent__link" onClick={() => openTasks(call.id)} type="button">
+					{label}
+				</button>
+			) : (
+				<span className="chat-agent__name">{label}</span>
+			)}
+			{running ? null : <Status view={view} />}
+		</div>
+	);
+}
+
+function PlainToolCard({ call, subagentTools, task, root, open, onToggle, theme }: ToolCardProps) {
 	const view = describeTool(call, { root, subagentTools, task });
 	const isOpen = open ?? false;
 	const Icon = FAMILY_ICON[view.family];
