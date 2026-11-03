@@ -77,17 +77,38 @@ for (const viewport of VIEWPORTS) {
 			await expect(row).toHaveAttribute("data-flash", "");
 			await expect(row).toBeInViewport();
 
+			// Every painted frame after the click counts, not only the settled one. A requestAnimationFrame
+			// callback runs before the frame's layout and resize observers, so each sample is a task queued
+			// from it, which runs after that frame paints.
+			await page.evaluate(() => {
+				const w = window as unknown as { __overlapFrames: number; __watch: boolean };
+				w.__overlapFrames = 0;
+				w.__watch = true;
+				const sample = () => {
+					const boxes = [...document.querySelectorAll(".chat-traj__item")]
+						.map((el) => el.getBoundingClientRect())
+						.sort((a, b) => a.top - b.top);
+					if (boxes.some((box, i) => i > 0 && box.top < boxes[i - 1].bottom - 1)) w.__overlapFrames++;
+				};
+				const tick = () => {
+					if (!w.__watch) return;
+					setTimeout(sample, 0);
+					requestAnimationFrame(tick);
+				};
+				requestAnimationFrame(tick);
+			});
 			await row.locator(".chat-traj__head").click();
 			const detail = row.getByTestId("chat-trajectory-detail");
 			await expect(detail.locator('[data-section="input"]')).toBeVisible();
 			await row.getByRole("button", { name: "Raw events" }).click();
 			await expect(row.getByTestId("chat-trajectory-raw")).toBeVisible();
-			const overlaps = () =>
-				trajectory.locator(".chat-traj__item").evaluateAll((els) => {
-					const boxes = els.map((el) => el.getBoundingClientRect()).sort((a, b) => a.top - b.top);
-					return boxes.filter((box, i) => i > 0 && box.top < boxes[i - 1].bottom - 1).length;
-				});
-			await expect.poll(overlaps).toBe(0);
+			await page.waitForTimeout(300);
+			const overlapFrames = await page.evaluate(() => {
+				const w = window as unknown as { __overlapFrames: number; __watch: boolean };
+				w.__watch = false;
+				return w.__overlapFrames;
+			});
+			expect(overlapFrames, "frames painting a row over the next").toBe(0);
 			await shot("row-open");
 
 			await page.getByRole("button", { name: "Turns", exact: true }).click();
