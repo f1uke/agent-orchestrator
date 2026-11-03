@@ -9,11 +9,14 @@ for (const viewport of VIEWPORTS) {
 	test.describe(`background command output at ${viewport.width}x${viewport.height}`, () => {
 		test.use({ viewport, colorScheme: "dark" });
 
-		test("the waiting row opens to the soak test's output, which grows while it runs", async ({ page }, info) => {
+		test("the waiting row opens the Tasks tab, and the soak test's output there grows while it runs", async ({
+			page,
+		}, info) => {
 			await page.goto("/#/projects/ao-demo/sessions/demo-chat-live");
-			const waiting = page.locator("[data-waiting]");
-			await waiting.locator(".chat-live-row").click({ timeout: 20_000 });
-			const output = waiting.locator("[data-task-output='live-soak']");
+			await page.locator("[data-waiting] .chat-live-row").click({ timeout: 20_000 });
+			const panel = page.getByTestId("tasks-panel");
+			await panel.getByRole("button", { name: /^Run the soak test/ }).click();
+			const output = panel.locator("[data-task-output='live-soak']");
 			await expect(output).toContainText("--- PASS: TestSenderSoak");
 			const runs = async () => ((await output.textContent()) ?? "").split("--- PASS").length - 1;
 			const first = await runs();
