@@ -74,9 +74,28 @@ const started = (taskId: string, toolUseId: string, description: string, taskTyp
 	},
 ];
 
+const MODELS = [
+	{
+		value: "sonnet",
+		resolvedModel: SUB_MODEL,
+		displayName: "Sonnet 5",
+		description: "Fast and capable",
+		supportsEffort: true,
+		supportedEffortLevels: ["low", "medium", "high"],
+	},
+];
+
 export function tasksEntries(): ChatEntry[] {
 	const steps: Step[] = [
 		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],
+		["in", { type: "control_request", request_id: "tasks-init", request: { subtype: "initialize" } }],
+		[
+			"out",
+			{
+				type: "control_response",
+				response: { subtype: "success", request_id: "tasks-init", response: { commands: [], models: MODELS } },
+			},
+		],
 		asked("tk-1", "Audit the webhook retry paths, run the soak test, and map the sender callers."),
 		lifecycle("tk-1", "started"),
 		say("msg_k1", "I'll map the callers first, then audit the retry paths and run the soak test in the background."),

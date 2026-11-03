@@ -144,6 +144,8 @@ export function liveVerb(call: ToolCallItem): string {
 	return say ? say(isObject(call.input) ? call.input : {}) : `Running ${call.name}`;
 }
 
+export const isAgentCall = (call: ToolCallItem) => call.name === "Agent" || call.name === "Task";
+
 export const isAgentTask = (task: BackgroundTask) => task.taskType.includes("agent");
 
 export function waitingVerb(tasks: readonly BackgroundTask[]): string {

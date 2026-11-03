@@ -21,6 +21,9 @@ import type { SessionActivityState, SessionTermination, WorkspaceSession } from 
 import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonLabel } from "../types/workspace";
 import { BrowserPanelView } from "./BrowserPanel";
 import { DocumentPanel } from "./DocumentPanel";
+import { TasksPanel } from "./TasksPanel";
+import type { ChatSessionState } from "../hooks/useChatSession";
+import type { Theme } from "../stores/ui-store";
 import type { FileDoc } from "../lib/chat-docs";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
@@ -37,7 +40,8 @@ import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "files" | "document" | "testiny" | "browser" | "simulator";
+export type InspectorView =
+	"summary" | "reviews" | "files" | "document" | "tasks" | "testiny" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -81,6 +85,16 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
 				<rect x="4" y="3" width="16" height="18" rx="2" />
 				<path d="M8 8h8M8 12h8M8 16h5" />
+			</svg>
+		),
+	},
+	{
+		id: "tasks",
+		label: "Tasks",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<rect x="4" y="4" width="16" height="16" rx="3" />
+				<rect x="9" y="9" width="6" height="6" rx="1" />
 			</svg>
 		),
 	},
@@ -129,7 +143,7 @@ const prStateTone: Record<SessionPRSummary["state"], string> = {
 };
 
 /**
- * Tabbed inspector rail beside the terminal (Summary · Reviews · Files · Document · Testiny · Device · Browser).
+ * Tabbed inspector rail beside the terminal (Summary · Reviews · Files · Document · Tasks · Testiny · Device · Browser).
  */
 export function SessionInspector({
 	session,
@@ -145,6 +159,8 @@ export function SessionInspector({
 	sessionDocs,
 	onOpenDoc,
 	onCloseDoc,
+	chat,
+	theme,
 	view: viewProp,
 	onViewChange,
 	onOpenFile,
@@ -186,6 +202,9 @@ export function SessionInspector({
 	onCloseDoc?: () => void;
 	sessionDocs?: readonly FileDoc[];
 	onOpenDoc?: (doc: FileDoc) => void;
+	/** The chat session behind a chat worker, for the Tasks tab. */
+	chat?: ChatSessionState;
+	theme?: Theme;
 	/** Controlled active tab. Omit to let the inspector own its own selection. */
 	view?: InspectorView;
 	onViewChange?: (view: InspectorView) => void;
@@ -221,11 +240,14 @@ export function SessionInspector({
 	const showFiles = session?.kind !== "orchestrator";
 	// Documents come from chat cards, so a terminal session has nothing to put in the tab.
 	const showDocument = session?.transport === "chat";
+	// Background tasks are claude's, so a terminal session has none to list.
+	const showTasks = session?.transport === "chat";
 	// A project with no web UI has nothing to preview, so the Browser tab is not
 	// offered at all — an always-empty tab is worse than one tab fewer.
 	const views = VIEWS.filter((v) => {
 		if (v.id === "files") return showFiles;
 		if (v.id === "document") return showDocument;
+		if (v.id === "tasks") return showTasks;
 		if (v.id === "browser") return hasWebUI;
 		if (v.id === "simulator") return hasIOSSimulator;
 		if (v.id === "testiny") return usesTestiny;
@@ -288,6 +310,7 @@ export function SessionInspector({
 					// list scrolling beneath), so it renders flush too.
 					view === "files" && "session-inspector__body--files",
 					view === "document" && "session-inspector__body--document",
+					view === "tasks" && "session-inspector__body--tasks",
 					// The Simulator tab owns its own full-height layout (picker,
 					// screen, controls), so it renders flush.
 					view === "simulator" && "session-inspector__body--simulator",
@@ -326,6 +349,9 @@ export function SessionInspector({
 						onOpen={onOpenDoc}
 						sessionId={session.id}
 					/>
+				) : null}
+				{view === "tasks" && showTasks ? (
+					<TasksPanel chat={chat} root={session.workspacePath ?? ""} sessionId={session.id} theme={theme ?? "dark"} />
 				) : null}
 				{view === "testiny" && usesTestiny ? <TestinyView key={taskKeyOf(session)} session={session} /> : null}
 				{/* The Simulator panel stays mounted while its tab is off so the chosen
