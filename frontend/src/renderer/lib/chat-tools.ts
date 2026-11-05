@@ -354,7 +354,7 @@ const CHROME_ACTIONS: Record<string, { title: string; arg?: (input: Input) => st
 	browser_batch: { title: "Browser actions" },
 };
 
-/** The `computer` tool's actions: one card title each, and the input that says where or what. */
+/** A card title for each action of Claude in Chrome's `computer` tool. */
 const COMPUTER_ACTIONS: Record<string, string> = {
 	screenshot: "Screenshot",
 	left_click: "Click",

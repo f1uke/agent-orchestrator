@@ -63,7 +63,6 @@ type ComposerProps = {
 	models: readonly ChatModel[];
 	model: string;
 	remoteControl: RemoteControl;
-	/** Claude in Chrome is on for this session. */
 	chrome: boolean;
 	/** Claude's guess at the next message; shown as ghost text while the box is empty and the session idle. */
 	suggestion: string;
