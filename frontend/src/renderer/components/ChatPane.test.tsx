@@ -296,12 +296,18 @@ describe("ChatPane", () => {
 		);
 		const streaming = document.querySelector("[data-streaming]")!;
 		expect(streaming).not.toHaveTextContent("**");
-		delta(
-			{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "budget** works.\n\n| Attempt | Ceiling |\n" } },
-		);
+		delta({
+			type: "content_block_delta",
+			index: 0,
+			delta: { type: "text_delta", text: "budget** works.\n\n| Attempt | Ceiling |\n" },
+		});
 		expect(streaming.querySelector("strong")).toHaveTextContent("retry budget");
 		expect(streaming).not.toHaveTextContent("|");
-		delta({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "| ---: | ---: |\n| 1 | 200ms |" } });
+		delta({
+			type: "content_block_delta",
+			index: 0,
+			delta: { type: "text_delta", text: "| ---: | ---: |\n| 1 | 200ms |" },
+		});
 		expect(streaming.querySelector("table")).not.toBeNull();
 	});
 
