@@ -27,6 +27,7 @@ import { newestUsage } from "../lib/chat-usage";
 import { useChatUsage } from "../hooks/useChatUsage";
 import { activeTurnIndex, railTurns } from "../lib/chat-rail";
 import { type ChatRow, chatRows } from "../lib/chat-rows";
+import { settledPrefix } from "../lib/chat-stream-tail";
 import type { ChatMux } from "../lib/chat-mux";
 import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
@@ -721,7 +722,7 @@ export const ChatRowView = memo(function ChatRowView(props: RowProps) {
 				<ThinkingRow onToggle={(open) => toggleRow(row.key, open)} open={openRows[row.key]} text={row.block.text} />
 			) : (
 				<div className="note-prose chat-md" data-streaming>
-					<NoteMarkdown source={row.block.text} theme={theme} />
+					<NoteMarkdown source={settledPrefix(row.block.text)} theme={theme} />
 					{row.caret ? (
 						<span className="chat-caret">
 							<LiveDots />
