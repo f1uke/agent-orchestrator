@@ -289,7 +289,7 @@ describe("ChatPane", () => {
 		);
 		const streaming = document.querySelector("[data-streaming]")!;
 		expect(streaming).toHaveTextContent("Hello, world");
-		expect(streaming.querySelector(".chat-caret")).not.toBeNull();
+		expect(streaming.querySelector(".chat-caret .chat-dots")).not.toBeNull();
 
 		feed(out({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "Hello, world" }] } }));
 		expect(document.querySelector("[data-streaming]")).toBeNull();
@@ -907,6 +907,8 @@ describe("ChatPane calm view", () => {
 		const head = document.querySelector("[data-turn] .chat-group__head")!;
 		expect(head).toHaveTextContent(/^Worked for 36s · 1 failed$/);
 		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
+		expect(document.querySelector('[data-notice="turn_end"]')).toBeNull();
+		expect(rowOf("turn_end")[0].querySelector("[data-answer-bar]")).not.toBeNull();
 	});
 
 	describe("documents of a turn", () => {
