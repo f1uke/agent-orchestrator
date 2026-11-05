@@ -24,8 +24,7 @@ export type ChatRow =
 			task?: BackgroundTask;
 			reply?: string;
 			docs?: TurnDocs;
-			// The turn's "Worked for" row already says how long it took.
-			timed?: true;
+			durationShownAbove?: true;
 	  }
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
@@ -156,7 +155,7 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 		const pieces = foldSegments(row.key, between, ended.item.durationMs);
 		if (!pieces) continue;
 		out.push(...pieces);
-		if (ended.item.durationMs !== undefined && !between.some(isChapter)) rows[end] = { ...ended, timed: true };
+		if (ended.item.durationMs !== undefined && !between.some(isChapter)) rows[end] = { ...ended, durationShownAbove: true };
 		i = last - 1;
 	}
 	return out;

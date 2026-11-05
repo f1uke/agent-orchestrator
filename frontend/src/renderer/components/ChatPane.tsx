@@ -735,7 +735,7 @@ export const ChatRowView = memo(function ChatRowView(props: RowProps) {
 					pendingByRequest={pendingByRequest}
 					docs={row.docs}
 					reply={row.reply}
-					timed={row.timed}
+					durationShownAbove={row.durationShownAbove}
 					root={root}
 					rowKey={row.key}
 					sessionNames={props.sessionNames}
@@ -756,7 +756,7 @@ function ItemRow({
 	task,
 	reply,
 	docs,
-	timed,
+	durationShownAbove,
 	theme,
 	root,
 	openRows,
@@ -774,7 +774,7 @@ function ItemRow({
 	task?: BackgroundTask;
 	reply?: string;
 	docs?: TurnDocs;
-	timed?: true;
+	durationShownAbove?: true;
 }) {
 	switch (item.kind) {
 		case "user":
@@ -848,7 +848,7 @@ function ItemRow({
 				<>
 					{reply !== undefined ? <AnswerBar end={item} reply={reply} /> : null}
 					{docs ? <ChatDocStrip docs={docs} /> : null}
-					{timed ? null : (
+					{durationShownAbove ? null : (
 						<div
 							className={cn(
 								"chat-sys",
