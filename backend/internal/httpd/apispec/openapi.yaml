@@ -3708,6 +3708,63 @@ paths:
         for an unknown session, a name that is not a blob name, or a missing blob
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/chrome:
+    put:
+      operationId: setChatChrome
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersSetChatChromeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Turn Claude in Chrome on or off for a chat session's agent
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/files/{root}/*:
     get:
       operationId: getChatFile
@@ -12602,6 +12659,17 @@ components:
       - status
       - prs
       - transport
+      type: object
+    ControllersSetChatChromeRequest:
+      properties:
+        enabled:
+          description: Turn Claude in Chrome on or off. The agent restarts on the
+            same conversation, so a turn in flight is a 409 CHAT_REQUEST_REJECTED.
+          type:
+          - "null"
+          - boolean
+      required:
+      - enabled
       type: object
     ControllersSetChatModelRequest:
       properties:

@@ -2773,6 +2773,20 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/chrome", id: "setChatChrome", tag: "sessions",
+			summary:    "Turn Claude in Chrome on or off for a chat session's agent",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetChatChromeRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ChatAckResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/model", id: "setChatModel", tag: "sessions",
 			summary:    "Switch the model of a chat session's agent",
 			pathParams: []any{controllers.SessionIDParam{}},

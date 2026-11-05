@@ -20,7 +20,6 @@ const (
 type idleState struct {
 	contextTokens int
 	cacheTTL      string
-	tasks         map[string]struct{}
 	rateLimited   bool
 	stop          func() bool
 	generation    int
@@ -31,6 +30,9 @@ type afterFunc func(d time.Duration, f func()) (stop func() bool)
 func realAfterFunc(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop }
 
 func (h *host) observeIdleLocked(ev chatproto.Event, line []byte) {
+	if ev, ok := ev.(chatproto.System); ok {
+		h.readTaskLocked(ev)
+	}
 	if h.idleOff {
 		return
 	}
@@ -44,7 +46,6 @@ func (h *host) observeIdleLocked(ev chatproto.Event, line []byte) {
 		if ev.Subtype == "compact_boundary" {
 			h.idle.contextTokens = 0
 		}
-		h.readTaskLocked(ev)
 	case chatproto.Result:
 		h.armIdleLocked()
 	case chatproto.Unknown:
@@ -101,13 +102,13 @@ func (h *host) readTaskLocked(ev chatproto.System) {
 	}
 	switch {
 	case ev.Subtype == "task_started":
-		if h.idle.tasks == nil {
-			h.idle.tasks = map[string]struct{}{}
+		if h.tasks == nil {
+			h.tasks = map[string]struct{}{}
 		}
-		h.idle.tasks[w.TaskID] = struct{}{}
+		h.tasks[w.TaskID] = struct{}{}
 	case ev.Subtype == "task_notification",
 		ev.Subtype == "task_updated" && w.Patch.Status != "" && w.Patch.Status != "running" && w.Patch.Status != "pending":
-		delete(h.idle.tasks, w.TaskID)
+		delete(h.tasks, w.TaskID)
 	}
 }
 
@@ -134,7 +135,7 @@ func (h *host) disarmIdleLocked() {
 func (h *host) fireIdleLocked() {
 	h.idle.stop = nil
 	if h.closed || h.idle.contextTokens < idleCompactMinTokens || h.idle.cacheTTL != "1h" ||
-		len(h.idle.tasks) > 0 || h.idle.rateLimited {
+		len(h.tasks) > 0 || h.idle.rateLimited {
 		return
 	}
 	t := h.folder.Transcript()
