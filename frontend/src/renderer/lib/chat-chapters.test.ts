@@ -44,6 +44,7 @@ const rowsOf = (items: ChatItem[]) =>
 			commands: [],
 			models: [],
 			model: "",
+			chrome: false,
 			tasks: [],
 			agentModels: {},
 			remoteControl: REMOTE_CONTROL_OFF,

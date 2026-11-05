@@ -1,7 +1,7 @@
 import type { AnswerBody } from "./chat-answers";
 import type { ChatApi, ChatResult } from "./chat-api";
 import { type ChatEntry, type Direction, isObject, unfinished } from "./chat-event";
-import { ChatFolder, type Pending } from "./chat-fold";
+import { CHROME_FLAG, ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
 import { markdownDeltas, markdownEntries, MOCK_MARKDOWN_CHAT_SESSION } from "./chat-mock-markdown";
@@ -1094,6 +1094,15 @@ export const stubChatApi: ChatApi = {
 		insertions: 12,
 		deletions: 4,
 	}),
+	setChrome: async (id, enabled) => {
+		const session = await stubSession(id);
+		if (session.folder.transcript().busy) {
+			return { ok: false, error: { kind: "rejected", message: "claude is busy: wait for the turn to end" } };
+		}
+		const argv = enabled ? ["claude", CHROME_FLAG] : ["claude"];
+		append(id, session, [["host", { kind: "spawn", argv, resume: SESSION, pid: session.folder.lastSeq + 2 }]]);
+		return OK;
+	},
 	upload: async (_id, file) => ({
 		ok: true,
 		file: { path: `/preview/attachments/${file.name || "pasted file"}`, name: file.name, size: file.size },

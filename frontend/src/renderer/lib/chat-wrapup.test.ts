@@ -58,6 +58,7 @@ describe("latestWrapUpId", () => {
 					commands: [],
 					models: [],
 					model: "",
+					chrome: false,
 					tasks: [],
 					agentModels: {},
 					remoteControl: REMOTE_CONTROL_OFF,

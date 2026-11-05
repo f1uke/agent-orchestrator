@@ -51,7 +51,7 @@ const MODELS: ChatModel[] = [
 
 function renderComposer(
 	over: Partial<ChatActions> = {},
-	props: { suggestion?: string; busy?: boolean; remoteControl?: RemoteControl } = {},
+	props: { suggestion?: string; busy?: boolean; remoteControl?: RemoteControl; chrome?: boolean } = {},
 ) {
 	const actions = {
 		send: vi.fn<ChatActions["send"]>(async () => OK),
@@ -60,6 +60,7 @@ function renderComposer(
 		setMode: vi.fn<ChatActions["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
 		setRemoteControl: vi.fn<ChatActions["setRemoteControl"]>(async () => OK),
+		setChrome: vi.fn<ChatActions["setChrome"]>(async () => OK),
 		stopTask: vi.fn<ChatActions["stopTask"]>(async () => ({ ok: true })),
 		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
 		rewind: vi.fn<ChatActions["rewind"]>(async () => ({ ok: true })),
@@ -75,6 +76,7 @@ function renderComposer(
 			<ChatComposer
 				actions={actions}
 				busy={props.busy ?? false}
+				chrome={props.chrome ?? false}
 				suggestion={suggestion}
 				commands={COMMANDS}
 				model="claude-opus-5-5"
@@ -276,6 +278,49 @@ describe("ChatComposer model picker", () => {
 		await user.click(await screen.findByRole("menuitemradio", { name: /Sonnet 5\.5/ }));
 		await act(async () => undefined);
 		expect(onToast).toHaveBeenCalledWith("Model 'x' not found");
+	});
+});
+
+describe("ChatComposer Claude in Chrome", () => {
+	const chromeItem = () => screen.findByRole("menuitemcheckbox", { name: /Claude in Chrome/ });
+
+	it("turns Chrome on from the model menu", async () => {
+		const { user, actions } = renderComposer();
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		const item = await chromeItem();
+		expect(item).toHaveAttribute("aria-checked", "false");
+		await user.click(item);
+		await act(async () => undefined);
+		expect(actions.setChrome).toHaveBeenCalledWith(true);
+	});
+
+	it("turns Chrome off when it is on", async () => {
+		const { user, actions } = renderComposer({}, { chrome: true });
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		const item = await chromeItem();
+		expect(item).toHaveAttribute("aria-checked", "true");
+		await user.click(item);
+		await act(async () => undefined);
+		expect(actions.setChrome).toHaveBeenCalledWith(false);
+	});
+
+	it("cannot be switched while a turn runs, since claude restarts", async () => {
+		const { user, actions } = renderComposer({}, { busy: true });
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		const item = await chromeItem();
+		expect(item).toHaveAttribute("aria-disabled", "true");
+		await user.click(item);
+		expect(actions.setChrome).not.toHaveBeenCalled();
+	});
+
+	it("shows the host's refusal", async () => {
+		const { user, onToast } = renderComposer({
+			setChrome: vi.fn(async () => ({ ok: false, error: { kind: "rejected", message: "claude is busy" } }) as const),
+		});
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		await user.click(await chromeItem());
+		await act(async () => undefined);
+		expect(onToast).toHaveBeenCalledWith("claude is busy");
 	});
 });
 

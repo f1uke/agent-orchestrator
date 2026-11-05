@@ -63,6 +63,8 @@ type ComposerProps = {
 	models: readonly ChatModel[];
 	model: string;
 	remoteControl: RemoteControl;
+	/** Claude in Chrome is on for this session. */
+	chrome: boolean;
 	/** Claude's guess at the next message; shown as ghost text while the box is empty and the session idle. */
 	suggestion: string;
 	onToast: (message: string) => void;
@@ -79,6 +81,7 @@ export function ChatComposer({
 	models,
 	model,
 	remoteControl,
+	chrome,
 	suggestion,
 	onToast,
 	prefill,
@@ -406,8 +409,11 @@ export function ChatComposer({
 							<span className="chat-composer__grow" />
 							<ModelModePicker
 								disabled={disabled}
+								chrome={chrome}
+								chromeLocked={busy}
 								model={model}
 								models={models}
+								onChrome={(enabled) => void report(actions.setChrome(enabled))}
 								onMode={(mode: PermissionMode) => void report(actions.setMode(mode))}
 								onModel={(value) => void report(actions.setModel(value))}
 								onRemoteControl={(enabled) => void report(actions.setRemoteControl(enabled))}

@@ -185,6 +185,8 @@ export type Transcript = {
 	models: ChatModel[];
 	/** In use: the spawn's --model, then system/init or an accepted set_model. */
 	model: string;
+	/** The latest spawn ran claude with --chrome, so the Claude in Chrome tools are on. */
+	chrome: boolean;
 	tasks: BackgroundTask[];
 	/** The model each subagent's messages name, by the Agent call's tool_use id. */
 	agentModels: Record<string, string>;
@@ -243,12 +245,20 @@ function parseModels(raw: unknown): ChatModel[] {
 	}));
 }
 
+export const CHROME_FLAG = "--chrome";
+
+/** The flags in a claude argv: what follows "--" is prompt text. */
+function flagsOf(argv: readonly string[]): readonly string[] {
+	const end = argv.indexOf("--");
+	return end < 0 ? argv : argv.slice(0, end);
+}
+
 function modelFlag(argv: readonly string[]): string {
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg === "--") break;
+	const flags = flagsOf(argv);
+	for (let i = 0; i < flags.length; i++) {
+		const arg = flags[i];
 		if (arg.startsWith("--model=")) return arg.slice("--model=".length);
-		if (arg === "--model" && i + 1 < argv.length) return argv[i + 1];
+		if (arg === "--model" && i + 1 < flags.length) return flags[i + 1];
 	}
 	return "";
 }
@@ -280,6 +290,7 @@ export class ChatFolder {
 	private slash: ChatCommand[] = [];
 	private models: ChatModel[] = [];
 	private model = "";
+	private chrome = false;
 	private tasks = new Map<string, BackgroundTask>();
 	private agentModels: Record<string, string> = {};
 	private ts = "";
@@ -350,6 +361,7 @@ export class ChatFolder {
 			commands: [...this.slash],
 			models: [...this.models],
 			model: this.model,
+			chrome: this.chrome,
 			tasks: [...this.tasks.values()],
 			agentModels: { ...this.agentModels },
 			contextTokens: this.context,
@@ -670,6 +682,7 @@ export class ChatFolder {
 			case "spawn":
 				this.endProcess();
 				this.model = modelFlag(note.argv);
+				this.chrome = flagsOf(note.argv).includes(CHROME_FLAG);
 				this.awaitingBrief = note.resume === "";
 				if (note.resume !== "") this.notice("resumed", note.resume);
 				else this.notice("spawn", "");

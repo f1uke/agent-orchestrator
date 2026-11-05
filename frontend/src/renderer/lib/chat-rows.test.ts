@@ -86,6 +86,7 @@ function transcript(items: ChatItem[], extra: Partial<Transcript> = {}): Transcr
 		commands: [],
 		models: [],
 		model: "",
+		chrome: false,
 		tasks: [],
 		agentModels: {},
 		remoteControl: REMOTE_CONTROL_OFF,
