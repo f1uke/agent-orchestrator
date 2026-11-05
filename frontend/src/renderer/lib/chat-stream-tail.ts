@@ -8,11 +8,11 @@ export function settledPrefix(text: string): string {
 	const lines = text.split("\n");
 	if (lines.filter((line) => FENCE.test(line)).length % 2 === 1) return text;
 
-	const blockStart = text.lastIndexOf("\n\n") + 1;
-	const block = text.slice(blockStart === 0 ? 0 : blockStart + 1);
-	const blockLines = block.split("\n");
-	if (block.trimStart().startsWith("|") && !blockLines.some((line) => TABLE_DELIMITER.test(line))) {
-		return text.slice(0, blockStart === 0 ? 0 : blockStart + 1);
+	const blank = text.lastIndexOf("\n\n");
+	const blockStart = blank < 0 ? 0 : blank + 2;
+	const block = text.slice(blockStart);
+	if (block.trimStart().startsWith("|") && !block.split("\n").some((line) => TABLE_DELIMITER.test(line))) {
+		return text.slice(0, blockStart);
 	}
 
 	const lineStart = text.lastIndexOf("\n") + 1;
