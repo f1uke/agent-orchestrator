@@ -56,6 +56,7 @@ import { CopyButton } from "./CopyButton";
 import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine, ToolCard } from "./ChatToolCard";
 import {
 	GroupRow,
+	LiveDots,
 	LiveThinkingRow,
 	type OpenRows,
 	ThinkingRow,
@@ -715,7 +716,11 @@ export const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			) : (
 				<div className="note-prose chat-md" data-streaming>
 					<NoteMarkdown source={row.block.text} theme={theme} />
-					{row.caret ? <span aria-hidden="true" className="chat-caret" /> : null}
+					{row.caret ? (
+						<span className="chat-caret">
+							<LiveDots />
+						</span>
+					) : null}
 				</div>
 			);
 		case "group":
@@ -746,6 +751,7 @@ export const ChatRowView = memo(function ChatRowView(props: RowProps) {
 					pendingByRequest={pendingByRequest}
 					docs={row.docs}
 					reply={row.reply}
+					durationShownAbove={row.durationShownAbove}
 					root={root}
 					rowKey={row.key}
 					sessionNames={props.sessionNames}
@@ -766,6 +772,7 @@ function ItemRow({
 	task,
 	reply,
 	docs,
+	durationShownAbove,
 	theme,
 	root,
 	openRows,
@@ -783,6 +790,7 @@ function ItemRow({
 	task?: BackgroundTask;
 	reply?: string;
 	docs?: TurnDocs;
+	durationShownAbove?: true;
 }) {
 	switch (item.kind) {
 		case "user":
@@ -856,15 +864,17 @@ function ItemRow({
 				<>
 					{reply !== undefined ? <AnswerBar end={item} reply={reply} /> : null}
 					{docs ? <ChatDocStrip docs={docs} /> : null}
-					<div
-						className={cn(
-							"chat-sys",
-							item.isError && (item.subtype === "error_during_execution" ? "chat-sys--warn" : "chat-sys--error"),
-						)}
-						data-notice="turn_end"
-					>
-						{turnEndText(item)}
-					</div>
+					{durationShownAbove ? null : (
+						<div
+							className={cn(
+								"chat-sys",
+								item.isError && (item.subtype === "error_during_execution" ? "chat-sys--warn" : "chat-sys--error"),
+							)}
+							data-notice="turn_end"
+						>
+							{turnEndText(item)}
+						</div>
+					)}
 					{item.error ? <TurnErrorDetail error={item.error} /> : null}
 				</>
 			);

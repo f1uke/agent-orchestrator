@@ -24,6 +24,7 @@ export type ChatRow =
 			task?: BackgroundTask;
 			reply?: string;
 			docs?: TurnDocs;
+			durationShownAbove?: true;
 	  }
 	| { key: string; kind: "pending"; pending: Pending }
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
@@ -150,9 +151,12 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 				break;
 			}
 		}
-		const pieces = foldSegments(row.key, rows.slice(i + 1, last), ended.item.durationMs);
+		const between = rows.slice(i + 1, last);
+		const pieces = foldSegments(row.key, between, ended.item.durationMs);
 		if (!pieces) continue;
 		out.push(...pieces);
+		if (ended.item.durationMs !== undefined && !between.some(isChapter))
+			rows[end] = { ...ended, durationShownAbove: true };
 		i = last - 1;
 	}
 	return out;
