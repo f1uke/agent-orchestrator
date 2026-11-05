@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { ArrowUpRight, GitPullRequest, Pencil } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { useProjectBranches } from "../hooks/useProjectBranches";
@@ -25,6 +25,7 @@ import { TasksPanel } from "./TasksPanel";
 import type { ChatSessionState } from "../hooks/useChatSession";
 import type { Theme } from "../stores/ui-store";
 import type { FileDoc } from "../lib/chat-docs";
+import { writeRevision } from "../lib/chat-preview";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPanel";
@@ -241,6 +242,11 @@ export function SessionInspector({
 	// Documents come from chat cards, so a terminal session has nothing to put in the tab.
 	const showDocument = session?.transport === "chat";
 	const showTasks = session?.transport === "chat";
+	const chatItems = chat?.transcript.items;
+	const docRevision = useMemo(
+		() => (openDoc && chatItems ? writeRevision(chatItems, openDoc) : 0),
+		[openDoc, chatItems],
+	);
 	// A project with no web UI has nothing to preview, so the Browser tab is not
 	// offered at all — an always-empty tab is worse than one tab fewer.
 	const views = VIEWS.filter((v) => {
@@ -346,6 +352,7 @@ export function SessionInspector({
 						docs={sessionDocs}
 						onClose={() => onCloseDoc?.()}
 						onOpen={onOpenDoc}
+						revision={docRevision}
 						sessionId={session.id}
 					/>
 				) : null}
