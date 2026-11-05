@@ -359,7 +359,6 @@ func (h *host) control(subtype string, build func(requestID string) chatproto.Ou
 	return okResponse{OK: true}, nil
 }
 
-// controlBody is control that hands back the body of claude's success answer.
 func (h *host) controlBody(subtype string, build func(requestID string) chatproto.Outbound) (json.RawMessage, error) {
 	id := uuid.NewString()
 	answer := make(chan chatproto.ControlResponse, 1)
