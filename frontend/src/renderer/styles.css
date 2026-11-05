@@ -7866,8 +7866,6 @@ ol.note-prose__list {
 	border-color: var(--border-1);
 }
 
-/* Several inline codes in one sentence read as a row of buttons when each is
-   boxed; a fill alone keeps them legible without the chrome. */
 .chat-md .note-prose__code-inline {
 	padding: 2px 5px;
 	border-color: transparent;
