@@ -430,7 +430,12 @@ describe("Claude in Chrome tools", () => {
 		[chrome("computer"), { action: "left_click", coordinate: [10, 20], tabId: 1 }, "Click", "10, 20"],
 		[chrome("computer"), { action: "type", text: "hello", tabId: 1 }, "Type", '"hello"'],
 		[chrome("computer"), { action: "screenshot", tabId: 1 }, "Screenshot", ""],
-		[chrome("javascript_tool"), { action: "javascript_exec", text: "document.title", tabId: 1 }, "Run JavaScript", "document.title"],
+		[
+			chrome("javascript_tool"),
+			{ action: "javascript_exec", text: "document.title", tabId: 1 },
+			"Run JavaScript",
+			"document.title",
+		],
 		[chrome("some_new_action"), {}, "Some new action", ""],
 	])("%s %j reads as %s", (name, input, title, arg) => {
 		const view = describeTool(call(name, input, { content: [{ type: "text", text: "ok" }] }));
@@ -446,7 +451,9 @@ describe("Claude in Chrome tools", () => {
 	});
 
 	it("shows a text result as output, without the input JSON", () => {
-		const view = describeTool(call(chrome("get_page_text"), { tabId: 1 }, { content: [{ type: "text", text: "page words" }] }));
+		const view = describeTool(
+			call(chrome("get_page_text"), { tabId: 1 }, { content: [{ type: "text", text: "page words" }] }),
+		);
 		expect(view.body).toEqual({ kind: "output", text: "page words" });
 	});
 

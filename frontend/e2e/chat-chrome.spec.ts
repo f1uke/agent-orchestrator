@@ -13,7 +13,9 @@ for (const viewport of VIEWPORTS) {
 			page,
 		}, info) => {
 			const settled = () =>
-				page.getByRole("menu").evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+				page
+					.getByRole("menu")
+					.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
 			const shot = (name: string) =>
 				page.screenshot({ path: info.outputPath(`chat-chrome-${name}-${viewport.width}.png`) });
 			await page.goto("/#/projects/ao-demo/sessions/demo-chat-chrome");

@@ -914,9 +914,9 @@ function stubSession(id: string): Promise<StubSession> {
 																		? nextEntries()
 																		: id === MOCK_CHROME_CHAT_SESSION
 																			? chromeEntries()
-																		: long
-																			? fixture
-																			: mockChatEntries(fixture);
+																			: long
+																				? fixture
+																				: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };

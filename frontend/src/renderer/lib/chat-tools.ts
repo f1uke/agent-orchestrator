@@ -34,18 +34,7 @@ export type ToolBody =
 	| { kind: "generic"; input: string; output: string; images: ChatImage[]; imageName: string };
 
 export type ToolView = {
-	family:
-		| "bash"
-		| "edit"
-		| "write"
-		| "read"
-		| "search"
-		| "agent"
-		| "todo"
-		| "plan"
-		| "question"
-		| "browser"
-		| "other";
+	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "todo" | "plan" | "question" | "browser" | "other";
 	title: string;
 	/** For a file card, the base name. The full path stays in `path` for the row's tooltip. */
 	arg: string;
@@ -392,7 +381,9 @@ function describeChrome(call: ToolCallItem, input: Input, output: string): ToolV
 		family: "browser",
 		path: "",
 		compact: true,
-		status: outcome(call, () => (images.length ? (images.length === 1 ? "image" : plural(images.length, "image")) : "done")),
+		status: outcome(call, () =>
+			images.length ? (images.length === 1 ? "image" : plural(images.length, "image")) : "done",
+		),
 		body: images.length ? { kind: "image", images, path: "screenshot" } : { kind: "output", text: output },
 	};
 }

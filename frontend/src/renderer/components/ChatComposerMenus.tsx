@@ -185,9 +185,7 @@ export function ModelModePicker({
 					onCheckedChange={(on) => onChrome(on === true)}
 				>
 					<span className="chat-model-item__name">Claude in Chrome</span>
-					<span className="chat-model-item__hint">
-						{chromeLocked ? "After this turn" : "Restarts claude"}
-					</span>
+					<span className="chat-model-item__hint">{chromeLocked ? "After this turn" : "Restarts claude"}</span>
 				</DropdownMenuCheckboxItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
