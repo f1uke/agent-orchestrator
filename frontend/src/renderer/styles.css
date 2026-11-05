@@ -8219,6 +8219,22 @@ ol.note-prose__list {
 	color: var(--fg);
 }
 
+.chat-turn__body .chat-group__body {
+	margin-left: 0;
+	padding-left: 0;
+	border-left: 0;
+}
+
+.chat-group__body > .chat-tool:not(.chat-tool--open) {
+	border-color: transparent;
+	background: none;
+}
+
+.chat-group__body > .chat-tool:not(.chat-tool--open) .chat-tool__head {
+	padding: 3px 4px;
+	border-radius: 6px;
+}
+
 .chat-statusline__bg {
 	display: inline-flex;
 	align-items: center;
