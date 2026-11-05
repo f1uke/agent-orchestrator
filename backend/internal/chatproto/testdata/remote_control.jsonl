@@ -1,0 +1,12 @@
+{"seq":1,"ts":"2026-11-05T09:00:00.000Z","dir":"in","payload":{"type":"control_request","request_id":"rc-1","request":{"subtype":"remote_control","enabled":true}}}
+{"seq":2,"ts":"2026-11-05T09:00:00.100Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"ready","session_id":"s-1"}}
+{"seq":3,"ts":"2026-11-05T09:00:00.200Z","dir":"out","payload":{"type":"control_response","response":{"subtype":"success","request_id":"rc-1","response":{"session_url":"https://claude.ai/code/session_example","connect_url":"https://claude.ai/code?bridge=example","environment_id":"","bridge_epoch":1,"bridge_session_id":"cse_example"}}}}
+{"seq":4,"ts":"2026-11-05T09:00:00.300Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"connected","bridge_epoch":1,"session_id":"s-1"}}
+{"seq":5,"ts":"2026-11-05T09:01:00.000Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"reconnecting","session_id":"s-1"}}
+{"seq":6,"ts":"2026-11-05T09:01:02.000Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"connected","bridge_epoch":2,"session_id":"s-1"}}
+{"seq":7,"ts":"2026-11-05T09:02:00.000Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-1","state":"queued"}}
+{"seq":8,"ts":"2026-11-05T09:02:00.010Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-1","state":"started"}}
+{"seq":9,"ts":"2026-11-05T09:02:00.020Z","dir":"out","payload":{"type":"user","uuid":"remote-1","isReplay":true,"origin":{"kind":"human"},"session_id":"s-1","message":{"role":"user","content":"placeholder remote prompt"}}}
+{"seq":10,"ts":"2026-11-05T09:02:01.000Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-1","state":"completed"}}
+{"seq":11,"ts":"2026-11-05T09:03:00.000Z","dir":"in","payload":{"type":"control_request","request_id":"rc-2","request":{"subtype":"remote_control","enabled":false}}}
+{"seq":12,"ts":"2026-11-05T09:03:00.100Z","dir":"out","payload":{"type":"control_response","response":{"subtype":"success","request_id":"rc-2","response":{}}}}

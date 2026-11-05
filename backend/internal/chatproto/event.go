@@ -34,6 +34,16 @@ type System struct {
 	Raw            json.RawMessage
 }
 
+// BridgeState is a system/bridge_state event: the state of the Remote Control
+// bridge that lets claude.ai/code or the Claude app drive this session. State is
+// as claude sent it (ready, connected, reconnecting, failed). Detail is claude's
+// human-readable reason, set on a failure.
+type BridgeState struct {
+	State       string
+	Detail      string
+	FailureKind string
+}
+
 // Assistant is one assistant message event. With partial messages on, claude
 // emits one event per content block, all sharing MessageID.
 type Assistant struct {
@@ -111,6 +121,7 @@ type Unknown struct {
 
 func (SystemInit) isEvent()       {}
 func (System) isEvent()           {}
+func (BridgeState) isEvent()      {}
 func (Assistant) isEvent()        {}
 func (User) isEvent()             {}
 func (Result) isEvent()           {}
@@ -292,9 +303,15 @@ func decodeSystem(subtype string, line []byte) (Event, bool) {
 		CWD            string   `json:"cwd"`
 		Tools          []string `json:"tools"`
 		SlashCommands  []string `json:"slash_commands"`
+		State          string   `json:"state"`
+		Detail         string   `json:"detail"`
+		FailureKind    string   `json:"failure_kind"`
 	}
 	if json.Unmarshal(line, &w) != nil {
 		return nil, false
+	}
+	if subtype == "bridge_state" {
+		return BridgeState{State: w.State, Detail: w.Detail, FailureKind: w.FailureKind}, true
 	}
 	if subtype == "init" {
 		return SystemInit{
