@@ -18,6 +18,7 @@ export type ChatActions = {
 	interrupt: () => Promise<ChatResult>;
 	setMode: (mode: PermissionMode) => Promise<ChatResult>;
 	setModel: (model: string) => Promise<ChatResult>;
+	setRemoteControl: (enabled: boolean) => Promise<ChatResult>;
 	upload: (file: File) => Promise<UploadResult>;
 	stopTask: (taskId: string) => Promise<ChatResult>;
 	taskOutput: (taskId: string) => Promise<TaskOutput | null>;
@@ -48,6 +49,7 @@ export function useChatActions(sessionId: string, connection: ChatConnection, ap
 			interrupt: () => run(api.interrupt(sessionId)),
 			setMode: (mode) => run(api.setMode(sessionId, mode)),
 			setModel: (model) => run(api.setModel(sessionId, model)),
+			setRemoteControl: (enabled) => run(api.setRemoteControl(sessionId, enabled)),
 			upload: (file) => api.upload(sessionId, file),
 			stopTask: (taskId) => api.stopTask(sessionId, taskId),
 			taskOutput: (taskId) => api.taskOutput(sessionId, taskId),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chapterOf, chapters, MARK_CHAPTER } from "./chat-chapters";
-import type { ChatItem, ToolCallItem, Transcript, UserItem } from "./chat-fold";
+import { type ChatItem, REMOTE_CONTROL_OFF, type ToolCallItem, type Transcript, type UserItem } from "./chat-fold";
 import { chatRows } from "./chat-rows";
 import { emptyOverlay } from "./chat-stream";
 
@@ -46,6 +46,7 @@ const rowsOf = (items: ChatItem[]) =>
 			model: "",
 			tasks: [],
 			agentModels: {},
+			remoteControl: REMOTE_CONTROL_OFF,
 			suggestion: "",
 			lastSeq: 0,
 		} satisfies Transcript,

@@ -2456,6 +2456,11 @@ type SetChatModelRequest struct {
 	Model string `json:"model" description:"A value from the models the session's initialize response lists, such as sonnet, or a full model id. The agent checks it: a model it does not know is a 409 CHAT_REQUEST_REJECTED."`
 }
 
+// SetChatRemoteControlRequest is the body of PUT /api/v1/sessions/{sessionId}/chat/remote-control.
+type SetChatRemoteControlRequest struct {
+	Enabled *bool `json:"enabled" description:"true to start Remote Control, so claude.ai/code and the Claude app can drive the session; false to stop it. The agent may refuse, for an account or a setup that cannot use it: that is a 409 CHAT_REQUEST_REJECTED with its reason. The state and the session URL arrive in the chat log."`
+}
+
 // ResolveChatFilesRequest is the body of POST /api/v1/sessions/{sessionId}/chat/files/resolve.
 type ResolveChatFilesRequest struct {
 	Refs []string `json:"refs" minItems:"1" maxItems:"64" description:"File names as the agent wrote them: absolute, ~/ or relative paths, or globs. Each is at most 1024 bytes."`

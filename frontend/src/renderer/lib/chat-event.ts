@@ -117,6 +117,7 @@ export type ChatEvent =
 			uuid: string;
 			parentToolUseId: string;
 			isReplay: boolean;
+			originKind: string;
 			blocks: Block[];
 			structuredPatch?: PatchHunk[];
 	  }
@@ -132,7 +133,15 @@ export type ChatEvent =
 			contextTokens?: number;
 			contextWindows: Record<string, number>;
 	  }
-	| { type: "control_request"; requestId: string; subtype: string; canUseTool?: CanUseTool; rewind?: RewindAsk }
+	| { type: "bridge_state"; state: string; detail: string }
+	| {
+			type: "control_request";
+			requestId: string;
+			subtype: string;
+			enabled?: boolean;
+			canUseTool?: CanUseTool;
+			rewind?: RewindAsk;
+	  }
 	| { type: "control_response"; requestId: string; ok: boolean; error: string; response: unknown }
 	| { type: "control_cancel"; requestId: string }
 	| { type: "command_lifecycle"; commandUuid: string; state: CommandState }
@@ -141,6 +150,13 @@ export type ChatEvent =
 	| { type: "unknown"; eventType: string };
 
 export type Origin = { via: string; from: string };
+
+/** The `via` of a user row for a prompt typed on claude.ai/code or the Claude app. AO sent no such prompt, so `from` is empty. */
+export const REMOTE_CONTROL_VIA = "remote_control";
+
+/** True when the origin names a peer session or the orchestrator, which the chat shows as a peer message. */
+export const isPeerOrigin = (origin: Origin | undefined): origin is Origin =>
+	origin !== undefined && origin.via !== REMOTE_CONTROL_VIA;
 
 export type HostNote =
 	| { kind: "spawn"; resume: string; argv: string[] }
@@ -311,6 +327,8 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 					model: str(line.model),
 				};
 			}
+			if (line.subtype === "bridge_state")
+				return { type: "bridge_state", state: str(line.state), detail: str(line.detail) };
 			return {
 				type: "system",
 				subtype: str(line.subtype),
@@ -335,6 +353,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				uuid: str(line.uuid),
 				parentToolUseId: str(line.parent_tool_use_id),
 				isReplay: line.isReplay === true,
+				originKind: isObject(line.origin) ? str(line.origin.kind) : "",
 				blocks: decodeBlocks(message.content),
 				structuredPatch: decodePatch(line.tool_use_result),
 			};
@@ -360,6 +379,9 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				const target = str(subtype === "rewind_files" ? request.user_message_id : request.target_message_uuid);
 				const rewind: RewindAsk = { target, files: subtype === "rewind_files", dryRun: request.dry_run === true };
 				return { type: "control_request", requestId, subtype, rewind };
+			}
+			if (subtype === "remote_control") {
+				return { type: "control_request", requestId, subtype, enabled: request.enabled === true };
 			}
 			if (subtype !== "can_use_tool") return { type: "control_request", requestId, subtype };
 			return {

@@ -5,7 +5,7 @@ import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import type { PermissionMode } from "../lib/chat-answers";
 import type { ChatResult } from "../lib/chat-api";
 import { MAX_IMAGES, prepareImage, withAttachedPaths } from "../lib/chat-attach";
-import type { ChatCommand, ChatModel, UserItem } from "../lib/chat-fold";
+import type { ChatCommand, ChatModel, RemoteControl, UserItem } from "../lib/chat-fold";
 import { isImageMime } from "../lib/chat-images";
 import { type ComposerToken, replaceToken, slashGroups, tokenAt } from "../lib/chat-menus";
 import { rankFiles } from "../lib/open-quickly";
@@ -62,6 +62,7 @@ type ComposerProps = {
 	commands: readonly ChatCommand[];
 	models: readonly ChatModel[];
 	model: string;
+	remoteControl: RemoteControl;
 	/** Claude's guess at the next message; shown as ghost text while the box is empty and the session idle. */
 	suggestion: string;
 	onToast: (message: string) => void;
@@ -77,6 +78,7 @@ export function ChatComposer({
 	commands,
 	models,
 	model,
+	remoteControl,
 	suggestion,
 	onToast,
 	prefill,
@@ -408,6 +410,8 @@ export function ChatComposer({
 								models={models}
 								onMode={(mode: PermissionMode) => void report(actions.setMode(mode))}
 								onModel={(value) => void report(actions.setModel(value))}
+								onRemoteControl={(enabled) => void report(actions.setRemoteControl(enabled))}
+								remoteControl={remoteControl}
 								permissionMode={permissionMode}
 							/>
 							{busy ? (

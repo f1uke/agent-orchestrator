@@ -72,6 +72,14 @@ type RewindFiles struct {
 	DryRun        bool
 }
 
+// SetRemoteControl turns the Remote Control bridge on or off. Claude answers
+// success, with the session's claude.ai/code URL when enabling, or an error that
+// says why the bridge cannot start. The bridge ends when claude exits.
+type SetRemoteControl struct {
+	RequestID string
+	Enabled   bool
+}
+
 // MCPReply answers an mcp_message control request with one JSON-RPC message.
 type MCPReply struct {
 	RequestID string
@@ -94,6 +102,7 @@ func (SetPermissionMode) isOutbound()  {}
 func (SetModel) isOutbound()           {}
 func (PermissionAnswer) isOutbound()   {}
 func (StopTask) isOutbound()           {}
+func (SetRemoteControl) isOutbound()   {}
 func (MCPReply) isOutbound()           {}
 func (RewindConversation) isOutbound() {}
 func (RewindFiles) isOutbound()        {}
@@ -183,6 +192,8 @@ func Encode(o Outbound) ([]byte, error) {
 			req["dry_run"] = true
 		}
 		return encodeControlRequest(m.RequestID, req)
+	case SetRemoteControl:
+		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "remote_control", "enabled": m.Enabled})
 	case GetContextUsage:
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "get_context_usage"})
 	case PermissionAnswer:

@@ -50,6 +50,7 @@ type rewindRequest struct {
 }
 
 type rewindPreviewRequest struct{ UUID string }
+type remoteControlRequest struct{ Enabled bool }
 
 type stateRequest struct{}
 
@@ -63,6 +64,7 @@ func (setModelRequest) isRequest()      {}
 func (stopTaskRequest) isRequest()      {}
 func (rewindRequest) isRequest()        {}
 func (rewindPreviewRequest) isRequest() {}
+func (remoteControlRequest) isRequest() {}
 func (stateRequest) isRequest()         {}
 func (subscribeRequest) isRequest()     {}
 
@@ -86,6 +88,7 @@ func parseRequest(line []byte) (request, error) {
 		TaskID             string            `json:"task_id"`
 		UUID               string            `json:"uuid"`
 		RestoreFiles       bool              `json:"restore_files"`
+		Enabled            *bool             `json:"enabled"`
 		FromSeq            uint64            `json:"from_seq"`
 	}
 	if err := json.Unmarshal(line, &w); err != nil {
@@ -150,6 +153,11 @@ func parseRequest(line []byte) (request, error) {
 			return nil, errors.New("rewind_preview needs uuid")
 		}
 		return rewindPreviewRequest{UUID: w.UUID}, nil
+	case "remote_control":
+		if w.Enabled == nil {
+			return nil, errors.New("remote_control needs enabled")
+		}
+		return remoteControlRequest{Enabled: *w.Enabled}, nil
 	case "state":
 		return stateRequest{}, nil
 	case "subscribe":
@@ -311,6 +319,10 @@ func (h *host) do(req request) (any, error) {
 	case setModelRequest:
 		return h.control("set_model", func(id string) chatproto.Outbound {
 			return chatproto.SetModel{RequestID: id, Model: r.Model}
+		})
+	case remoteControlRequest:
+		return h.control("remote_control", func(id string) chatproto.Outbound {
+			return chatproto.SetRemoteControl{RequestID: id, Enabled: r.Enabled}
 		})
 	case stopTaskRequest:
 		return h.control("stop_task", func(id string) chatproto.Outbound {

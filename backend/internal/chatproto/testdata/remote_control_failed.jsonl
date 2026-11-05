@@ -1,0 +1,3 @@
+{"seq":1,"ts":"2026-11-05T09:00:00.000Z","dir":"in","payload":{"type":"control_request","request_id":"rc-1","request":{"subtype":"remote_control","enabled":true}}}
+{"seq":2,"ts":"2026-11-05T09:00:00.100Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"failed","detail":"Remote Control is not available for this account.","failure_kind":"terminal","session_id":"s-1"}}
+{"seq":3,"ts":"2026-11-05T09:00:00.200Z","dir":"out","payload":{"type":"control_response","response":{"subtype":"error","request_id":"rc-1","error":"Remote Control is not available for this account."}}}

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatActions } from "../hooks/useChatActions";
 import type { ChatResult, UploadResult } from "../lib/chat-api";
-import type { ChatCommand, ChatModel } from "../lib/chat-fold";
+import { type ChatCommand, type ChatModel, type RemoteControl, REMOTE_CONTROL_OFF } from "../lib/chat-fold";
 import { stubImageDecoder } from "../test/chat-attach-stub";
 import { ChatComposer, type Prefill } from "./ChatComposer";
 
@@ -49,13 +49,17 @@ const MODELS: ChatModel[] = [
 	model("claude-opus-4-8", "claude-opus-4-8", "Opus 4.8"),
 ];
 
-function renderComposer(over: Partial<ChatActions> = {}, props: { suggestion?: string; busy?: boolean } = {}) {
+function renderComposer(
+	over: Partial<ChatActions> = {},
+	props: { suggestion?: string; busy?: boolean; remoteControl?: RemoteControl } = {},
+) {
 	const actions = {
 		send: vi.fn<ChatActions["send"]>(async () => OK),
 		answer: vi.fn<ChatActions["answer"]>(async () => OK),
 		interrupt: vi.fn<ChatActions["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatActions["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
+		setRemoteControl: vi.fn<ChatActions["setRemoteControl"]>(async () => OK),
 		stopTask: vi.fn<ChatActions["stopTask"]>(async () => ({ ok: true })),
 		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
 		rewind: vi.fn<ChatActions["rewind"]>(async () => ({ ok: true })),
@@ -75,6 +79,7 @@ function renderComposer(over: Partial<ChatActions> = {}, props: { suggestion?: s
 				commands={COMMANDS}
 				model="claude-opus-5-5"
 				models={MODELS}
+				remoteControl={props.remoteControl ?? REMOTE_CONTROL_OFF}
 				onToast={onToast}
 				permissionMode="default"
 				prefill={prefill}
@@ -207,6 +212,47 @@ describe("ChatComposer model picker", () => {
 		await user.click(await screen.findByRole("menuitemradio", { name: /Sonnet 5\.5/ }));
 		await act(async () => undefined);
 		expect(actions.setModel).toHaveBeenCalledWith("sonnet");
+	});
+
+	it("turns Remote Control on from the menu, and off again while it is on", async () => {
+		const off = renderComposer();
+		await off.user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		const toggle = await screen.findByRole("menuitemcheckbox", { name: "Remote Control" });
+		expect(toggle).toHaveAttribute("aria-checked", "false");
+		await off.user.click(toggle);
+		await act(async () => undefined);
+		expect(off.actions.setRemoteControl).toHaveBeenCalledWith(true);
+	});
+
+	it.each(["connecting", "connected", "reconnecting"] as const)(
+		"offers to turn Remote Control off while %s",
+		async (state) => {
+			const on = renderComposer({}, { remoteControl: { state, url: "", detail: "" } });
+			await on.user.click(screen.getByRole("button", { name: /Model and mode/ }));
+			const toggle = await screen.findByRole("menuitemcheckbox", { name: "Remote Control" });
+			expect(toggle).toHaveAttribute("aria-checked", "true");
+			await on.user.click(toggle);
+			await act(async () => undefined);
+			expect(on.actions.setRemoteControl).toHaveBeenCalledWith(false);
+		},
+	);
+
+	it("offers a retry after Remote Control failed, and shows claude's refusal", async () => {
+		const refused = renderComposer(
+			{
+				setRemoteControl: vi.fn(
+					async () => ({ ok: false, error: { kind: "rejected", message: "Not available for this account" } }) as const,
+				),
+			},
+			{ remoteControl: { state: "failed", url: "", detail: "earlier failure" } },
+		);
+		await refused.user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		const toggle = await screen.findByRole("menuitemcheckbox", { name: "Remote Control" });
+		expect(toggle).toHaveAttribute("aria-checked", "false");
+		await refused.user.click(toggle);
+		await act(async () => undefined);
+		expect(refused.actions.setRemoteControl).toHaveBeenCalledWith(true);
+		expect(refused.onToast).toHaveBeenCalledWith("Not available for this account");
 	});
 
 	it("offers pinned versions in a submenu", async () => {

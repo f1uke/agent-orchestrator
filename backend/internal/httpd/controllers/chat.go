@@ -26,6 +26,7 @@ type ChatService interface {
 	StopTask(ctx context.Context, id domain.SessionID, taskID string) error
 	Rewind(ctx context.Context, id domain.SessionID, uuid string, restoreFiles bool) error
 	RewindPreview(ctx context.Context, id domain.SessionID, uuid string) (sessionhost.RewindPreview, error)
+	SetRemoteControl(ctx context.Context, id domain.SessionID, enabled bool) error
 }
 
 // ChatController owns the routes the chat view drives a session with.
@@ -43,6 +44,7 @@ func (c *ChatController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/chat/rewind/preview", c.rewindPreview)
 	r.Put("/sessions/{sessionId}/chat/mode", c.setMode)
 	r.Put("/sessions/{sessionId}/chat/model", c.setModel)
+	r.Put("/sessions/{sessionId}/chat/remote-control", c.setRemoteControl)
 }
 
 func chatBadRequest(w http.ResponseWriter, r *http.Request, code, message string) {
@@ -251,6 +253,27 @@ func (c *ChatController) setModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.Svc.SetModel(r.Context(), sessionID(r), model); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+func (c *ChatController) setRemoteControl(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/chat/remote-control")
+		return
+	}
+	var body SetChatRemoteControlRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	if body.Enabled == nil {
+		chatBadRequest(w, r, "ENABLED_REQUIRED", "enabled is required")
+		return
+	}
+	if err := c.Svc.SetRemoteControl(r.Context(), sessionID(r), *body.Enabled); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}

@@ -1,4 +1,4 @@
-import { type ChatEntry, isObject } from "./chat-event";
+import { type ChatEntry, isObject, isPeerOrigin } from "./chat-event";
 import type { ChatItem, ToolCallItem, Transcript } from "./chat-fold";
 import { formatCost, formatTokens } from "./chat-inspect";
 import { noticeText } from "./chat-notice";
@@ -54,7 +54,7 @@ const PEER_PREFIX = /^\[from @[^\]]*\]\s*/;
 
 function userLabel(item: Extract<ChatItem, { kind: "user" }>): { title: string; detail: string } {
 	const text = item.text.replace(PEER_PREFIX, "");
-	if (item.origin) {
+	if (isPeerOrigin(item.origin)) {
 		const from = item.origin.from;
 		return { title: from.endsWith("-orchestrator") ? "orchestrator" : `@${from}`, detail: firstLine(text) };
 	}

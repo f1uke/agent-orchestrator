@@ -4081,6 +4081,64 @@ paths:
       summary: Switch the model of a chat session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/remote-control:
+    put:
+      operationId: setChatRemoteControl
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersSetChatRemoteControlRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start or stop Remote Control for a chat session, so claude.ai/code
+        and the Claude app can drive it
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/rewind:
     post:
       operationId: rewindChat
@@ -12554,6 +12612,19 @@ components:
           type: string
       required:
       - model
+      type: object
+    ControllersSetChatRemoteControlRequest:
+      properties:
+        enabled:
+          description: 'true to start Remote Control, so claude.ai/code and the Claude
+            app can drive the session; false to stop it. The agent may refuse, for
+            an account or a setup that cannot use it: that is a 409 CHAT_REQUEST_REJECTED
+            with its reason. The state and the session URL arrive in the chat log.'
+          type:
+          - "null"
+          - boolean
+      required:
+      - enabled
       type: object
     ControllersSetSessionBranchRequest:
       properties:

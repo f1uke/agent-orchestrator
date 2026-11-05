@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatEntry } from "./chat-event";
 import {
 	type ChatItem,
+	REMOTE_CONTROL_OFF,
 	type NoticeKind,
 	type ToolCallItem,
 	type Transcript,
@@ -87,6 +88,7 @@ function transcript(items: ChatItem[], extra: Partial<Transcript> = {}): Transcr
 		model: "",
 		tasks: [],
 		agentModels: {},
+		remoteControl: REMOTE_CONTROL_OFF,
 		suggestion: "",
 		lastSeq: 0,
 		...extra,

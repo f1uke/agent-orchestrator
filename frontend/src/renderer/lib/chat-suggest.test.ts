@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ToolCallItem } from "./chat-fold";
+import { REMOTE_CONTROL_OFF, type ToolCallItem } from "./chat-fold";
 import { chatRows } from "./chat-rows";
 import { emptyOverlay } from "./chat-stream";
 import {
@@ -106,6 +106,7 @@ describe("liveSuggestions", () => {
 				model: "",
 				tasks: [],
 				agentModels: {},
+				remoteControl: REMOTE_CONTROL_OFF,
 				suggestion: "",
 				lastSeq: 0,
 			},
