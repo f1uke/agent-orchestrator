@@ -174,6 +174,13 @@ type rewindWire struct {
 	RestoreFiles bool   `json:"restore_files,omitempty"`
 }
 
+// RemoteControl turns Remote Control on or off for the running claude and
+// returns once claude has answered. Claude's refusal, such as an account that
+// cannot use it, is a RefusedError. The bridge ends when claude exits.
+func (c Client) RemoteControl(ctx context.Context, enabled bool) error {
+	return c.call(ctx, map[string]any{"op": "remote_control", "enabled": enabled}, &okResponse{})
+}
+
 // State reports what the host knows about its session right now.
 func (c Client) State(ctx context.Context) (State, error) {
 	var resp stateResponse
