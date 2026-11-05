@@ -31,7 +31,7 @@ export type ToolBody =
 	| { kind: "output"; text: string }
 	| { kind: "image"; images: ChatImage[]; path: string }
 	| { kind: "plan"; plan: string }
-	| { kind: "generic"; input: string; output: string };
+	| { kind: "generic"; input: string; output: string; images: ChatImage[]; imageName: string };
 
 export type ToolView = {
 	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "todo" | "plan" | "question" | "other";
@@ -455,7 +455,13 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 				family: "todo",
 				arg: todoArg(call, input),
 				status: outcome(call, () => "done"),
-				body: { kind: "generic", input: JSON.stringify(call.input ?? null, null, 2), output },
+				body: {
+					kind: "generic",
+					input: JSON.stringify(call.input ?? null, null, 2),
+					output,
+					images: [],
+					imageName: "",
+				},
 				compact: true,
 			};
 		case "ExitPlanMode":
@@ -485,7 +491,13 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 		family: "other",
 		arg: "",
 		status: outcome(call, () => "done"),
-		body: { kind: "generic", input: JSON.stringify(call.input ?? null, null, 2), output },
+		body: {
+			kind: "generic",
+			input: JSON.stringify(call.input ?? null, null, 2),
+			output,
+			images: imagesOf(call.result?.content),
+			imageName: call.name.split("__").at(-1) || call.name,
+		},
 	};
 }
 
