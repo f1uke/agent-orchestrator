@@ -1,4 +1,4 @@
-import { type CodeView, splitLines } from "./chat-code";
+import { type CodeView, languageOf, splitLines } from "./chat-code";
 import type { ChatItem, ToolCallItem } from "./chat-fold";
 import { isObject } from "./chat-event";
 import { docRefs, isDocPath } from "./chat-refs";
@@ -145,6 +145,7 @@ export function textView(doc: Pick<FileDoc, "path" | "kind">, text: string, limi
 			body = text;
 		}
 	} else if (doc.kind === "diff") language = "diff";
+	else if (doc.kind === "html") language = languageOf(doc.path);
 	const all = splitLines(body);
 	const lines = all.slice(0, limit).map((line, i) => ({ kind: "context" as const, num: i + 1, text: line }));
 	return { path: doc.path, language, lines, hidden: all.length - lines.length };

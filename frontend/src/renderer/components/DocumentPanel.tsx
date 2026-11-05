@@ -1,8 +1,10 @@
 import { ArrowUpRight, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBrowserView } from "../hooks/useBrowserView";
 import { docMeta, docTag, type FileDoc, textView } from "../lib/chat-docs";
+import { previewDocument } from "../lib/chat-preview";
 import { chatFileUrl } from "../lib/chat-refs-store";
+import { WIDGET_DOC_TYPE, WIDGET_FRAME_URL } from "../lib/chat-widget";
 import { useUiStore } from "../stores/ui-store";
 import { CodeBox } from "./ChatCodeBox";
 import { useObjectUrl } from "./MediaLightbox";
@@ -12,7 +14,7 @@ import { Button } from "./ui/button";
 type Loaded = { state: "loading" } | { state: "failed" } | { state: "ready"; text: string };
 
 // The daemon serves only allowlisted types, so a refusal is the whole failure story: no retry, no detail.
-function useDocText(url: string | undefined): Loaded {
+function useDocText(url: string | undefined, revision = 0): Loaded {
 	const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
 	useEffect(() => {
 		if (url === undefined) return;
@@ -25,17 +27,12 @@ function useDocText(url: string | undefined): Loaded {
 				if (!controller.signal.aborted) setLoaded({ state: "failed" });
 			});
 		return () => controller.abort();
-	}, [url]);
+	}, [url, revision]);
 	return loaded;
 }
 
-const NATIVE_KINDS = new Set<FileDoc["kind"]>(["html", "pdf"]);
+const LINKED_KINDS = new Set<FileDoc["kind"]>(["html", "pdf"]);
 
-/**
- * The inspector's Document tab: the file a chat card opened, drawn by kind. HTML and PDF go to a native
- * view because the daemon serves them under a sandbox CSP that only a real page can honour; the rest is
- * read here and drawn in the app's own DOM, where no markup from the file can run.
- */
 export function DocumentPanel({
 	sessionId,
 	doc,
@@ -43,6 +40,7 @@ export function DocumentPanel({
 	onClose,
 	docs = [],
 	onOpen,
+	revision = 0,
 }: {
 	sessionId: string;
 	doc: FileDoc | null;
@@ -50,6 +48,7 @@ export function DocumentPanel({
 	onClose: () => void;
 	docs?: readonly FileDoc[];
 	onOpen?: (doc: FileDoc) => void;
+	revision?: number;
 }) {
 	if (!doc) {
 		return (
@@ -93,7 +92,7 @@ export function DocumentPanel({
 						{docMeta(doc)}
 					</p>
 				</div>
-				{NATIVE_KINDS.has(doc.kind) ? (
+				{LINKED_KINDS.has(doc.kind) ? (
 					<Button asChild size="sm" variant="outline">
 						<a href={url} rel="noreferrer noopener" target="_blank">
 							Open in browser
@@ -106,8 +105,10 @@ export function DocumentPanel({
 				</Button>
 			</header>
 			<div className="document-panel__body">
-				{NATIVE_KINDS.has(doc.kind) ? (
+				{doc.kind === "pdf" ? (
 					<NativeDoc active={active} sessionId={sessionId} url={url} />
+				) : doc.kind === "html" ? (
+					<HtmlDoc doc={doc} key={`${doc.root}:${doc.path}`} revision={revision} url={url} />
 				) : doc.kind === "image" ? (
 					<ImageDoc doc={doc} url={url} />
 				) : (
@@ -134,6 +135,69 @@ function NativeDoc({ sessionId, url, active }: { sessionId: string; url: string;
 		);
 	}
 	return <div className="document-panel__slot" data-doc-slot ref={view.slotRef} />;
+}
+
+type HtmlMode = "preview" | "source";
+
+const HTML_MODES: ReadonlyArray<readonly [HtmlMode, string]> = [
+	["preview", "Preview"],
+	["source", "Source"],
+];
+
+function HtmlDoc({ doc, url, revision }: { doc: FileDoc; url: string; revision: number }) {
+	const theme = useUiStore((state) => state.theme);
+	const [mode, setMode] = useState<HtmlMode>("preview");
+	const loaded = useDocText(url, revision);
+	const source = useMemo(
+		() => (loaded.state === "ready" && mode === "source" ? textView(doc, loaded.text) : undefined),
+		[doc, loaded, mode],
+	);
+	return (
+		<div className="document-html">
+			<div aria-label="View" className="document-html__modes" role="tablist">
+				{HTML_MODES.map(([value, label]) => (
+					<button
+						aria-selected={mode === value}
+						className="document-html__mode"
+						key={value}
+						onClick={() => setMode(value)}
+						role="tab"
+						type="button"
+					>
+						{label}
+					</button>
+				))}
+			</div>
+			{loaded.state === "failed" ? (
+				<Failed doc={doc} />
+			) : loaded.state !== "ready" ? null : mode === "preview" ? (
+				<PreviewFrame html={loaded.text} key={revision} title={`Preview of ${doc.title}`} />
+			) : source ? (
+				<CodeBox mode="read" named={false} theme={theme} view={source} />
+			) : null}
+		</div>
+	);
+}
+
+// Opaque origin (no allow-same-origin): the file reaches no cookie, storage or API of the app.
+function PreviewFrame({ html, title }: { html: string; title: string }) {
+	const frame = useRef<HTMLIFrameElement>(null);
+	const sent = useRef(false);
+	return (
+		<iframe
+			className="document-html__frame"
+			onLoad={() => {
+				if (sent.current) return;
+				sent.current = true;
+				frame.current?.contentWindow?.postMessage({ type: WIDGET_DOC_TYPE, html: previewDocument(html) }, "*");
+			}}
+			ref={frame}
+			referrerPolicy="no-referrer"
+			sandbox="allow-scripts"
+			src={WIDGET_FRAME_URL}
+			title={title}
+		/>
+	);
 }
 
 function ImageDoc({ doc, url }: { doc: FileDoc; url: string }) {

@@ -195,6 +195,15 @@ describe("ToolCard", () => {
 		expect(body).toHaveTextContent("Result");
 	});
 
+	it("shows the image an MCP tool returns next to its text, instead of only the text", () => {
+		const shot = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } };
+		const result = { isError: false, content: [{ type: "text", text: "Captured the page" }, shot] };
+		card(call("mcp__browser__screenshot", { tab: 1 }, result), { open: true });
+		const body = document.querySelector(".chat-tool__body")!;
+		expect(body).toHaveTextContent("Captured the page");
+		expect(screen.getByRole("img", { name: "screenshot" })).toHaveAttribute("src", "data:image/png;base64,iVBORw==");
+	});
+
 	it("shows a Read of a PNG as a thumbnail that opens the full image", async () => {
 		const png = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } };
 		const read = call("Read", { file_path: "/work/project/docs/shot.png" }, { isError: false, content: [png] });
