@@ -132,7 +132,15 @@ export type ChatEvent =
 			contextTokens?: number;
 			contextWindows: Record<string, number>;
 	  }
-	| { type: "control_request"; requestId: string; subtype: string; canUseTool?: CanUseTool; rewind?: RewindAsk }
+	| { type: "bridge_state"; state: string; detail: string }
+	| {
+			type: "control_request";
+			requestId: string;
+			subtype: string;
+			enabled?: boolean;
+			canUseTool?: CanUseTool;
+			rewind?: RewindAsk;
+	  }
 	| { type: "control_response"; requestId: string; ok: boolean; error: string; response: unknown }
 	| { type: "control_cancel"; requestId: string }
 	| { type: "command_lifecycle"; commandUuid: string; state: CommandState }
@@ -311,6 +319,8 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 					model: str(line.model),
 				};
 			}
+			if (line.subtype === "bridge_state")
+				return { type: "bridge_state", state: str(line.state), detail: str(line.detail) };
 			return {
 				type: "system",
 				subtype: str(line.subtype),
@@ -360,6 +370,9 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				const target = str(subtype === "rewind_files" ? request.user_message_id : request.target_message_uuid);
 				const rewind: RewindAsk = { target, files: subtype === "rewind_files", dryRun: request.dry_run === true };
 				return { type: "control_request", requestId, subtype, rewind };
+			}
+			if (subtype === "remote_control") {
+				return { type: "control_request", requestId, subtype, enabled: request.enabled === true };
 			}
 			if (subtype !== "can_use_tool") return { type: "control_request", requestId, subtype };
 			return {

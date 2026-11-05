@@ -1146,3 +1146,88 @@ describe("chat fold: rewind", () => {
 		expect(noticeKinds(tr)).toEqual([]);
 	});
 });
+
+describe("chat fold: Remote Control", () => {
+	const URL = "https://claude.ai/code/session_example";
+	const entries = loadFixture("remote_control.jsonl");
+	const failed = loadFixture("remote_control_failed.jsonl");
+	const remote = (all: ChatEntry[], seq: number) => foldEntries(upTo(all, seq)).remoteControl;
+
+	it("follows the bridge from enable to disable", () => {
+		expect(remote(entries, 0)).toEqual({ state: "off", url: "", detail: "" });
+		expect(remote(entries, 1)).toEqual({ state: "connecting", url: "", detail: "" });
+		expect(remote(entries, 2).state).toBe("connecting");
+		expect(remote(entries, 3)).toEqual({ state: "connecting", url: URL, detail: "" });
+		expect(remote(entries, 4)).toEqual({ state: "connected", url: URL, detail: "" });
+		expect(remote(entries, 5).state).toBe("reconnecting");
+		expect(remote(entries, 6).state).toBe("connected");
+		expect(remote(entries, 10)).toEqual({ state: "connected", url: URL, detail: "" });
+		expect(remote(entries, 11).state).toBe("connected");
+		expect(remote(entries, 12)).toEqual({ state: "off", url: "", detail: "" });
+	});
+
+	it("keeps the failure reason", () => {
+		for (const seq of [2, 3]) {
+			expect(remote(failed, seq)).toEqual({
+				state: "failed",
+				url: "",
+				detail: "Remote Control is not available for this account.",
+			});
+		}
+	});
+
+	it("takes the reason from the error when no bridge state came first", () => {
+		const tr = foldEntries([
+			synth(1, "in", {
+				type: "control_request",
+				request_id: "rc",
+				request: { subtype: "remote_control", enabled: true },
+			}),
+			synth(2, "out", {
+				type: "control_response",
+				response: { subtype: "error", request_id: "rc", error: "cannot ask the user to confirm" },
+			}),
+		]);
+		expect(tr.remoteControl).toEqual({ state: "failed", url: "", detail: "cannot ask the user to confirm" });
+	});
+
+	it("stays on when a disable is refused", () => {
+		const refused = [
+			...upTo(entries, 10),
+			synth(11, "in", {
+				type: "control_request",
+				request_id: "rc-2",
+				request: { subtype: "remote_control", enabled: false },
+			}),
+			synth(12, "out", { type: "control_response", response: { subtype: "error", request_id: "rc-2", error: "boom" } }),
+		];
+		expect(foldEntries(refused).remoteControl.state).toBe("connected");
+	});
+
+	it("is off after the process ends, and survives the init that opens every turn", () => {
+		const connected = upTo(entries, 6);
+		const init = synth(7, "out", {
+			type: "system",
+			subtype: "init",
+			session_id: "s-1",
+			model: "m",
+			permissionMode: "default",
+		});
+		expect(foldEntries([...connected, init]).remoteControl.state).toBe("connected");
+		for (const note of [
+			{ kind: "exit", code: 0 },
+			{ kind: "spawn", argv: ["claude"] },
+		]) {
+			expect(foldEntries([...connected, synth(7, "host", note)]).remoteControl).toEqual({
+				state: "off",
+				url: "",
+				detail: "",
+			});
+		}
+	});
+
+	it("runs a message typed on the remote side through its lifecycle", () => {
+		expect(foldEntries(upTo(entries, 9)).busy).toBe(true);
+		expect(foldEntries(upTo(entries, 10)).busy).toBe(false);
+	});
+});

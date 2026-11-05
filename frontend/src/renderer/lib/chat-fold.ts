@@ -144,6 +144,25 @@ export type ChatModel = {
 	supportedEffortLevels: string[];
 };
 
+/**
+ * Where a session's Remote Control bridge stands: claude.ai/code and the Claude
+ * app can drive the session while it is connected. `url` is the session's
+ * claude.ai/code address, set once claude accepted the request. `detail` is the
+ * reason when `state` is "failed".
+ */
+export type RemoteControlState = "off" | "connecting" | "connected" | "reconnecting" | "failed";
+export type RemoteControl = { state: RemoteControlState; url: string; detail: string };
+
+export const REMOTE_CONTROL_OFF: RemoteControl = { state: "off", url: "", detail: "" };
+
+// claude's "ready" means registered but not connected yet, which reads as connecting.
+const BRIDGE_STATES: Record<string, RemoteControlState> = {
+	ready: "connecting",
+	connected: "connected",
+	reconnecting: "reconnecting",
+	failed: "failed",
+};
+
 export type Transcript = {
 	claudeSessionIds: string[];
 	items: ChatItem[];
@@ -173,6 +192,8 @@ export type Transcript = {
 	thinkingSince?: string;
 	contextBreakdown?: ContextBreakdown;
 	usage?: SubscriptionUsage;
+	/** The Remote Control bridge. Off after a process ends, because the bridge dies with claude. */
+	remoteControl: RemoteControl;
 	/** Claude's guess at the next user message. Empty once input, a turn start, an interrupt or a process change follows it. */
 	suggestion: string;
 	lastSeq: number;
@@ -250,10 +271,11 @@ export class ChatFolder {
 	private pending: Pending[] = [];
 	private mode = "";
 	private cost = 0;
-	// The id of a host's initialize or set_model request, to its subtype,
-	// because claude's response does not repeat it.
-	private controls = new Map<string, string>();
+	// The id of a host's initialize, set_model or remote_control request, to what
+	// it asked, because claude's response does not repeat it.
+	private controls = new Map<string, { subtype: string; enabled: boolean }>();
 	private rewinds = new Map<string, RewindAsk>();
+	private remote: RemoteControl = REMOTE_CONTROL_OFF;
 	private slash: ChatCommand[] = [];
 	private models: ChatModel[] = [];
 	private model = "";
@@ -333,6 +355,7 @@ export class ChatFolder {
 			thinkingSince: this.thinkingSince,
 			contextBreakdown: this.breakdown,
 			usage: this.usage,
+			remoteControl: { ...this.remote },
 			suggestion: this.suggestion,
 			lastSeq: this.last,
 		};
@@ -411,6 +434,11 @@ export class ChatFolder {
 			case "prompt_suggestion":
 				this.suggestion = event.text;
 				break;
+			case "bridge_state": {
+				const state = BRIDGE_STATES[event.state];
+				if (state) this.remote = { ...this.remote, state, detail: event.detail };
+				break;
+			}
 		}
 	}
 
@@ -420,17 +448,40 @@ export class ChatFolder {
 			this.suggestion = "";
 			this.addUserInput(event.uuid, event.blocks);
 		} else if (event.type === "control_response") this.answerPermission(event);
-		else if (event.type === "control_request" && (event.subtype === "initialize" || event.subtype === "set_model")) {
-			this.controls.set(event.requestId, event.subtype);
-		} else if (event.type === "control_request" && event.rewind && !event.rewind.dryRun) {
-			this.rewinds.set(event.requestId, event.rewind);
+		else if (event.type === "control_request") {
+			if (event.rewind && !event.rewind.dryRun) this.rewinds.set(event.requestId, event.rewind);
+			else this.askControl(event.requestId, event.subtype, event.enabled === true);
+		}
+	}
+
+	private askControl(requestId: string, subtype: string, enabled: boolean): void {
+		if (subtype === "initialize" || subtype === "set_model") this.controls.set(requestId, { subtype, enabled });
+		else if (subtype === "remote_control") {
+			this.controls.set(requestId, { subtype, enabled });
+			if (enabled) this.remote = { state: "connecting", url: "", detail: "" };
+		}
+	}
+
+	private answerRemote(response: Extract<ChatEvent, { type: "control_response" }>, enabled: boolean): void {
+		if (!enabled) {
+			if (response.ok) this.remote = REMOTE_CONTROL_OFF;
+		} else if (response.ok) {
+			const url = isObject(response.response) ? strField(response.response, "session_url") : "";
+			this.remote = { ...this.remote, url };
+		} else {
+			this.remote = { ...this.remote, state: "failed", detail: response.error || this.remote.detail };
 		}
 	}
 
 	private answerControl(response: Extract<ChatEvent, { type: "control_response" }>): void {
-		const subtype = this.controls.get(response.requestId);
-		if (subtype === undefined) return;
+		const control = this.controls.get(response.requestId);
+		if (control === undefined) return;
 		this.controls.delete(response.requestId);
+		const { subtype } = control;
+		if (subtype === "remote_control") {
+			this.answerRemote(response, control.enabled);
+			return;
+		}
 		if (!response.ok || !isObject(response.response)) return;
 		const body = response.response;
 		if (subtype === "initialize") {
@@ -643,6 +694,7 @@ export class ChatFolder {
 
 	private endProcess(): void {
 		this.suggestion = "";
+		this.remote = REMOTE_CONTROL_OFF;
 		this.thinkingSince = undefined;
 		for (const [id, task] of this.tasks) {
 			if (unfinished(task.state)) this.tasks.set(id, { ...task, state: "stopped" });
