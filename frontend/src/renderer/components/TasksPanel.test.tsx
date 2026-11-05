@@ -38,6 +38,8 @@ function fakeApi() {
 			modifiedAt: "2026-11-03T09:00:00Z",
 		})),
 		upload: vi.fn<ChatApi["upload"]>(async () => ({ ok: true, file: { path: "/x", name: "x", size: 1 } })),
+		rewind: vi.fn<ChatApi["rewind"]>(async () => ({ ok: true })),
+		rewindPreview: vi.fn<ChatApi["rewindPreview"]>(async () => null),
 	};
 }
 

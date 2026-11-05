@@ -78,6 +78,13 @@ function fakeApi() {
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
 		stopTask: vi.fn<ChatApi["stopTask"]>(async () => OK),
+		rewind: vi.fn<ChatApi["rewind"]>(async () => OK),
+		rewindPreview: vi.fn<ChatApi["rewindPreview"]>(async () => ({
+			canRewind: true,
+			filesChanged: ["/w/src/a.ts", "/w/b.md"],
+			insertions: 3,
+			deletions: 1,
+		})),
 		taskOutput: vi.fn<ChatApi["taskOutput"]>(async () => null),
 		upload: vi.fn<ChatApi["upload"]>(async (_id, file) => ({
 			ok: true,
@@ -570,6 +577,77 @@ describe("ChatPane answers", () => {
 		expect(screen.queryByText(/Session is asleep or restarting/)).toBeNull();
 		expect(input).toBeEnabled();
 		expect(screen.getByRole("button", { name: /Allow once/ })).toBeEnabled();
+	});
+});
+
+describe("ChatPane rewind", () => {
+	const turn = (uuid: string, text: string, reply: string) => [
+		entry("in", { type: "user", uuid, message: { content: text } }),
+		out({ type: "command_lifecycle", command_uuid: uuid, state: "completed" }),
+		out({ type: "assistant", message: { id: `m-${uuid}`, content: [{ type: "text", text: reply }] } }),
+		out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0 }),
+	];
+	const bubble = (text: string) =>
+		[...document.querySelectorAll(".chat-user")].find((b) => b.textContent?.includes(text))!;
+
+	it("rewinds to a user message with the files left alone, and puts its text back in the composer", async () => {
+		const { feed, api, user } = renderPane();
+		feed(
+			entry("host", { kind: "spawn", resume: "c-1" }),
+			...turn("u1", "First ask", "one"),
+			...turn("u2", "Second ask", "two"),
+		);
+
+		await user.click(within(bubble("Second ask") as HTMLElement).getByRole("button", { name: "Rewind to here" }));
+		const dialog = await screen.findByRole("dialog");
+		expect(dialog).toHaveTextContent("This message and everything after it leave the conversation");
+		expect(within(dialog).getByRole("switch", { name: /Restore files/ })).not.toBeChecked();
+		await user.click(within(dialog).getByRole("button", { name: "Rewind" }));
+
+		expect(api.rewind).toHaveBeenCalledWith("chat-1", "u2", false);
+		await waitFor(() => expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Second ask"));
+	});
+
+	it("lists the files a restore would change and sends restoreFiles when it is on", async () => {
+		const { feed, api, user } = renderPane("chat", fakeApi(), { ...session, workspacePath: "/w" });
+		feed(entry("host", { kind: "spawn", resume: "c-1" }), ...turn("u1", "First ask", "one"));
+
+		await user.click(within(bubble("First ask") as HTMLElement).getByRole("button", { name: "Rewind to here" }));
+		const dialog = await screen.findByRole("dialog");
+		await user.click(within(dialog).getByRole("switch", { name: /Restore files/ }));
+		expect(api.rewindPreview).toHaveBeenCalledWith("chat-1", "u1");
+		expect(await within(dialog).findByText("src/a.ts")).toBeInTheDocument();
+		expect(dialog).toHaveTextContent("+3 −1");
+		await user.click(within(dialog).getByRole("button", { name: "Rewind" }));
+		expect(api.rewind).toHaveBeenCalledWith("chat-1", "u1", true);
+	});
+
+	it("draws the cut once the log shows it, and offers no rewind while a turn runs", () => {
+		const { feed } = renderPane();
+		feed(
+			entry("host", { kind: "spawn", resume: "c-1" }),
+			...turn("u1", "First ask", "one"),
+			...turn("u2", "Second ask", "two"),
+		);
+		feed(
+			entry("in", {
+				type: "control_request",
+				request_id: "r1",
+				request: { subtype: "rewind_conversation", target_message_uuid: "u2" },
+			}),
+			out({
+				type: "control_response",
+				response: { subtype: "success", request_id: "r1", response: { rewound: true } },
+			}),
+		);
+		expect(screen.getByTestId("chat-stream")).not.toHaveTextContent("Second ask");
+		expect(screen.getByText("Rewound here · later messages dropped")).toBeInTheDocument();
+
+		feed(
+			entry("in", { type: "user", uuid: "u3", message: { content: "Third ask" } }),
+			out({ type: "command_lifecycle", command_uuid: "u3", state: "started" }),
+		);
+		expect(within(bubble("First ask") as HTMLElement).queryByRole("button", { name: "Rewind to here" })).toBeNull();
 	});
 });
 

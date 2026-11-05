@@ -1066,3 +1066,83 @@ describe("prompt suggestion", () => {
 		expect(tr.suggestion).toBe("what next?");
 	});
 });
+
+describe("chat fold: rewind", () => {
+	const user = (seq: number, uuid: string, text: string) =>
+		synth(seq, "in", { type: "user", uuid, message: { role: "user", content: text } });
+	const reply = (seq: number, id: string, text: string) =>
+		synth(seq, "out", {
+			type: "assistant",
+			message: { id, role: "assistant", content: [{ type: "text", text }] },
+			parent_tool_use_id: null,
+			session_id: "s",
+		});
+	const rewindAsk = (seq: number, id: string, target: string) =>
+		synth(seq, "in", {
+			type: "control_request",
+			request_id: id,
+			request: { subtype: "rewind_conversation", target_message_uuid: target },
+		});
+	const rewindAnswer = (seq: number, id: string, response: unknown) =>
+		synth(seq, "out", { type: "control_response", response: { subtype: "success", request_id: id, response } });
+	const turns = [user(1, "u-1", "first"), reply(2, "m-1", "one"), user(3, "u-2", "second"), reply(4, "m-2", "two")];
+
+	it("drops the target message and everything after it, and marks the cut", () => {
+		const tr = foldEntries([...turns, rewindAsk(5, "r-1", "u-2"), rewindAnswer(6, "r-1", { rewound: true })]);
+		expect(users(tr).map((u) => u.uuid)).toEqual(["u-1"]);
+		expect(tr.items.some((i) => i.kind === "assistant_text" && i.text === "two")).toBe(false);
+		expect(tr.items.at(-1)).toMatchObject({ kind: "notice", notice: "rewound" });
+		expect(tr.itemKeys).toHaveLength(tr.items.length);
+	});
+
+	it("keeps the conversation when claude refuses the rewind", () => {
+		const tr = foldEntries([
+			...turns,
+			rewindAsk(5, "r-1", "u-2"),
+			rewindAnswer(6, "r-1", { rewound: false, reason: "turn_running" }),
+		]);
+		expect(users(tr).map((u) => u.uuid)).toEqual(["u-1", "u-2"]);
+		expect(noticeKinds(tr)).not.toContain("rewound");
+	});
+
+	it("folds a turn sent after the cut as a fresh message", () => {
+		const tr = foldEntries([
+			...turns,
+			rewindAsk(5, "r-1", "u-2"),
+			rewindAnswer(6, "r-1", { rewound: true }),
+			user(7, "u-3", "third"),
+			reply(8, "m-3", "three"),
+		]);
+		expect(users(tr).map((u) => u.text)).toEqual(["first", "third"]);
+		expect(noticeKinds(tr)).toEqual(["rewound"]);
+	});
+
+	it("says when the files were put back too", () => {
+		const tr = foldEntries([
+			...turns,
+			rewindAsk(5, "r-1", "u-2"),
+			rewindAnswer(6, "r-1", { rewound: true }),
+			synth(7, "in", {
+				type: "control_request",
+				request_id: "f-1",
+				request: { subtype: "rewind_files", user_message_id: "u-2" },
+			}),
+			rewindAnswer(8, "f-1", { canRewind: true }),
+		]);
+		expect(notices(tr).map((n) => [n.notice, n.text])).toEqual([["rewound", "files"]]);
+	});
+
+	it("ignores a dry run", () => {
+		const tr = foldEntries([
+			...turns,
+			synth(5, "in", {
+				type: "control_request",
+				request_id: "f-1",
+				request: { subtype: "rewind_files", user_message_id: "u-2", dry_run: true },
+			}),
+			rewindAnswer(6, "f-1", { canRewind: true, filesChanged: ["/a"] }),
+		]);
+		expect(users(tr)).toHaveLength(2);
+		expect(noticeKinds(tr)).toEqual([]);
+	});
+});

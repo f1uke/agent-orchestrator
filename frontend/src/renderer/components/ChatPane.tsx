@@ -69,6 +69,7 @@ import { NoteMarkdown } from "./NoteMarkdown";
 import { ChatDocsProvider, ChatDocStrip, SessionDocsReporter } from "./ChatDocs";
 import { ChatTasksProvider, type OpenTasks } from "./ChatTasks";
 import { ChatRefsProvider, RefImages } from "./RefImages";
+import { ChatRewindProvider, type RewindControl, RewindButton } from "./ChatRewind";
 
 export type ChatPaneView = "chat" | "trajectory";
 
@@ -182,6 +183,19 @@ export function ChatPane({
 
 	const onPrompt = useCallback((text: string) => setPrefill((prev) => ({ text, seq: (prev?.seq ?? 0) + 1 })), []);
 
+	const rewindReady = !transcript.busy && !actions.hostDown && transcript.pending.length === 0;
+	const rewind = useMemo<RewindControl>(
+		() => ({
+			rewind: actions.rewind,
+			preview: actions.rewindPreview,
+			onRewound: (item) => onPrompt(item.text),
+			onError: showToast,
+			ready: rewindReady,
+			root,
+		}),
+		[actions.rewind, actions.rewindPreview, onPrompt, showToast, rewindReady, root],
+	);
+
 	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
 		if (e.key !== "Escape" || e.defaultPrevented || !transcript.busy || actions.hostDown) return;
 		const target = e.target as Element;
@@ -195,90 +209,92 @@ export function ChatPane({
 	return (
 		<ChatRefsProvider sessionId={session.id}>
 			<TaskOutputProvider read={actions.taskOutput}>
-				<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
-					<ChatTasksProvider onOpen={onOpenTasks}>
-						<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
-						<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-							{view === "trajectory" ? (
-								<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
-							) : (
-								<ChatStream
-									disabled={actions.hostDown}
-									replaying={chat.replaying}
-									onAnswer={onAnswer}
-									onNewSession={setSuggested}
-									onPrompt={onPrompt}
-									pending={transcript.pending}
-									requests={requests}
-									root={root}
-									rows={rows}
-									theme={theme}
-								/>
-							)}
-							<div className="chat-bottom">
-								{actions.hostDown ? (
-									<div className="chat-banner" role="alert">
-										<CloudOff className="chat-icon" aria-hidden="true" />
-										Session is asleep or restarting. Sending and answering resume once it is back.
+				<ChatRewindProvider value={rewind}>
+					<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
+						<ChatTasksProvider onOpen={onOpenTasks}>
+							<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
+							<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
+								{view === "trajectory" ? (
+									<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
+								) : (
+									<ChatStream
+										disabled={actions.hostDown}
+										replaying={chat.replaying}
+										onAnswer={onAnswer}
+										onNewSession={setSuggested}
+										onPrompt={onPrompt}
+										pending={transcript.pending}
+										requests={requests}
+										root={root}
+										rows={rows}
+										theme={theme}
+									/>
+								)}
+								<div className="chat-bottom">
+									{actions.hostDown ? (
+										<div className="chat-banner" role="alert">
+											<CloudOff className="chat-icon" aria-hidden="true" />
+											Session is asleep or restarting. Sending and answering resume once it is back.
+										</div>
+									) : null}
+									{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
+									{view === "chat" ? (
+										<ChatComposer
+											actions={actions}
+											busy={transcript.busy}
+											commands={transcript.commands}
+											model={transcript.model}
+											models={transcript.models}
+											suggestion={transcript.suggestion}
+											onToast={showToast}
+											permissionMode={transcript.permissionMode}
+											prefill={prefill}
+											queued={queued}
+											sessionId={session.id}
+										/>
+									) : null}
+									<div className="chat-statusline">
+										<ConnectionLabel connection={chat.connection} error={chat.error} />
+										{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+										{runningInBackground > 0 ? (
+											onOpenTasks ? (
+												<button className="chat-statusline__tasks" onClick={() => onOpenTasks(null)} type="button">
+													<span className="chat-statusline__dot chat-statusline__dot--live" />
+													{runningInBackground} running in background
+												</button>
+											) : (
+												<span>
+													<span className="chat-statusline__dot chat-statusline__dot--live" />
+													{runningInBackground} running in background
+												</span>
+											)
+										) : null}
+										<span className="chat-statusline__grow" />
+										{view === "chat" ? (
+											<>
+												<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+												<UsageMeter usage={usage} />
+												<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+											</>
+										) : null}
 									</div>
-								) : null}
-								{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
-								{view === "chat" ? (
-									<ChatComposer
-										actions={actions}
-										busy={transcript.busy}
-										commands={transcript.commands}
-										model={transcript.model}
-										models={transcript.models}
-										suggestion={transcript.suggestion}
-										onToast={showToast}
-										permissionMode={transcript.permissionMode}
-										prefill={prefill}
-										queued={queued}
-										sessionId={session.id}
+								</div>
+								{suggested ? (
+									<SuggestedSessionDialog
+										onClose={() => setSuggested(undefined)}
+										projectId={session.workspaceId}
+										suggestion={suggested}
 									/>
 								) : null}
-								<div className="chat-statusline">
-									<ConnectionLabel connection={chat.connection} error={chat.error} />
-									{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
-									{runningInBackground > 0 ? (
-										onOpenTasks ? (
-											<button className="chat-statusline__tasks" onClick={() => onOpenTasks(null)} type="button">
-												<span className="chat-statusline__dot chat-statusline__dot--live" />
-												{runningInBackground} running in background
-											</button>
-										) : (
-											<span>
-												<span className="chat-statusline__dot chat-statusline__dot--live" />
-												{runningInBackground} running in background
-											</span>
-										)
-									) : null}
-									<span className="chat-statusline__grow" />
-									{view === "chat" ? (
-										<>
-											<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
-											<UsageMeter usage={usage} />
-											<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
-										</>
-									) : null}
-								</div>
+								{toast ? (
+									<div className="chat-toast" role="status">
+										{toast}
+									</div>
+								) : null}
 							</div>
-							{suggested ? (
-								<SuggestedSessionDialog
-									onClose={() => setSuggested(undefined)}
-									projectId={session.workspaceId}
-									suggestion={suggested}
-								/>
-							) : null}
-							{toast ? (
-								<div className="chat-toast" role="status">
-									{toast}
-								</div>
-							) : null}
-						</div>
-					</ChatTasksProvider>
-				</ChatDocsProvider>
+						</ChatTasksProvider>
+					</ChatDocsProvider>
+				</ChatRewindProvider>
 			</TaskOutputProvider>
 		</ChatRefsProvider>
 	);
@@ -974,6 +990,7 @@ function NoticeRow({ notice }: { notice: Extract<ChatItem, { kind: "notice" }> }
 				"chat-sys",
 				notice.notice === "interrupted" && "chat-sys--warn",
 				notice.notice === "api_error" && "chat-sys--error",
+				notice.notice === "rewound" && "chat-sys--cut",
 			)}
 			data-notice={notice.notice}
 		>
@@ -1001,7 +1018,10 @@ function UserMessage({ item }: { item: UserItem }) {
 				) : null}
 				{item.text}
 			</div>
-			{state ? <div className="chat-user__meta">{state}</div> : null}
+			<div className="chat-user__meta">
+				{state ? <span>{state}</span> : null}
+				<RewindButton item={item} />
+			</div>
 		</div>
 	);
 }

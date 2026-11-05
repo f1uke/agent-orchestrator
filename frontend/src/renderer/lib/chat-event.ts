@@ -87,6 +87,9 @@ function decodeCompact(line: Obj): CompactTokens | undefined {
 	return typeof post === "number" ? { pre, post } : { pre };
 }
 
+/** A rewind_conversation or rewind_files request: the user message it goes back to. */
+export type RewindAsk = { target: string; files: boolean; dryRun: boolean };
+
 export type ChatEvent =
 	| { type: "system_init"; sessionId: string; permissionMode: string; model: string }
 	| {
@@ -129,7 +132,7 @@ export type ChatEvent =
 			contextTokens?: number;
 			contextWindows: Record<string, number>;
 	  }
-	| { type: "control_request"; requestId: string; subtype: string; canUseTool?: CanUseTool }
+	| { type: "control_request"; requestId: string; subtype: string; canUseTool?: CanUseTool; rewind?: RewindAsk }
 	| { type: "control_response"; requestId: string; ok: boolean; error: string; response: unknown }
 	| { type: "control_cancel"; requestId: string }
 	| { type: "command_lifecycle"; commandUuid: string; state: CommandState }
@@ -353,6 +356,11 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			if (!request) return undefined;
 			const requestId = str(line.request_id);
 			const subtype = str(request.subtype);
+			if (subtype === "rewind_conversation" || subtype === "rewind_files") {
+				const target = str(subtype === "rewind_files" ? request.user_message_id : request.target_message_uuid);
+				const rewind: RewindAsk = { target, files: subtype === "rewind_files", dryRun: request.dry_run === true };
+				return { type: "control_request", requestId, subtype, rewind };
+			}
 			if (subtype !== "can_use_tool") return { type: "control_request", requestId, subtype };
 			return {
 				type: "control_request",
