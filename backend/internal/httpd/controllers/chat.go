@@ -13,6 +13,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
 )
 
 // ChatService drives a chat session through its session host.
@@ -23,6 +24,8 @@ type ChatService interface {
 	SetMode(ctx context.Context, id domain.SessionID, mode chatproto.PermissionMode) error
 	SetModel(ctx context.Context, id domain.SessionID, model string) error
 	StopTask(ctx context.Context, id domain.SessionID, taskID string) error
+	Rewind(ctx context.Context, id domain.SessionID, uuid string, restoreFiles bool) error
+	RewindPreview(ctx context.Context, id domain.SessionID, uuid string) (sessionhost.RewindPreview, error)
 }
 
 // ChatController owns the routes the chat view drives a session with.
@@ -36,6 +39,8 @@ func (c *ChatController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/chat/answers", c.answer)
 	r.Post("/sessions/{sessionId}/chat/interrupt", c.interrupt)
 	r.Post("/sessions/{sessionId}/chat/tasks/{taskId}/stop", c.stopTask)
+	r.Post("/sessions/{sessionId}/chat/rewind", c.rewind)
+	r.Post("/sessions/{sessionId}/chat/rewind/preview", c.rewindPreview)
 	r.Put("/sessions/{sessionId}/chat/mode", c.setMode)
 	r.Put("/sessions/{sessionId}/chat/model", c.setModel)
 }
@@ -161,6 +166,51 @@ func (c *ChatController) stopTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+func (c *ChatController) rewind(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/chat/rewind")
+		return
+	}
+	var body RewindChatRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	if body.UUID == "" {
+		chatBadRequest(w, r, "UUID_REQUIRED", "uuid is required")
+		return
+	}
+	if err := c.Svc.Rewind(r.Context(), sessionID(r), body.UUID, body.RestoreFiles); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+func (c *ChatController) rewindPreview(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/chat/rewind/preview")
+		return
+	}
+	var body RewindChatPreviewRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	if body.UUID == "" {
+		chatBadRequest(w, r, "UUID_REQUIRED", "uuid is required")
+		return
+	}
+	p, err := c.Svc.RewindPreview(r.Context(), sessionID(r), body.UUID)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, RewindChatPreviewResponse{
+		CanRewind: p.CanRewind, Error: p.Error, FilesChanged: p.FilesChanged, Insertions: p.Insertions, Deletions: p.Deletions,
+	})
 }
 
 func (c *ChatController) setMode(w http.ResponseWriter, r *http.Request) {

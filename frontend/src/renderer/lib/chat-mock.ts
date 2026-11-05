@@ -1019,6 +1019,54 @@ export const stubChatApi: ChatApi = {
 		]);
 		return OK;
 	},
+	rewind: async (id, uuid, restoreFiles) => {
+		const session = await stubSession(id);
+		const requestId = `stub-rewind-${++session.sent}`;
+		const steps: Step[] = [
+			[
+				"in",
+				{
+					type: "control_request",
+					request_id: requestId,
+					request: { subtype: "rewind_conversation", target_message_uuid: uuid },
+				},
+			],
+			[
+				"out",
+				{
+					type: "control_response",
+					response: { subtype: "success", request_id: requestId, response: { rewound: true } },
+				},
+			],
+		];
+		if (restoreFiles) {
+			steps.push(
+				[
+					"in",
+					{
+						type: "control_request",
+						request_id: `${requestId}-files`,
+						request: { subtype: "rewind_files", user_message_id: uuid },
+					},
+				],
+				[
+					"out",
+					{
+						type: "control_response",
+						response: { subtype: "success", request_id: `${requestId}-files`, response: { canRewind: true } },
+					},
+				],
+			);
+		}
+		append(id, session, steps);
+		return OK;
+	},
+	rewindPreview: async () => ({
+		canRewind: true,
+		filesChanged: ["/preview/worktree/src/chat.ts", "/preview/worktree/README.md"],
+		insertions: 12,
+		deletions: 4,
+	}),
 	upload: async (_id, file) => ({
 		ok: true,
 		file: { path: `/preview/attachments/${file.name || "pasted file"}`, name: file.name, size: file.size },

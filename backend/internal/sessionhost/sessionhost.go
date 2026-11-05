@@ -69,6 +69,10 @@ var protocolFlags = []string{
 	"--allowedTools", mcpAllowedTools(),
 }
 
+// envFileCheckpointing turns on the file checkpoints that rewind_files restores;
+// claude keeps them off when it runs under an SDK host.
+const envFileCheckpointing = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"
+
 var errNotRunning = errors.New("claude is not running")
 
 // Run hosts one claude process until it exits or ctx is cancelled, and returns
@@ -193,7 +197,7 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, mod
 	cmd := process.Command(argv[0], argv[1:]...)
 	process.Detach(cmd)
 	cmd.Dir = cfg.Dir
-	cmd.Env = append(os.Environ(), ports.EnvAgentParentPID+"="+strconv.Itoa(os.Getpid()))
+	cmd.Env = append(os.Environ(), ports.EnvAgentParentPID+"="+strconv.Itoa(os.Getpid()), envFileCheckpointing+"=1")
 	cmd.Stderr = h.pane
 	cmd.WaitDelay = stdoutDrain
 	stdin, err := cmd.StdinPipe()

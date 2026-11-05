@@ -1428,6 +1428,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/chat/rewind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rewind a chat session's conversation to before one of its user messages: that message and every message after it leave the agent's context, and with restoreFiles the files the agent changed since then are put back. 409 when the session is not a chat session, its host is not running, or the agent refuses, with its reason in the message */
+        post: operations["rewindChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/chat/rewind/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** What restoring files to before one of a chat session's user messages would change, without changing them */
+        post: operations["previewChatRewind"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output": {
         parameters: {
             query?: never;
@@ -4140,6 +4174,26 @@ export interface components {
              * @description Number of stuck running review runs that were failed.
              */
             failed: number;
+        };
+        ControllersRewindChatPreviewRequest: {
+            /** @description The user message a rewind would go back to. */
+            uuid: string;
+        };
+        ControllersRewindChatPreviewResponse: {
+            /** @description False when the agent holds no file checkpoint for that message, as in a session started before checkpoints were on. */
+            canRewind: boolean;
+            deletions: number;
+            /** @description Why the files cannot be restored, when canRewind is false. */
+            error?: string;
+            /** @description Absolute paths a restore would change. */
+            filesChanged: string[];
+            insertions: number;
+        };
+        ControllersRewindChatRequest: {
+            /** @description Also put back the files the agent changed since that message. */
+            restoreFiles?: boolean;
+            /** @description The user message to rewind to: it and every message after it leave the conversation. */
+            uuid: string;
         };
         ControllersSessionPRAOReviewSummary: {
             preMr?: boolean;
@@ -12701,6 +12755,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatAckResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    rewindChat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersRewindChatRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatAckResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    previewChatRewind: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersRewindChatPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersRewindChatPreviewResponse"];
                 };
             };
             /** @description Bad Request */

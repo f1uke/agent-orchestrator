@@ -150,6 +150,30 @@ func (c Client) StopTask(ctx context.Context, taskID string) error {
 	return c.call(ctx, map[string]string{"op": "stop_task", "task_id": taskID}, &okResponse{})
 }
 
+// Rewind drops the user message uuid and every message after it from claude's
+// conversation. With restoreFiles it then puts the files claude changed since
+// that message back. Claude's refusal, such as a turn that is running, is a
+// RefusedError.
+func (c Client) Rewind(ctx context.Context, uuid string, restoreFiles bool) error {
+	return c.call(ctx, rewindWire{Op: "rewind", UUID: uuid, RestoreFiles: restoreFiles}, &okResponse{})
+}
+
+// RewindPreview reports what restoring files to before the user message uuid
+// would change, without changing them.
+func (c Client) RewindPreview(ctx context.Context, uuid string) (RewindPreview, error) {
+	var resp rewindPreviewResponse
+	if err := c.call(ctx, rewindWire{Op: "rewind_preview", UUID: uuid}, &resp); err != nil {
+		return RewindPreview{}, err
+	}
+	return resp.Preview, nil
+}
+
+type rewindWire struct {
+	Op           string `json:"op"`
+	UUID         string `json:"uuid"`
+	RestoreFiles bool   `json:"restore_files,omitempty"`
+}
+
 // State reports what the host knows about its session right now.
 func (c Client) State(ctx context.Context) (State, error) {
 	var resp stateResponse

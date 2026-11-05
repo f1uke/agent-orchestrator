@@ -5,6 +5,7 @@ import {
 	type ChatImage,
 	type ChatResult,
 	httpChatApi,
+	type RewindPreview,
 	type TaskOutput,
 	type UploadResult,
 } from "../lib/chat-api";
@@ -20,6 +21,8 @@ export type ChatActions = {
 	upload: (file: File) => Promise<UploadResult>;
 	stopTask: (taskId: string) => Promise<ChatResult>;
 	taskOutput: (taskId: string) => Promise<TaskOutput | null>;
+	rewind: (uuid: string, restoreFiles: boolean) => Promise<ChatResult>;
+	rewindPreview: (uuid: string) => Promise<RewindPreview | null>;
 	hostDown: boolean;
 };
 
@@ -48,6 +51,8 @@ export function useChatActions(sessionId: string, connection: ChatConnection, ap
 			upload: (file) => api.upload(sessionId, file),
 			stopTask: (taskId) => api.stopTask(sessionId, taskId),
 			taskOutput: (taskId) => api.taskOutput(sessionId, taskId),
+			rewind: (uuid, restoreFiles) => run(api.rewind(sessionId, uuid, restoreFiles)),
+			rewindPreview: (uuid) => api.rewindPreview(sessionId, uuid),
 			hostDown,
 		}),
 		[api, hostDown, run, sessionId],

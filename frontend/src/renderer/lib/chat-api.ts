@@ -7,6 +7,8 @@ export type ChatImage = components["schemas"]["ChatImage"];
 
 export type TaskOutput = components["schemas"]["ControllersChatTaskOutputResponse"];
 
+export type RewindPreview = components["schemas"]["ControllersRewindChatPreviewResponse"];
+
 export type ChatErrorKind = "host_not_running" | "rejected" | "not_chat" | "invalid" | "failed";
 
 export type ChatActionError = { kind: ChatErrorKind; message: string };
@@ -29,6 +31,10 @@ export type ChatApi = {
 	stopTask: (sessionId: string, taskId: string) => Promise<ChatResult>;
 	/** The tail of a background task's output; null when the daemon has none for it. */
 	taskOutput: (sessionId: string, taskId: string) => Promise<TaskOutput | null>;
+	/** Drops the user message uuid and everything after it from claude's conversation; restoreFiles also puts the files back. */
+	rewind: (sessionId: string, uuid: string, restoreFiles: boolean) => Promise<ChatResult>;
+	/** What restoring files to before uuid would change; null when the daemon could not say. */
+	rewindPreview: (sessionId: string, uuid: string) => Promise<RewindPreview | null>;
 };
 
 const KIND_BY_CODE: Record<string, ChatErrorKind> = {
@@ -98,6 +104,21 @@ export const httpChatApi: ChatApi = {
 				params: { path: { sessionId, taskId } },
 			}),
 		),
+	rewind: (sessionId, uuid, restoreFiles) =>
+		settle(
+			apiClient.POST("/api/v1/sessions/{sessionId}/chat/rewind", { ...path(sessionId), body: { uuid, restoreFiles } }),
+		),
+	rewindPreview: async (sessionId, uuid) => {
+		try {
+			const { data } = await apiClient.POST("/api/v1/sessions/{sessionId}/chat/rewind/preview", {
+				...path(sessionId),
+				body: { uuid },
+			});
+			return data ?? null;
+		} catch {
+			return null;
+		}
+	},
 	taskOutput: async (sessionId, taskId) => {
 		try {
 			const { data } = await apiClient.GET("/api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output", {
