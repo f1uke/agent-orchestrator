@@ -65,7 +65,7 @@ const PATCH = [
 
 const PREVIEW_HTML = [
 	"<!doctype html>",
-	'<html><head><title>Counter</title><style>body{font:16px sans-serif;padding:24px}</style></head><body>',
+	"<html><head><title>Counter</title><style>body{font:16px sans-serif;padding:24px}</style></head><body>",
 	"<h1>Counter</h1>",
 	'<button id="add">Add one</button> <output id="count">0</output>',
 	'<p id="reach">checking</p>',

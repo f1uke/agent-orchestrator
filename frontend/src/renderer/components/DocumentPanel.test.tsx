@@ -224,7 +224,7 @@ describe("DocumentPanel", () => {
 
 	describe("html preview", () => {
 		const page = doc({ kind: "html", path: "out/page.html", title: "page.html" });
-		const FILE = "<!doctype html><html><body><button onclick=\"go()\">Go</button></body></html>";
+		const FILE = '<!doctype html><html><body><button onclick="go()">Go</button></body></html>';
 
 		function frameOf() {
 			const frame = document.querySelector("iframe");

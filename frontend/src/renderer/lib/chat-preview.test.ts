@@ -6,7 +6,8 @@ const policyOf = (doc: string) => /<meta http-equiv="Content-Security-Policy" co
 
 describe("previewDocument", () => {
 	it("puts the policy ahead of everything the file says, keeping its doctype first", () => {
-		const file = '<!DOCTYPE html>\n<html lang="th"><head><title>t</title></head><body><script>x()</script></body></html>';
+		const file =
+			'<!DOCTYPE html>\n<html lang="th"><head><title>t</title></head><body><script>x()</script></body></html>';
 		const doc = previewDocument(file);
 		expect(doc.startsWith("<!DOCTYPE html>")).toBe(true);
 		expect(doc.indexOf("Content-Security-Policy")).toBeLessThan(doc.indexOf("<html"));
