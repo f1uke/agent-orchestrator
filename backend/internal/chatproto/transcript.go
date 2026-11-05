@@ -195,12 +195,12 @@ type Folder struct {
 	suggest  string
 }
 
-// NewFolder returns an empty Folder.
 type control struct {
 	subtype string
 	enabled bool // remote_control only
 }
 
+// NewFolder returns an empty Folder.
 func NewFolder() *Folder {
 	return &Folder{
 		tools:    map[string]*ToolCall{},
