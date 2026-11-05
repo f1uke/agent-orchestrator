@@ -63,6 +63,23 @@ const PATCH = [
 	"+sleepCtx(ctx, budget.Delay(attempt))",
 ].join("\n");
 
+const PREVIEW_HTML = [
+	"<!doctype html>",
+	'<html><head><title>Counter</title><style>body{font:16px sans-serif;padding:24px}</style></head><body>',
+	"<h1>Counter</h1>",
+	'<button id="add">Add one</button> <output id="count">0</output>',
+	'<p id="reach">checking</p>',
+	"<script>",
+	"var n = 0;",
+	"document.getElementById('add').onclick = function () { document.getElementById('count').textContent = String(++n); };",
+	"var seen = [];",
+	"try { localStorage.length; seen.push('storage'); } catch (e) {}",
+	"try { document.cookie; seen.push('cookie'); } catch (e) {}",
+	"fetch('http://127.0.0.1:3001/api/v1/sessions').then(function () { seen.push('daemon'); }, function () {})",
+	"  .finally(function () { document.getElementById('reach').textContent = seen.length ? 'reached ' + seen.join(' ') : 'reached nothing'; });",
+	"</script></body></html>",
+].join("\n");
+
 type Served = { root: Root; kind: Kind; mime: string; body: string; size: number };
 const served = (root: Root, kind: Kind, mime: string, body: string, size = body.length): Served => ({
 	root,
@@ -80,7 +97,7 @@ const FILES: Record<string, Served & { path: string }> = {
 	[DOCS_LOG]: { ...served("worktree", "log", "text/plain", LOG, 2_140_000), path: DOCS_LOG },
 	[DOCS_PATCH]: { ...served("worktree", "diff", "text/plain", PATCH, 1_024), path: DOCS_PATCH },
 	[DOCS_PDF]: { ...served("worktree", "pdf", "application/pdf", "%PDF-1.4", 412_000), path: DOCS_PDF },
-	[DOCS_HTML]: { ...served("worktree", "html", "text/html", "<h1>Preview</h1>", 3_300), path: DOCS_HTML },
+	[DOCS_HTML]: { ...served("worktree", "html", "text/html", PREVIEW_HTML, 3_300), path: DOCS_HTML },
 };
 
 /** The daemon's two chat file routes. */
@@ -203,7 +220,35 @@ for (const viewport of VIEWPORTS) {
 			await expect(write.locator(".chat-tool__body")).toHaveCount(0);
 		});
 
-		test("shows an html and a pdf card as a notice with a link in the browser build, and leaves the Browser tab alone", async ({
+		test("runs an html file live in a sandboxed preview that reaches nothing, with its source a toggle away", async ({
+			page,
+		}, info) => {
+			await stubDaemon(page);
+			await page.goto(SESSION);
+			const inspector = page.getByRole("complementary", { name: "Session inspector" });
+
+			await page.getByTestId("chat-docs").getByRole("button", { name: "Open preview.html" }).click();
+			await expect(inspector.getByRole("tab", { name: "Preview" })).toHaveAttribute("aria-selected", "true");
+			const frame = inspector.locator("iframe[title='Preview of preview.html']");
+			await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+			const preview = page.frameLocator("iframe[title='Preview of preview.html']");
+			await preview.getByRole("button", { name: "Add one" }).click();
+			await preview.getByRole("button", { name: "Add one" }).click();
+			await expect(preview.locator("#count")).toHaveText("2");
+			await expect(preview.locator("#reach")).toHaveText("reached nothing");
+			await expect(inspector.getByRole("link", { name: /Open in browser/ })).toHaveAttribute(
+				"href",
+				/\/chat\/files\/worktree\/docs\/preview\.html$/,
+			);
+			await shot(page, info, "after-html-preview");
+
+			await inspector.getByRole("tab", { name: "Source" }).click();
+			await expect(inspector.locator("iframe")).toHaveCount(0);
+			await expect(inspector.locator(".chat-codebox__text").filter({ hasText: "Add one" })).toBeVisible();
+			await shot(page, info, "after-html-source");
+		});
+
+		test("shows a pdf card as a notice with a link in the browser build, and leaves the Browser tab alone", async ({
 			page,
 		}) => {
 			await stubDaemon(page);
@@ -211,14 +256,11 @@ for (const viewport of VIEWPORTS) {
 			const inspector = page.getByRole("complementary", { name: "Session inspector" });
 			const browserBefore = await inspector.getByRole("tab", { name: "Browser" }).getAttribute("aria-selected");
 
-			await page.getByTestId("chat-docs").getByRole("button", { name: "Open preview.html" }).click();
+			await page.getByTestId("chat-docs").getByRole("button", { name: "Open billing-export-spec.pdf" }).click();
 			await expect(inspector.getByText(/opens in the desktop app/i)).toBeVisible();
 			const open = inspector.getByRole("link", { name: /Open in browser/ });
-			await expect(open).toHaveAttribute("href", /\/chat\/files\/worktree\/docs\/preview\.html$/);
-			await expect(inspector.locator("iframe")).toHaveCount(0);
-
-			await page.getByTestId("chat-docs").getByRole("button", { name: "Open billing-export-spec.pdf" }).click();
 			await expect(open).toHaveAttribute("href", /\/chat\/files\/worktree\/docs\/billing-export-spec\.pdf$/);
+			await expect(inspector.locator("iframe")).toHaveCount(0);
 
 			expect(browserBefore).toBe("false");
 			await expect(inspector.getByRole("tab", { name: "Browser" })).toHaveAttribute("aria-selected", "false");

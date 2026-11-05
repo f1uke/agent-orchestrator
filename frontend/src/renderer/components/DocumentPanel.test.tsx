@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiBaseUrl } from "../lib/api-client";
 import type { FileDoc } from "../lib/chat-docs";
+import { previewDocument } from "../lib/chat-preview";
+import { WIDGET_DOC_TYPE, WIDGET_FRAME_URL } from "../lib/chat-widget";
 import { DocumentPanel } from "./DocumentPanel";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -147,10 +149,7 @@ describe("DocumentPanel", () => {
 			window.ao = original;
 		});
 
-		it.each([
-			["html", "docs/preview.html", "preview.html"],
-			["pdf", "docs/spec.pdf", "spec.pdf"],
-		] as const)(
+		it.each([["pdf", "docs/spec.pdf", "spec.pdf"]] as const)(
 			"shows a %s file as a notice with a link outside the desktop app, never as markup",
 			(kind, path, title) => {
 				delete window.ao;
@@ -164,7 +163,7 @@ describe("DocumentPanel", () => {
 			},
 		);
 
-		it("gives an html file a native view of its own, keyed apart from the Browser tab's", async () => {
+		it("gives a pdf file a native view of its own, keyed apart from the Browser tab's", async () => {
 			const ensure = vi.fn(async (id: string) => ({
 				viewId: `1:${id}`,
 				url: "",
@@ -182,12 +181,12 @@ describe("DocumentPanel", () => {
 				isLoading: false,
 			}));
 			window.ao = { ...window.ao!, browser: { ...window.ao!.browser, ensure, navigate } };
-			panel(doc({ kind: "html", path: "docs/preview.html", title: "preview.html" }));
+			panel(doc({ kind: "pdf", path: "docs/spec.pdf", title: "spec.pdf" }));
 			expect(document.querySelector("[data-doc-slot]")).not.toBeNull();
 			expect(document.querySelector("iframe")).toBeNull();
 			await waitFor(() => expect(ensure).toHaveBeenCalledWith("doc:s1"));
 			await waitFor(() =>
-				expect(navigate).toHaveBeenCalledWith({ viewId: "1:doc:s1", url: `${DAEMON}/worktree/docs/preview.html` }),
+				expect(navigate).toHaveBeenCalledWith({ viewId: "1:doc:s1", url: `${DAEMON}/worktree/docs/spec.pdf` }),
 			);
 			expect(ensure).not.toHaveBeenCalledWith("s1");
 		});
@@ -220,6 +219,65 @@ describe("DocumentPanel", () => {
 			await act(async () => undefined);
 			view.unmount();
 			expect(destroy).toHaveBeenCalledWith("1:doc:s1");
+		});
+	});
+
+	describe("html preview", () => {
+		const page = doc({ kind: "html", path: "out/page.html", title: "page.html" });
+		const FILE = "<!doctype html><html><body><button onclick=\"go()\">Go</button></body></html>";
+
+		function frameOf() {
+			const frame = document.querySelector("iframe");
+			if (!frame) throw new Error("no preview frame");
+			return frame;
+		}
+
+		async function loadedFrame() {
+			const frame = await waitFor(frameOf);
+			const post = vi.fn();
+			Object.defineProperty(frame, "contentWindow", { configurable: true, value: { postMessage: post } });
+			act(() => {
+				frame.dispatchEvent(new Event("load"));
+			});
+			return post;
+		}
+
+		it("draws the file live in a frame with scripts on and no way back to the app's origin", async () => {
+			text(FILE);
+			panel(page);
+			expect(screen.getByRole("tab", { name: "Preview" })).toHaveAttribute("aria-selected", "true");
+			const post = await loadedFrame();
+			const frame = frameOf();
+			expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+			expect(frame).toHaveAttribute("src", WIDGET_FRAME_URL);
+			expect(frame).toHaveAttribute("title", "Preview of page.html");
+			await waitFor(() =>
+				expect(post).toHaveBeenCalledWith({ type: WIDGET_DOC_TYPE, html: previewDocument(FILE) }, "*"),
+			);
+			expect(fetchMock).toHaveBeenCalledWith(`${DAEMON}/worktree/out/page.html`, expect.anything());
+			expect(screen.getByRole("link", { name: /Open in browser/ })).toBeInTheDocument();
+		});
+
+		it("shows the markup as text under Source, where none of it runs", async () => {
+			text(FILE);
+			panel(page);
+			await userEvent.setup().click(screen.getByRole("tab", { name: "Source" }));
+			expect(await screen.findByText(/onclick/)).toBeInTheDocument();
+			expect(document.querySelector("iframe")).toBeNull();
+		});
+
+		it("reads the file again when the chat writes it again", async () => {
+			text(FILE);
+			const view = render(<DocumentPanel active doc={page} onClose={vi.fn()} revision={1} sessionId="s1" />);
+			await loadedFrame();
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			text("<p>second</p>");
+			view.rerender(<DocumentPanel active doc={page} onClose={vi.fn()} revision={2} sessionId="s1" />);
+			const post = await loadedFrame();
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			await waitFor(() =>
+				expect(post).toHaveBeenCalledWith({ type: WIDGET_DOC_TYPE, html: previewDocument("<p>second</p>") }, "*"),
+			);
 		});
 	});
 
