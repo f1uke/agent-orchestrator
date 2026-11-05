@@ -187,7 +187,7 @@ export function ModelModePicker({
 				>
 					<span className="chat-model-item__name">Claude in Chrome</span>
 					<span className="chat-model-item__hint">
-						{chromeLocked ? "Wait for the turn to end" : "Restarts claude on this chat"}
+						{chromeLocked ? "After this turn" : "Restarts claude"}
 					</span>
 				</DropdownMenuCheckboxItem>
 			</DropdownMenuContent>

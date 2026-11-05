@@ -5,6 +5,7 @@ import { CHROME_FLAG, ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
 import { markdownDeltas, markdownEntries, MOCK_MARKDOWN_CHAT_SESSION } from "./chat-mock-markdown";
+import { chromeEntries, MOCK_CHROME_CHAT_SESSION } from "./chat-mock-chrome";
 import { MOCK_NEXT_CHAT_SESSION, nextEntries } from "./chat-mock-next";
 import { MOCK_SUGGEST_CHAT_SESSION, suggestEntries } from "./chat-mock-suggest";
 import { docsEntries, MOCK_DOCS_CHAT_SESSION } from "./chat-mock-docs";
@@ -911,6 +912,8 @@ function stubSession(id: string): Promise<StubSession> {
 																	? tasksEntries()
 																	: id === MOCK_NEXT_CHAT_SESSION
 																		? nextEntries()
+																		: id === MOCK_CHROME_CHAT_SESSION
+																			? chromeEntries()
 																		: long
 																			? fixture
 																			: mockChatEntries(fixture);
