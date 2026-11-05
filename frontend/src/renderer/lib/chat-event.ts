@@ -117,6 +117,7 @@ export type ChatEvent =
 			uuid: string;
 			parentToolUseId: string;
 			isReplay: boolean;
+			originKind: string;
 			blocks: Block[];
 			structuredPatch?: PatchHunk[];
 	  }
@@ -149,6 +150,13 @@ export type ChatEvent =
 	| { type: "unknown"; eventType: string };
 
 export type Origin = { via: string; from: string };
+
+/** The `via` of a user row for a prompt typed on claude.ai/code or the Claude app. AO sent no such prompt, so `from` is empty. */
+export const REMOTE_CONTROL_VIA = "remote_control";
+
+/** True when the origin names a peer session or the orchestrator, which the chat shows as a peer message. */
+export const isPeerOrigin = (origin: Origin | undefined): origin is Origin =>
+	origin !== undefined && origin.via !== REMOTE_CONTROL_VIA;
 
 export type HostNote =
 	| { kind: "spawn"; resume: string; argv: string[] }
@@ -345,6 +353,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				uuid: str(line.uuid),
 				parentToolUseId: str(line.parent_tool_use_id),
 				isReplay: line.isReplay === true,
+				originKind: isObject(line.origin) ? str(line.origin.kind) : "",
 				blocks: decodeBlocks(message.content),
 				structuredPatch: decodePatch(line.tool_use_result),
 			};

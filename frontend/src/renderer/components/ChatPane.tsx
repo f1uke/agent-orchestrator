@@ -15,6 +15,7 @@ import { useChatActions } from "../hooks/useChatActions";
 import { type ChatConnection, type ChatSessionState, useChatSession } from "../hooks/useChatSession";
 import { useSessionNames } from "../hooks/useSessionNames";
 import type { ChatApi } from "../lib/chat-api";
+import { isPeerOrigin } from "../lib/chat-event";
 import type { BackgroundTask, ChatItem, Pending, TaskMessageItem, TurnEndItem, UserItem } from "../lib/chat-fold";
 import { noticeText } from "../lib/chat-notice";
 import type { TurnError } from "../lib/chat-turn-error";
@@ -789,7 +790,7 @@ function ItemRow({
 }) {
 	switch (item.kind) {
 		case "user":
-			if (item.origin) return <PeerMessage item={item} sessionNames={sessionNames} theme={theme} />;
+			if (isPeerOrigin(item.origin)) return <PeerMessage item={item} sessionNames={sessionNames} theme={theme} />;
 			if (item.brief) {
 				return (
 					<TaskBrief

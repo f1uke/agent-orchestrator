@@ -55,12 +55,14 @@ type Assistant struct {
 }
 
 // User is a user message event: a replay of an input, or tool results.
-// String content becomes a single TextBlock.
+// String content becomes a single TextBlock. OriginKind is claude's
+// origin.kind, "human" for a message a person typed.
 type User struct {
 	UUID            string
 	SessionID       string
 	ParentToolUseID string
 	IsReplay        bool
+	OriginKind      string
 	Blocks          []Block
 }
 
@@ -351,7 +353,10 @@ func decodeUser(line []byte) (Event, bool) {
 		SessionID       string `json:"session_id"`
 		ParentToolUseID string `json:"parent_tool_use_id"`
 		IsReplay        bool   `json:"isReplay"`
-		Message         struct {
+		Origin          struct {
+			Kind string `json:"kind"`
+		} `json:"origin"`
+		Message struct {
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
@@ -364,7 +369,7 @@ func decodeUser(line []byte) (Event, bool) {
 	}
 	return User{
 		UUID: w.UUID, SessionID: w.SessionID, ParentToolUseID: w.ParentToolUseID,
-		IsReplay: w.IsReplay, Blocks: blocks,
+		IsReplay: w.IsReplay, OriginKind: w.Origin.Kind, Blocks: blocks,
 	}, true
 }
 

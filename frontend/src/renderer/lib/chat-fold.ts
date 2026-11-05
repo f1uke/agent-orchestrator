@@ -13,6 +13,7 @@ import {
 	type TaskState,
 	type TaskUsage,
 	type Usage,
+	REMOTE_CONTROL_VIA,
 	isObject,
 	unfinished,
 	parseEvent,
@@ -385,8 +386,9 @@ export class ChatFolder {
 				break;
 			case "user":
 				if (event.parentToolUseId === "") this.thinkingSince = undefined;
-				if (event.isReplay) this.applyTaskMessage(event.blocks);
-				else this.applyToolResults(event.blocks, event.structuredPatch);
+				if (event.isReplay) {
+					if (!this.applyTaskMessage(event.blocks)) this.addRemoteInput(event);
+				} else this.applyToolResults(event.blocks, event.structuredPatch);
 				break;
 			case "result":
 				this.thinkingSince = undefined;
@@ -446,7 +448,7 @@ export class ChatFolder {
 		if (event.type === "user") {
 			this.thinkingSince = undefined;
 			this.suggestion = "";
-			this.addUserInput(event.uuid, event.blocks);
+			this.addUserInput(event.uuid, event.blocks, undefined);
 		} else if (event.type === "control_response") this.answerPermission(event);
 		else if (event.type === "control_request") {
 			if (event.rewind && !event.rewind.dryRun) this.rewinds.set(event.requestId, event.rewind);
@@ -565,12 +567,13 @@ export class ChatFolder {
 		}
 	}
 
-	private applyTaskMessage(blocks: Block[]): void {
+	private applyTaskMessage(blocks: Block[]): boolean {
 		const text = blocks.map((b) => (b.type === "text" ? b.text : "")).join("");
 		const note = parseTaskNotification(text);
-		if (!note) return;
+		if (!note) return false;
 		this.push({ kind: "task_message", ts: this.ts, ...note, opensTurn: this.turnStart === undefined });
 		this.turnStart ??= this.ts;
+		return true;
 	}
 
 	private updateTool(id: string, patch: Partial<ToolCallItem>): void {
@@ -579,7 +582,18 @@ export class ChatFolder {
 		this.items[at] = { ...(this.items[at] as ToolCallItem), ...patch };
 	}
 
-	private addUserInput(uuid: string, blocks: Block[]): void {
+	/**
+	 * The host logs every input it sends before claude can replay it, so a
+	 * replay whose uuid has no row is a human's message that did not come from AO.
+	 */
+	private addRemoteInput(event: Extract<ChatEvent, { type: "user" }>): void {
+		if (event.uuid === "" || event.parentToolUseId !== "" || event.originKind !== "human") return;
+		if (!event.blocks.some((b) => b.type === "text" || b.type === "image")) return;
+		this.suggestion = "";
+		this.addUserInput(event.uuid, event.blocks, { via: REMOTE_CONTROL_VIA, from: "" });
+	}
+
+	private addUserInput(uuid: string, blocks: Block[], remote: Origin | undefined): void {
 		if (uuid !== "" && this.users.has(uuid)) return;
 		let text = "";
 		const images: ChatImage[] = [];
@@ -591,7 +605,7 @@ export class ChatFolder {
 		}
 		const item: UserItem = { kind: "user", uuid, text, images, state: this.commands.get(uuid) ?? "sent", ts: this.ts };
 		this.turnStart ??= this.ts;
-		const origin = this.origins.get(uuid);
+		const origin = this.origins.get(uuid) ?? remote;
 		if (origin) item.origin = origin;
 		else if (this.awaitingBrief) item.brief = true;
 		this.awaitingBrief = false;

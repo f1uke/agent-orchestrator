@@ -74,9 +74,14 @@ const (
 
 // Origin says where a user input came from when it was not typed in the chat.
 type Origin struct {
-	Via  string `json:"via"` // "ao_send" today
+	Via  string `json:"via"` // "ao_send", or OriginRemoteControl for a prompt typed on the Remote Control side
 	From string `json:"from"`
 }
+
+// OriginRemoteControl is the Via of a user row the folds add for a prompt typed
+// on claude.ai/code or the Claude app. AO did not send it, so no host note
+// names an origin and From is empty.
+const OriginRemoteControl = "remote_control"
 
 // HostNote is the parsed payload of a DirHost entry.
 type HostNote struct {

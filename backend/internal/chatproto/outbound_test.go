@@ -179,7 +179,7 @@ func TestEncodeMatchesWhatTheCLIAccepted(t *testing.T) {
 			assertJSONEqual(t, got, e.Payload)
 		}
 	}
-	want := map[string]int{"UserInput": 10, "Initialize": 2, "SetPermissionMode": 1, "Interrupt": 1, "PermissionAnswer": 6, "SetModel": 2, "SetRemoteControl": 2}
+	want := map[string]int{"UserInput": 11, "Initialize": 2, "SetPermissionMode": 1, "Interrupt": 1, "PermissionAnswer": 6, "SetModel": 2, "SetRemoteControl": 2}
 	if !reflect.DeepEqual(seen, want) {
 		t.Errorf("fixtures exercised %v, want %v", seen, want)
 	}

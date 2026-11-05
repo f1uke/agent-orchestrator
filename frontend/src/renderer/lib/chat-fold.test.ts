@@ -1162,8 +1162,66 @@ describe("chat fold: Remote Control", () => {
 		expect(remote(entries, 5).state).toBe("reconnecting");
 		expect(remote(entries, 6).state).toBe("connected");
 		expect(remote(entries, 10)).toEqual({ state: "connected", url: URL, detail: "" });
-		expect(remote(entries, 11).state).toBe("connected");
-		expect(remote(entries, 12)).toEqual({ state: "off", url: "", detail: "" });
+		expect(remote(entries, 16)).toEqual({ state: "connected", url: URL, detail: "" });
+		expect(remote(entries, 17).state).toBe("connected");
+		expect(remote(entries, 18)).toEqual({ state: "off", url: "", detail: "" });
+	});
+
+	it("gives each prompt one user row, in order, and marks the remote ones", () => {
+		const remoteOrigin = { via: "remote_control", from: "" };
+		const rows = (seq: number) => users(foldEntries(upTo(entries, seq)));
+		expect([8, 9, 10, 11, 12, 15, 18].map((seq) => rows(seq).length)).toEqual([0, 1, 1, 2, 2, 3, 3]);
+		expect(rows(18).map(({ uuid, text, origin, state }) => ({ uuid, text, origin, state }))).toEqual([
+			{ uuid: "remote-1", text: "placeholder remote prompt", origin: remoteOrigin, state: "completed" },
+			{ uuid: "local-1", text: "placeholder local prompt", origin: undefined, state: "sent" },
+			{ uuid: "remote-2", text: "second placeholder remote prompt", origin: remoteOrigin, state: "completed" },
+		]);
+	});
+
+	describe("a replayed user message", () => {
+		const human = `"origin":{"kind":"human"}`;
+		const replay = (extra: string, content = `"hi"`) =>
+			json(`{"type":"user",${extra},"isReplay":true,"message":{"role":"user","content":${content}}}`);
+		const rowsFor = (payload: unknown) => users(foldEntries([synth(1, "out", payload)])).length;
+
+		it.each([
+			["from a human", replay(`"uuid":"r1",${human}`), 1],
+			[
+				"from a human, with only an image",
+				replay(
+					`"uuid":"r1",${human}`,
+					`[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA"}}]`,
+				),
+				1,
+			],
+			["with no origin", replay(`"uuid":"r1"`), 0],
+			["of a task notification", replay(`"uuid":"r1","origin":{"kind":"task-notification"}`), 0],
+			["with no uuid", replay(human), 0],
+			["inside a subagent", replay(`"uuid":"r1",${human},"parent_tool_use_id":"toolu_1"`), 0],
+			[
+				"with only tool results",
+				replay(`"uuid":"r1",${human}`, `[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]`),
+				0,
+			],
+		])("%s adds %i user rows", (_name, payload, rows) => {
+			expect(rowsFor(payload)).toBe(rows);
+		});
+
+		it("keeps one row and the ao_send origin when it replays an input the host sent", () => {
+			const payload = replay(`"uuid":"u1",${human}`);
+			const tr = foldEntries([
+				synth(1, "host", { kind: "user_origin", uuid: "u1", origin: { via: "ao_send", from: "w-2" } }),
+				synth(2, "in", { type: "user", uuid: "u1", message: { role: "user", content: "hi" } }),
+				synth(3, "out", payload),
+				synth(4, "out", payload),
+			]);
+			expect(users(tr).map((u) => u.origin)).toEqual([{ via: "ao_send", from: "w-2" }]);
+		});
+
+		it("keeps one row when claude replays a remote prompt twice", () => {
+			const payload = replay(`"uuid":"r1",${human}`);
+			expect(users(foldEntries([synth(1, "out", payload), synth(2, "out", payload)]))).toHaveLength(1);
+		});
 	});
 
 	it("keeps the failure reason", () => {

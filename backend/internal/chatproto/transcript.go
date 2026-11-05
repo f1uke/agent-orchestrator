@@ -272,7 +272,9 @@ func (f *Folder) applyOut(ev Event) {
 			f.remote.State, f.remote.Detail = state, ev.Detail
 		}
 	case User:
-		if !ev.IsReplay {
+		if ev.IsReplay {
+			f.addRemoteInput(ev)
+		} else {
 			f.applyToolResults(ev)
 		}
 	case Result:
@@ -295,7 +297,7 @@ func (f *Folder) applyOut(ev Event) {
 func (f *Folder) applyIn(ev Event) {
 	switch ev := ev.(type) {
 	case User:
-		f.addUserInput(ev)
+		f.addUserInput(ev, nil)
 	case ControlRequest:
 		c, ok := ev.Body.(OtherControl)
 		if !ok {
@@ -386,7 +388,29 @@ func (f *Folder) applyToolResults(u User) {
 	}
 }
 
-func (f *Folder) addUserInput(u User) {
+// originHuman is the origin.kind claude gives a message a person typed.
+const originHuman = "human"
+
+// addRemoteInput adds the row for a prompt typed on the Remote Control side.
+// The host logs every input it sends before claude can replay it, so a replay
+// whose uuid has no row is a human's message that did not come from AO.
+func (f *Folder) addRemoteInput(u User) {
+	if u.UUID == "" || u.ParentToolUseID != "" || u.OriginKind != originHuman {
+		return
+	}
+	typed := slices.ContainsFunc(u.Blocks, func(b Block) bool {
+		switch b.(type) {
+		case TextBlock, ImageBlock:
+			return true
+		}
+		return false
+	})
+	if typed {
+		f.addUserInput(u, &Origin{Via: OriginRemoteControl})
+	}
+}
+
+func (f *Folder) addUserInput(u User, origin *Origin) {
 	if u.UUID != "" && f.users[u.UUID] != nil {
 		return
 	}
@@ -408,6 +432,8 @@ func (f *Folder) addUserInput(u User) {
 	item := &UserItem{UUID: u.UUID, Text: text.String(), Images: images, State: state}
 	if o, ok := f.origins[u.UUID]; ok {
 		item.Origin = &o
+	} else {
+		item.Origin = origin
 	}
 	if u.UUID != "" {
 		f.users[u.UUID] = item
