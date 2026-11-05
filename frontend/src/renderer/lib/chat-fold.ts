@@ -8,6 +8,7 @@ import {
 	type HostNote,
 	type Origin,
 	type PatchHunk,
+	type RewindAsk,
 	type TaskEvent,
 	type TaskState,
 	type TaskUsage,
@@ -35,7 +36,7 @@ export type PermissionOutcome = {
 
 export type ToolResult = { isError: boolean; content: unknown; structuredPatch?: PatchHunk[] };
 
-export type NoticeKind = "interrupted" | "spawn" | "resumed" | "exit" | "compacted" | "api_error";
+export type NoticeKind = "interrupted" | "spawn" | "resumed" | "exit" | "compacted" | "api_error" | "rewound";
 
 export type UserItem = {
 	kind: "user";
@@ -252,6 +253,7 @@ export class ChatFolder {
 	// The id of a host's initialize or set_model request, to its subtype,
 	// because claude's response does not repeat it.
 	private controls = new Map<string, string>();
+	private rewinds = new Map<string, RewindAsk>();
 	private slash: ChatCommand[] = [];
 	private models: ChatModel[] = [];
 	private model = "";
@@ -395,6 +397,7 @@ export class ChatFolder {
 				}
 				this.answerPermission(event);
 				this.answerControl(event);
+				this.answerRewind(event);
 				break;
 			case "control_cancel":
 				this.settle(event.requestId, "cancelled", "", []);
@@ -419,6 +422,8 @@ export class ChatFolder {
 		} else if (event.type === "control_response") this.answerPermission(event);
 		else if (event.type === "control_request" && (event.subtype === "initialize" || event.subtype === "set_model")) {
 			this.controls.set(event.requestId, event.subtype);
+		} else if (event.type === "control_request" && event.rewind && !event.rewind.dryRun) {
+			this.rewinds.set(event.requestId, event.rewind);
 		}
 	}
 
@@ -434,6 +439,39 @@ export class ChatFolder {
 		} else if (typeof body.model === "string" && body.model !== "") {
 			this.model = body.model;
 		}
+	}
+
+	private answerRewind(response: Extract<ChatEvent, { type: "control_response" }>): void {
+		const ask = this.rewinds.get(response.requestId);
+		if (ask === undefined) return;
+		this.rewinds.delete(response.requestId);
+		if (!response.ok || !isObject(response.response)) return;
+		if (ask.files) {
+			const last = this.items.at(-1);
+			if (response.response.canRewind === true && last?.kind === "notice" && last.notice === "rewound") {
+				this.items[this.items.length - 1] = { ...last, text: "files" };
+			}
+			return;
+		}
+		if (response.response.rewound === true) this.cutAt(ask.target);
+	}
+
+	/** Drops the user message uuid and every item after it, as claude's rewind_conversation does. */
+	private cutAt(uuid: string): void {
+		const at = this.users.get(uuid);
+		if (at === undefined) return;
+		this.items.length = at;
+		this.itemKeys.length = at;
+		for (const [id, i] of this.tools) if (i >= at) this.tools.delete(id);
+		for (const [id, i] of this.users) {
+			if (i < at) continue;
+			this.users.delete(id);
+			this.commands.delete(id);
+			this.origins.delete(id);
+		}
+		this.suggestion = "";
+		this.context = undefined;
+		this.notice("rewound", "");
 	}
 
 	private applyAssistant(messageId: string, parentToolUseId: string, blocks: Block[]): void {

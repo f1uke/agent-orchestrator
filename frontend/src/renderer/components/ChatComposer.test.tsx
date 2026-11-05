@@ -58,6 +58,8 @@ function renderComposer(over: Partial<ChatActions> = {}, props: { suggestion?: s
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
 		stopTask: vi.fn<ChatActions["stopTask"]>(async () => ({ ok: true })),
 		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
+		rewind: vi.fn<ChatActions["rewind"]>(async () => ({ ok: true })),
+		rewindPreview: vi.fn<ChatActions["rewindPreview"]>(async () => null),
 		upload: vi.fn<ChatActions["upload"]>(async (file) => saved(file)),
 		hostDown: false,
 		...over,

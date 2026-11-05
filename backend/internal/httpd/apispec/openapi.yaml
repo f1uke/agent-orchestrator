@@ -4081,6 +4081,125 @@ paths:
       summary: Switch the model of a chat session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/rewind:
+    post:
+      operationId: rewindChat
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersRewindChatRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Rewind a chat session''s conversation to before one of its user messages:
+        that message and every message after it leave the agent''s context, and with
+        restoreFiles the files the agent changed since then are put back. 409 when
+        the session is not a chat session, its host is not running, or the agent refuses,
+        with its reason in the message'
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/chat/rewind/preview:
+    post:
+      operationId: previewChatRewind
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersRewindChatPreviewRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersRewindChatPreviewResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: What restoring files to before one of a chat session's user messages
+        would change, without changing them
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/tasks/{taskId}/output:
     get:
       operationId: getChatTaskOutput
@@ -12160,6 +12279,52 @@ components:
           type: integer
       required:
       - failed
+      type: object
+    ControllersRewindChatPreviewRequest:
+      properties:
+        uuid:
+          description: The user message a rewind would go back to.
+          minLength: 1
+          type: string
+      required:
+      - uuid
+      type: object
+    ControllersRewindChatPreviewResponse:
+      properties:
+        canRewind:
+          description: False when the agent holds no file checkpoint for that message,
+            as in a session started before checkpoints were on.
+          type: boolean
+        deletions:
+          type: integer
+        error:
+          description: Why the files cannot be restored, when canRewind is false.
+          type: string
+        filesChanged:
+          description: Absolute paths a restore would change.
+          items:
+            type: string
+          type: array
+        insertions:
+          type: integer
+      required:
+      - canRewind
+      - filesChanged
+      - insertions
+      - deletions
+      type: object
+    ControllersRewindChatRequest:
+      properties:
+        restoreFiles:
+          description: Also put back the files the agent changed since that message.
+          type: boolean
+        uuid:
+          description: 'The user message to rewind to: it and every message after
+            it leave the conversation.'
+          minLength: 1
+          type: string
+      required:
+      - uuid
       type: object
     ControllersSessionPRAOReviewSummary:
       properties:

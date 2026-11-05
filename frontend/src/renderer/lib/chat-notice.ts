@@ -15,6 +15,8 @@ export function noticeText(notice: NoticeItem): string {
 			return "Conversation compacted";
 		case "interrupted":
 			return "Interrupted";
+		case "rewound":
+			return notice.text === "files" ? "Rewound here · files restored" : "Rewound here · later messages dropped";
 		case "api_error":
 			return describeTurnError("", notice.text).label;
 	}
