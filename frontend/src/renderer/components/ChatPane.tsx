@@ -276,7 +276,7 @@ export function ChatPane({
 										<span className="chat-statusline__grow" />
 										{view === "chat" ? (
 											<>
-												<span>Enter sends · Shift+Enter newline · Esc interrupts</span>
+												<span className="chat-statusline__hint">Enter sends · Shift+Enter newline · Esc interrupts</span>
 												<UsageMeter usage={usage} />
 												<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
 											</>
