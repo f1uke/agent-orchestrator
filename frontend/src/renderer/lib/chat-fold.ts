@@ -462,10 +462,7 @@ export class ChatFolder {
 		if (at === undefined) return;
 		this.items.length = at;
 		this.itemKeys.length = at;
-		const keep = (map: Map<string, number>) => {
-			for (const [id, i] of map) if (i >= at) map.delete(id);
-		};
-		keep(this.tools);
+		for (const [id, i] of this.tools) if (i >= at) this.tools.delete(id);
 		for (const [id, i] of this.users) {
 			if (i < at) continue;
 			this.users.delete(id);
