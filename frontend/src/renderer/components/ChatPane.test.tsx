@@ -448,6 +448,31 @@ describe("ChatPane composer", () => {
 		expect(api.interrupt).toHaveBeenCalledTimes(2);
 	});
 
+	it("shows the Remote Control chip from the log, with a link to share, and drops it when the host exits", async () => {
+		const { feed, user } = renderPane();
+		expect(screen.queryByText(/^Remote /)).toBeNull();
+		feed(
+			entry("in", { type: "control_request", request_id: "rc", request: { subtype: "remote_control", enabled: true } }),
+			out({ type: "system", subtype: "bridge_state", state: "ready" }),
+		);
+		expect(screen.getByText("Remote connecting")).toBeInTheDocument();
+		feed(
+			out({
+				type: "control_response",
+				response: {
+					subtype: "success",
+					request_id: "rc",
+					response: { session_url: "https://claude.ai/code/session_example" },
+				},
+			}),
+			out({ type: "system", subtype: "bridge_state", state: "connected" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Remote connected" }));
+		expect(await screen.findByText("https://claude.ai/code/session_example")).toBeInTheDocument();
+		feed(entry("host", { kind: "exit", code: 0 }));
+		expect(screen.queryByText(/^Remote /)).toBeNull();
+	});
+
 	it("does not interrupt when Esc denies a focused permission card", async () => {
 		const { feed, api, user } = renderPane();
 		feed(userIn("u1", "Build it"), lifecycle("u1", "started"), ...bashRequest());

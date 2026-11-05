@@ -9715,6 +9715,62 @@ ol.note-prose__list {
 	background: var(--red);
 }
 
+.chat-remote {
+	display: inline-flex;
+	align-items: center;
+	color: inherit;
+}
+
+.chat-remote .chat-statusline__dot {
+	margin-right: 6px;
+}
+
+.chat-remote .chat-statusline__dot[data-remote="connected"] {
+	background: var(--green);
+}
+
+.chat-remote .chat-statusline__dot[data-remote="connecting"],
+.chat-remote .chat-statusline__dot[data-remote="reconnecting"] {
+	background: var(--amber);
+}
+
+.chat-remote .chat-statusline__dot[data-remote="failed"] {
+	background: var(--red);
+}
+
+.chat-remote__pop {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 12px;
+}
+
+.chat-remote__lead {
+	color: var(--fg-muted);
+}
+
+.chat-remote__qr {
+	align-self: center;
+	width: 168px;
+	padding: 10px;
+	border-radius: 8px;
+	background: #fff;
+	color: #0a0b0d;
+}
+
+.chat-remote__qr svg {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+
+.chat-remote__url {
+	width: 100%;
+	overflow-wrap: anywhere;
+	color: var(--fg-muted);
+	font-size: 12px;
+}
+
 .chat-toast {
 	position: absolute;
 	bottom: 18px;

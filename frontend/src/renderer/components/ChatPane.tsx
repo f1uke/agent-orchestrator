@@ -43,6 +43,7 @@ import {
 } from "../lib/chat-suggest";
 import { latestWrapUpId, wrapUpOf } from "../lib/chat-wrapup";
 import { ChatChapters } from "./ChatChapters";
+import { RemoteControlChip } from "./ChatRemoteControl";
 import { ChatTrajectory } from "./ChatTrajectory";
 import { ChatWrapUp } from "./ChatWrapUp";
 import { BUBBLE_THUMB, ChatImages } from "./ChatImages";
@@ -245,6 +246,7 @@ export function ChatPane({
 											commands={transcript.commands}
 											model={transcript.model}
 											models={transcript.models}
+											remoteControl={transcript.remoteControl}
 											suggestion={transcript.suggestion}
 											onToast={showToast}
 											permissionMode={transcript.permissionMode}
@@ -255,6 +257,7 @@ export function ChatPane({
 									) : null}
 									<div className="chat-statusline">
 										<ConnectionLabel connection={chat.connection} error={chat.error} />
+										<RemoteControlChip remote={transcript.remoteControl} />
 										{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
 										{runningInBackground > 0 ? (
 											onOpenTasks ? (
