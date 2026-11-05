@@ -288,6 +288,23 @@ describe("ChatPane", () => {
 		expect(streaming.querySelector(".chat-caret")).not.toBeNull();
 	});
 
+	it("holds back a half-typed table or bold until it can render as itself", () => {
+		const { delta } = renderPane();
+		delta(
+			{ type: "message_start", message: { id: "m1" } },
+			{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "The **retry " } },
+		);
+		const streaming = document.querySelector("[data-streaming]")!;
+		expect(streaming).not.toHaveTextContent("**");
+		delta(
+			{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "budget** works.\n\n| Attempt | Ceiling |\n" } },
+		);
+		expect(streaming.querySelector("strong")).toHaveTextContent("retry budget");
+		expect(streaming).not.toHaveTextContent("|");
+		delta({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "| ---: | ---: |\n| 1 | 200ms |" } });
+		expect(streaming.querySelector("table")).not.toBeNull();
+	});
+
 	it("streams a reply with a caret until the logged block replaces it", () => {
 		const { feed, delta } = renderPane();
 		delta(
