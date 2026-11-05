@@ -30,6 +30,7 @@ function fakeApi() {
 		interrupt: vi.fn<ChatApi["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
+		setRemoteControl: vi.fn<ChatApi["setRemoteControl"]>(async () => OK),
 		stopTask: vi.fn<ChatApi["stopTask"]>(async () => OK),
 		taskOutput: vi.fn<ChatApi["taskOutput"]>(async () => ({
 			text: "=== RUN TestSoak\n",

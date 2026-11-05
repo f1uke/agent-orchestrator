@@ -56,6 +56,7 @@ function renderComposer(over: Partial<ChatActions> = {}, props: { suggestion?: s
 		interrupt: vi.fn<ChatActions["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatActions["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
+		setRemoteControl: vi.fn<ChatActions["setRemoteControl"]>(async () => OK),
 		stopTask: vi.fn<ChatActions["stopTask"]>(async () => ({ ok: true })),
 		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
 		rewind: vi.fn<ChatActions["rewind"]>(async () => ({ ok: true })),
