@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	chatsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/chat"
+	"github.com/aoagents/agent-orchestrator/backend/internal/sessionhost"
 )
 
 type chatCall struct {
@@ -30,6 +31,8 @@ type chatCall struct {
 	mode      chatproto.PermissionMode
 	model     string
 	taskID    string
+	uuid      string
+	restore   bool
 }
 
 type fakeChatService struct {
@@ -68,6 +71,16 @@ func (f *fakeChatService) StopTask(_ context.Context, id domain.SessionID, taskI
 	return f.err
 }
 
+func (f *fakeChatService) Rewind(_ context.Context, id domain.SessionID, uuid string, restoreFiles bool) error {
+	f.calls = append(f.calls, chatCall{op: "rewind", id: id, uuid: uuid, restore: restoreFiles})
+	return f.err
+}
+
+func (f *fakeChatService) RewindPreview(_ context.Context, id domain.SessionID, uuid string) (sessionhost.RewindPreview, error) {
+	f.calls = append(f.calls, chatCall{op: "rewind_preview", id: id, uuid: uuid})
+	return sessionhost.RewindPreview{CanRewind: true, FilesChanged: []string{"/w/a.txt"}, Insertions: 1, Deletions: 2}, f.err
+}
+
 func newChatTestServer(t *testing.T, svc controllers.ChatService) *httptest.Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -87,6 +100,47 @@ var chatRoutes = []chatRoute{
 	{"mode", "PUT", "/api/v1/sessions/s-1/chat/mode", `{"mode":"plan"}`},
 	{"model", "PUT", "/api/v1/sessions/s-1/chat/model", `{"model":"haiku"}`},
 	{"stop task", "POST", "/api/v1/sessions/s-1/chat/tasks/bq3k9x1ab/stop", ``},
+	{"rewind", "POST", "/api/v1/sessions/s-1/chat/rewind", `{"uuid":"u-2"}`},
+	{"rewind preview", "POST", "/api/v1/sessions/s-1/chat/rewind/preview", `{"uuid":"u-2"}`},
+}
+
+func TestChatRewind(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/rewind", `{"uuid":"u-2","restoreFiles":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", status, body)
+	}
+	want := []chatCall{{op: "rewind", id: "s-1", uuid: "u-2", restore: true}}
+	if !reflect.DeepEqual(svc.calls, want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
+func TestChatRewindPreview(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/rewind/preview", `{"uuid":"u-2"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", status, body)
+	}
+	var resp controllers.RewindChatPreviewResponse
+	mustJSON(t, body, &resp)
+	if !resp.CanRewind || !reflect.DeepEqual(resp.FilesChanged, []string{"/w/a.txt"}) || resp.Insertions != 1 || resp.Deletions != 2 {
+		t.Errorf("body = %s", body)
+	}
+}
+
+func TestChatRewindNeedsAUUID(t *testing.T) {
+	for _, path := range []string{"/api/v1/sessions/s-1/chat/rewind", "/api/v1/sessions/s-1/chat/rewind/preview"} {
+		svc := &fakeChatService{}
+		srv := newChatTestServer(t, svc)
+		body, status, _ := doRequest(t, srv, "POST", path, `{}`)
+		assertErrorCode(t, body, status, http.StatusBadRequest, "UUID_REQUIRED")
+		if len(svc.calls) != 0 {
+			t.Errorf("%s: service was called without a uuid", path)
+		}
+	}
 }
 
 func TestChatSend(t *testing.T) {

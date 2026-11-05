@@ -44,18 +44,27 @@ type setModelRequest struct{ Model string }
 
 type stopTaskRequest struct{ TaskID string }
 
+type rewindRequest struct {
+	UUID         string
+	RestoreFiles bool
+}
+
+type rewindPreviewRequest struct{ UUID string }
+
 type stateRequest struct{}
 
 type subscribeRequest struct{ FromSeq uint64 }
 
-func (sendRequest) isRequest()      {}
-func (answerRequest) isRequest()    {}
-func (interruptRequest) isRequest() {}
-func (setModeRequest) isRequest()   {}
-func (setModelRequest) isRequest()  {}
-func (stopTaskRequest) isRequest()  {}
-func (stateRequest) isRequest()     {}
-func (subscribeRequest) isRequest() {}
+func (sendRequest) isRequest()          {}
+func (answerRequest) isRequest()        {}
+func (interruptRequest) isRequest()     {}
+func (setModeRequest) isRequest()       {}
+func (setModelRequest) isRequest()      {}
+func (stopTaskRequest) isRequest()      {}
+func (rewindRequest) isRequest()        {}
+func (rewindPreviewRequest) isRequest() {}
+func (stateRequest) isRequest()         {}
+func (subscribeRequest) isRequest()     {}
 
 func parseRequest(line []byte) (request, error) {
 	var w struct {
@@ -75,6 +84,8 @@ func parseRequest(line []byte) (request, error) {
 		Mode               string            `json:"mode"`
 		Model              string            `json:"model"`
 		TaskID             string            `json:"task_id"`
+		UUID               string            `json:"uuid"`
+		RestoreFiles       bool              `json:"restore_files"`
 		FromSeq            uint64            `json:"from_seq"`
 	}
 	if err := json.Unmarshal(line, &w); err != nil {
@@ -129,6 +140,16 @@ func parseRequest(line []byte) (request, error) {
 			return nil, errors.New("stop_task needs a valid task_id")
 		}
 		return stopTaskRequest{TaskID: w.TaskID}, nil
+	case "rewind":
+		if w.UUID == "" {
+			return nil, errors.New("rewind needs uuid")
+		}
+		return rewindRequest{UUID: w.UUID, RestoreFiles: w.RestoreFiles}, nil
+	case "rewind_preview":
+		if w.UUID == "" {
+			return nil, errors.New("rewind_preview needs uuid")
+		}
+		return rewindPreviewRequest{UUID: w.UUID}, nil
 	case "state":
 		return stateRequest{}, nil
 	case "subscribe":
@@ -295,6 +316,10 @@ func (h *host) do(req request) (any, error) {
 		return h.control("stop_task", func(id string) chatproto.Outbound {
 			return chatproto.StopTask{RequestID: id, TaskID: r.TaskID}
 		})
+	case rewindRequest:
+		return h.rewind(r)
+	case rewindPreviewRequest:
+		return h.rewindPreview(r.UUID)
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -328,6 +353,14 @@ func (h *host) do(req request) (any, error) {
 // control_response, so a refusal comes back as the error. subtype names the
 // request in the timeout message.
 func (h *host) control(subtype string, build func(requestID string) chatproto.Outbound) (any, error) {
+	if _, err := h.controlBody(subtype, build); err != nil {
+		return nil, err
+	}
+	return okResponse{OK: true}, nil
+}
+
+// controlBody is control that hands back the body of claude's success answer.
+func (h *host) controlBody(subtype string, build func(requestID string) chatproto.Outbound) (json.RawMessage, error) {
 	id := uuid.NewString()
 	answer := make(chan chatproto.ControlResponse, 1)
 	h.mu.Lock()
@@ -350,7 +383,7 @@ func (h *host) control(subtype string, build func(requestID string) chatproto.Ou
 		case !r.OK:
 			return nil, errors.New(r.Error)
 		}
-		return okResponse{OK: true}, nil
+		return r.Response, nil
 	case <-t.C:
 		h.mu.Lock()
 		delete(h.answers, id)

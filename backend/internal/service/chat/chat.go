@@ -88,6 +88,29 @@ func (s *Service) StopTask(ctx context.Context, id domain.SessionID, taskID stri
 	return hostError(id, c.StopTask(ctx, taskID))
 }
 
+// Rewind drops the user message uuid and everything after it from the
+// session's conversation, and with restoreFiles puts the files claude changed
+// since then back. Claude's refusal, such as a running turn, is
+// CHAT_REQUEST_REJECTED with its reason.
+func (s *Service) Rewind(ctx context.Context, id domain.SessionID, uuid string, restoreFiles bool) error {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hostError(id, c.Rewind(ctx, uuid, restoreFiles))
+}
+
+// RewindPreview reports what restoring files to before the user message uuid
+// would change.
+func (s *Service) RewindPreview(ctx context.Context, id domain.SessionID, uuid string) (sessionhost.RewindPreview, error) {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return sessionhost.RewindPreview{}, err
+	}
+	p, err := c.RewindPreview(ctx, uuid)
+	return p, hostError(id, err)
+}
+
 func (s *Service) client(ctx context.Context, id domain.SessionID) (sessionhost.Client, error) {
 	rec, ok, err := s.sessions.GetSession(ctx, id)
 	switch {

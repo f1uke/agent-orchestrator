@@ -2482,6 +2482,26 @@ type ResolveChatFilesResponse struct {
 	Files []ChatFileRef `json:"files" description:"One entry per requested ref, in request order."`
 }
 
+// RewindChatRequest is the body of POST /api/v1/sessions/{sessionId}/chat/rewind.
+type RewindChatRequest struct {
+	UUID         string `json:"uuid" minLength:"1" description:"The user message to rewind to: it and every message after it leave the conversation."`
+	RestoreFiles bool   `json:"restoreFiles,omitempty" description:"Also put back the files the agent changed since that message."`
+}
+
+// RewindChatPreviewRequest is the body of POST /api/v1/sessions/{sessionId}/chat/rewind/preview.
+type RewindChatPreviewRequest struct {
+	UUID string `json:"uuid" minLength:"1" description:"The user message a rewind would go back to."`
+}
+
+// RewindChatPreviewResponse is what restoring files to before a user message would change.
+type RewindChatPreviewResponse struct {
+	CanRewind    bool     `json:"canRewind" description:"False when the agent holds no file checkpoint for that message, as in a session started before checkpoints were on."`
+	Error        string   `json:"error,omitempty" description:"Why the files cannot be restored, when canRewind is false."`
+	FilesChanged []string `json:"filesChanged" description:"Absolute paths a restore would change."`
+	Insertions   int      `json:"insertions"`
+	Deletions    int      `json:"deletions"`
+}
+
 // ChatAckResponse is the body of the chat endpoints that return nothing else.
 type ChatAckResponse struct {
 	OK bool `json:"ok"`

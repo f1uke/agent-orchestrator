@@ -55,6 +55,23 @@ type StopTask struct {
 	TaskID    string
 }
 
+// RewindConversation drops the user message TargetUUID and every message after
+// it from claude's conversation. Claude answers rewound false with a reason,
+// such as turn_running, when it cannot cut there.
+type RewindConversation struct {
+	RequestID  string
+	TargetUUID string
+}
+
+// RewindFiles restores the files claude changed since the user message
+// UserMessageID. DryRun only reports what would change. Claude keeps the
+// checkpoints only when it was started with file checkpointing on.
+type RewindFiles struct {
+	RequestID     string
+	UserMessageID string
+	DryRun        bool
+}
+
 // MCPReply answers an mcp_message control request with one JSON-RPC message.
 type MCPReply struct {
 	RequestID string
@@ -70,15 +87,17 @@ type PermissionAnswer struct {
 	Decision  Decision
 }
 
-func (UserInput) isOutbound()         {}
-func (Initialize) isOutbound()        {}
-func (Interrupt) isOutbound()         {}
-func (SetPermissionMode) isOutbound() {}
-func (SetModel) isOutbound()          {}
-func (PermissionAnswer) isOutbound()  {}
-func (StopTask) isOutbound()          {}
-func (MCPReply) isOutbound()          {}
-func (GetContextUsage) isOutbound()   {}
+func (UserInput) isOutbound()          {}
+func (Initialize) isOutbound()         {}
+func (Interrupt) isOutbound()          {}
+func (SetPermissionMode) isOutbound()  {}
+func (SetModel) isOutbound()           {}
+func (PermissionAnswer) isOutbound()   {}
+func (StopTask) isOutbound()           {}
+func (MCPReply) isOutbound()           {}
+func (RewindConversation) isOutbound() {}
+func (RewindFiles) isOutbound()        {}
+func (GetContextUsage) isOutbound()    {}
 
 // Decision is the verdict in a PermissionAnswer.
 type Decision interface{ isDecision() }
@@ -150,6 +169,20 @@ func Encode(o Outbound) ([]byte, error) {
 			return nil, errors.New("chatproto: stop_task needs a task id")
 		}
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "stop_task", "task_id": m.TaskID})
+	case RewindConversation:
+		if m.TargetUUID == "" {
+			return nil, errors.New("chatproto: rewind_conversation needs a target uuid")
+		}
+		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "rewind_conversation", "target_message_uuid": m.TargetUUID})
+	case RewindFiles:
+		if m.UserMessageID == "" {
+			return nil, errors.New("chatproto: rewind_files needs a user message id")
+		}
+		req := map[string]any{"subtype": "rewind_files", "user_message_id": m.UserMessageID}
+		if m.DryRun {
+			req["dry_run"] = true
+		}
+		return encodeControlRequest(m.RequestID, req)
 	case GetContextUsage:
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "get_context_usage"})
 	case PermissionAnswer:

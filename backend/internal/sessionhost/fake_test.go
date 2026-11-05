@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ const (
 	envFakeSleeper  = "SESSIONHOST_FAKE_SLEEPER"
 	envFakeParent   = "SESSIONHOST_FAKE_PARENT"
 	envFakeContext  = "SESSIONHOST_FAKE_CONTEXT"
+	envFakeEnv      = "SESSIONHOST_FAKE_ENV"
 )
 
 func TestMain(m *testing.M) {
@@ -47,6 +49,11 @@ func fakeClaude(fixture string) int {
 		b, _ := json.Marshal(os.Args[1:])
 		if err := os.WriteFile(p, b, 0o600); err != nil {
 			return fail("write argv: %v", err)
+		}
+	}
+	if p := os.Getenv(envFakeEnv); p != "" {
+		if err := os.WriteFile(p, []byte(strings.Join(os.Environ(), "\n")), 0o600); err != nil {
+			return fail("write env: %v", err)
 		}
 	}
 	if p := os.Getenv(envFakeParent); p != "" {

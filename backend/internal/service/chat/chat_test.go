@@ -105,6 +105,11 @@ var ops = []op{
 	{"set mode", func(s *Service) error { return s.SetMode(context.Background(), "s-1", chatproto.ModePlan) }, map[string]any{"op": "set_mode", "mode": "plan"}},
 	{"set model", func(s *Service) error { return s.SetModel(context.Background(), "s-1", "haiku") }, map[string]any{"op": "set_model", "model": "haiku"}},
 	{"stop task", func(s *Service) error { return s.StopTask(context.Background(), "s-1", "bq3k9x1ab") }, map[string]any{"op": "stop_task", "task_id": "bq3k9x1ab"}},
+	{"rewind", func(s *Service) error { return s.Rewind(context.Background(), "s-1", "u-2", true) }, map[string]any{"op": "rewind", "uuid": "u-2", "restore_files": true}},
+	{"rewind preview", func(s *Service) error {
+		_, err := s.RewindPreview(context.Background(), "s-1", "u-2")
+		return err
+	}, map[string]any{"op": "rewind_preview", "uuid": "u-2"}},
 }
 
 func wantAPIError(t *testing.T, err error, kind apierr.Kind, code string) *apierr.Error {
