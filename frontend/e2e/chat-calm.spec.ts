@@ -37,6 +37,16 @@ for (const viewport of VIEWPORTS) {
 			await group.click();
 			await expect(stream.locator("[data-tool]").first()).toBeVisible();
 			await shot("turn-open");
+
+			const nested = stream.locator("[data-turn] .chat-group__body").first();
+			expect(await nested.evaluate((el) => getComputedStyle(el).borderLeftWidth), "one rule per open turn").toBe("0px");
+			const tool = stream.locator("[data-turn] [data-group] .chat-tool").first();
+			const boxed = () => tool.evaluate((el) => getComputedStyle(el).borderTopColor !== "rgba(0, 0, 0, 0)");
+			expect(await boxed(), "a closed tool in an open group is a plain row").toBe(false);
+			await tool.locator(".chat-tool__head").click();
+			await expect(tool.locator(".chat-tool__head")).toHaveAttribute("aria-expanded", "true");
+			expect(await boxed(), "the tool you open gets its box").toBe(true);
+			await shot("tool-open");
 		});
 	});
 }

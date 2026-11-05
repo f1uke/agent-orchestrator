@@ -136,7 +136,8 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   borderless `--bg-3` fill; user input as a right-aligned borderless `--bg-2` bubble
   with an even 16px radius; assistant text through
   `NoteMarkdown`; tool cards on `--bg-1` with a hairline `--border-1` and 8px
-  radius, Edit/Write diffs through `DiffRows`; `ao send` messages as 10px cards
+  radius (inside an open group a closed card is a plain row, and only the opened
+  card shows its box; an open turn draws one left rule, not one per group), Edit/Write diffs through `DiffRows`; `ao send` messages as 10px cards
   tinted with `--purple` (peer) or `--accent` (orchestrator); a pending request
   ringed in needs-you `--lane-needs` (a plan in `--accent`); settled requests as
   a dashed one-line outcome. Chat | Terminal | Events is a segmented control in
