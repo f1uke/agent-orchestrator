@@ -34,7 +34,18 @@ export type ToolBody =
 	| { kind: "generic"; input: string; output: string; images: ChatImage[]; imageName: string };
 
 export type ToolView = {
-	family: "bash" | "edit" | "write" | "read" | "search" | "agent" | "todo" | "plan" | "question" | "other";
+	family:
+		| "bash"
+		| "edit"
+		| "write"
+		| "read"
+		| "search"
+		| "agent"
+		| "todo"
+		| "plan"
+		| "question"
+		| "browser"
+		| "other";
 	title: string;
 	/** For a file card, the base name. The full path stays in `path` for the row's tooltip. */
 	arg: string;
@@ -314,11 +325,86 @@ const agentArg = (input: Input): string => {
 
 const TODO_TITLE: Record<string, string> = { TaskCreate: "Add todo", TaskUpdate: "Update todo", TodoWrite: "Todos" };
 
+const CHROME_PREFIX = "mcp__claude-in-chrome__";
+
+const quoted = (text: string) => (text ? `"${text}"` : "");
+
+/** Claude in Chrome's actions by tool name: a title, and the input worth showing beside it. */
+const CHROME_ACTIONS: Record<string, { title: string; arg?: (input: Input) => string }> = {
+	navigate: { title: "Open page", arg: (input) => str(input.url) },
+	tabs_context_mcp: { title: "List tabs" },
+	tabs_create_mcp: { title: "New tab" },
+	tabs_close_mcp: { title: "Close tab" },
+	read_page: { title: "Read page" },
+	get_page_text: { title: "Page text" },
+	find: { title: "Find", arg: (input) => quoted(str(input.query)) },
+	form_input: { title: "Fill form", arg: (input) => quoted(str(input.value)) },
+	javascript_tool: { title: "Run JavaScript", arg: (input) => str(input.text) },
+	read_console_messages: { title: "Console messages" },
+	read_network_requests: { title: "Network requests" },
+	resize_window: { title: "Resize window" },
+	gif_creator: { title: "Record GIF" },
+	upload_image: { title: "Upload image" },
+	file_upload: { title: "Upload file" },
+	list_connected_browsers: { title: "List browsers" },
+	select_browser: { title: "Select browser" },
+	switch_browser: { title: "Switch browser" },
+	shortcuts_list: { title: "List shortcuts" },
+	shortcuts_execute: { title: "Run shortcut" },
+	browser_batch: { title: "Browser actions" },
+};
+
+/** The `computer` tool's actions: one card title each, and the input that says where or what. */
+const COMPUTER_ACTIONS: Record<string, string> = {
+	screenshot: "Screenshot",
+	left_click: "Click",
+	right_click: "Right click",
+	double_click: "Double click",
+	triple_click: "Triple click",
+	hover: "Hover",
+	left_click_drag: "Drag",
+	type: "Type",
+	key: "Key",
+	scroll: "Scroll",
+	scroll_to: "Scroll to",
+	wait: "Wait",
+	zoom: "Zoom",
+};
+
+const humanize = (name: string) => {
+	const words = name.replace(/_mcp$/, "").replace(/_/g, " ");
+	return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+function chromeTitleArg(action: string, input: Input): { title: string; arg: string } {
+	if (action === "computer") {
+		const name = str(input.action);
+		const at = Array.isArray(input.coordinate) ? input.coordinate.join(", ") : "";
+		const arg = str(input.text) ? quoted(str(input.text)) : at || str(input.ref);
+		return { title: COMPUTER_ACTIONS[name] ?? humanize(name || "computer"), arg };
+	}
+	const known = CHROME_ACTIONS[action];
+	return { title: known?.title ?? humanize(action), arg: known?.arg?.(input) ?? "" };
+}
+
+function describeChrome(call: ToolCallItem, input: Input, output: string): ToolView {
+	const images = imagesOf(call.result?.content);
+	return {
+		...chromeTitleArg(call.name.slice(CHROME_PREFIX.length), input),
+		family: "browser",
+		path: "",
+		compact: true,
+		status: outcome(call, () => (images.length ? (images.length === 1 ? "image" : plural(images.length, "image")) : "done")),
+		body: images.length ? { kind: "image", images, path: "screenshot" } : { kind: "output", text: output },
+	};
+}
+
 export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolView {
 	const input = isObject(call.input) ? call.input : {};
 	const output = resultText(call.result);
 	const base = { title: call.name, compact: false, path: "" };
 	const short = (text: string) => shortenPaths(text, ctx.root);
+	if (call.name.startsWith(CHROME_PREFIX)) return describeChrome(call, input, output);
 
 	switch (call.name) {
 		case "Bash": {
