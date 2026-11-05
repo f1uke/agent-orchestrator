@@ -169,11 +169,16 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 				<div className="chat-term">
 					<span className="chat-term__label">Input</span>
 					{body.input}
-					{body.output ? (
-						<>
-							<span className="chat-term__label">Result</span>
-							{body.output}
-						</>
+					{body.output || body.images.length ? <span className="chat-term__label">Result</span> : null}
+					{body.output}
+					{body.images.length ? (
+						<div className="chat-tool__images">
+							<ChatImages
+								images={body.images}
+								name={(i) => (body.images.length > 1 ? `${body.imageName} (${i + 1})` : body.imageName)}
+								thumb={READ_THUMB}
+							/>
+						</div>
 					) : null}
 				</div>
 			);
