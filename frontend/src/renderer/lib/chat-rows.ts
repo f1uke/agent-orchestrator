@@ -155,7 +155,8 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 		const pieces = foldSegments(row.key, between, ended.item.durationMs);
 		if (!pieces) continue;
 		out.push(...pieces);
-		if (ended.item.durationMs !== undefined && !between.some(isChapter)) rows[end] = { ...ended, durationShownAbove: true };
+		if (ended.item.durationMs !== undefined && !between.some(isChapter))
+			rows[end] = { ...ended, durationShownAbove: true };
 		i = last - 1;
 	}
 	return out;
