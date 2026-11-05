@@ -1,9 +1,6 @@
 const FENCE = /^\s*(```|~~~)/;
 const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
 
-// The part of a streaming reply that renders as its final shape. A half-typed
-// table header, bold, code span or link would show its raw markers for a few
-// words and then jump, so the tail that opens one waits for the next delta.
 export function settledPrefix(text: string): string {
 	const lines = text.split("\n");
 	if (lines.filter((line) => FENCE.test(line)).length % 2 === 1) return text;
