@@ -98,7 +98,6 @@ type PickerProps = {
 	models: readonly ChatModel[];
 	model: string;
 	chrome: boolean;
-	/** Switching Chrome restarts claude, so it waits for the turn to end. */
 	chromeLocked: boolean;
 	onChrome: (enabled: boolean) => void;
 	permissionMode: string;

@@ -21,8 +21,8 @@ type Transcript struct {
 	Model            string        // in use: the spawn's --model, then system/init or an accepted set_model
 	ChosenModel      string        // the latest accepted set_model, which a respawn passes as --model
 	RemoteControl    RemoteControl // the Remote Control bridge; off after a process ends
-	Chrome           bool          // the latest spawn ran claude with --chrome, so a respawn keeps Claude in Chrome
-	Suggestion       string        // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
+	Chrome           bool
+	Suggestion       string // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
 	LastSeq          uint64
 }
 
@@ -538,7 +538,6 @@ func (f *Folder) applyHost(n HostNote) {
 // ignores the setting that enables it by default, so a host must pass it.
 const ChromeFlag = "--chrome"
 
-// flagsOf drops "--" and the prompt text claude reads after it.
 func flagsOf(argv []string) []string {
 	if i := slices.Index(argv, "--"); i >= 0 {
 		return argv[:i]

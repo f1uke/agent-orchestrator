@@ -129,7 +129,6 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 	return h.run(ctx, cfg, ln, first)
 }
 
-// launch is what one claude process starts with beyond the agent command.
 type launch struct {
 	resume      string
 	model       string
@@ -138,8 +137,6 @@ type launch struct {
 	chrome      bool
 }
 
-// from resumes the transcript's latest claude session with its chosen model,
-// so a relaunch picks the conversation up where the last process left it.
 func (l launch) from(t chatproto.Transcript, chrome bool) launch {
 	l.model, l.resume, l.chrome = t.ChosenModel, "", chrome
 	if n := len(t.ClaudeSessionIDs); n > 0 {
@@ -208,10 +205,8 @@ type host struct {
 	idle            idleState
 	afterFunc       afterFunc
 	launched        launch
-	// tasks holds the background tasks claude has running, which die with it.
-	tasks map[string]struct{}
-	// relaunch carries a launch that replaces the running claude, as when
-	// Claude in Chrome is turned on or off, which claude reads only at start.
+	tasks           map[string]struct{}
+	// claude reads --chrome only at start, so switching it replaces the process.
 	relaunch chan launch
 }
 
@@ -244,9 +239,6 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, l launch) (
 	}
 }
 
-// runClaude runs one claude process until it exits, ctx is cancelled, or a
-// relaunch replaces it, which it returns. serve starts the socket server once
-// the first process is up.
 func (h *host) runClaude(ctx context.Context, cfg Config, l launch, serve func()) (*os.ProcessState, *launch, error) {
 	argv := claudeArgv(cfg.Command, l)
 	cmd := process.Command(argv[0], argv[1:]...)
@@ -399,8 +391,6 @@ func (h *host) finish(code *int, signal *string) {
 	}
 }
 
-// endProcessLocked forgets the claude process that ended. Subscribers stay,
-// since a relaunch keeps serving them.
 func (h *host) endProcessLocked() {
 	h.stdin, h.pid = nil, 0
 	h.contextID = ""
@@ -414,8 +404,6 @@ func (h *host) endProcessLocked() {
 
 var errChromeBusy = errors.New("claude is busy: wait for the turn and its background tasks to end, then turn Chrome on or off")
 
-// setChrome relaunches claude with Claude in Chrome on or off, resuming the
-// same conversation. A turn in flight would be cut off, so it is refused.
 func (h *host) setChrome(enabled bool) (any, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

@@ -329,7 +329,6 @@ const CHROME_PREFIX = "mcp__claude-in-chrome__";
 
 const quoted = (text: string) => (text ? `"${text}"` : "");
 
-/** Claude in Chrome's actions by tool name: a title, and the input worth showing beside it. */
 const CHROME_ACTIONS: Record<string, { title: string; arg?: (input: Input) => string }> = {
 	navigate: { title: "Open page", arg: (input) => str(input.url) },
 	tabs_context_mcp: { title: "List tabs" },
@@ -354,7 +353,6 @@ const CHROME_ACTIONS: Record<string, { title: string; arg?: (input: Input) => st
 	browser_batch: { title: "Browser actions" },
 };
 
-/** A card title for each action of Claude in Chrome's `computer` tool. */
 const COMPUTER_ACTIONS: Record<string, string> = {
 	screenshot: "Screenshot",
 	left_click: "Click",

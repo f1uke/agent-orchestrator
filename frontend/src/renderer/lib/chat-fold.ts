@@ -185,7 +185,6 @@ export type Transcript = {
 	models: ChatModel[];
 	/** In use: the spawn's --model, then system/init or an accepted set_model. */
 	model: string;
-	/** The latest spawn ran claude with --chrome, so the Claude in Chrome tools are on. */
 	chrome: boolean;
 	tasks: BackgroundTask[];
 	/** The model each subagent's messages name, by the Agent call's tool_use id. */
@@ -247,7 +246,6 @@ function parseModels(raw: unknown): ChatModel[] {
 
 export const CHROME_FLAG = "--chrome";
 
-/** The flags in a claude argv: what follows "--" is prompt text. */
 function flagsOf(argv: readonly string[]): readonly string[] {
 	const end = argv.indexOf("--");
 	return end < 0 ? argv : argv.slice(0, end);
