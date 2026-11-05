@@ -131,7 +131,10 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
 - **Derived (2026-10-30), the reference has no chat:** the **chat view** of a
   headless chat session (`components/ChatPane.tsx`, `ChatToolCard.tsx`; `.chat-*`
   in `styles.css`), from the approved headless-chat mockup. An 860px centred
-  column; user input as a right-aligned `--bg-2` bubble; assistant text through
+  column (1040px once the pane is 1400px wide); assistant prose 15px / 1.65 with
+  12px between paragraphs and 16px before code, tables and quotes; inline code as a
+  borderless `--bg-3` fill; user input as a right-aligned borderless `--bg-2` bubble
+  with an even 16px radius; assistant text through
   `NoteMarkdown`; tool cards on `--bg-1` with a hairline `--border-1` and 8px
   radius, Edit/Write diffs through `DiffRows`; `ao send` messages as 10px cards
   tinted with `--purple` (peer) or `--accent` (orchestrator); a pending request

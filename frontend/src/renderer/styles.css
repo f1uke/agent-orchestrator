@@ -7520,6 +7520,7 @@ ol.note-prose__list {
 
 .chat-pane {
 	position: relative;
+	container: chat-pane / inline-size;
 	display: flex;
 	height: 100%;
 	min-height: 0;
@@ -7700,6 +7701,12 @@ ol.note-prose__list {
 	margin: 0 auto;
 }
 
+@container chat-pane (min-width: 1400px) {
+	.chat-col {
+		max-width: 1040px;
+	}
+}
+
 .chat-row {
 	position: absolute;
 	top: 0;
@@ -7794,10 +7801,11 @@ ol.note-prose__list {
 
 .chat-user__bubble {
 	max-width: 78%;
-	padding: 10px 14px;
-	border: 1px solid var(--border-1);
-	border-radius: 12px 12px 4px 12px;
+	padding: 10px 16px;
+	border-radius: 16px;
 	background: var(--bg-2);
+	font-size: 15px;
+	line-height: 1.6;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 }
@@ -7821,14 +7829,30 @@ ol.note-prose__list {
 }
 
 .chat-md {
-	font-size: 14px;
-	line-height: 1.6;
+	font-size: 15px;
+	line-height: 1.65;
 }
 
 .chat-md .note-prose__p {
-	margin-top: 8px;
-	font-size: 14px;
-	line-height: 1.6;
+	margin-top: 12px;
+	font-size: 15px;
+	line-height: 1.65;
+}
+
+.chat-md .note-prose__list {
+	margin-top: 10px;
+	font-size: 15px;
+	line-height: 1.65;
+}
+
+.chat-md .note-prose__li {
+	margin-bottom: 6px;
+}
+
+.chat-md .note-prose__code,
+.chat-md .note-prose__table-scroll,
+.chat-md .note-prose__quote {
+	margin-top: 16px;
 }
 
 .chat-md .note-prose__p--first {
@@ -7838,9 +7862,17 @@ ol.note-prose__list {
 /* A chat reply sits on --bg, a step darker than a note's page, so --border
    hairlines vanish; these rules use --border-1. */
 .chat-md .note-prose__code,
-.chat-md .note-prose__code-head,
-.chat-md .note-prose__code-inline {
+.chat-md .note-prose__code-head {
 	border-color: var(--border-1);
+}
+
+/* Several inline codes in one sentence read as a row of buttons when each is
+   boxed; a fill alone keeps them legible without the chrome. */
+.chat-md .note-prose__code-inline {
+	padding: 2px 5px;
+	border-color: transparent;
+	background: var(--bg-3);
+	font-size: 0.86em;
 }
 
 .chat-md .note-prose__quote {
@@ -8843,6 +8875,12 @@ ol.note-prose__list {
 	max-width: 924px;
 	margin: 0 auto;
 	padding: 0 32px 14px;
+}
+
+@container chat-pane (min-width: 1400px) {
+	.chat-bottom {
+		max-width: 1104px;
+	}
 }
 
 .chat-banner {
