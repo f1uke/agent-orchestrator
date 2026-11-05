@@ -261,17 +261,76 @@ func TestClientStopTaskGivesUpWhenClaudeIsSilent(t *testing.T) {
 	}
 }
 
+func TestClientRemoteControl(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir,
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.SetRemoteControl{RequestID: "rc-1", Enabled: true})},
+		fixtureLine{chatproto.DirOut, `{"type":"system","subtype":"bridge_state","state":"ready"}`},
+		fixtureLine{chatproto.DirOut, `{"type":"control_response","response":{"subtype":"success","request_id":"rc-1","response":{"session_url":"https://claude.ai/code/session_example"}}}`},
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.SetRemoteControl{RequestID: "rc-2", Enabled: false})},
+		fixtureLine{chatproto.DirOut, `{"type":"control_response","response":{"subtype":"success","request_id":"rc-2","response":{}}}`},
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.SetRemoteControl{RequestID: "rc-3", Enabled: true})},
+		fixtureLine{chatproto.DirOut, `{"type":"control_response","response":{"subtype":"error","request_id":"rc-3","error":"Remote Control is not available for this account."}}`},
+	))
+	startHost(t, cfg)
+	c := NewClient(cfg.SocketPath)
+	ctx := context.Background()
+
+	if err := c.RemoteControl(ctx, true); err != nil {
+		t.Fatalf("RemoteControl(true) = %v, want claude's success", err)
+	}
+	if err := c.RemoteControl(ctx, false); err != nil {
+		t.Fatalf("RemoteControl(false) = %v, want claude's success", err)
+	}
+	got := loggedInputs(t, cfg.LogPath, "control_request/remote_control")
+	if len(got) != 2 || !strings.Contains(got[0], `"enabled":true`) || !strings.Contains(got[1], `"enabled":false`) {
+		t.Errorf("logged remote_control requests = %v, want enable then disable", got)
+	}
+
+	err := c.RemoteControl(ctx, true)
+	var refused *RefusedError
+	if !errors.As(err, &refused) || refused.Reason != "Remote Control is not available for this account." {
+		t.Fatalf("RemoteControl(true) err = %v, want claude's refusal as the reason", err)
+	}
+}
+
+func TestClientRemoteControlGivesUpWhenClaudeIsSilent(t *testing.T) {
+	dir := shortDir(t)
+	cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir,
+		fixtureLine{chatproto.DirIn, encoded(t, chatproto.SetRemoteControl{RequestID: "rc", Enabled: true})},
+	))
+	cfg.controlTimeout = 50 * time.Millisecond
+	startHost(t, cfg)
+
+	err := NewClient(cfg.SocketPath).RemoteControl(context.Background(), true)
+	var refused *RefusedError
+	if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "did not answer remote_control") {
+		t.Fatalf("err = %v, want a refusal saying claude did not answer", err)
+	}
+}
+
+func TestRemoteControlRequestNeedsEnabled(t *testing.T) {
+	if _, err := parseRequest([]byte(`{"op":"remote_control"}`)); err == nil {
+		t.Error("remote_control without enabled parsed, want an error so a missing flag cannot read as off")
+	}
+	req, err := parseRequest([]byte(`{"op":"remote_control","enabled":false}`))
+	if err != nil || req != (remoteControlRequest{Enabled: false}) {
+		t.Errorf("parseRequest(enabled:false) = %v, %v, want a disable", req, err)
+	}
+}
+
 func TestClientWithNoHostIsNotReachable(t *testing.T) {
 	c := NewClient(filepath.Join(shortDir(t), "none.sock"))
 	ctx := context.Background()
 	_, sendErr := c.Send(ctx, chatproto.UserInput{Text: "hi"}, nil)
 	for name, err := range map[string]error{
-		"Send":      sendErr,
-		"Answer":    c.Answer(ctx, "r", chatproto.Allow{}),
-		"Interrupt": c.Interrupt(ctx),
-		"SetMode":   c.SetMode(ctx, chatproto.ModePlan),
-		"SetModel":  c.SetModel(ctx, "haiku"),
-		"StopTask":  c.StopTask(ctx, "t1"),
+		"Send":          sendErr,
+		"Answer":        c.Answer(ctx, "r", chatproto.Allow{}),
+		"Interrupt":     c.Interrupt(ctx),
+		"SetMode":       c.SetMode(ctx, chatproto.ModePlan),
+		"SetModel":      c.SetModel(ctx, "haiku"),
+		"StopTask":      c.StopTask(ctx, "t1"),
+		"RemoteControl": c.RemoteControl(ctx, true),
 	} {
 		if !errors.Is(err, ErrNotReachable) {
 			t.Errorf("%s err = %v, want ErrNotReachable", name, err)

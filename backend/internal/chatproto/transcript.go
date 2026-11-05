@@ -9,18 +9,19 @@ import (
 
 // Transcript is the chat state a log folds into.
 type Transcript struct {
-	ClaudeSessionIDs []string  // in first-seen order, from system/init
-	Items            []Item    // in the order they happened
-	Pending          []Pending // open can_use_tool requests, oldest first
-	Queued           []string  // user input uuids sent but not yet started
-	Busy             bool      // some command started and has not finished
-	PermissionMode   string    // latest system/init value
-	CostUSD          float64   // latest result.total_cost_usd, cumulative for the claude process
-	Commands         []Command // from the latest initialize response
-	Models           []Model   // from the latest initialize response
-	Model            string    // in use: the spawn's --model, then system/init or an accepted set_model
-	ChosenModel      string    // the latest accepted set_model, which a respawn passes as --model
-	Suggestion       string    // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
+	ClaudeSessionIDs []string      // in first-seen order, from system/init
+	Items            []Item        // in the order they happened
+	Pending          []Pending     // open can_use_tool requests, oldest first
+	Queued           []string      // user input uuids sent but not yet started
+	Busy             bool          // some command started and has not finished
+	PermissionMode   string        // latest system/init value
+	CostUSD          float64       // latest result.total_cost_usd, cumulative for the claude process
+	Commands         []Command     // from the latest initialize response
+	Models           []Model       // from the latest initialize response
+	Model            string        // in use: the spawn's --model, then system/init or an accepted set_model
+	ChosenModel      string        // the latest accepted set_model, which a respawn passes as --model
+	RemoteControl    RemoteControl // the Remote Control bridge; off after a process ends
+	Suggestion       string        // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
 	LastSeq          uint64
 }
 
@@ -183,14 +184,20 @@ type Folder struct {
 	pending  []Pending
 	mode     string
 	cost     float64
-	// controls maps the id of a host's initialize or set_model request to its
-	// subtype, because claude's response does not repeat it.
-	controls map[string]string
+	// controls maps the id of a host's initialize, set_model or remote_control
+	// request to what it asked, because claude's response does not repeat it.
+	controls map[string]control
+	remote   RemoteControl
 	slash    []Command
 	models   []Model
 	model    string
 	chosen   string
 	suggest  string
+}
+
+type control struct {
+	subtype string
+	enabled bool // remote_control only
 }
 
 // NewFolder returns an empty Folder.
@@ -201,7 +208,8 @@ func NewFolder() *Folder {
 		origins:  map[string]Origin{},
 		commands: map[string]CommandState{},
 		perms:    map[string]*permission{},
-		controls: map[string]string{},
+		controls: map[string]control{},
+		remote:   RemoteControl{State: RemoteOff},
 	}
 }
 
@@ -259,8 +267,14 @@ func (f *Folder) applyOut(ev Event) {
 		f.applyAssistant(ev)
 	case PromptSuggestion:
 		f.suggest = ev.Text
+	case BridgeState:
+		if state, ok := bridgeState(ev.State); ok {
+			f.remote.State, f.remote.Detail = state, ev.Detail
+		}
 	case User:
-		if !ev.IsReplay {
+		if ev.IsReplay {
+			f.addRemoteInput(ev)
+		} else {
 			f.applyToolResults(ev)
 		}
 	case Result:
@@ -283,10 +297,21 @@ func (f *Folder) applyOut(ev Event) {
 func (f *Folder) applyIn(ev Event) {
 	switch ev := ev.(type) {
 	case User:
-		f.addUserInput(ev)
+		f.addUserInput(ev, nil)
 	case ControlRequest:
-		if c, ok := ev.Body.(OtherControl); ok && (c.Subtype == "initialize" || c.Subtype == "set_model") {
-			f.controls[ev.RequestID] = c.Subtype
+		c, ok := ev.Body.(OtherControl)
+		if !ok {
+			return
+		}
+		switch c.Subtype {
+		case "initialize", "set_model":
+			f.controls[ev.RequestID] = control{subtype: c.Subtype}
+		case "remote_control":
+			enabled := remoteEnabled(c.Raw)
+			f.controls[ev.RequestID] = control{subtype: c.Subtype, enabled: enabled}
+			if enabled {
+				f.remote = RemoteControl{State: RemoteConnecting}
+			}
 		}
 	case ControlResponse:
 		f.answerPermission(ev)
@@ -294,15 +319,19 @@ func (f *Folder) applyIn(ev Event) {
 }
 
 func (f *Folder) answerControl(r ControlResponse) {
-	subtype, ok := f.controls[r.RequestID]
+	c, ok := f.controls[r.RequestID]
 	if !ok {
 		return
 	}
 	delete(f.controls, r.RequestID)
+	if c.subtype == "remote_control" {
+		f.answerRemote(r, c.enabled)
+		return
+	}
 	if !r.OK {
 		return
 	}
-	switch subtype {
+	switch c.subtype {
 	case "initialize":
 		var body struct {
 			Commands []Command `json:"commands"`
@@ -359,7 +388,29 @@ func (f *Folder) applyToolResults(u User) {
 	}
 }
 
-func (f *Folder) addUserInput(u User) {
+// originHuman is the origin.kind claude gives a message a person typed.
+const originHuman = "human"
+
+// addRemoteInput adds the row for a prompt typed on the Remote Control side.
+// The host logs every input it sends before claude can replay it, so a replay
+// whose uuid has no row is a human's message that did not come from AO.
+func (f *Folder) addRemoteInput(u User) {
+	if u.UUID == "" || u.ParentToolUseID != "" || u.OriginKind != originHuman {
+		return
+	}
+	typed := slices.ContainsFunc(u.Blocks, func(b Block) bool {
+		switch b.(type) {
+		case TextBlock, ImageBlock:
+			return true
+		}
+		return false
+	})
+	if typed {
+		f.addUserInput(u, &Origin{Via: OriginRemoteControl})
+	}
+}
+
+func (f *Folder) addUserInput(u User, origin *Origin) {
 	if u.UUID != "" && f.users[u.UUID] != nil {
 		return
 	}
@@ -381,6 +432,8 @@ func (f *Folder) addUserInput(u User) {
 	item := &UserItem{UUID: u.UUID, Text: text.String(), Images: images, State: state}
 	if o, ok := f.origins[u.UUID]; ok {
 		item.Origin = &o
+	} else {
+		item.Origin = origin
 	}
 	if u.UUID != "" {
 		f.users[u.UUID] = item
@@ -502,6 +555,7 @@ func exitText(code *int) string {
 
 func (f *Folder) endProcess() {
 	f.suggest = ""
+	f.remote = RemoteControl{State: RemoteOff}
 	for id := range f.perms {
 		f.settle(id, PermissionCancelled, "", nil)
 	}
@@ -534,6 +588,7 @@ func (f *Folder) Transcript() Transcript {
 		Models:           slices.Clone(f.models),
 		Model:            f.model,
 		ChosenModel:      f.chosen,
+		RemoteControl:    f.remote,
 		Suggestion:       f.suggest,
 		LastSeq:          f.last,
 	}

@@ -77,6 +77,7 @@ function fakeApi() {
 		interrupt: vi.fn<ChatApi["interrupt"]>(async () => OK),
 		setMode: vi.fn<ChatApi["setMode"]>(async () => OK),
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
+		setRemoteControl: vi.fn<ChatApi["setRemoteControl"]>(async () => OK),
 		stopTask: vi.fn<ChatApi["stopTask"]>(async () => OK),
 		rewind: vi.fn<ChatApi["rewind"]>(async () => OK),
 		rewindPreview: vi.fn<ChatApi["rewindPreview"]>(async () => ({
@@ -445,6 +446,31 @@ describe("ChatPane composer", () => {
 		expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
 		await user.keyboard("{Escape}");
 		expect(api.interrupt).toHaveBeenCalledTimes(2);
+	});
+
+	it("shows the Remote Control chip from the log, with a link to share, and drops it when the host exits", async () => {
+		const { feed, user } = renderPane();
+		expect(screen.queryByText(/^Remote /)).toBeNull();
+		feed(
+			entry("in", { type: "control_request", request_id: "rc", request: { subtype: "remote_control", enabled: true } }),
+			out({ type: "system", subtype: "bridge_state", state: "ready" }),
+		);
+		expect(screen.getByText("Remote connecting")).toBeInTheDocument();
+		feed(
+			out({
+				type: "control_response",
+				response: {
+					subtype: "success",
+					request_id: "rc",
+					response: { session_url: "https://claude.ai/code/session_example" },
+				},
+			}),
+			out({ type: "system", subtype: "bridge_state", state: "connected" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Remote connected" }));
+		expect(await screen.findByText("https://claude.ai/code/session_example")).toBeInTheDocument();
+		feed(entry("host", { kind: "exit", code: 0 }));
+		expect(screen.queryByText(/^Remote /)).toBeNull();
 	});
 
 	it("does not interrupt when Esc denies a focused permission card", async () => {

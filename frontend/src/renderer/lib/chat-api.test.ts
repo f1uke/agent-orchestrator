@@ -51,6 +51,26 @@ describe("httpChatApi", () => {
 		]);
 	});
 
+	it("puts the Remote Control switch on its own route and reports a refusal", async () => {
+		PUT.mockResolvedValueOnce(reply(200)).mockResolvedValueOnce(
+			reply(409, {
+				error: "x",
+				code: "CHAT_REQUEST_REJECTED",
+				message: "not available for this account",
+				requestId: "q",
+			}),
+		);
+		expect(await httpChatApi.setRemoteControl("s1", true)).toEqual({ ok: true });
+		expect(await httpChatApi.setRemoteControl("s1", false)).toEqual({
+			ok: false,
+			error: { kind: "rejected", message: "not available for this account" },
+		});
+		expect(PUT.mock.calls.map((c) => [c[0], c[1].body])).toEqual([
+			["/api/v1/sessions/{sessionId}/chat/remote-control", { enabled: true }],
+			["/api/v1/sessions/{sessionId}/chat/remote-control", { enabled: false }],
+		]);
+	});
+
 	it("answers, interrupts and sets the mode on their own routes", async () => {
 		POST.mockResolvedValue(reply(200));
 		PUT.mockResolvedValue(reply(200));

@@ -1,10 +1,12 @@
 import { ChevronDown, FileCode, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import type { PermissionMode } from "../lib/chat-answers";
-import type { ChatModel } from "../lib/chat-fold";
+import type { ChatModel, RemoteControl } from "../lib/chat-fold";
+import { remoteControlOn } from "../lib/chat-remote";
 import { type ModelMenu, modelMenu } from "../lib/chat-menus";
 import {
 	DropdownMenu,
+	DropdownMenuCheckboxItem,
 	DropdownMenuContent,
 	DropdownMenuLabel,
 	DropdownMenuRadioGroup,
@@ -99,9 +101,20 @@ type PickerProps = {
 	disabled: boolean;
 	onModel: (value: string) => void;
 	onMode: (mode: PermissionMode) => void;
+	remoteControl: RemoteControl;
+	onRemoteControl: (enabled: boolean) => void;
 };
 
-export function ModelModePicker({ models, model, permissionMode, disabled, onModel, onMode }: PickerProps) {
+export function ModelModePicker({
+	models,
+	model,
+	permissionMode,
+	disabled,
+	onModel,
+	onMode,
+	remoteControl,
+	onRemoteControl,
+}: PickerProps) {
 	const menu = modelMenu(models, model);
 	const modelName = menu.current?.displayName ?? model;
 	const label = modelName ? `${modelName} · ${modeLabel(permissionMode)}` : modeLabel(permissionMode);
@@ -154,6 +167,10 @@ export function ModelModePicker({ models, model, permissionMode, disabled, onMod
 						</DropdownMenuRadioItem>
 					))}
 				</DropdownMenuRadioGroup>
+				<DropdownMenuSeparator />
+				<DropdownMenuCheckboxItem checked={remoteControlOn(remoteControl)} onCheckedChange={onRemoteControl}>
+					Remote Control
+				</DropdownMenuCheckboxItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

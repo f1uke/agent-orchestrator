@@ -1002,6 +1002,33 @@ export const stubChatApi: ChatApi = {
 		]);
 		return OK;
 	},
+	setRemoteControl: async (id, enabled) => {
+		const session = await stubSession(id);
+		const requestId = `stub-remote-${session.folder.lastSeq}`;
+		const url = "https://claude.ai/code/session_stub";
+		append(id, session, [
+			["in", { type: "control_request", request_id: requestId, request: { subtype: "remote_control", enabled } }],
+			...(enabled
+				? ([
+						["out", { type: "system", subtype: "bridge_state", state: "ready", session_id: SESSION }],
+						[
+							"out",
+							{
+								type: "control_response",
+								response: { subtype: "success", request_id: requestId, response: { session_url: url } },
+							},
+						],
+						["out", { type: "system", subtype: "bridge_state", state: "connected", session_id: SESSION }],
+					] as Step[])
+				: ([
+						[
+							"out",
+							{ type: "control_response", response: { subtype: "success", request_id: requestId, response: {} } },
+						],
+					] as Step[])),
+		]);
+		return OK;
+	},
 	setModel: async (id, model) => {
 		const session = await stubSession(id);
 		const known = session.folder.transcript().models.find((m) => m.value === model);

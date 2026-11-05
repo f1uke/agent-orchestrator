@@ -40,6 +40,10 @@ func TestEncode(t *testing.T) {
 			`{"type":"control_request","request_id":"r10","request":{"dry_run":true,"subtype":"rewind_files","user_message_id":"u2"}}`},
 		{"rewind files", RewindFiles{RequestID: "r11", UserMessageID: "u2"},
 			`{"type":"control_request","request_id":"r11","request":{"subtype":"rewind_files","user_message_id":"u2"}}`},
+		{"enable remote control", SetRemoteControl{RequestID: "rc-1", Enabled: true},
+			`{"type":"control_request","request_id":"rc-1","request":{"subtype":"remote_control","enabled":true}}`},
+		{"disable remote control", SetRemoteControl{RequestID: "rc-2"},
+			`{"type":"control_request","request_id":"rc-2","request":{"subtype":"remote_control","enabled":false}}`},
 		{"get context usage", GetContextUsage{RequestID: "ctx-1"},
 			`{"type":"control_request","request_id":"ctx-1","request":{"subtype":"get_context_usage"}}`},
 		{"allow", PermissionAnswer{RequestID: "r4", Decision: Allow{UpdatedInput: input}},
@@ -112,6 +116,7 @@ func outboundFromWire(payload json.RawMessage) (Outbound, error) {
 			Subtype string `json:"subtype"`
 			Mode    string `json:"mode"`
 			Model   string `json:"model"`
+			Enabled bool   `json:"enabled"`
 		} `json:"request"`
 		Response struct {
 			RequestID string `json:"request_id"`
@@ -140,6 +145,8 @@ func outboundFromWire(payload json.RawMessage) (Outbound, error) {
 			return SetPermissionMode{RequestID: w.RequestID, Mode: mode}, err
 		case "set_model":
 			return SetModel{RequestID: w.RequestID, Model: w.Request.Model}, nil
+		case "remote_control":
+			return SetRemoteControl{RequestID: w.RequestID, Enabled: w.Request.Enabled}, nil
 		}
 	case "control_response":
 		r := w.Response.Response
@@ -155,7 +162,7 @@ func outboundFromWire(payload json.RawMessage) (Outbound, error) {
 
 func TestEncodeMatchesWhatTheCLIAccepted(t *testing.T) {
 	seen := map[string]int{}
-	for _, name := range []string{"first_session.jsonl", "resumed_session.jsonl", "set_model.jsonl"} {
+	for _, name := range []string{"first_session.jsonl", "resumed_session.jsonl", "set_model.jsonl", "remote_control.jsonl"} {
 		for _, e := range loadFixture(t, name) {
 			if e.Dir != DirIn {
 				continue
@@ -172,7 +179,7 @@ func TestEncodeMatchesWhatTheCLIAccepted(t *testing.T) {
 			assertJSONEqual(t, got, e.Payload)
 		}
 	}
-	want := map[string]int{"UserInput": 10, "Initialize": 2, "SetPermissionMode": 1, "Interrupt": 1, "PermissionAnswer": 6, "SetModel": 2}
+	want := map[string]int{"UserInput": 11, "Initialize": 2, "SetPermissionMode": 1, "Interrupt": 1, "PermissionAnswer": 6, "SetModel": 2, "SetRemoteControl": 2}
 	if !reflect.DeepEqual(seen, want) {
 		t.Errorf("fixtures exercised %v, want %v", seen, want)
 	}

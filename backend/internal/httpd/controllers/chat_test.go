@@ -33,6 +33,7 @@ type chatCall struct {
 	taskID    string
 	uuid      string
 	restore   bool
+	enabled   bool
 }
 
 type fakeChatService struct {
@@ -63,6 +64,11 @@ func (f *fakeChatService) SetMode(_ context.Context, id domain.SessionID, mode c
 
 func (f *fakeChatService) SetModel(_ context.Context, id domain.SessionID, model string) error {
 	f.calls = append(f.calls, chatCall{op: "set_model", id: id, model: model})
+	return f.err
+}
+
+func (f *fakeChatService) SetRemoteControl(_ context.Context, id domain.SessionID, enabled bool) error {
+	f.calls = append(f.calls, chatCall{op: "remote_control", id: id, enabled: enabled})
 	return f.err
 }
 
@@ -99,6 +105,7 @@ var chatRoutes = []chatRoute{
 	{"interrupt", "POST", "/api/v1/sessions/s-1/chat/interrupt", ``},
 	{"mode", "PUT", "/api/v1/sessions/s-1/chat/mode", `{"mode":"plan"}`},
 	{"model", "PUT", "/api/v1/sessions/s-1/chat/model", `{"model":"haiku"}`},
+	{"remote control", "PUT", "/api/v1/sessions/s-1/chat/remote-control", `{"enabled":true}`},
 	{"stop task", "POST", "/api/v1/sessions/s-1/chat/tasks/bq3k9x1ab/stop", ``},
 	{"rewind", "POST", "/api/v1/sessions/s-1/chat/rewind", `{"uuid":"u-2"}`},
 	{"rewind preview", "POST", "/api/v1/sessions/s-1/chat/rewind/preview", `{"uuid":"u-2"}`},
@@ -211,6 +218,37 @@ func TestChatInterruptAndMode(t *testing.T) {
 	}
 	if !reflect.DeepEqual(svc.calls, want) {
 		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
+func TestChatRemoteControl(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	for _, enabled := range []string{"true", "false"} {
+		if body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/s-1/chat/remote-control", `{"enabled":`+enabled+`}`); status != http.StatusOK {
+			t.Fatalf("enabled=%s status = %d, body=%s", enabled, status, body)
+		}
+	}
+	want := []chatCall{
+		{op: "remote_control", id: "s-1", enabled: true},
+		{op: "remote_control", id: "s-1", enabled: false},
+	}
+	if !reflect.DeepEqual(svc.calls, want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
+func TestChatRemoteControlRefusesABodyWithoutEnabled(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	for _, body := range []string{`{}`, `{"enabled":null}`, `nope`} {
+		resp, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/s-1/chat/remote-control", body)
+		if status != http.StatusBadRequest {
+			t.Errorf("body %s: status = %d, want 400, resp=%s", body, status, resp)
+		}
+	}
+	if len(svc.calls) != 0 {
+		t.Errorf("a refused body reached the service: %+v", svc.calls)
 	}
 }
 

@@ -1,0 +1,18 @@
+{"seq":1,"ts":"2026-11-05T09:00:00.000Z","dir":"in","payload":{"type":"control_request","request_id":"rc-1","request":{"subtype":"remote_control","enabled":true}}}
+{"seq":2,"ts":"2026-11-05T09:00:00.100Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"ready","session_id":"s-1"}}
+{"seq":3,"ts":"2026-11-05T09:00:00.200Z","dir":"out","payload":{"type":"control_response","response":{"subtype":"success","request_id":"rc-1","response":{"session_url":"https://claude.ai/code/session_example","connect_url":"https://claude.ai/code?bridge=example","environment_id":"","bridge_epoch":1,"bridge_session_id":"cse_example"}}}}
+{"seq":4,"ts":"2026-11-05T09:00:00.300Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"connected","bridge_epoch":1,"session_id":"s-1"}}
+{"seq":5,"ts":"2026-11-05T09:01:00.000Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"reconnecting","session_id":"s-1"}}
+{"seq":6,"ts":"2026-11-05T09:01:02.000Z","dir":"out","payload":{"type":"system","subtype":"bridge_state","state":"connected","bridge_epoch":2,"session_id":"s-1"}}
+{"seq":7,"ts":"2026-11-05T09:02:00.000Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-1","state":"queued"}}
+{"seq":8,"ts":"2026-11-05T09:02:00.010Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-1","state":"started"}}
+{"seq":9,"ts":"2026-11-05T09:02:00.020Z","dir":"out","payload":{"type":"user","uuid":"remote-1","isReplay":true,"origin":{"kind":"human"},"session_id":"s-1","message":{"role":"user","content":"placeholder remote prompt"}}}
+{"seq":10,"ts":"2026-11-05T09:02:01.000Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-1","state":"completed"}}
+{"seq":11,"ts":"2026-11-05T09:02:30.000Z","dir":"in","payload":{"type":"user","message":{"role":"user","content":"placeholder local prompt"},"parent_tool_use_id":null,"session_id":"","uuid":"local-1"}}
+{"seq":12,"ts":"2026-11-05T09:02:30.050Z","dir":"out","payload":{"type":"user","uuid":"local-1","isReplay":true,"session_id":"s-1","parent_tool_use_id":null,"message":{"role":"user","content":"placeholder local prompt"}}}
+{"seq":13,"ts":"2026-11-05T09:02:45.000Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-2","state":"queued"}}
+{"seq":14,"ts":"2026-11-05T09:02:45.010Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-2","state":"started"}}
+{"seq":15,"ts":"2026-11-05T09:02:45.020Z","dir":"out","payload":{"type":"user","uuid":"remote-2","isReplay":true,"origin":{"kind":"human"},"session_id":"s-1","message":{"role":"user","content":"second placeholder remote prompt"}}}
+{"seq":16,"ts":"2026-11-05T09:02:46.000Z","dir":"out","payload":{"type":"command_lifecycle","command_uuid":"remote-2","state":"completed"}}
+{"seq":17,"ts":"2026-11-05T09:03:00.000Z","dir":"in","payload":{"type":"control_request","request_id":"rc-2","request":{"subtype":"remote_control","enabled":false}}}
+{"seq":18,"ts":"2026-11-05T09:03:00.100Z","dir":"out","payload":{"type":"control_response","response":{"subtype":"success","request_id":"rc-2","response":{}}}}

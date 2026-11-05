@@ -1,5 +1,11 @@
 import { isObject, type TaskState, unfinished } from "./chat-event";
-import type { BackgroundTask, ChatItem, ToolCallItem, Transcript } from "./chat-fold";
+import {
+	type BackgroundTask,
+	type ChatItem,
+	REMOTE_CONTROL_OFF,
+	type ToolCallItem,
+	type Transcript,
+} from "./chat-fold";
 import { taskLabel } from "./chat-tools";
 
 export type TaskKind = "agent" | "bash" | "other";
@@ -179,6 +185,7 @@ export function subagentTranscript(tr: Transcript, agentCallId: string): Transcr
 		model: tr.agentModels[agentCallId] ?? "",
 		tasks: tr.tasks.filter((t) => calls.has(t.toolUseId)),
 		agentModels: tr.agentModels,
+		remoteControl: REMOTE_CONTROL_OFF,
 		suggestion: "",
 		lastSeq: tr.lastSeq,
 	};

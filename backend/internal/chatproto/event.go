@@ -34,6 +34,16 @@ type System struct {
 	Raw            json.RawMessage
 }
 
+// BridgeState is a system/bridge_state event: the state of the Remote Control
+// bridge that lets claude.ai/code or the Claude app drive this session. State is
+// as claude sent it (ready, connected, reconnecting, failed). Detail is claude's
+// human-readable reason, set on a failure.
+type BridgeState struct {
+	State       string
+	Detail      string
+	FailureKind string
+}
+
 // Assistant is one assistant message event. With partial messages on, claude
 // emits one event per content block, all sharing MessageID.
 type Assistant struct {
@@ -45,12 +55,14 @@ type Assistant struct {
 }
 
 // User is a user message event: a replay of an input, or tool results.
-// String content becomes a single TextBlock.
+// String content becomes a single TextBlock. OriginKind is claude's
+// origin.kind, "human" for a message a person typed.
 type User struct {
 	UUID            string
 	SessionID       string
 	ParentToolUseID string
 	IsReplay        bool
+	OriginKind      string
 	Blocks          []Block
 }
 
@@ -111,6 +123,7 @@ type Unknown struct {
 
 func (SystemInit) isEvent()       {}
 func (System) isEvent()           {}
+func (BridgeState) isEvent()      {}
 func (Assistant) isEvent()        {}
 func (User) isEvent()             {}
 func (Result) isEvent()           {}
@@ -292,9 +305,15 @@ func decodeSystem(subtype string, line []byte) (Event, bool) {
 		CWD            string   `json:"cwd"`
 		Tools          []string `json:"tools"`
 		SlashCommands  []string `json:"slash_commands"`
+		State          string   `json:"state"`
+		Detail         string   `json:"detail"`
+		FailureKind    string   `json:"failure_kind"`
 	}
 	if json.Unmarshal(line, &w) != nil {
 		return nil, false
+	}
+	if subtype == "bridge_state" {
+		return BridgeState{State: w.State, Detail: w.Detail, FailureKind: w.FailureKind}, true
 	}
 	if subtype == "init" {
 		return SystemInit{
@@ -334,7 +353,10 @@ func decodeUser(line []byte) (Event, bool) {
 		SessionID       string `json:"session_id"`
 		ParentToolUseID string `json:"parent_tool_use_id"`
 		IsReplay        bool   `json:"isReplay"`
-		Message         struct {
+		Origin          struct {
+			Kind string `json:"kind"`
+		} `json:"origin"`
+		Message struct {
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
@@ -347,7 +369,7 @@ func decodeUser(line []byte) (Event, bool) {
 	}
 	return User{
 		UUID: w.UUID, SessionID: w.SessionID, ParentToolUseID: w.ParentToolUseID,
-		IsReplay: w.IsReplay, Blocks: blocks,
+		IsReplay: w.IsReplay, OriginKind: w.Origin.Kind, Blocks: blocks,
 	}, true
 }
 

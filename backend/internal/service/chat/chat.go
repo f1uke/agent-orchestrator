@@ -111,6 +111,17 @@ func (s *Service) RewindPreview(ctx context.Context, id domain.SessionID, uuid s
 	return p, hostError(id, err)
 }
 
+// SetRemoteControl turns Remote Control on or off for the session. Claude may
+// refuse, for an account or a setup that cannot use it: that is
+// CHAT_REQUEST_REJECTED with its reason.
+func (s *Service) SetRemoteControl(ctx context.Context, id domain.SessionID, enabled bool) error {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hostError(id, c.RemoteControl(ctx, enabled))
+}
+
 func (s *Service) client(ctx context.Context, id domain.SessionID) (sessionhost.Client, error) {
 	rec, ok, err := s.sessions.GetSession(ctx, id)
 	switch {
