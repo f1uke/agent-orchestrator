@@ -173,6 +173,18 @@ describe("ShellTopbar worker session actions", () => {
 		expect(screen.queryByRole("button", { name: "Kill session" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Open orchestrator" })).not.toBeInTheDocument();
 	});
+
+	it("offers the inspector toggle on a chat orchestrator, whose rail holds Document and Tasks", () => {
+		renderTopbar(sessionWith({ kind: "orchestrator", transport: "chat" }));
+
+		expect(screen.getByRole("button", { name: /inspector panel/i })).toBeInTheDocument();
+	});
+
+	it("offers no inspector toggle on a terminal orchestrator, which has no rail", () => {
+		renderTopbar(sessionWith({ kind: "orchestrator" }));
+
+		expect(screen.queryByRole("button", { name: /inspector panel/i })).not.toBeInTheDocument();
+	});
 });
 
 describe("ShellTopbar — the member switcher, and where it has to live", () => {
