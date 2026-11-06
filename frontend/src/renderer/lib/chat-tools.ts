@@ -1,5 +1,6 @@
 import { isObject, type TaskState, unfinished } from "./chat-event";
 import { type CodeView, editView, lineCounts, readView, writeView } from "./chat-code";
+import { quietExitLabel } from "./chat-exit";
 import { type ChatImage, imagesOf } from "./chat-images";
 import { READ_ME, SHOW_WIDGET } from "./chat-widget";
 import type { BackgroundTask, PermissionOutcome, ToolCallItem, ToolResult } from "./chat-fold";
@@ -163,9 +164,18 @@ export function toolRunning(call: ToolCallItem): boolean {
 	return !call.result && call.permission?.status !== "denied" && call.permission?.status !== "cancelled";
 }
 
-/** A tool that did not run to success: its result errored, the user denied it, or its background task failed. */
 export function toolFailed(call: ToolCallItem, task?: BackgroundTask): boolean {
-	return call.result?.isError === true || call.permission?.status === "denied" || task?.state === "error";
+	return (
+		(call.result?.isError === true && quietExit(call) === undefined) ||
+		call.permission?.status === "denied" ||
+		task?.state === "error"
+	);
+}
+
+function quietExit(call: ToolCallItem): string | undefined {
+	if (call.name !== "Bash" || call.result?.isError !== true || !isObject(call.input)) return undefined;
+	if (call.input.run_in_background === true) return undefined;
+	return quietExitLabel(str(call.input.command), resultText(call.result));
 }
 
 /** What a call touches, so that three edits of one file count as one file. */
@@ -400,15 +410,18 @@ export function describeTool(call: ToolCallItem, ctx: ToolContext = {}): ToolVie
 			const command = short(str(input.command));
 			const description = str(input.description);
 			const exit = /^Exit code (\d+)/.exec(output);
-			const failed = call.result?.isError === true;
+			const quiet = quietExit(call);
+			const failed = call.result?.isError === true && quiet === undefined;
 			const status: ToolStatus =
 				input.run_in_background === true
 					? backgroundStatus(call, ctx.task)
 					: !call.result
 						? { tone: "running" }
-						: failed
-							? { tone: "error", text: "Failed" }
-							: { tone: "ok", text: "done" };
+						: quiet
+							? { tone: "idle", text: `${quiet} · exit 1` }
+							: failed
+								? { tone: "error", text: "Failed" }
+								: { tone: "ok", text: "done" };
 			return {
 				...base,
 				title: description || command,
