@@ -1,7 +1,5 @@
 import type { components } from "../../../api/schema";
 
-// Workers and orchestrators share one wire enum. The intersection keeps this type
-// honest if either schema ever grows a value the other lacks.
 export type Transport = components["schemas"]["WorkerTransportSettingsResponse"]["workerTransport"] &
 	components["schemas"]["OrchestratorTransportSettingsResponse"]["orchestratorTransport"];
 

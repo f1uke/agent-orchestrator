@@ -160,14 +160,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// not on the URL's presence.
 	const hasWebUI = workspace?.hasWebUI ?? false;
 	const hasIOSSimulator = workspace?.hasIOSSimulator ?? false;
-	// The rail's tabs come from one place. A worker has the full set, a chat
-	// orchestrator only Document and Tasks, and a terminal orchestrator none, so
-	// it has no rail at all.
 	const inspectorViews = session ? allowedInspectorViews(session, { hasWebUI, hasIOSSimulator }) : [];
 	const hasInspector = inspectorViews.length > 0;
 	const hasBrowserTab = inspectorViews.includes("browser");
-	// An orchestrator works in the project checkout, with no worktree to search,
-	// index or diff, even when its rail is up.
 	const hasWorktree = !isOrchestrator;
 	const previewUrl = session?.previewUrl?.trim() || undefined;
 	const previewRevision = session?.previewRevision;
@@ -565,8 +560,6 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// previewRevision, so a URL change is also treated as a fresh preview.
 	useEffect(() => {
 		if (!sessionLoaded) return;
-		// No Browser tab (no web UI, or an orchestrator) means nothing to reveal:
-		// selecting it would leave the rail on a view that does not exist.
 		if (!hasBrowserTab) return;
 		const revision = previewRevision ?? 0;
 		const url = previewUrl ?? "";
@@ -614,7 +607,6 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// ⌘⇧F opens the rail, selects the Files tab and asks that tab for its Search
 	// mode, because that is where the results live: the rail is already the app's
 	// files surface and a hit opens exactly the way a Browse row does.
-	// An orchestrator has no worktree to search.
 	useProjectSearchShortcut(hasWorktree, () => {
 		setInspectorView("files");
 		if (!useUiStore.getState().isInspectorOpen) toggleInspector();

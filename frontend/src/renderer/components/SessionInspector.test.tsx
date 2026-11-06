@@ -383,10 +383,6 @@ describe("SessionInspector tabs", () => {
 		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Browser"]);
 	});
 
-	// An orchestrator's workspace is the project checkout, not a per-task
-	// worktree, and it has no branch of its own to diff. Its chat can still open
-	// documents and run background tasks, so those two tabs are all it gets,
-	// whatever the project turns on.
 	it("gives a chat orchestrator exactly Document and Tasks, opening on Document", () => {
 		renderWithQuery(<SessionInspector session={chatOrchestrator} />);
 		expect(tabNames()).toEqual(["Document", "Tasks"]);
@@ -422,9 +418,6 @@ describe("SessionInspector tabs", () => {
 		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 	});
 
-	// The remembered/controlled tab can name a view this session no longer shows —
-	// a session whose tab was Browser when the project got switched off. Falling
-	// through would render a tab strip with nothing selected above an empty body.
 	it("falls back to Summary when the active view is not available (Browser on a project with no web UI)", () => {
 		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} view="browser" />);
 
@@ -433,8 +426,6 @@ describe("SessionInspector tabs", () => {
 		expect(screen.getByText("Branch")).toBeInTheDocument();
 	});
 
-	// A tab remembered from a worker, or a Files request from a terminal
-	// reference, must never put Summary, Files or Browser on an orchestrator.
 	it.each(["summary", "reviews", "files", "browser", "simulator", "testiny"] as const)(
 		"falls back to Document when a chat orchestrator is handed the %s view",
 		(view) => {

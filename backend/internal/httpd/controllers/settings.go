@@ -66,7 +66,6 @@ type ResponseLanguageService interface {
 }
 
 // TransportSettingsService is the global transport settings store the controller needs.
-// *transportsettings.Store satisfies this directly.
 type TransportSettingsService interface {
 	Get() transportsettings.Settings
 	SetWorker(domain.Transport) error
@@ -367,8 +366,6 @@ func (c *SettingsController) setOrchestratorTransport(w http.ResponseWriter, r *
 	envelope.WriteJSON(w, http.StatusOK, OrchestratorTransportSettingsResponse{OrchestratorTransport: c.TransportSettings.Get().OrchestratorTransport})
 }
 
-// setTransport decodes body into in, validates the transport read from it and stores it with set.
-// It writes the 400 itself and reports whether the caller should answer.
 func (c *SettingsController) setTransport(w http.ResponseWriter, r *http.Request, in any, read func() domain.Transport, set func(domain.Transport) error) bool {
 	if err := decodeJSON(r, in); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)

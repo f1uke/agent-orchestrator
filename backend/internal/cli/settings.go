@@ -67,8 +67,6 @@ To go back to the agent's own terminal for every project:
 	})
 }
 
-// settingsTransport describes one global transport setting: its label, its help, and how its wire types carry the value.
-// The route is settings/<label>-transport.
 type settingsTransport[R any] struct {
 	label, short, long string
 	request            func(domain.Transport) any

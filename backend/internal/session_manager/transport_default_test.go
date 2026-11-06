@@ -41,7 +41,6 @@ func TestSpawnResolvesTheTransportFromTheSettings(t *testing.T) {
 		terminal = domain.TransportTerminal
 		chat     = domain.TransportChat
 	)
-	// The four settings are one worker and one orchestrator value at the project and at the global level.
 	type settings struct{ projectWorker, projectOrch, globalWorker, globalOrch domain.Transport }
 	for _, tc := range []struct {
 		name         string

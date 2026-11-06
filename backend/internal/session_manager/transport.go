@@ -33,7 +33,6 @@ func ResolveTransport(c TransportChoice) domain.Transport {
 	return domain.DefaultClaudeCodeTransport
 }
 
-// resolveTransport feeds ResolveTransport the project and global setting that belong to the session's kind.
 func (m *Manager) resolveTransport(explicit domain.Transport, harness domain.AgentHarness, kind domain.SessionKind, project domain.ProjectConfig) domain.Transport {
 	choice := TransportChoice{Explicit: explicit, Harness: harness}
 	global := m.workerTransport

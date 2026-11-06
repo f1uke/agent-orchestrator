@@ -323,9 +323,7 @@ type Manager struct {
 	// responseLanguage returns the global default human-facing response language.
 	// Nil (bare Manager/omitting wiring) means English (no directive) — the safe
 	// default that leaves every prompt byte-for-byte unchanged.
-	responseLanguage func() string
-	// workerTransport and orchestratorTransport return the global transport for
-	// new claude-code sessions of that kind; nil names none.
+	responseLanguage      func() string
 	workerTransport       func() domain.Transport
 	orchestratorTransport func() domain.Transport
 	// sessionPaneReaper closes the AUXILIARY panes a session leaves behind when

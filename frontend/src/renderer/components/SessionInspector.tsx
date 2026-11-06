@@ -243,10 +243,6 @@ export function SessionInspector({
 		[openDoc, chatItems],
 	);
 	const views = VIEWS.filter((v) => allowed.includes(v.id));
-	// The requested tab can name a view this session does not show: a remembered
-	// Browser tab in a project that has since switched the web UI off, or a worker's
-	// Summary on an orchestrator. Without this the strip would render with nothing
-	// selected above an empty body.
 	const view = allowed.includes(requestedView) ? requestedView : allowed.at(0);
 
 	if (!session) {
@@ -258,7 +254,6 @@ export function SessionInspector({
 			</aside>
 		);
 	}
-	// A terminal orchestrator has no rail; SessionView does not mount one for it.
 	if (!view) return null;
 
 	return (

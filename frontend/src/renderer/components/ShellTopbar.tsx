@@ -239,12 +239,7 @@ export function ShellTopbar() {
 				) : null}
 				{isSessionRoute && session ? <ChatViewToggle session={session} style={noDragStyle} /> : null}
 				<NotificationCenter style={noDragStyle} />
-				{/* Sessions with a rail keep only the inspector toggle after the bell.
-				    Kill moved to the terminal toolbar (icon-only, beside Restart);
-				    the Orchestrator link is redundant with the sidebar's per-project
-				    Orchestrator button and was removed. A terminal orchestrator has
-				    no rail, so no toggle. */}
-				{session && allowedInspectorViews(session).length > 0 ? (
+								{session && allowedInspectorViews(session).length > 0 ? (
 					<button
 						aria-label={isInspectorOpen ? "Close inspector panel" : "Open inspector panel"}
 						aria-pressed={isInspectorOpen}

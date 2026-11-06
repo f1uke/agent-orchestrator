@@ -40,11 +40,10 @@ type Config struct {
 	// user's next message after each turn.
 	NoPromptSuggestions bool
 
-	stdinGrace     time.Duration
-	killGrace      time.Duration
-	controlTimeout time.Duration
-	contextTimeout time.Duration
-	// predecessorWait bounds how long listen waits for a host that still holds the socket.
+	stdinGrace      time.Duration
+	killGrace       time.Duration
+	controlTimeout  time.Duration
+	contextTimeout  time.Duration
 	predecessorWait time.Duration
 }
 
@@ -53,8 +52,7 @@ const (
 	defaultKillGrace      = 2 * time.Second
 	defaultControlTimeout = requestTimeout / 2
 	// Claude may not know get_context_usage, so a missing answer is dropped, not retried.
-	defaultContextTimeout = 5 * time.Second
-	// A restarted session starts its new host while the old one is still stopping claude.
+	defaultContextTimeout  = 5 * time.Second
 	defaultPredecessorWait = 10 * time.Second
 	predecessorPoll        = 50 * time.Millisecond
 	contextRequestPrefix   = "ctx-"
@@ -98,7 +96,7 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Close unlinks the socket. A later Remove could delete the one a successor host just made.
+	// UnixListener.Close unlinks the socket; a later Remove could delete a successor host's socket.
 	defer func() { _ = ln.Close() }()
 
 	lg, folder, err := openLog(cfg.LogPath)
@@ -181,8 +179,6 @@ func hasUserInput(t chatproto.Transcript) bool {
 	return false
 }
 
-// listen takes over socketPath. A host that answers on it gets up to wait to
-// shut down before listen reports it as still running.
 func listen(ctx context.Context, socketPath string, wait time.Duration) (net.Listener, error) {
 	d := net.Dialer{Timeout: time.Second}
 	deadline := time.Now().Add(wait)
