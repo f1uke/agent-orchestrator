@@ -340,6 +340,7 @@ export function ChatComposer({
 					<div
 						className="chat-composer"
 						data-disabled={disabled || undefined}
+						data-mode={bash ? "bash" : undefined}
 						onDragOver={(e) => {
 							if (e.dataTransfer.types.includes("Files")) e.preventDefault();
 						}}

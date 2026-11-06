@@ -21,33 +21,35 @@ export const bashOutput = (id: string, stream: "stdout" | "stderr", text: string
 	{ kind: "bash_output", id, stream, text },
 ];
 
+const lifecycle = (id: string, state: string): BashStep => [
+	"out",
+	{ type: "command_lifecycle", command_uuid: id, state },
+];
+
 /** What the host logs once a run ends: the end note, the injected user message, and claude's empty result. */
 export function bashFinish(
 	id: string,
 	command: string,
 	{ stdout, stderr, code, stopped = false }: { stdout: string; stderr: string; code: number; stopped?: boolean },
 ): BashStep[] {
-	return [
-		["host", { kind: "bash_end", id, code: stopped ? null : code, signal: null, stopped, truncated: false }],
-		[
-			"in",
+	const message = {
+		role: "user",
+		content: [
+			{ type: "text", text: `<bash-input>${escapeXml(command)}</bash-input>` },
 			{
-				type: "user",
-				uuid: id,
-				shouldQuery: false,
-				message: {
-					role: "user",
-					content: [
-						{ type: "text", text: `<bash-input>${escapeXml(command)}</bash-input>` },
-						{
-							type: "text",
-							text: `<bash-stdout>${escapeXml(stdout)}</bash-stdout><bash-stderr>${escapeXml(stderr)}</bash-stderr><bash-exit-code>${stopped ? 130 : code}</bash-exit-code>`,
-						},
-					],
-				},
+				type: "text",
+				text: `<bash-stdout>${escapeXml(stdout)}</bash-stdout><bash-stderr>${escapeXml(stderr)}</bash-stderr><bash-exit-code>${stopped ? 130 : code}</bash-exit-code>`,
 			},
 		],
+	};
+	return [
+		["host", { kind: "bash_end", id, code: stopped ? null : code, signal: null, stopped, truncated: false }],
+		["in", { type: "user", uuid: id, shouldQuery: false, message }],
+		lifecycle(id, "queued"),
+		lifecycle(id, "started"),
+		["out", { type: "user", uuid: id, isReplay: true, origin: { kind: "human" }, session_id: SESSION, message }],
 		["out", { type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, session_id: SESSION }],
+		lifecycle(id, "completed"),
 	];
 }
 
