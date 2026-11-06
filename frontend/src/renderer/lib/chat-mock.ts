@@ -4,12 +4,14 @@ import { type ChatEntry, type Direction, isObject, unfinished } from "./chat-eve
 import { CHROME_FLAG, ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
+import { foldAnswerEntries, MOCK_FOLD_CHAT_SESSION } from "./chat-mock-fold";
 import { markdownDeltas, markdownEntries, MOCK_MARKDOWN_CHAT_SESSION } from "./chat-mock-markdown";
 import { chromeEntries, MOCK_CHROME_CHAT_SESSION } from "./chat-mock-chrome";
 import { MOCK_NEXT_CHAT_SESSION, nextEntries } from "./chat-mock-next";
 import { MOCK_SUGGEST_CHAT_SESSION, suggestEntries } from "./chat-mock-suggest";
 import { docsEntries, MOCK_DOCS_CHAT_SESSION } from "./chat-mock-docs";
 import { errorEntries, MOCK_ERRORS_CHAT_SESSION } from "./chat-mock-errors";
+import { exitsEntries, MOCK_EXITS_CHAT_SESSION } from "./chat-mock-exits";
 import { MOCK_REFS_CHAT_SESSION, refsEntries } from "./chat-mock-refs";
 import { MOCK_TASKS_CHAT_SESSION, TASKS_SOAK_TASK, tasksEntries } from "./chat-mock-tasks";
 import { MOCK_WIDGETS_CHAT_SESSION, widgetEntries } from "./chat-mock-widgets";
@@ -914,9 +916,13 @@ function stubSession(id: string): Promise<StubSession> {
 																		? nextEntries()
 																		: id === MOCK_CHROME_CHAT_SESSION
 																			? chromeEntries()
-																			: long
-																				? fixture
-																				: mockChatEntries(fixture);
+																			: id === MOCK_EXITS_CHAT_SESSION
+																				? exitsEntries()
+																				: id === MOCK_FOLD_CHAT_SESSION
+																					? foldAnswerEntries()
+																					: long
+																						? fixture
+																						: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };

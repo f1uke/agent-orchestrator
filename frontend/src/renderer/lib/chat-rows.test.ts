@@ -415,6 +415,106 @@ describe("chatRows widgets", () => {
 	});
 });
 
+describe("chatRows turn fold around a question the human answered", () => {
+	const answer = [
+		"Two options fit.",
+		"",
+		"| Option | Cost | Risk |",
+		"| --- | --- | --- |",
+		"| Alpha | low | high |",
+		"| Beta | high | low |",
+		"",
+		"- Alpha ships first.",
+		"- Beta holds up longer.",
+		"",
+		"I recommend Beta. Which one should I build?",
+	].join("\n");
+	const ended = (durationMs: number): ChatItem => ({
+		...(turnEnd() as Extract<ChatItem, { kind: "turn_end" }>),
+		durationMs,
+	});
+	const textOf = (row: ChatRow) => (row.kind === "item" && row.item.kind === "assistant_text" ? row.item.text : "");
+	const nameOf = (row: ChatRow) => (row.kind === "item" && row.item.kind === "tool_call" ? row.item.name : "");
+
+	it("keeps the answer written before the question, and the answered card, in view", () => {
+		const rows = rowsOf([
+			user(),
+			say("looking"),
+			tool("Read"),
+			tool("Grep"),
+			say(answer),
+			tool("AskUserQuestion", { questions: [] }),
+			say("Building Beta."),
+			ended(131_000),
+		]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "tool_call", "assistant_text", "turn_end"]);
+		expect(textOf(rows[2])).toBe(answer);
+		expect(nameOf(rows[3])).toBe("AskUserQuestion");
+		expect(textOf(rows[4])).toBe("Building Beta.");
+		const turn = rows[1];
+		expect(turn.kind === "turn" && shape(turn.rows)).toEqual(["assistant_text", "group"]);
+		expect(turn.kind === "turn" && textOf(turn.rows[0])).toBe("looking");
+	});
+
+	it("folds the work after the answer on its own, and shows the duration once at the turn end", () => {
+		const rows = rowsOf([
+			user(),
+			tool("Read"),
+			tool("Grep"),
+			say(answer),
+			tool("AskUserQuestion", { questions: [] }),
+			say("starting"),
+			tool("Edit"),
+			tool("Bash"),
+			say("Built Beta."),
+			ended(131_000),
+		]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "tool_call", "turn", "assistant_text", "turn_end"]);
+		const turns = rows.filter((r) => r.kind === "turn");
+		expect(turns.map((t) => t.kind === "turn" && t.durationMs)).toEqual([undefined, undefined]);
+		expect(turns.map((t) => t.key)).toEqual([...new Set(turns.map((t) => t.key))]);
+		const end = rows.at(-1);
+		expect(end?.kind === "item" && end.durationShownAbove).toBeFalsy();
+	});
+
+	it("keeps the plan text before an approved plan in view", () => {
+		const rows = rowsOf([user(), tool("Read"), tool("Grep"), say(answer), tool("ExitPlanMode"), say("ok"), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "tool_call", "assistant_text", "turn_end"]);
+	});
+
+	it("still folds the narration before an approved permission prompt", () => {
+		const approved: ToolCallItem = {
+			...tool("Bash"),
+			permission: { requestId: "r1", status: "allowed", message: "", updatedPermissions: [] },
+		};
+		const rows = rowsOf([user(), tool("Read"), say("running the tests"), approved, say("Tests pass."), turnEnd()]);
+		expect(shape(rows)).toEqual(["user", "turn", "assistant_text", "turn_end"]);
+	});
+
+	it("loses no row: the folds and the rows in view hold every row of the turn", () => {
+		const rows = rowsOf([
+			user(),
+			say("looking"),
+			tool("Read"),
+			tool("Grep"),
+			say(answer),
+			tool("AskUserQuestion", { questions: [] }),
+			say("starting"),
+			tool("Edit"),
+			tool("Bash"),
+			say("Built Beta."),
+			turnEnd(),
+		]);
+		const flat = (r: ChatRow): ChatRow[] =>
+			r.kind === "turn"
+				? r.rows.flatMap(flat)
+				: r.kind === "group"
+					? r.members.map((m) => ({ ...r, key: m.key }))
+					: [r];
+		expect(rows.flatMap(flat).map((r) => r.key)).toEqual(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+	});
+});
+
 describe("chatRows chapters and wrap-up", () => {
 	const chapter = (title: string, result: "ok" | "error" | "none" = "ok") =>
 		tool("mcp__ao__mark_chapter", { title }, result);
