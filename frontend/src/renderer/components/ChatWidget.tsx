@@ -141,7 +141,7 @@ export function ChatWidget({
 					html={html}
 					onPrompt={prompt}
 					onSize={sizeTo}
-					style={{ height, visibility: ready ? "visible" : "hidden" }}
+					style={{ height }}
 					theme={theme}
 					title={spec.title || "Visual"}
 				/>
