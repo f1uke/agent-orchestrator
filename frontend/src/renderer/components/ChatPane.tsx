@@ -44,6 +44,7 @@ import {
 	skillSuggestionOf,
 } from "../lib/chat-suggest";
 import { latestWrapUpId, wrapUpOf } from "../lib/chat-wrapup";
+import { ChatBashRow, StopBashProvider } from "./ChatBashRow";
 import { ChatChapters } from "./ChatChapters";
 import { RemoteControlChip } from "./ChatRemoteControl";
 import { ChatTrajectory } from "./ChatTrajectory";
@@ -185,6 +186,16 @@ export function ChatPane({
 		[sendAnswer, setMode, showToast],
 	);
 
+	const { stopBash } = actions;
+	const onStopBash = useCallback(
+		(id: string) => {
+			void stopBash(id).then((result) => {
+				if (!result.ok && result.error.kind !== "host_not_running") showToast(result.error.message);
+			});
+		},
+		[stopBash, showToast],
+	);
+
 	const onPrompt = useCallback((text: string) => setPrefill((prev) => ({ text, seq: (prev?.seq ?? 0) + 1 })), []);
 
 	const rewindReady = !transcript.busy && !actions.hostDown && transcript.pending.length === 0;
@@ -214,95 +225,98 @@ export function ChatPane({
 		<ChatRefsProvider sessionId={session.id}>
 			<TaskOutputProvider read={actions.taskOutput}>
 				<ChatRewindProvider value={rewind}>
-					<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
-						<ChatTasksProvider onOpen={onOpenTasks}>
-							<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
-							<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
-								{view === "trajectory" ? (
-									<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
-								) : (
-									<ChatStream
-										disabled={actions.hostDown}
-										replaying={chat.replaying}
-										onAnswer={onAnswer}
-										onNewSession={setSuggested}
-										onPrompt={onPrompt}
-										pending={transcript.pending}
-										requests={requests}
-										root={root}
-										rows={rows}
-										theme={theme}
-									/>
-								)}
-								<div className="chat-bottom">
-									{actions.hostDown ? (
-										<div className="chat-banner" role="alert">
-											<CloudOff className="chat-icon" aria-hidden="true" />
-											Session is asleep or restarting. Sending and answering resume once it is back.
+					<StopBashProvider stop={onStopBash}>
+						<ChatDocsProvider onOpen={onOpenDoc} openDoc={openDoc}>
+							<ChatTasksProvider onOpen={onOpenTasks}>
+								<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
+								<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
+									{view === "trajectory" ? (
+										<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
+									) : (
+										<ChatStream
+											disabled={actions.hostDown}
+											replaying={chat.replaying}
+											onAnswer={onAnswer}
+											onNewSession={setSuggested}
+											onPrompt={onPrompt}
+											pending={transcript.pending}
+											requests={requests}
+											root={root}
+											rows={rows}
+											theme={theme}
+										/>
+									)}
+									<div className="chat-bottom">
+										{actions.hostDown ? (
+											<div className="chat-banner" role="alert">
+												<CloudOff className="chat-icon" aria-hidden="true" />
+												Session is asleep or restarting. Sending and answering resume once it is back.
+											</div>
+										) : null}
+										{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
+										{view === "chat" ? (
+											<ChatComposer
+												actions={actions}
+												bashBusy={transcript.bashBusy}
+												busy={transcript.busy}
+												chrome={transcript.chrome}
+												commands={transcript.commands}
+												model={transcript.model}
+												models={transcript.models}
+												remoteControl={transcript.remoteControl}
+												suggestion={transcript.suggestion}
+												onToast={showToast}
+												permissionMode={transcript.permissionMode}
+												prefill={prefill}
+												queued={queued}
+												sessionId={session.id}
+											/>
+										) : null}
+										<div className="chat-statusline">
+											<ConnectionLabel connection={chat.connection} error={chat.error} />
+											<RemoteControlChip remote={transcript.remoteControl} />
+											{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
+											{runningInBackground > 0 ? (
+												onOpenTasks ? (
+													<button className="chat-statusline__tasks" onClick={() => onOpenTasks(null)} type="button">
+														<span className="chat-statusline__dot chat-statusline__dot--live" />
+														{runningInBackground} running in background
+													</button>
+												) : (
+													<span>
+														<span className="chat-statusline__dot chat-statusline__dot--live" />
+														{runningInBackground} running in background
+													</span>
+												)
+											) : null}
+											<span className="chat-statusline__grow" />
+											{view === "chat" ? (
+												<>
+													<span className="chat-statusline__hint">
+														Enter sends · Shift+Enter newline · Esc interrupts
+													</span>
+													<UsageMeter usage={usage} />
+													<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
+												</>
+											) : null}
 										</div>
-									) : null}
-									{view === "chat" ? <ChatTodoBar todos={todos} /> : null}
-									{view === "chat" ? (
-										<ChatComposer
-											actions={actions}
-											busy={transcript.busy}
-											chrome={transcript.chrome}
-											commands={transcript.commands}
-											model={transcript.model}
-											models={transcript.models}
-											remoteControl={transcript.remoteControl}
-											suggestion={transcript.suggestion}
-											onToast={showToast}
-											permissionMode={transcript.permissionMode}
-											prefill={prefill}
-											queued={queued}
-											sessionId={session.id}
+									</div>
+									{suggested ? (
+										<SuggestedSessionDialog
+											onClose={() => setSuggested(undefined)}
+											projectId={session.workspaceId}
+											suggestion={suggested}
 										/>
 									) : null}
-									<div className="chat-statusline">
-										<ConnectionLabel connection={chat.connection} error={chat.error} />
-										<RemoteControlChip remote={transcript.remoteControl} />
-										{transcript.costUsd > 0 ? <span>{formatCost(transcript.costUsd)} this session</span> : null}
-										{runningInBackground > 0 ? (
-											onOpenTasks ? (
-												<button className="chat-statusline__tasks" onClick={() => onOpenTasks(null)} type="button">
-													<span className="chat-statusline__dot chat-statusline__dot--live" />
-													{runningInBackground} running in background
-												</button>
-											) : (
-												<span>
-													<span className="chat-statusline__dot chat-statusline__dot--live" />
-													{runningInBackground} running in background
-												</span>
-											)
-										) : null}
-										<span className="chat-statusline__grow" />
-										{view === "chat" ? (
-											<>
-												<span className="chat-statusline__hint">
-													Enter sends · Shift+Enter newline · Esc interrupts
-												</span>
-												<UsageMeter usage={usage} />
-												<ContextMeter breakdown={transcript.contextBreakdown} fallback={fallbackContext} />
-											</>
-										) : null}
-									</div>
+									{toast ? (
+										<div className="chat-toast" role="status">
+											{toast}
+										</div>
+									) : null}
 								</div>
-								{suggested ? (
-									<SuggestedSessionDialog
-										onClose={() => setSuggested(undefined)}
-										projectId={session.workspaceId}
-										suggestion={suggested}
-									/>
-								) : null}
-								{toast ? (
-									<div className="chat-toast" role="status">
-										{toast}
-									</div>
-								) : null}
-							</div>
-						</ChatTasksProvider>
-					</ChatDocsProvider>
+							</ChatTasksProvider>
+						</ChatDocsProvider>
+					</StopBashProvider>
 				</ChatRewindProvider>
 			</TaskOutputProvider>
 		</ChatRefsProvider>
@@ -898,6 +912,8 @@ function ItemRow({
 			);
 		case "notice":
 			return <NoticeRow notice={item} />;
+		case "bash":
+			return <ChatBashRow item={item} />;
 	}
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AnswerBody, PermissionMode } from "../lib/chat-answers";
 import {
+	type BashResult,
 	type ChatApi,
 	type ChatImage,
 	type ChatResult,
@@ -20,6 +21,8 @@ export type ChatActions = {
 	setModel: (model: string) => Promise<ChatResult>;
 	setRemoteControl: (enabled: boolean) => Promise<ChatResult>;
 	setChrome: (enabled: boolean) => Promise<ChatResult>;
+	runBash: (command: string) => Promise<BashResult>;
+	stopBash: (id: string) => Promise<ChatResult>;
 	upload: (file: File) => Promise<UploadResult>;
 	stopTask: (taskId: string) => Promise<ChatResult>;
 	taskOutput: (taskId: string) => Promise<TaskOutput | null>;
@@ -52,6 +55,12 @@ export function useChatActions(sessionId: string, connection: ChatConnection, ap
 			setModel: (model) => run(api.setModel(sessionId, model)),
 			setRemoteControl: (enabled) => run(api.setRemoteControl(sessionId, enabled)),
 			setChrome: (enabled) => run(api.setChrome(sessionId, enabled)),
+			runBash: async (command) => {
+				const result = await api.runBash(sessionId, command);
+				if (!result.ok && result.error.kind === "host_not_running") setHostDown(true);
+				return result;
+			},
+			stopBash: (id) => run(api.stopBash(sessionId, id)),
 			upload: (file) => api.upload(sessionId, file),
 			stopTask: (taskId) => api.stopTask(sessionId, taskId),
 			taskOutput: (taskId) => api.taskOutput(sessionId, taskId),

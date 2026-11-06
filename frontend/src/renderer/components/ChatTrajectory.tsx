@@ -41,6 +41,7 @@ const KIND_LABEL: Record<RowKind, string> = {
 	thinking: "THINKING",
 	tool: "TOOL",
 	task: "TASK",
+	bash: "BASH",
 	turn_end: "TURN END",
 	notice: "NOTICE",
 };

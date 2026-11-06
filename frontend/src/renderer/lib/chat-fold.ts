@@ -3,6 +3,7 @@ import {
 	type CanUseTool,
 	type ChatEntry,
 	type ChatEvent,
+	type BashStream,
 	type CommandState,
 	type CompactTokens,
 	type HostNote,
@@ -96,8 +97,30 @@ export type NoticeItem = {
 	tokens?: CompactTokens;
 };
 
+export type BashChunk = { stream: BashStream; text: string };
+
+/** running until the host notes the end, then done, or stopped when the person or a dying host ended it. */
+export type BashState = "running" | "done" | "stopped";
+
+/** A "!" command the session host ran for the person, with the output it has produced so far. */
+export type BashItem = {
+	kind: "bash";
+	id: string;
+	command: string;
+	cwd: string;
+	chunks: BashChunk[];
+	state: BashState;
+	/** Absent while running, after a signal, and when the process never reported one. */
+	code: number | null;
+	signal: string | null;
+	/** The host stopped logging output at its cap. */
+	truncated: boolean;
+	ts: string;
+};
+
 export type ChatItem =
 	| UserItem
+	| BashItem
 	| { kind: "assistant_text"; messageId: string; text: string; parentToolUseId: string }
 	| { kind: "thinking"; text: string; parentToolUseId: string }
 	| ToolCallItem
@@ -198,12 +221,17 @@ export type Transcript = {
 	remoteControl: RemoteControl;
 	/** Claude's guess at the next user message. Empty once input, a turn start, an interrupt or a process change follows it. */
 	suggestion: string;
+	/** A "!" command is running, or its result has not yet been taken in by claude. */
+	bashBusy: boolean;
 	lastSeq: number;
 };
 
 // The user message claude emits after an interrupt ("[Request interrupted by
 // user]", or "... for tool use]").
 const INTERRUPT_MARKER = "[Request interrupted by user";
+
+// A run is injected once its result went to claude as a user message, and settled once claude's empty result for it came back.
+type BashPhase = "running" | "ended" | "injected" | "settled";
 
 type Permission = { toolUseId?: string; out: PermissionOutcome };
 
@@ -300,6 +328,7 @@ export class ChatFolder {
 	private usage: SubscriptionUsage | undefined;
 	private awaitingBrief = false;
 	private suggestion = "";
+	private bashRuns = new Map<string, { at: number; phase: BashPhase }>();
 
 	get lastSeq(): number {
 		return this.last;
@@ -368,6 +397,7 @@ export class ChatFolder {
 			usage: this.usage,
 			remoteControl: { ...this.remote },
 			suggestion: this.suggestion,
+			bashBusy: [...this.bashRuns.values()].some((run) => run.phase !== "settled"),
 			lastSeq: this.last,
 		};
 	}
@@ -401,6 +431,7 @@ export class ChatFolder {
 				} else this.applyToolResults(event.blocks, event.structuredPatch);
 				break;
 			case "result":
+				if (this.settleBash()) break;
 				this.thinkingSince = undefined;
 				this.cost = event.totalCostUsd;
 				if (event.contextTokens !== undefined) this.context = event.contextTokens;
@@ -438,7 +469,7 @@ export class ChatFolder {
 				this.settle(event.requestId, "cancelled", "", []);
 				break;
 			case "command_lifecycle":
-				this.setCommand(event.commandUuid, event.state);
+				if (!this.bashRuns.has(event.commandUuid)) this.setCommand(event.commandUuid, event.state);
 				break;
 			case "rate_limit":
 				this.usage = parseRateLimit(event.info, this.ts) ?? this.usage;
@@ -456,6 +487,7 @@ export class ChatFolder {
 
 	private applyIn(event: ChatEvent): void {
 		if (event.type === "user") {
+			if (!event.shouldQuery && this.injectBash(event.uuid)) return;
 			this.thinkingSince = undefined;
 			this.suggestion = "";
 			this.addUserInput(event.uuid, event.blocks, undefined);
@@ -534,6 +566,7 @@ export class ChatFolder {
 		}
 		this.suggestion = "";
 		this.context = undefined;
+		for (const [id, run] of this.bashRuns) if (run.at >= at) this.bashRuns.delete(id);
 		this.notice("rewound", "");
 	}
 
@@ -598,6 +631,7 @@ export class ChatFolder {
 	 */
 	private addRemoteInput(event: Extract<ChatEvent, { type: "user" }>): void {
 		if (event.uuid === "" || event.parentToolUseId !== "" || event.originKind !== "human") return;
+		if (this.bashRuns.has(event.uuid)) return;
 		if (!event.blocks.some((b) => b.type === "text" || b.type === "image")) return;
 		this.suggestion = "";
 		this.addUserInput(event.uuid, event.blocks, { via: REMOTE_CONTROL_VIA, from: "" });
@@ -689,12 +723,86 @@ export class ChatFolder {
 				this.endProcess();
 				this.notice("exit", note.code === null ? "terminated by signal" : `exit code ${note.code}`);
 				break;
+			case "bash_start":
+				this.startBash(note);
+				break;
+			case "bash_output":
+				this.outputBash(note);
+				break;
+			case "bash_end":
+				this.endBash(note);
+				break;
 			case "user_origin":
 				if (!note.origin || note.uuid === "") return;
 				this.origins.set(note.uuid, note.origin);
 				this.updateUser(note.uuid, { origin: note.origin });
 				break;
 		}
+	}
+
+	private startBash(note: Extract<HostNote, { kind: "bash_start" }>): void {
+		if (note.id === "" || this.bashRuns.has(note.id)) return;
+		this.bashRuns.set(note.id, { at: this.items.length, phase: "running" });
+		this.push({
+			kind: "bash",
+			id: note.id,
+			command: note.command,
+			cwd: note.cwd,
+			chunks: [],
+			state: "running",
+			code: null,
+			signal: null,
+			truncated: false,
+			ts: this.ts,
+		});
+	}
+
+	private updateBash(id: string, patch: (item: BashItem) => Partial<BashItem>): void {
+		const run = this.bashRuns.get(id);
+		if (run === undefined) return;
+		const item = this.items[run.at] as BashItem;
+		this.items[run.at] = { ...item, ...patch(item) };
+	}
+
+	private outputBash(note: Extract<HostNote, { kind: "bash_output" }>): void {
+		if (note.text === "") return;
+		this.updateBash(note.id, ({ chunks }) => {
+			const last = chunks.at(-1);
+			if (last?.stream === note.stream) {
+				return { chunks: [...chunks.slice(0, -1), { stream: note.stream, text: last.text + note.text }] };
+			}
+			return { chunks: [...chunks, { stream: note.stream, text: note.text }] };
+		});
+	}
+
+	private endBash(note: Extract<HostNote, { kind: "bash_end" }>): void {
+		const run = this.bashRuns.get(note.id);
+		if (run?.phase !== "running") return;
+		run.phase = "ended";
+		this.updateBash(note.id, () => ({
+			state: note.stopped ? "stopped" : "done",
+			code: note.code,
+			signal: note.signal,
+			truncated: note.truncated,
+		}));
+	}
+
+	/** The host sends a finished run to claude as a user message that claude stores and does not answer. */
+	private injectBash(uuid: string): boolean {
+		const run = this.bashRuns.get(uuid);
+		if (run === undefined) return false;
+		if (run.phase === "ended") run.phase = "injected";
+		return true;
+	}
+
+	/** Claude answers that message with an empty result and no turn, so it is no turn end. */
+	private settleBash(): boolean {
+		for (const run of this.bashRuns.values()) {
+			if (run.phase !== "injected") continue;
+			run.phase = "settled";
+			return true;
+		}
+		return false;
 	}
 
 	private notice(notice: NoticeKind, text: string, tokens?: CompactTokens): void {
@@ -718,6 +826,10 @@ export class ChatFolder {
 	}
 
 	private endProcess(): void {
+		for (const [id, run] of this.bashRuns) {
+			if (run.phase === "running") this.updateBash(id, () => ({ state: "stopped" }));
+			run.phase = "settled";
+		}
 		this.suggestion = "";
 		this.remote = REMOTE_CONTROL_OFF;
 		this.thinkingSince = undefined;

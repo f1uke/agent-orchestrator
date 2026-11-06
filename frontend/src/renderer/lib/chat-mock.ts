@@ -5,6 +5,7 @@ import { CHROME_FLAG, ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
 import { markdownDeltas, markdownEntries, MOCK_MARKDOWN_CHAT_SESSION } from "./chat-mock-markdown";
+import { bashEntries, bashFinish, bashOutput, bashStart, MOCK_BASH_CHAT_SESSION } from "./chat-mock-bash";
 import { chromeEntries, MOCK_CHROME_CHAT_SESSION } from "./chat-mock-chrome";
 import { MOCK_NEXT_CHAT_SESSION, nextEntries } from "./chat-mock-next";
 import { MOCK_SUGGEST_CHAT_SESSION, suggestEntries } from "./chat-mock-suggest";
@@ -914,9 +915,11 @@ function stubSession(id: string): Promise<StubSession> {
 																		? nextEntries()
 																		: id === MOCK_CHROME_CHAT_SESSION
 																			? chromeEntries()
-																			: long
-																				? fixture
-																				: mockChatEntries(fixture);
+																			: id === MOCK_BASH_CHAT_SESSION
+																				? bashEntries()
+																				: long
+																					? fixture
+																					: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -936,6 +939,8 @@ function append(id: string, session: StubSession, steps: Step[]): void {
 }
 
 const OK: ChatResult = { ok: true };
+
+const STUB_BASH_MS = 400;
 
 export const stubChatApi: ChatApi = {
 	send: async (id, text, images) => {
@@ -1104,6 +1109,32 @@ export const stubChatApi: ChatApi = {
 		}
 		const argv = enabled ? ["claude", CHROME_FLAG] : ["claude"];
 		append(id, session, [["host", { kind: "spawn", argv, resume: SESSION, pid: session.folder.lastSeq + 2 }]]);
+		return OK;
+	},
+	runBash: async (id, command) => {
+		const session = await stubSession(id);
+		const { busy, bashBusy } = session.folder.transcript();
+		if (busy) return { ok: false, error: { kind: "rejected", message: "claude is busy: wait for the turn to end" } };
+		if (bashBusy) {
+			return { ok: false, error: { kind: "rejected", message: "another command is still running" } };
+		}
+		const runId = `stub-bash-${++session.sent}`;
+		const stdout = `ran: ${command}\n`;
+		append(id, session, [bashStart(runId, command), bashOutput(runId, "stdout", stdout)]);
+		// A command that sleeps stays running until it is stopped, so a preview can show the Stop button.
+		if (!/\bsleep\b/.test(command)) {
+			setTimeout(() => {
+				append(id, session, bashFinish(runId, command, { stdout, stderr: "", code: 0 }));
+			}, STUB_BASH_MS);
+		}
+		return { ok: true, id: runId };
+	},
+	stopBash: async (id, runId) => {
+		const session = await stubSession(id);
+		const run = session.folder.transcript().items.find((i) => i.kind === "bash" && i.id === runId);
+		if (run?.kind !== "bash" || run.state !== "running") return OK;
+		const stdout = run.chunks.map((c) => c.text).join("");
+		append(id, session, bashFinish(runId, run.command, { stdout, stderr: "[stopped]\n", code: 130, stopped: true }));
 		return OK;
 	},
 	upload: async (_id, file) => ({
