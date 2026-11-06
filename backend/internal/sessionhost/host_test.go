@@ -536,11 +536,53 @@ func TestSingleHost(t *testing.T) {
 		startHost(t, cfg)
 		second := cfg
 		second.LogPath = filepath.Join(dir, "other.jsonl")
+		second.predecessorWait = 200 * time.Millisecond
+		started := time.Now()
 		_, err := Run(context.Background(), second, &syncBuffer{})
 		if err == nil || !strings.Contains(err.Error(), "session host already running") {
 			t.Fatalf("second Run err = %v, want already running", err)
 		}
+		if took := time.Since(started); took < second.predecessorWait {
+			t.Errorf("second Run gave up after %v, want it to wait %v for the first host", took, second.predecessorWait)
+		}
 		state(t, cfg.SocketPath)
+	})
+
+	t.Run("a host waits for the one it replaces to shut down", func(t *testing.T) {
+		dir := shortDir(t)
+		cfg, _ := fakeConfig(t, dir, waitingFixture(t, dir))
+		old := startHost(t, cfg)
+		next := cfg
+		next.LogPath = filepath.Join(dir, "next", "events.jsonl")
+		successor := make(chan runResult, 1)
+		successorCtx, stop := context.WithCancel(context.Background())
+		t.Cleanup(stop)
+		go func() {
+			code, err := Run(successorCtx, next, &syncBuffer{})
+			successor <- runResult{code, err}
+		}()
+		time.Sleep(300 * time.Millisecond)
+		old.cancel()
+		old.wait(t)
+		eventually(t, "the successor to answer on the socket", func() bool {
+			select {
+			case res := <-successor:
+				t.Fatalf("successor returned: code %d, err %v", res.code, res.err)
+			default:
+			}
+			c, err := net.Dial("unix", cfg.SocketPath)
+			if err == nil {
+				_ = c.Close()
+			}
+			return err == nil
+		})
+		time.Sleep(200 * time.Millisecond)
+		state(t, cfg.SocketPath)
+		stop()
+		if res := <-successor; res.err != nil {
+			t.Fatal(res.err)
+		}
+		socketGone(t, cfg.SocketPath)
 	})
 
 	t.Run("a stale socket file is replaced", func(t *testing.T) {
