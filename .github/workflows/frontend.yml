@@ -165,9 +165,35 @@ jobs:
   # dev server's fixed port and test-results/ are never shared between them.
   # Workers per shard stay at Playwright's CI default: raising them made chat
   # specs fail under parallel load.
+  #
+  # Shards run inside Microsoft's Playwright image, which already holds Chromium
+  # and its system libraries and fonts. `playwright install --with-deps` fetches
+  # those from the Ubuntu apt mirror on every run, and that mirror sometimes takes
+  # 9 minutes to serve the fonts; with four shards a slow mirror hit one shard in
+  # two of the first three runs. The image tag follows the playwright version
+  # pinned in package-lock.json, so a Playwright bump moves the image with it.
+  playwright-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: frontend/package-lock.json
+          sparse-checkout-cone-mode: false
+
+      - id: read
+        run: echo "version=$(jq -r '.packages["node_modules/playwright"].version' frontend/package-lock.json)" >> "$GITHUB_OUTPUT"
+
   e2e:
     name: e2e (shard ${{ matrix.shard }}/4)
+    needs: playwright-version
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright-version.outputs.version }}-noble
+      # The runner's own uid, so checkout and setup-node can write the
+      # workspace and tool cache the runner mounts in.
+      options: --user 1001
     strategy:
       fail-fast: false
       matrix:
@@ -185,9 +211,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - run: npm ci
-
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
 
       # With every test traced, three Monaco specs hit their 30 s timeout, so only
       # a failing test is traced: it is retried once with a trace on, and
