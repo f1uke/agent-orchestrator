@@ -64,6 +64,18 @@ describe("ToolCard", () => {
 		expect(within(body).getByText(/--- FAIL: TestX/)).toHaveClass("chat-term__line--fail");
 	});
 
+	it("shows grep with no match as a grey answer, with a grey exit line and untinted output", () => {
+		const grep = call("Bash", { command: "grep -c needle notes.txt" }, { isError: true, content: "Exit code 1\n0" });
+		const closed = card(grep).head;
+		const status = within(closed).getByText("no match · exit 1");
+		expect(status).not.toHaveClass("chat-tool__status--error");
+		expect(within(closed).queryByText("Failed")).toBeNull();
+		cleanup();
+		card(grep, { open: true });
+		const body = document.querySelector(".chat-tool__body")! as HTMLElement;
+		expect(within(body).getByText("Exit code 1")).toHaveClass("chat-tool__exit--quiet");
+	});
+
 	it("titles a Bash call without a description by its command, and shows no exit line when it passed", () => {
 		card(call("Bash", { command: "ls -la" }, { isError: false, content: "a\nb" }), { open: true });
 		expect(document.querySelector(".chat-tool__head")).toHaveTextContent("ls -la");

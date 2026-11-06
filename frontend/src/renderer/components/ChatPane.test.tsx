@@ -813,6 +813,23 @@ describe("ChatPane calm view", () => {
 		expect(shown[0]).toHaveAttribute("data-tool", "Bash");
 	});
 
+	it("keeps an expected non-zero exit inside a closed group and out of the failed count", () => {
+		const { feed } = renderPane();
+		feed(
+			userIn("u1", "look"),
+			toolUse("a", "Bash", { command: "git grep -c needle" }),
+			toolDone("a", "Exit code 1", true),
+			toolUse("b", "Bash", { command: "diff a.txt b.txt" }),
+			toolDone("b", "Exit code 1\n1c1", true),
+			toolUse("c", "Bash", { command: "go test" }),
+			toolDone("c", "Exit code 1\nFAIL", true),
+		);
+		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(/^Ran 3 commands \(1 failed\)$/);
+		const shown = document.querySelectorAll("[data-tool]");
+		expect(shown).toHaveLength(1);
+		expect(shown[0]).toHaveTextContent("go test");
+	});
+
 	it("shows the running call as a plain verb with a timer that ticks each second", () => {
 		vi.useFakeTimers({
 			toFake: ["Date", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"],
