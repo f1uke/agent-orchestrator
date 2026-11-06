@@ -469,7 +469,7 @@ export class ChatFolder {
 				this.settle(event.requestId, "cancelled", "", []);
 				break;
 			case "command_lifecycle":
-				this.setCommand(event.commandUuid, event.state);
+				if (!this.bashRuns.has(event.commandUuid)) this.setCommand(event.commandUuid, event.state);
 				break;
 			case "rate_limit":
 				this.usage = parseRateLimit(event.info, this.ts) ?? this.usage;
@@ -631,6 +631,7 @@ export class ChatFolder {
 	 */
 	private addRemoteInput(event: Extract<ChatEvent, { type: "user" }>): void {
 		if (event.uuid === "" || event.parentToolUseId !== "" || event.originKind !== "human") return;
+		if (this.bashRuns.has(event.uuid)) return;
 		if (!event.blocks.some((b) => b.type === "text" || b.type === "image")) return;
 		this.suggestion = "";
 		this.addUserInput(event.uuid, event.blocks, { via: REMOTE_CONTROL_VIA, from: "" });

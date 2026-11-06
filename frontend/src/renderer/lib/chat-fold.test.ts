@@ -1480,3 +1480,86 @@ describe("chat fold: a ! command", () => {
 		expect(tr.bashBusy).toBe(false);
 	});
 });
+
+describe("chat fold: what claude answers to a ! command's result", () => {
+	const RUN = "b7d1c2a4-5e6f-4a1b-9c3d-2e4f6a8b0c1d";
+	const message = {
+		role: "user",
+		content: [
+			{ type: "text", text: "<bash-input>git status --short &amp;&amp; echo done</bash-input>" },
+			{
+				type: "text",
+				text: "<bash-stdout> M a.txt\ndone\n</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>",
+			},
+		],
+	};
+	const lifecycle = (state: string, id = RUN) =>
+		["out", { type: "command_lifecycle", command_uuid: id, state }] as const;
+	const run = [
+		["host", { kind: "bash_start", id: RUN, command: "git status --short && echo done", cwd: "/w" }],
+		["host", { kind: "bash_output", id: RUN, stream: "stdout", text: " M a.txt\ndone\n" }],
+		["host", { kind: "bash_end", id: RUN, code: 0, signal: null, stopped: false, truncated: false }],
+		["in", { type: "user", uuid: RUN, shouldQuery: false, message }],
+	] as const;
+	const replay = [
+		lifecycle("queued"),
+		lifecycle("started"),
+		["out", { type: "user", uuid: RUN, isReplay: true, origin: { kind: "human" }, message }],
+		["out", { type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, total_cost_usd: 0 }],
+		lifecycle("completed"),
+	] as const;
+	const fold = (steps: ReadonlyArray<readonly [Direction, unknown]>) =>
+		foldEntries(steps.map(([dir, payload], i) => synth(i + 1, dir, payload)));
+
+	it("shows only the bash row: no replayed user row, no remote-control row, no turn end", () => {
+		const tr = fold([...run, ...replay]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash"]);
+		expect(tr.bashBusy).toBe(false);
+		expect(tr.busy).toBe(false);
+		expect(tr.queued).toEqual([]);
+	});
+
+	it("is not busy as a turn while the replay is in flight, and not settled until the result", () => {
+		const midway = fold([...run, replay[0], replay[1], replay[2]]);
+		expect(midway.busy).toBe(false);
+		expect(midway.bashBusy).toBe(true);
+		expect(midway.items.map((i) => i.kind)).toEqual(["bash"]);
+	});
+
+	it("still shows a replayed human message of another uuid as a remote prompt", () => {
+		const other = [
+			"out",
+			{
+				type: "user",
+				uuid: "remote-1",
+				isReplay: true,
+				origin: { kind: "human" },
+				message: { role: "user", content: "hi" },
+			},
+		] as const;
+		const tr = fold([...run, ...replay, other]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash", "user"]);
+	});
+
+	it("lets the next prompt run a normal turn after the run settled", () => {
+		const prompt = [
+			"in",
+			{ type: "user", uuid: "u1", message: { role: "user", content: "Reply with the word ok." } },
+		] as const;
+		const tr = fold([
+			...run,
+			...replay,
+			prompt,
+			lifecycle("queued", "u1"),
+			lifecycle("started", "u1"),
+			[
+				"out",
+				{ type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, total_cost_usd: 0.01 },
+			],
+			lifecycle("completed", "u1"),
+		]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash", "user", "turn_end"]);
+		expect(tr.busy).toBe(false);
+		expect(users(tr)[0].state).toBe("completed");
+	});
+});
