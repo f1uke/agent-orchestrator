@@ -145,30 +145,51 @@ function foldTurns(rows: ChatRow[]): ChatRow[] {
 		const ended = end >= 0 ? rows[end] : undefined;
 		if (ended?.kind !== "item" || ended.item.kind !== "turn_end" || interrupted || ended.item.isError) continue;
 
-		let last = end;
-		for (let j = end - 1; j > i; j--) {
-			if (isItem(rows[j], "assistant_text")) {
-				last = j;
-				break;
-			}
-		}
-		const between = rows.slice(i + 1, last);
-		const pieces = foldSegments(row.key, between, ended.item.durationMs);
-		if (!pieces) continue;
-		out.push(...pieces);
-		if (ended.item.durationMs !== undefined && !between.some(isChapter))
-			rows[end] = { ...ended, durationShownAbove: true };
-		i = last - 1;
+		const body = rows.slice(i + 1, end);
+		const parts = splitAtQuestions(row.key, body);
+		const durationMs = parts.length === 1 && !body.some(isChapter) ? ended.item.durationMs : undefined;
+		const folded = parts.map((part) => foldPart(part, durationMs));
+		if (folded.every((f) => f === undefined)) continue;
+		out.push(...folded.flatMap((f, k) => f ?? parts[k].rows));
+		if (durationMs !== undefined) rows[end] = { ...ended, durationShownAbove: true };
+		i = end - 1;
 	}
 	return out;
 }
 
-function foldSegments(userKey: string, between: ChatRow[], turnMs: number | undefined): ChatRow[] | undefined {
-	const durationMs = between.some(isChapter) ? undefined : turnMs;
+const SPLITS_TURN = new Set(["AskUserQuestion", "ExitPlanMode"]);
+const splitsTurn = (row: ChatRow | undefined) =>
+	row !== undefined && isItem(row, "tool_call") && SPLITS_TURN.has((row.item as ToolCallItem).name);
+
+type TurnPart = { key: string; rows: ChatRow[] };
+
+function splitAtQuestions(userKey: string, body: ChatRow[]): TurnPart[] {
+	const parts: TurnPart[] = [{ key: userKey, rows: [] }];
+	for (const r of body) {
+		parts[parts.length - 1].rows.push(r);
+		if (splitsTurn(r)) parts.push({ key: r.key, rows: [] });
+	}
+	return parts;
+}
+
+function foldPart({ key, rows }: TurnPart, durationMs: number | undefined): ChatRow[] | undefined {
+	const body = splitsTurn(rows.at(-1)) ? rows.slice(0, -1) : rows;
+	let last = body.length;
+	for (let j = body.length - 1; j >= 0; j--) {
+		if (isItem(body[j], "assistant_text")) {
+			last = j;
+			break;
+		}
+	}
+	const pieces = foldSegments(key, body.slice(0, last), durationMs);
+	return pieces && [...pieces, ...rows.slice(last)];
+}
+
+function foldSegments(segmentStart: string, between: ChatRow[], durationMs: number | undefined): ChatRow[] | undefined {
 	const out: ChatRow[] = [];
 	let folded = false;
 	let segment: ChatRow[] = [];
-	let segmentKey = userKey;
+	let segmentKey = segmentStart;
 	const close = (nextKey: string) => {
 		const turn = turnRow(
 			segmentKey,
@@ -189,7 +210,7 @@ function foldSegments(userKey: string, between: ChatRow[], turnMs: number | unde
 			out.push(r);
 		} else segment.push(r);
 	}
-	close(userKey);
+	close(segmentStart);
 	return folded ? out : undefined;
 }
 

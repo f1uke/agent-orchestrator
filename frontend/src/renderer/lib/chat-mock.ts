@@ -4,6 +4,7 @@ import { type ChatEntry, type Direction, isObject, unfinished } from "./chat-eve
 import { CHROME_FLAG, ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
+import { foldAnswerEntries, MOCK_FOLD_CHAT_SESSION } from "./chat-mock-fold";
 import { markdownDeltas, markdownEntries, MOCK_MARKDOWN_CHAT_SESSION } from "./chat-mock-markdown";
 import { bashEntries, bashFinish, bashOutput, bashStart, MOCK_BASH_CHAT_SESSION } from "./chat-mock-bash";
 import { chromeEntries, MOCK_CHROME_CHAT_SESSION } from "./chat-mock-chrome";
@@ -920,9 +921,11 @@ function stubSession(id: string): Promise<StubSession> {
 																				? bashEntries()
 																				: id === MOCK_EXITS_CHAT_SESSION
 																					? exitsEntries()
-																					: long
-																						? fixture
-																						: mockChatEntries(fixture);
+																					: id === MOCK_FOLD_CHAT_SESSION
+																						? foldAnswerEntries()
+																						: long
+																							? fixture
+																							: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
