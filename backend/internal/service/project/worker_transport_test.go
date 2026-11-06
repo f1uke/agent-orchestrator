@@ -49,3 +49,48 @@ func TestManager_WorkerTransportRoundTripsAndRefusesUnknownValues(t *testing.T) 
 		t.Fatalf("after clearing, stored = %q, want it inheriting", got)
 	}
 }
+
+func TestManager_OrchestratorTransportRoundTripsWithoutTouchingTheWorkerOne(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	set := func(field string, cfg domain.ProjectConfig) error {
+		_, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: cfg, MergeFields: []string{field}})
+		return err
+	}
+	stored := func(t *testing.T) domain.ProjectConfig {
+		t.Helper()
+		got, err := m.Get(ctx, "ao")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Project == nil || got.Project.Config == nil {
+			return domain.ProjectConfig{}
+		}
+		return *got.Project.Config
+	}
+
+	if err := set("workerTransport", domain.ProjectConfig{WorkerTransport: domain.TransportChat}); err != nil {
+		t.Fatal(err)
+	}
+	if err := set("orchestratorTransport", domain.ProjectConfig{OrchestratorTransport: domain.TransportTerminal}); err != nil {
+		t.Fatalf("set terminal: %v", err)
+	}
+	if got := stored(t); got.OrchestratorTransport != domain.TransportTerminal || got.WorkerTransport != domain.TransportChat {
+		t.Fatalf("stored = worker %q orchestrator %q, want chat and terminal", got.WorkerTransport, got.OrchestratorTransport)
+	}
+
+	wantCode(t, set("orchestratorTransport", domain.ProjectConfig{OrchestratorTransport: "pigeon"}), "INVALID_PROJECT_CONFIG")
+	if got := stored(t).OrchestratorTransport; got != domain.TransportTerminal {
+		t.Fatalf("a refused write changed the stored value to %q", got)
+	}
+
+	if err := set("orchestratorTransport", domain.ProjectConfig{}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if got := stored(t).OrchestratorTransport; got != "" {
+		t.Fatalf("after clearing, stored = %q, want it inheriting", got)
+	}
+}

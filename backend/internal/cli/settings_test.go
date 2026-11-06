@@ -6,16 +6,16 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
-	"github.com/aoagents/agent-orchestrator/backend/internal/workertransport"
+	"github.com/aoagents/agent-orchestrator/backend/internal/transportsettings"
 )
 
 func TestE2E_SettingsWorkerTransportShowsAndSetsTheGlobalDefault(t *testing.T) {
 	dir := t.TempDir()
-	store, err := workertransport.NewStore(dir)
+	store, err := transportsettings.NewStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	startDriftTestDaemonWith(t, httpd.APIDeps{WorkerTransport: store})
+	startDriftTestDaemonWith(t, httpd.APIDeps{TransportSettings: store})
 
 	out, err := runDriftCLI(t, "settings", "worker-transport")
 	if err != nil || !strings.Contains(out, "worker transport: chat") {
@@ -26,8 +26,8 @@ func TestE2E_SettingsWorkerTransportShowsAndSetsTheGlobalDefault(t *testing.T) {
 	if err != nil || !strings.Contains(out, "worker transport: terminal") {
 		t.Fatalf("set terminal: %v\n%s", err, out)
 	}
-	reopened, _ := workertransport.NewStore(dir)
-	if got := reopened.Transport(); got != domain.TransportTerminal {
+	reopened, _ := transportsettings.NewStore(dir)
+	if got := reopened.WorkerTransport(); got != domain.TransportTerminal {
 		t.Fatalf("the data dir holds %q after the command, want terminal", got)
 	}
 

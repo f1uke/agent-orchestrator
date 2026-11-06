@@ -31,7 +31,7 @@ func ResolveTransport(c TransportChoice) domain.Transport {
 			return t
 		}
 	}
-	return domain.DefaultWorkerTransport
+	return domain.DefaultClaudeCodeTransport
 }
 
 func (m *Manager) resolveTransport(explicit domain.Transport, harness domain.AgentHarness, kind domain.SessionKind, project domain.ProjectConfig) domain.Transport {

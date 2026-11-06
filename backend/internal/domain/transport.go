@@ -18,8 +18,8 @@ const (
 	TransportUnresolved Transport = ""
 )
 
-// DefaultWorkerTransport is the transport of a new claude-code worker that nothing configured.
-const DefaultWorkerTransport = TransportChat
+// DefaultClaudeCodeTransport is the transport of a new claude-code worker or orchestrator that nothing configured.
+const DefaultClaudeCodeTransport = TransportChat
 
 // ParseTransport validates a transport named at a boundary; empty stays empty.
 func ParseTransport(s string) (Transport, error) {
