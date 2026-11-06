@@ -42,6 +42,8 @@ type setModeRequest struct{ Mode chatproto.PermissionMode }
 
 type setModelRequest struct{ Model string }
 
+type setChromeRequest struct{ Enabled bool }
+
 type stopTaskRequest struct{ TaskID string }
 
 type rewindRequest struct {
@@ -61,6 +63,7 @@ func (answerRequest) isRequest()        {}
 func (interruptRequest) isRequest()     {}
 func (setModeRequest) isRequest()       {}
 func (setModelRequest) isRequest()      {}
+func (setChromeRequest) isRequest()     {}
 func (stopTaskRequest) isRequest()      {}
 func (rewindRequest) isRequest()        {}
 func (rewindPreviewRequest) isRequest() {}
@@ -138,6 +141,11 @@ func parseRequest(line []byte) (request, error) {
 			return nil, errors.New("set_model needs model")
 		}
 		return setModelRequest{Model: w.Model}, nil
+	case "set_chrome":
+		if w.Enabled == nil {
+			return nil, errors.New("set_chrome needs enabled")
+		}
+		return setChromeRequest{Enabled: *w.Enabled}, nil
 	case "stop_task":
 		if !chatfiles.ValidTaskID(w.TaskID) {
 			return nil, errors.New("stop_task needs a valid task_id")
@@ -193,6 +201,7 @@ type State struct {
 	Queued          []string         `json:"queued"`
 	Pending         []PendingRequest `json:"pending"`
 	PermissionMode  string           `json:"permission_mode"`
+	Chrome          bool             `json:"chrome"`
 	CostUSD         float64          `json:"cost_usd"`
 	LastSeq         uint64           `json:"last_seq"`
 }
@@ -324,6 +333,8 @@ func (h *host) do(req request) (any, error) {
 		return h.control("remote_control", func(id string) chatproto.Outbound {
 			return chatproto.SetRemoteControl{RequestID: id, Enabled: r.Enabled}
 		})
+	case setChromeRequest:
+		return h.setChrome(r.Enabled)
 	case stopTaskRequest:
 		return h.control("stop_task", func(id string) chatproto.Outbound {
 			return chatproto.StopTask{RequestID: id, TaskID: r.TaskID}
@@ -430,6 +441,7 @@ func (h *host) stateLocked() stateResponse {
 		Queued:         append([]string{}, t.Queued...),
 		Pending:        make([]PendingRequest, 0, len(t.Pending)),
 		PermissionMode: t.PermissionMode,
+		Chrome:         t.Chrome,
 		CostUSD:        t.CostUSD,
 		LastSeq:        t.LastSeq,
 	}}

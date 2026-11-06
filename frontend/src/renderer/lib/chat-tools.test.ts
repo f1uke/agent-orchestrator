@@ -417,3 +417,48 @@ describe("inputSummary", () => {
 		expect(inputSummary(call("Mystery", null))).toBe("");
 	});
 });
+
+describe("Claude in Chrome tools", () => {
+	const chrome = (action: string) => `mcp__claude-in-chrome__${action}`;
+	const png = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } };
+
+	it.each([
+		[chrome("navigate"), { url: "https://example.com/a", tabId: 1 }, "Open page", "https://example.com/a"],
+		[chrome("tabs_context_mcp"), {}, "List tabs", ""],
+		[chrome("tabs_create_mcp"), {}, "New tab", ""],
+		[chrome("find"), { query: "sign in button", tabId: 1 }, "Find", '"sign in button"'],
+		[chrome("computer"), { action: "left_click", coordinate: [10, 20], tabId: 1 }, "Click", "10, 20"],
+		[chrome("computer"), { action: "type", text: "hello", tabId: 1 }, "Type", '"hello"'],
+		[chrome("computer"), { action: "screenshot", tabId: 1 }, "Screenshot", ""],
+		[
+			chrome("javascript_tool"),
+			{ action: "javascript_exec", text: "document.title", tabId: 1 },
+			"Run JavaScript",
+			"document.title",
+		],
+		[chrome("some_new_action"), {}, "Some new action", ""],
+	])("%s %j reads as %s", (name, input, title, arg) => {
+		const view = describeTool(call(name, input, { content: [{ type: "text", text: "ok" }] }));
+		expect(view.family).toBe("browser");
+		expect(view.title).toBe(title);
+		expect(view.arg).toBe(arg);
+	});
+
+	it("shows a screenshot as an image, not as JSON", () => {
+		const view = describeTool(call(chrome("computer"), { action: "screenshot", tabId: 1 }, { content: [png] }));
+		expect(view.body.kind).toBe("image");
+		expect(view.status).toEqual({ tone: "ok", text: "image" });
+	});
+
+	it("shows a text result as output, without the input JSON", () => {
+		const view = describeTool(
+			call(chrome("get_page_text"), { tabId: 1 }, { content: [{ type: "text", text: "page words" }] }),
+		);
+		expect(view.body).toEqual({ kind: "output", text: "page words" });
+	});
+
+	it("marks a failed call as an error", () => {
+		const view = describeTool(call(chrome("navigate"), { url: "x" }, { isError: true, content: "no browser" }));
+		expect(view.status.tone).toBe("error");
+	});
+});

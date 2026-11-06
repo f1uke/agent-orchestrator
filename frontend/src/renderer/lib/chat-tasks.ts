@@ -183,6 +183,7 @@ export function subagentTranscript(tr: Transcript, agentCallId: string): Transcr
 		commands: [],
 		models: [],
 		model: tr.agentModels[agentCallId] ?? "",
+		chrome: tr.chrome,
 		tasks: tr.tasks.filter((t) => calls.has(t.toolUseId)),
 		agentModels: tr.agentModels,
 		remoteControl: REMOTE_CONTROL_OFF,

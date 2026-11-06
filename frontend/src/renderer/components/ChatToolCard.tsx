@@ -4,6 +4,7 @@ import {
 	ChevronRight,
 	FilePlus,
 	FileText,
+	Globe,
 	ListChecks,
 	ListTodo,
 	Loader2,
@@ -67,6 +68,7 @@ const FAMILY_ICON: Record<ToolView["family"], LucideIcon> = {
 	todo: ListTodo,
 	plan: ListChecks,
 	question: MessageSquare,
+	browser: Globe,
 	other: Wrench,
 };
 

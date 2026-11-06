@@ -14,6 +14,7 @@ func TestClaudeArgv(t *testing.T) {
 		model   string
 		attach  string
 		suggest bool
+		chrome  bool
 		want    []string
 	}{
 		{
@@ -80,11 +81,24 @@ func TestClaudeArgv(t *testing.T) {
 			suggest: true,
 			want:    append(append(append([]string{"claude"}, protocolFlags...), "--prompt-suggestions"), "--resume", "pin"),
 		},
+		{
+			name:    "chrome is asked for beside the protocol flags and survives a resume",
+			command: []string{"claude", "--model", "opus"},
+			resume:  "pin",
+			chrome:  true,
+			want:    append(append(append([]string{"claude", "--model", "opus"}, protocolFlags...), "--chrome"), "--resume", "pin"),
+		},
+		{
+			name:    "the session's chrome choice replaces one the agent command carries",
+			command: []string{"claude", "--no-chrome", "--chrome", "--", "--chrome"},
+			want:    append(append([]string{"claude"}, protocolFlags...), "--", "--chrome"),
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := claudeArgv(c.command, c.resume, c.model, c.attach, c.suggest); !slices.Equal(got, c.want) {
-				t.Errorf("claudeArgv(%v, %q, %q, %q, %v) =\n %v\nwant\n %v", c.command, c.resume, c.model, c.attach, c.suggest, got, c.want)
+			l := launch{resume: c.resume, model: c.model, attachDir: c.attach, suggestions: c.suggest, chrome: c.chrome}
+			if got := claudeArgv(c.command, l); !slices.Equal(got, c.want) {
+				t.Errorf("claudeArgv(%v, %+v) =\n %v\nwant\n %v", c.command, l, got, c.want)
 			}
 		})
 	}

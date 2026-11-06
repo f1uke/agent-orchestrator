@@ -108,11 +108,7 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 	defer func() { _ = lg.file.Close() }()
 
 	t := folder.Transcript()
-	model := t.ChosenModel
-	resume := ""
-	if n := len(t.ClaudeSessionIDs); n > 0 {
-		resume = t.ClaudeSessionIDs[n-1]
-	}
+	first := launch{attachDir: attachmentsBeside(cfg.LogPath), suggestions: !cfg.NoPromptSuggestions}.from(t, t.Chrome)
 	if hasUserInput(t) {
 		prompt = ""
 	}
@@ -127,8 +123,26 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 		promptAfterInit: prompt,
 		idleOff:         cfg.NoIdleCompact,
 		afterFunc:       realAfterFunc,
+		launched:        first,
+		relaunch:        make(chan launch, 1),
 	}
-	return h.run(ctx, cfg, ln, resume, model)
+	return h.run(ctx, cfg, ln, first)
+}
+
+type launch struct {
+	resume      string
+	model       string
+	attachDir   string
+	suggestions bool
+	chrome      bool
+}
+
+func (l launch) from(t chatproto.Transcript, chrome bool) launch {
+	l.model, l.resume, l.chrome = t.ChosenModel, "", chrome
+	if n := len(t.ClaudeSessionIDs); n > 0 {
+		l.resume = t.ClaudeSessionIDs[n-1]
+	}
+	return l
 }
 
 func readPrompt(path string) (string, error) {
@@ -190,10 +204,43 @@ type host struct {
 	idleOff         bool
 	idle            idleState
 	afterFunc       afterFunc
+	launched        launch
+	tasks           map[string]struct{}
+	// claude reads --chrome only at start, so switching it replaces the process.
+	relaunch chan launch
 }
 
-func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, model string) (int, error) {
-	argv := claudeArgv(cfg.Command, resume, model, attachmentsBeside(cfg.LogPath), !cfg.NoPromptSuggestions)
+func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, l launch) (int, error) {
+	var srv *server
+	for {
+		ps, next, err := h.runClaude(ctx, cfg, l, func() {
+			if srv == nil {
+				srv = newServer(h, ln)
+				go srv.serve()
+			}
+		})
+		if err != nil {
+			if srv != nil {
+				h.finish(nil, nil)
+				srv.close()
+			}
+			return 0, err
+		}
+		if next == nil {
+			code, signal, ret := exitStatus(ps)
+			h.finish(code, signal)
+			srv.close()
+			return ret, nil
+		}
+		h.mu.Lock()
+		h.endProcessLocked()
+		h.mu.Unlock()
+		l = *next
+	}
+}
+
+func (h *host) runClaude(ctx context.Context, cfg Config, l launch, serve func()) (*os.ProcessState, *launch, error) {
+	argv := claudeArgv(cfg.Command, l)
 	cmd := process.Command(argv[0], argv[1:]...)
 	process.Detach(cmd)
 	cmd.Dir = cfg.Dir
@@ -202,19 +249,19 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, mod
 	cmd.WaitDelay = stdoutDrain
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return 0, fmt.Errorf("sessionhost: stdin pipe: %w", err)
+		return nil, nil, fmt.Errorf("sessionhost: stdin pipe: %w", err)
 	}
 	// An os.Pipe instead of StdoutPipe, so that Wait can report the exit while
 	// the reader is still draining what claude wrote before it.
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		return 0, fmt.Errorf("sessionhost: stdout pipe: %w", err)
+		return nil, nil, fmt.Errorf("sessionhost: stdout pipe: %w", err)
 	}
 	defer func() { _ = stdoutR.Close() }()
 	cmd.Stdout = stdoutW
 	if err := cmd.Start(); err != nil {
 		_ = stdoutW.Close()
-		return 0, fmt.Errorf("sessionhost: start %s: %w", argv[0], err)
+		return nil, nil, fmt.Errorf("sessionhost: start %s: %w", argv[0], err)
 	}
 	_ = stdoutW.Close()
 
@@ -223,19 +270,23 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, mod
 		_ = cmd.Wait()
 		close(exited)
 	}()
-	h.start(stdin, cmd.Process.Pid, argv, resume)
+	h.start(stdin, cmd.Process.Pid, argv, l)
 
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)
 		h.readStdout(stdoutR)
 	}()
-	srv := newServer(h, ln)
-	go srv.serve()
+	serve()
 
+	var next *launch
 	select {
 	case <-exited:
 	case <-ctx.Done():
+		stop(cmd.Process, stdin, exited, orDefault(cfg.stdinGrace, defaultStdinGrace), orDefault(cfg.killGrace, defaultKillGrace))
+		<-exited
+	case l := <-h.relaunch:
+		next = &l
 		stop(cmd.Process, stdin, exited, orDefault(cfg.stdinGrace, defaultStdinGrace), orDefault(cfg.killGrace, defaultKillGrace))
 		<-exited
 	}
@@ -246,17 +297,15 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, resume, mod
 		<-drained
 	}
 
-	code, signal, ret := exitStatus(cmd.ProcessState)
-	h.finish(code, signal)
-	srv.close()
-	return ret, nil
+	return cmd.ProcessState, next, nil
 }
 
 // claudeArgv puts the protocol flags and --resume before any "--", after
 // which claude reads prompt text. Claude refuses --session-id beside --resume,
 // so a resume drops the pinned id the agent command carries. A model chosen
 // with set_model replaces the command's --model, so a respawn keeps it.
-func claudeArgv(command []string, resume, model, attachDir string, suggestions bool) []string {
+func claudeArgv(command []string, l launch) []string {
+	resume, model, attachDir, suggestions := l.resume, l.model, l.attachDir, l.suggestions
 	flags, rest := command, []string(nil)
 	if i := slices.Index(command, "--"); i >= 0 {
 		flags, rest = command[:i], command[i:]
@@ -270,6 +319,7 @@ func claudeArgv(command []string, resume, model, attachDir string, suggestions b
 		case model != "" && flags[i] == "--model":
 			i++
 		case model != "" && strings.HasPrefix(flags[i], "--model="):
+		case flags[i] == chatproto.ChromeFlag || flags[i] == "--no-chrome":
 		default:
 			argv = append(argv, flags[i])
 		}
@@ -280,6 +330,9 @@ func claudeArgv(command []string, resume, model, attachDir string, suggestions b
 	argv = append(argv, protocolFlags...)
 	if suggestions {
 		argv = append(argv, "--prompt-suggestions")
+	}
+	if l.chrome {
+		argv = append(argv, chatproto.ChromeFlag)
 	}
 	if attachDir != "" {
 		argv = append(argv, "--add-dir", attachDir)
@@ -297,11 +350,11 @@ func orDefault(d, def time.Duration) time.Duration {
 	return d
 }
 
-func (h *host) start(stdin io.Writer, pid int, argv []string, resume string) {
+func (h *host) start(stdin io.Writer, pid int, argv []string, l launch) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.stdin, h.pid = stdin, pid
-	h.noteLocked(spawnNote{Kind: chatproto.NoteSpawn, Argv: argv, Resume: resume, PID: pid})
+	h.stdin, h.pid, h.launched = stdin, pid, l
+	h.noteLocked(spawnNote{Kind: chatproto.NoteSpawn, Argv: argv, Resume: l.resume, PID: pid})
 	h.initID = uuid.NewString()
 	if err := h.writeThenLogLocked(chatproto.Initialize{RequestID: h.initID, SDKMCPServers: []string{mcpServerName}}); err != nil {
 		h.pane.line(dim("sessionhost: " + err.Error()))
@@ -330,17 +383,45 @@ func waitFor(done <-chan struct{}, d time.Duration) bool {
 func (h *host) finish(code *int, signal *string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.stdin, h.pid = nil, 0
+	h.endProcessLocked()
 	h.noteLocked(exitNote{Kind: chatproto.NoteExit, Code: code, Signal: signal})
 	h.closed = true
-	h.contextID = ""
-	h.disarmIdleLocked()
 	for s := range h.subs {
 		h.dropLocked(s)
 	}
+}
+
+func (h *host) endProcessLocked() {
+	h.stdin, h.pid = nil, 0
+	h.contextID = ""
+	h.tasks = nil
+	h.disarmIdleLocked()
 	for id, ch := range h.answers {
 		close(ch)
 		delete(h.answers, id)
+	}
+}
+
+var errChromeBusy = errors.New("claude is busy: wait for the turn and its background tasks to end, then turn Chrome on or off")
+
+func (h *host) setChrome(enabled bool) (any, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed || h.stdin == nil {
+		return nil, errNotRunning
+	}
+	if h.launched.chrome == enabled {
+		return okResponse{OK: true}, nil
+	}
+	t := h.folder.Transcript()
+	if t.Busy || len(t.Pending) > 0 || len(h.tasks) > 0 {
+		return nil, errChromeBusy
+	}
+	select {
+	case h.relaunch <- h.launched.from(t, enabled):
+		return okResponse{OK: true}, nil
+	default:
+		return nil, errors.New("claude is already restarting")
 	}
 }
 

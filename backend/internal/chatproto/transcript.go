@@ -21,7 +21,8 @@ type Transcript struct {
 	Model            string        // in use: the spawn's --model, then system/init or an accepted set_model
 	ChosenModel      string        // the latest accepted set_model, which a respawn passes as --model
 	RemoteControl    RemoteControl // the Remote Control bridge; off after a process ends
-	Suggestion       string        // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
+	Chrome           bool
+	Suggestion       string // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
 	LastSeq          uint64
 }
 
@@ -192,6 +193,7 @@ type Folder struct {
 	models   []Model
 	model    string
 	chosen   string
+	chrome   bool
 	suggest  string
 }
 
@@ -511,6 +513,7 @@ func (f *Folder) applyHost(n HostNote) {
 	case NoteSpawn:
 		f.endProcess()
 		f.model = modelFlag(n.Argv)
+		f.chrome = slices.Contains(flagsOf(n.Argv), ChromeFlag)
 		if n.Resume != "" {
 			f.items = append(f.items, Notice{Kind: NoticeResumed, Text: n.Resume})
 		} else {
@@ -531,11 +534,20 @@ func (f *Folder) applyHost(n HostNote) {
 	}
 }
 
+// ChromeFlag is the claude flag that turns on Claude in Chrome. Print mode
+// ignores the setting that enables it by default, so a host must pass it.
+const ChromeFlag = "--chrome"
+
+func flagsOf(argv []string) []string {
+	if i := slices.Index(argv, "--"); i >= 0 {
+		return argv[:i]
+	}
+	return argv
+}
+
 func modelFlag(argv []string) string {
+	argv = flagsOf(argv)
 	for i, a := range argv {
-		if a == "--" {
-			break
-		}
 		if v, ok := strings.CutPrefix(a, "--model="); ok {
 			return v
 		}
@@ -589,6 +601,7 @@ func (f *Folder) Transcript() Transcript {
 		Model:            f.model,
 		ChosenModel:      f.chosen,
 		RemoteControl:    f.remote,
+		Chrome:           f.chrome,
 		Suggestion:       f.suggest,
 		LastSeq:          f.last,
 	}

@@ -27,6 +27,7 @@ export type ChatApi = {
 	setModel: (sessionId: string, model: string) => Promise<ChatResult>;
 	/** Starts or stops Remote Control. The state and the session URL come back in the chat log, not in the result. */
 	setRemoteControl: (sessionId: string, enabled: boolean) => Promise<ChatResult>;
+	setChrome: (sessionId: string, enabled: boolean) => Promise<ChatResult>;
 	/** Saves a file where claude can read it; the answered path goes into the message. */
 	upload: (sessionId: string, file: File) => Promise<UploadResult>;
 	/** Ends a background task: a subagent or a background Bash. Resolves once claude has answered. */
@@ -103,6 +104,8 @@ export const httpChatApi: ChatApi = {
 		settle(
 			apiClient.PUT("/api/v1/sessions/{sessionId}/chat/remote-control", { ...path(sessionId), body: { enabled } }),
 		),
+	setChrome: (sessionId, enabled) =>
+		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/chrome", { ...path(sessionId), body: { enabled } })),
 	upload,
 	stopTask: (sessionId, taskId) =>
 		settle(

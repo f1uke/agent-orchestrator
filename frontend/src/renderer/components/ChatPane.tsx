@@ -246,6 +246,7 @@ export function ChatPane({
 										<ChatComposer
 											actions={actions}
 											busy={transcript.busy}
+											chrome={transcript.chrome}
 											commands={transcript.commands}
 											model={transcript.model}
 											models={transcript.models}

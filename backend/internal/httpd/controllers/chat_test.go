@@ -72,6 +72,11 @@ func (f *fakeChatService) SetRemoteControl(_ context.Context, id domain.SessionI
 	return f.err
 }
 
+func (f *fakeChatService) SetChrome(_ context.Context, id domain.SessionID, enabled bool) error {
+	f.calls = append(f.calls, chatCall{op: "set_chrome", id: id, enabled: enabled})
+	return f.err
+}
+
 func (f *fakeChatService) StopTask(_ context.Context, id domain.SessionID, taskID string) error {
 	f.calls = append(f.calls, chatCall{op: "stop_task", id: id, taskID: taskID})
 	return f.err
@@ -106,6 +111,7 @@ var chatRoutes = []chatRoute{
 	{"mode", "PUT", "/api/v1/sessions/s-1/chat/mode", `{"mode":"plan"}`},
 	{"model", "PUT", "/api/v1/sessions/s-1/chat/model", `{"model":"haiku"}`},
 	{"remote control", "PUT", "/api/v1/sessions/s-1/chat/remote-control", `{"enabled":true}`},
+	{"chrome", "PUT", "/api/v1/sessions/s-1/chat/chrome", `{"enabled":true}`},
 	{"stop task", "POST", "/api/v1/sessions/s-1/chat/tasks/bq3k9x1ab/stop", ``},
 	{"rewind", "POST", "/api/v1/sessions/s-1/chat/rewind", `{"uuid":"u-2"}`},
 	{"rewind preview", "POST", "/api/v1/sessions/s-1/chat/rewind/preview", `{"uuid":"u-2"}`},
@@ -233,6 +239,23 @@ func TestChatRemoteControl(t *testing.T) {
 		{op: "remote_control", id: "s-1", enabled: true},
 		{op: "remote_control", id: "s-1", enabled: false},
 	}
+	if !reflect.DeepEqual(svc.calls, want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
+func TestChatChrome(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	for _, body := range []string{`{"enabled":true}`, `{"enabled":false}`} {
+		if got, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/s-1/chat/chrome", body); status != http.StatusOK {
+			t.Fatalf("chrome %s status = %d, body=%s", body, status, got)
+		}
+	}
+	if _, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/s-1/chat/chrome", `{}`); status != http.StatusBadRequest {
+		t.Errorf("chrome without enabled status = %d, want 400", status)
+	}
+	want := []chatCall{{op: "set_chrome", id: "s-1", enabled: true}, {op: "set_chrome", id: "s-1", enabled: false}}
 	if !reflect.DeepEqual(svc.calls, want) {
 		t.Errorf("service got %+v, want %+v", svc.calls, want)
 	}

@@ -801,3 +801,23 @@ func TestPromptSuggestionSurvivesEventsThatAreNotInput(t *testing.T) {
 		t.Error("Suggestion was cleared by an event that starts nothing")
 	}
 }
+
+func TestFoldChromeFollowsTheLatestSpawn(t *testing.T) {
+	spawn := func(seq uint64, argv ...string) Entry {
+		b, _ := json.Marshal(map[string]any{"kind": "spawn", "argv": argv})
+		return synth(seq, DirHost, string(b))
+	}
+	if tr := foldEntries(t, []Entry{spawn(1, "claude", "-p")}); tr.Chrome {
+		t.Error("a spawn without --chrome folded Chrome = true")
+	}
+	on := []Entry{spawn(1, "claude", "-p"), spawn(2, "claude", "-p", "--chrome", "--resume", "s-1")}
+	if tr := foldEntries(t, on); !tr.Chrome {
+		t.Error("a later spawn with --chrome folded Chrome = false")
+	}
+	if tr := foldEntries(t, append(on, spawn(3, "claude", "-p", "--resume", "s-1"))); tr.Chrome {
+		t.Error("a spawn after the chrome one, without the flag, kept Chrome = true")
+	}
+	if tr := foldEntries(t, []Entry{spawn(1, "claude", "--", "--chrome")}); tr.Chrome {
+		t.Error("--chrome after -- is prompt text, not the flag")
+	}
+}

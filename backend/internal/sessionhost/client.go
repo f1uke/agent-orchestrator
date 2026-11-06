@@ -143,6 +143,12 @@ func (c Client) SetModel(ctx context.Context, model string) error {
 	return c.call(ctx, map[string]string{"op": "set_model", "model": model}, &okResponse{})
 }
 
+// SetChrome relaunches claude with Claude in Chrome on or off, resuming the
+// same conversation. The host refuses while a turn runs, as a RefusedError.
+func (c Client) SetChrome(ctx context.Context, enabled bool) error {
+	return c.call(ctx, map[string]any{"op": "set_chrome", "enabled": enabled}, &okResponse{})
+}
+
 // StopTask ends the background task taskID, a Bash command or a subagent, and
 // returns once claude has answered. Claude's refusal, such as a mode that cannot
 // stop tasks, is a RefusedError.

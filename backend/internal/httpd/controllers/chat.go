@@ -23,6 +23,7 @@ type ChatService interface {
 	Interrupt(ctx context.Context, id domain.SessionID) error
 	SetMode(ctx context.Context, id domain.SessionID, mode chatproto.PermissionMode) error
 	SetModel(ctx context.Context, id domain.SessionID, model string) error
+	SetChrome(ctx context.Context, id domain.SessionID, enabled bool) error
 	StopTask(ctx context.Context, id domain.SessionID, taskID string) error
 	Rewind(ctx context.Context, id domain.SessionID, uuid string, restoreFiles bool) error
 	RewindPreview(ctx context.Context, id domain.SessionID, uuid string) (sessionhost.RewindPreview, error)
@@ -45,6 +46,7 @@ func (c *ChatController) Register(r chi.Router) {
 	r.Put("/sessions/{sessionId}/chat/mode", c.setMode)
 	r.Put("/sessions/{sessionId}/chat/model", c.setModel)
 	r.Put("/sessions/{sessionId}/chat/remote-control", c.setRemoteControl)
+	r.Put("/sessions/{sessionId}/chat/chrome", c.setChrome)
 }
 
 func chatBadRequest(w http.ResponseWriter, r *http.Request, code, message string) {
@@ -274,6 +276,27 @@ func (c *ChatController) setRemoteControl(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := c.Svc.SetRemoteControl(r.Context(), sessionID(r), *body.Enabled); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+func (c *ChatController) setChrome(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/chat/chrome")
+		return
+	}
+	var body SetChatChromeRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	if body.Enabled == nil {
+		chatBadRequest(w, r, "ENABLED_REQUIRED", "enabled is required")
+		return
+	}
+	if err := c.Svc.SetChrome(r.Context(), sessionID(r), *body.Enabled); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}

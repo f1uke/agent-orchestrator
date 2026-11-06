@@ -97,6 +97,9 @@ function ModelItem({ model, menu }: { model: ChatModel; menu: ModelMenu }) {
 type PickerProps = {
 	models: readonly ChatModel[];
 	model: string;
+	chrome: boolean;
+	chromeLocked: boolean;
+	onChrome: (enabled: boolean) => void;
 	permissionMode: string;
 	disabled: boolean;
 	onModel: (value: string) => void;
@@ -108,8 +111,11 @@ type PickerProps = {
 export function ModelModePicker({
 	models,
 	model,
+	chrome,
+	chromeLocked,
 	permissionMode,
 	disabled,
+	onChrome,
 	onModel,
 	onMode,
 	remoteControl,
@@ -168,8 +174,18 @@ export function ModelModePicker({
 					))}
 				</DropdownMenuRadioGroup>
 				<DropdownMenuSeparator />
+				<DropdownMenuLabel>Tools</DropdownMenuLabel>
 				<DropdownMenuCheckboxItem checked={remoteControlOn(remoteControl)} onCheckedChange={onRemoteControl}>
 					Remote Control
+				</DropdownMenuCheckboxItem>
+				<DropdownMenuCheckboxItem
+					checked={chrome}
+					className="chat-model-item"
+					disabled={chromeLocked}
+					onCheckedChange={(on) => onChrome(on === true)}
+				>
+					<span className="chat-model-item__name">Claude in Chrome</span>
+					<span className="chat-model-item__hint">{chromeLocked ? "After this turn" : "Restarts claude"}</span>
 				</DropdownMenuCheckboxItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

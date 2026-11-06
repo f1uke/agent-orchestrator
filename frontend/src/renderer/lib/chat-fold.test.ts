@@ -1289,3 +1289,18 @@ describe("chat fold: Remote Control", () => {
 		expect(foldEntries(upTo(entries, 10)).busy).toBe(false);
 	});
 });
+
+describe("chat fold: Claude in Chrome", () => {
+	const spawn = (seq: number, argv: string[]) => synth(seq, "host", { kind: "spawn", argv, resume: "", pid: 1 });
+
+	it("follows the latest spawn's --chrome flag", () => {
+		expect(foldEntries([spawn(1, ["claude", "-p"])]).chrome).toBe(false);
+		const on = [spawn(1, ["claude", "-p"]), spawn(2, ["claude", "-p", "--chrome"])];
+		expect(foldEntries(on).chrome).toBe(true);
+		expect(foldEntries([...on, spawn(3, ["claude", "-p"])]).chrome).toBe(false);
+	});
+
+	it("does not read prompt text after -- as the flag", () => {
+		expect(foldEntries([spawn(1, ["claude", "--", "--chrome"])]).chrome).toBe(false);
+	});
+});

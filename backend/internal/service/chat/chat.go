@@ -78,6 +78,16 @@ func (s *Service) SetModel(ctx context.Context, id domain.SessionID, model strin
 	return hostError(id, c.SetModel(ctx, model))
 }
 
+// SetChrome turns Claude in Chrome on or off for the session by relaunching its
+// claude on the same conversation. A turn in flight is CHAT_REQUEST_REJECTED.
+func (s *Service) SetChrome(ctx context.Context, id domain.SessionID, enabled bool) error {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hostError(id, c.SetChrome(ctx, enabled))
+}
+
 // StopTask ends the background task taskID of the session. Claude may refuse,
 // in a mode that cannot stop tasks: that is CHAT_REQUEST_REJECTED with its reason.
 func (s *Service) StopTask(ctx context.Context, id domain.SessionID, taskID string) error {
