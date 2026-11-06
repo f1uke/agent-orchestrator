@@ -189,10 +189,13 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      # With every test traced, three Monaco specs hit their 30 s timeout, so only
+      # a failing test is traced: it is retried once with a trace on, and
+      # --fail-on-flaky-tests keeps a test that passes only on retry a failure.
       - name: Run Playwright e2e shard ${{ matrix.shard }}/4 in a real browser
-        run: npx playwright test --shard=${{ matrix.shard }}/4 --trace=retain-on-failure
+        run: npx playwright test --shard=${{ matrix.shard }}/4 --retries=1 --trace=on-first-retry --fail-on-flaky-tests
 
-      # Each failing test leaves its trace.zip here; open it with
+      # Each failing test leaves its retry's trace.zip here; open it with
       # `npx playwright show-trace <trace.zip>` or at trace.playwright.dev.
       - name: Upload failure traces
         if: failure()
