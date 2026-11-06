@@ -22,7 +22,8 @@ type Transcript struct {
 	ChosenModel      string        // the latest accepted set_model, which a respawn passes as --model
 	RemoteControl    RemoteControl // the Remote Control bridge; off after a process ends
 	Chrome           bool
-	Suggestion       string // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
+	Bash             *BashItem // the "!" command run the session is busy with, until it settles; nil when none
+	Suggestion       string    // claude's guess at the next user message; empty once input, a turn start, an interrupt or a process change follows it
 	LastSeq          uint64
 }
 
@@ -195,6 +196,8 @@ type Folder struct {
 	chosen   string
 	chrome   bool
 	suggest  string
+	bashes   map[string]*BashItem // every "!" command run, by id
+	bash     *BashItem            // the latest run
 }
 
 type control struct {
@@ -211,6 +214,7 @@ func NewFolder() *Folder {
 		commands: map[string]CommandState{},
 		perms:    map[string]*permission{},
 		controls: map[string]control{},
+		bashes:   map[string]*BashItem{},
 		remote:   RemoteControl{State: RemoteOff},
 	}
 }
@@ -280,6 +284,9 @@ func (f *Folder) applyOut(ev Event) {
 			f.applyToolResults(ev)
 		}
 	case Result:
+		if f.settleBash() {
+			return
+		}
 		f.cost = ev.TotalCostUSD
 		f.items = append(f.items, TurnEnd{Subtype: ev.Subtype, IsError: ev.IsError, NumTurns: ev.NumTurns, CostUSD: ev.TotalCostUSD})
 	case ControlRequest:
@@ -292,14 +299,18 @@ func (f *Folder) applyOut(ev Event) {
 	case ControlCancel:
 		f.settle(ev.RequestID, PermissionCancelled, "", nil)
 	case CommandLifecycle:
-		f.setCommand(ev.CommandUUID, ev.State)
+		if f.bashes[ev.CommandUUID] == nil {
+			f.setCommand(ev.CommandUUID, ev.State)
+		}
 	}
 }
 
 func (f *Folder) applyIn(ev Event) {
 	switch ev := ev.(type) {
 	case User:
-		f.addUserInput(ev, nil)
+		if !f.isBashResult(ev) {
+			f.addUserInput(ev, nil)
+		}
 	case ControlRequest:
 		c, ok := ev.Body.(OtherControl)
 		if !ok {
@@ -397,7 +408,7 @@ const originHuman = "human"
 // The host logs every input it sends before claude can replay it, so a replay
 // whose uuid has no row is a human's message that did not come from AO.
 func (f *Folder) addRemoteInput(u User) {
-	if u.UUID == "" || u.ParentToolUseID != "" || u.OriginKind != originHuman {
+	if u.UUID == "" || u.ParentToolUseID != "" || u.OriginKind != originHuman || f.bashes[u.UUID] != nil {
 		return
 	}
 	typed := slices.ContainsFunc(u.Blocks, func(b Block) bool {
@@ -519,6 +530,8 @@ func (f *Folder) applyHost(n HostNote) {
 		} else {
 			f.items = append(f.items, Notice{Kind: NoticeSpawn})
 		}
+	case NoteBashStart, NoteBashOutput, NoteBashEnd:
+		f.applyBash(n)
 	case NoteExit:
 		f.endProcess()
 		f.items = append(f.items, Notice{Kind: NoticeExit, Text: exitText(n.Code)})
@@ -566,6 +579,7 @@ func exitText(code *int) string {
 }
 
 func (f *Folder) endProcess() {
+	f.endBash()
 	f.suggest = ""
 	f.remote = RemoteControl{State: RemoteOff}
 	for id := range f.perms {
@@ -602,6 +616,7 @@ func (f *Folder) Transcript() Transcript {
 		ChosenModel:      f.chosen,
 		RemoteControl:    f.remote,
 		Chrome:           f.chrome,
+		Bash:             f.activeBash(),
 		Suggestion:       f.suggest,
 		LastSeq:          f.last,
 	}
@@ -619,6 +634,8 @@ func (f *Folder) Transcript() Transcript {
 			}
 		case *ToolCall:
 			t.Items = append(t.Items, cloneToolCall(it))
+		case *BashItem:
+			t.Items = append(t.Items, cloneBash(it))
 		default:
 			t.Items = append(t.Items, it)
 		}
