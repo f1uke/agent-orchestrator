@@ -127,7 +127,11 @@ function ToolBodyView({ body, theme }: { body: ToolBody; theme: Theme }) {
 						<span className="chat-code__text">{body.command}</span>
 						<CopyButton className="chat-code__copy" value={body.command} what="command" />
 					</div>
-					{body.exitCode ? <div className="chat-tool__exit">Exit code {body.exitCode}</div> : null}
+					{body.exitCode ? (
+						<div className={cn("chat-tool__exit", !body.failed && "chat-tool__exit--quiet")}>
+							Exit code {body.exitCode}
+						</div>
+					) : null}
 					{body.task ? (
 						<TaskOutputView running={body.task.running} taskId={body.task.id} />
 					) : body.output ? (
