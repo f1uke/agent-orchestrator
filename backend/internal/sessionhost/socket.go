@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +55,10 @@ type rewindRequest struct {
 type rewindPreviewRequest struct{ UUID string }
 type remoteControlRequest struct{ Enabled bool }
 
+type bashRequest struct{ Command string }
+
+type bashStopRequest struct{ ID string }
+
 type stateRequest struct{}
 
 type subscribeRequest struct{ FromSeq uint64 }
@@ -68,6 +73,8 @@ func (stopTaskRequest) isRequest()      {}
 func (rewindRequest) isRequest()        {}
 func (rewindPreviewRequest) isRequest() {}
 func (remoteControlRequest) isRequest() {}
+func (bashRequest) isRequest()          {}
+func (bashStopRequest) isRequest()      {}
 func (stateRequest) isRequest()         {}
 func (subscribeRequest) isRequest()     {}
 
@@ -93,6 +100,8 @@ func parseRequest(line []byte) (request, error) {
 		RestoreFiles       bool              `json:"restore_files"`
 		Enabled            *bool             `json:"enabled"`
 		FromSeq            uint64            `json:"from_seq"`
+		Command            string            `json:"command"`
+		ID                 string            `json:"id"`
 	}
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, fmt.Errorf("bad request: %w", err)
@@ -166,6 +175,16 @@ func parseRequest(line []byte) (request, error) {
 			return nil, errors.New("remote_control needs enabled")
 		}
 		return remoteControlRequest{Enabled: *w.Enabled}, nil
+	case "bash":
+		if strings.TrimSpace(w.Command) == "" {
+			return nil, errors.New("bash needs command")
+		}
+		return bashRequest{Command: w.Command}, nil
+	case "bash_stop":
+		if w.ID == "" {
+			return nil, errors.New("bash_stop needs id")
+		}
+		return bashStopRequest{ID: w.ID}, nil
 	case "state":
 		return stateRequest{}, nil
 	case "subscribe":
@@ -343,6 +362,10 @@ func (h *host) do(req request) (any, error) {
 		return h.rewind(r)
 	case rewindPreviewRequest:
 		return h.rewindPreview(r.UUID)
+	case bashRequest:
+		return h.runBash(r.Command)
+	case bashStopRequest:
+		return h.stopBash(r.ID), nil
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -352,6 +375,9 @@ func (h *host) do(req request) (any, error) {
 		in.UUID = uuid.NewString()
 		if h.stdin == nil {
 			return nil, errNotRunning
+		}
+		if h.folder.Transcript().Bash != nil {
+			return nil, errBashBusy
 		}
 		if r.Origin != nil {
 			h.noteLocked(originNote{Kind: chatproto.NoteUserOrigin, UUID: in.UUID, Origin: *r.Origin})

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 
@@ -28,6 +29,8 @@ type ChatService interface {
 	Rewind(ctx context.Context, id domain.SessionID, uuid string, restoreFiles bool) error
 	RewindPreview(ctx context.Context, id domain.SessionID, uuid string) (sessionhost.RewindPreview, error)
 	SetRemoteControl(ctx context.Context, id domain.SessionID, enabled bool) error
+	RunBash(ctx context.Context, id domain.SessionID, command string) (runID string, err error)
+	StopBash(ctx context.Context, id domain.SessionID, runID string) error
 }
 
 // ChatController owns the routes the chat view drives a session with.
@@ -43,6 +46,8 @@ func (c *ChatController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/chat/tasks/{taskId}/stop", c.stopTask)
 	r.Post("/sessions/{sessionId}/chat/rewind", c.rewind)
 	r.Post("/sessions/{sessionId}/chat/rewind/preview", c.rewindPreview)
+	r.Post("/sessions/{sessionId}/chat/bash", c.runBash)
+	r.Post("/sessions/{sessionId}/chat/bash/stop", c.stopBash)
 	r.Put("/sessions/{sessionId}/chat/mode", c.setMode)
 	r.Put("/sessions/{sessionId}/chat/model", c.setModel)
 	r.Put("/sessions/{sessionId}/chat/remote-control", c.setRemoteControl)
@@ -276,6 +281,67 @@ func (c *ChatController) setRemoteControl(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := c.Svc.SetRemoteControl(r.Context(), sessionID(r), *body.Enabled); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+// maxBashCommandBytes bounds a "!" command, which no person types longer.
+const maxBashCommandBytes = 64 << 10
+
+// checkBashCommand refuses a command that is blank, too long, or carries a
+// control character other than tab and newline, which a person does not type
+// and a shell or terminal may act on.
+func checkBashCommand(command string) (code, message string) {
+	switch {
+	case strings.TrimSpace(command) == "":
+		return "COMMAND_REQUIRED", "command is required"
+	case len(command) > maxBashCommandBytes:
+		return "COMMAND_TOO_LONG", "A command is at most 64 KiB"
+	case strings.ContainsFunc(command, func(r rune) bool { return r != '\t' && r != '\n' && unicode.IsControl(r) }):
+		return "COMMAND_CONTROL_CHARS", "A command may carry no control characters other than tab and newline"
+	}
+	return "", ""
+}
+
+func (c *ChatController) runBash(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/chat/bash")
+		return
+	}
+	var body RunChatBashRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	if code, msg := checkBashCommand(body.Command); code != "" {
+		chatBadRequest(w, r, code, msg)
+		return
+	}
+	id, err := c.Svc.RunBash(r.Context(), sessionID(r), strings.TrimSpace(body.Command))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatBashResponse{ID: id})
+}
+
+func (c *ChatController) stopBash(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/chat/bash/stop")
+		return
+	}
+	var body StopChatBashRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	if body.ID == "" {
+		chatBadRequest(w, r, "ID_REQUIRED", "id is required")
+		return
+	}
+	if err := c.Svc.StopBash(r.Context(), sessionID(r), body.ID); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}

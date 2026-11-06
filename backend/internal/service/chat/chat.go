@@ -132,6 +132,29 @@ func (s *Service) SetRemoteControl(ctx context.Context, id domain.SessionID, ena
 	return hostError(id, c.RemoteControl(ctx, enabled))
 }
 
+// RunBash runs command, which the person typed after "!" in the chat, in the
+// session's worktree and returns the run's id. The host refuses it while a turn
+// is open, a permission is pending or another command has not finished: that
+// is CHAT_REQUEST_REJECTED with its reason.
+func (s *Service) RunBash(ctx context.Context, id domain.SessionID, command string) (string, error) {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	runID, err := c.RunBash(ctx, command)
+	return runID, hostError(id, err)
+}
+
+// StopBash stops the session's "!" command run runID. A finished or unknown
+// run is a no-op.
+func (s *Service) StopBash(ctx context.Context, id domain.SessionID, runID string) error {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hostError(id, c.StopBash(ctx, runID))
+}
+
 func (s *Service) client(ctx context.Context, id domain.SessionID) (sessionhost.Client, error) {
 	rec, ok, err := s.sessions.GetSession(ctx, id)
 	switch {

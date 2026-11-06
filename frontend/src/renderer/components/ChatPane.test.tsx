@@ -81,6 +81,8 @@ function fakeApi() {
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
 		setRemoteControl: vi.fn<ChatApi["setRemoteControl"]>(async () => OK),
 		setChrome: vi.fn<ChatApi["setChrome"]>(async () => OK),
+		runBash: vi.fn<ChatApi["runBash"]>(async () => ({ ok: true, id: "b1" })),
+		stopBash: vi.fn<ChatApi["stopBash"]>(async () => OK),
 		stopTask: vi.fn<ChatApi["stopTask"]>(async () => OK),
 		rewind: vi.fn<ChatApi["rewind"]>(async () => OK),
 		rewindPreview: vi.fn<ChatApi["rewindPreview"]>(async () => ({
@@ -2008,5 +2010,115 @@ describe("ChatPane links into the Tasks tab", () => {
 		expect(within(document.querySelector(".chat-statusline") as HTMLElement).getByRole("button")).toHaveTextContent(
 			"2 running",
 		);
+	});
+});
+
+describe("ChatPane ! commands", () => {
+	const composer = () => screen.getByRole("textbox", { name: "Message Claude" });
+	const host = (payload: object) => entry("host", payload);
+	const started = (id: string, command: string) => host({ kind: "bash_start", id, command, cwd: "/w" });
+	const printed = (id: string, text: string, stream = "stdout") => host({ kind: "bash_output", id, stream, text });
+	const ended = (id: string, over: object = {}) =>
+		host({ kind: "bash_end", id, code: 0, signal: null, stopped: false, truncated: false, ...over });
+	const injected = (id: string) =>
+		entry("in", {
+			type: "user",
+			uuid: id,
+			shouldQuery: false,
+			message: { role: "user", content: [{ type: "text", text: "<bash-input>x</bash-input>" }] },
+		});
+	const settled = () => out({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 0 });
+
+	it("draws a finished run as a row with its output and exit code, and no user row or turn end", () => {
+		const { feed } = renderPane();
+		feed(
+			started("b1", "git status"),
+			printed("b1", "clean\n"),
+			printed("b1", "warning\n", "stderr"),
+			ended("b1", { code: 3 }),
+			injected("b1"),
+			settled(),
+		);
+		const row = document.querySelector('[data-bash="b1"]')!;
+		expect(row).toHaveTextContent("git status");
+		expect(row.querySelector('[data-stream="stdout"]')).toHaveTextContent("clean");
+		expect(row.querySelector('[data-stream="stderr"]')).toHaveTextContent("warning");
+		expect(within(row as HTMLElement).getByTestId("chat-bash-badge")).toHaveTextContent("exit 3");
+		expect(document.querySelectorAll(".chat-user")).toHaveLength(0);
+		expect(document.querySelector('[data-notice="turn_end"]')).toBeNull();
+	});
+
+	it("stops a running run from its row and only then", async () => {
+		const { feed, api, user } = renderPane();
+		feed(started("b1", "sleep 30"), printed("b1", "started\n"));
+		const stop = screen.getByRole("button", { name: "Stop sleep 30" });
+		await user.click(stop);
+		await settle();
+		expect(api.stopBash).toHaveBeenCalledExactlyOnceWith("chat-1", "b1");
+		feed(ended("b1", { code: null, stopped: true }));
+		expect(screen.queryByRole("button", { name: "Stop sleep 30" })).toBeNull();
+		expect(
+			within(document.querySelector('[data-bash="b1"]') as HTMLElement).getByTestId("chat-bash-badge"),
+		).toHaveTextContent("stopped");
+	});
+
+	it("runs a typed ! command through runBash and never sends it as a prompt", async () => {
+		const { api, user } = renderPane();
+		await user.type(composer(), "!git status");
+		expect(screen.getByRole("textbox", { name: "Shell command" })).toHaveValue("git status");
+		await user.keyboard("{Enter}");
+		await settle();
+		expect(api.runBash).toHaveBeenCalledExactlyOnceWith("chat-1", "git status");
+		expect(api.send).not.toHaveBeenCalled();
+		expect(composer()).toHaveValue("");
+	});
+
+	it("keeps the normal Send disabled while a run is still being passed to claude", async () => {
+		const { feed, user } = renderPane();
+		feed(started("b1", "ls"), ended("b1"), injected("b1"));
+		await user.type(composer(), "next prompt");
+		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+		feed(settled());
+		expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+	});
+
+	describe("never runs a command from anything but the composer", () => {
+		it("Run on a shell block that starts with ! only fills the composer as a prompt", async () => {
+			const { feed, api, user } = renderPane();
+			feed(userIn("u1", "how?"), saying("```bash\n!rm -rf build\n```"));
+			await user.click(screen.getByRole("button", { name: "Ask Claude to run this" }));
+			await settle();
+			expect(composer()).toHaveValue("Run this command:\n\n```bash\n!rm -rf build\n```");
+			expect(screen.queryByTestId("chat-bash-mode")).toBeNull();
+			expect(api.runBash).not.toHaveBeenCalled();
+			expect(api.send).not.toHaveBeenCalled();
+		});
+
+		it("Run while the composer is in bash mode leaves bash mode and still runs nothing", async () => {
+			const { feed, api, user } = renderPane();
+			feed(userIn("u1", "how?"), saying("```bash\n!rm -rf build\n```"));
+			await user.type(composer(), "!echo hi");
+			await user.click(screen.getByRole("button", { name: "Ask Claude to run this" }));
+			await settle();
+			expect(screen.queryByTestId("chat-bash-mode")).toBeNull();
+			expect(composer()).toHaveValue("Run this command:\n\n```bash\n!rm -rf build\n```");
+			await user.click(composer());
+			await user.keyboard("{Enter}");
+			await settle();
+			expect(api.runBash).not.toHaveBeenCalled();
+			expect(api.send).toHaveBeenCalledTimes(1);
+		});
+
+		it("assistant text and markdown links that contain !rm -rf call neither runBash nor stopBash", async () => {
+			const { feed, api, user } = renderPane();
+			feed(userIn("u1", "go"), saying("!rm -rf /tmp/x\n\n[!rm -rf build](https://example.com/!rm)\n\n`!rm -rf y`"));
+			for (const button of screen.queryAllByRole("button")) {
+				if (button.closest(".chat-composer-wrap")) continue;
+				await user.click(button);
+			}
+			await settle();
+			expect(api.runBash).not.toHaveBeenCalled();
+			expect(api.stopBash).not.toHaveBeenCalled();
+		});
 	});
 });

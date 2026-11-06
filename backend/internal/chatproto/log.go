@@ -70,6 +70,9 @@ const (
 	NoteSpawn      HostNoteKind = "spawn"
 	NoteExit       HostNoteKind = "exit"
 	NoteUserOrigin HostNoteKind = "user_origin"
+	NoteBashStart  HostNoteKind = "bash_start"
+	NoteBashOutput HostNoteKind = "bash_output"
+	NoteBashEnd    HostNoteKind = "bash_end"
 )
 
 // Origin says where a user input came from when it was not typed in the chat.
@@ -90,8 +93,23 @@ type HostNote struct {
 	Origin *Origin
 	Resume string
 	Argv   []string
-	Code   *int // nil when claude died on a signal
+	Code   *int // nil when claude, or a "!" command for bash_end, died on a signal
+	Bash   BashNote
 	Raw    json.RawMessage
+}
+
+// BashNote is the body of a bash_start, bash_output or bash_end note, which
+// follow one "!" command the person ran. ID names the run. Each kind sets its
+// own fields; bash_end also sets HostNote.Code.
+type BashNote struct {
+	ID        string
+	Command   string     // bash_start
+	CWD       string     // bash_start
+	Stream    BashStream // bash_output
+	Text      string     // bash_output
+	Signal    *string    // bash_end: the signal that ended it, nil when it exited
+	Stopped   bool       // bash_end: stopped by the person, or because claude went away
+	Truncated bool       // bash_end: output past the display cap was not logged
 }
 
 // ParseHostNote parses the payload of a DirHost entry.
@@ -103,6 +121,15 @@ func ParseHostNote(payload json.RawMessage) (HostNote, error) {
 		Resume string       `json:"resume"`
 		Argv   []string     `json:"argv"`
 		Code   *int         `json:"code"`
+
+		ID        string     `json:"id"`
+		Command   string     `json:"command"`
+		CWD       string     `json:"cwd"`
+		Stream    BashStream `json:"stream"`
+		Text      string     `json:"text"`
+		Signal    *string    `json:"signal"`
+		Stopped   bool       `json:"stopped"`
+		Truncated bool       `json:"truncated"`
 	}
 	if err := json.Unmarshal(payload, &w); err != nil {
 		return HostNote{}, fmt.Errorf("chatproto: parse host note: %w", err)
@@ -110,5 +137,13 @@ func ParseHostNote(payload json.RawMessage) (HostNote, error) {
 	if w.Kind == "" {
 		return HostNote{}, errors.New("chatproto: parse host note: missing kind")
 	}
-	return HostNote{Kind: w.Kind, UUID: w.UUID, Origin: w.Origin, Resume: w.Resume, Argv: w.Argv, Code: w.Code, Raw: bytes.Clone(payload)}, nil
+	n := HostNote{Kind: w.Kind, UUID: w.UUID, Origin: w.Origin, Resume: w.Resume, Argv: w.Argv, Code: w.Code, Raw: bytes.Clone(payload)}
+	switch w.Kind {
+	case NoteBashStart, NoteBashOutput, NoteBashEnd:
+		n.Bash = BashNote{
+			ID: w.ID, Command: w.Command, CWD: w.CWD, Stream: w.Stream, Text: w.Text,
+			Signal: w.Signal, Stopped: w.Stopped, Truncated: w.Truncated,
+		}
+	}
+	return n, nil
 }

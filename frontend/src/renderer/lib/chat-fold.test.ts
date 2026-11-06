@@ -1304,3 +1304,262 @@ describe("chat fold: Claude in Chrome", () => {
 		expect(foldEntries([spawn(1, ["claude", "--", "--chrome"])]).chrome).toBe(false);
 	});
 });
+
+describe("chat fold: a ! command", () => {
+	const start = (id = "b1", command = "git status") => ({ kind: "bash_start", id, command, cwd: "/work/tree" });
+	const output = (text: string, stream = "stdout", id = "b1") => ({ kind: "bash_output", id, stream, text });
+	const end = (over: object = {}, id = "b1") => ({
+		kind: "bash_end",
+		id,
+		code: 0,
+		signal: null,
+		stopped: false,
+		truncated: false,
+		...over,
+	});
+	const injection = (id = "b1") => ({
+		type: "user",
+		uuid: id,
+		shouldQuery: false,
+		message: {
+			role: "user",
+			content: [
+				{ type: "text", text: "<bash-input>git status</bash-input>" },
+				{
+					type: "text",
+					text: "<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>",
+				},
+			],
+		},
+	});
+	const empty = { type: "result", subtype: "success", is_error: false, result: "", num_turns: 0 };
+	const fold = (...steps: Array<[Direction, unknown]>) =>
+		foldEntries(steps.map(([dir, payload], i) => synth(i + 1, dir, payload)));
+	const bashes = (tr: Transcript) =>
+		tr.items.filter((i): i is Extract<ChatItem, { kind: "bash" }> => i.kind === "bash");
+
+	it("builds one row from the start, output and end notes, joining output of the same stream", () => {
+		const tr = fold(
+			["host", start()],
+			["host", output("On branch main\n")],
+			["host", output("nothing to commit\n")],
+			["host", output("warning: x\n", "stderr")],
+			["host", end()],
+		);
+		expect(bashes(tr)).toEqual([
+			{
+				kind: "bash",
+				id: "b1",
+				command: "git status",
+				cwd: "/work/tree",
+				chunks: [
+					{ stream: "stdout", text: "On branch main\nnothing to commit\n" },
+					{ stream: "stderr", text: "warning: x\n" },
+				],
+				state: "done",
+				code: 0,
+				signal: null,
+				truncated: false,
+				ts: "",
+			},
+		]);
+		expect(tr.items).toHaveLength(1);
+	});
+
+	it("shows a run as running until its end note, and keeps the output so far after a reload", () => {
+		const tr = fold(["host", start()], ["host", output("compiling\n")]);
+		expect(bashes(tr)[0]).toMatchObject({
+			state: "running",
+			code: null,
+			chunks: [{ stream: "stdout", text: "compiling\n" }],
+		});
+		expect(tr.bashBusy).toBe(true);
+	});
+
+	it.each([
+		["a failing exit code", { code: 2 }, { state: "done", code: 2, signal: null }],
+		["a signal", { code: null, signal: "SIGSEGV" }, { state: "done", code: null, signal: "SIGSEGV" }],
+		["a stop", { code: null, stopped: true }, { state: "stopped", code: null, signal: null }],
+		["a truncated output", { truncated: true }, { state: "done", code: 0, truncated: true }],
+	])("ends on %s", (_name, over, expected) => {
+		expect(bashes(fold(["host", start()], ["host", end(over)]))[0]).toMatchObject(expected);
+	});
+
+	it("hides the injected user message and drops claude's empty result: no user row, no turn end", () => {
+		const tr = fold(
+			["host", start()],
+			["host", output("clean\n")],
+			["host", end()],
+			["in", injection()],
+			["out", empty],
+		);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash"]);
+		expect(tr.bashBusy).toBe(false);
+		expect(tr.costUsd).toBe(0);
+	});
+
+	it("is busy from the start until claude's result settles it", () => {
+		const busy = (...steps: Array<[Direction, unknown]>) => fold(["host", start()], ...steps).bashBusy;
+		expect(busy()).toBe(true);
+		expect(busy(["host", end()])).toBe(true);
+		expect(busy(["host", end()], ["in", injection()])).toBe(true);
+		expect(busy(["host", end()], ["in", injection()], ["out", empty])).toBe(false);
+	});
+
+	it("drops only the one result that follows the injection, and a later real result still ends its turn", () => {
+		const tr = fold(
+			["host", start()],
+			["host", end()],
+			["in", injection()],
+			["out", empty],
+			["in", { type: "user", uuid: "u1", message: { role: "user", content: "next" } }],
+			["out", { type: "command_lifecycle", command_uuid: "u1", state: "started" }],
+			["out", { type: "result", subtype: "success", is_error: false, result: "done", num_turns: 1 }],
+		);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash", "user", "turn_end"]);
+	});
+
+	it("keeps a shouldQuery false user message that no run produced", () => {
+		const tr = fold(["in", injection("other")]);
+		expect(users(tr)).toHaveLength(1);
+	});
+
+	it("keeps a result that no injection precedes", () => {
+		const tr = fold(["host", start()], ["host", end()], ["out", empty]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash", "turn_end"]);
+		expect(tr.bashBusy).toBe(true);
+	});
+
+	it("stops a running run when claude exits, and clears the busy state", () => {
+		const tr = fold(["host", start()], ["host", output("x\n")], ["host", { kind: "exit", code: 1 }]);
+		expect(bashes(tr)[0]).toMatchObject({ state: "stopped", code: null });
+		expect(tr.bashBusy).toBe(false);
+	});
+
+	it("ignores a repeated start and output for an unknown run", () => {
+		const tr = fold(["host", start()], ["host", start()], ["host", output("x", "stdout", "nope")]);
+		expect(bashes(tr)).toHaveLength(1);
+		expect(bashes(tr)[0].chunks).toEqual([]);
+	});
+
+	it("folds the same one entry at a time as whole", () => {
+		const steps: Array<[Direction, unknown]> = [
+			["host", start()],
+			["host", output("a\n")],
+			["host", end()],
+			["in", injection()],
+			["out", empty],
+		];
+		const entries = steps.map(([dir, payload], i) => synth(i + 1, dir, payload));
+		const folder = new ChatFolder();
+		for (const entry of entries) folder.apply(entry);
+		expect(folder.transcript()).toEqual(foldEntries(entries));
+	});
+
+	it("takes a run out when a rewind cuts the row before it", () => {
+		const tr = fold(
+			["in", { type: "user", uuid: "u1", message: { role: "user", content: "go" } }],
+			["host", start()],
+			["host", end()],
+			["in", injection()],
+			["out", empty],
+			[
+				"in",
+				{
+					type: "control_request",
+					request_id: "rw",
+					request: { subtype: "rewind_conversation", target_message_uuid: "u1" },
+				},
+			],
+			[
+				"out",
+				{ type: "control_response", response: { subtype: "success", request_id: "rw", response: { rewound: true } } },
+			],
+		);
+		expect(bashes(tr)).toHaveLength(0);
+		expect(tr.bashBusy).toBe(false);
+	});
+});
+
+describe("chat fold: what claude answers to a ! command's result", () => {
+	const RUN = "b7d1c2a4-5e6f-4a1b-9c3d-2e4f6a8b0c1d";
+	const message = {
+		role: "user",
+		content: [
+			{ type: "text", text: "<bash-input>git status --short &amp;&amp; echo done</bash-input>" },
+			{
+				type: "text",
+				text: "<bash-stdout> M a.txt\ndone\n</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>",
+			},
+		],
+	};
+	const lifecycle = (state: string, id = RUN) =>
+		["out", { type: "command_lifecycle", command_uuid: id, state }] as const;
+	const run = [
+		["host", { kind: "bash_start", id: RUN, command: "git status --short && echo done", cwd: "/w" }],
+		["host", { kind: "bash_output", id: RUN, stream: "stdout", text: " M a.txt\ndone\n" }],
+		["host", { kind: "bash_end", id: RUN, code: 0, signal: null, stopped: false, truncated: false }],
+		["in", { type: "user", uuid: RUN, shouldQuery: false, message }],
+	] as const;
+	const replay = [
+		lifecycle("queued"),
+		lifecycle("started"),
+		["out", { type: "user", uuid: RUN, isReplay: true, origin: { kind: "human" }, message }],
+		["out", { type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, total_cost_usd: 0 }],
+		lifecycle("completed"),
+	] as const;
+	const fold = (steps: ReadonlyArray<readonly [Direction, unknown]>) =>
+		foldEntries(steps.map(([dir, payload], i) => synth(i + 1, dir, payload)));
+
+	it("shows only the bash row: no replayed user row, no remote-control row, no turn end", () => {
+		const tr = fold([...run, ...replay]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash"]);
+		expect(tr.bashBusy).toBe(false);
+		expect(tr.busy).toBe(false);
+		expect(tr.queued).toEqual([]);
+	});
+
+	it("is not busy as a turn while the replay is in flight, and not settled until the result", () => {
+		const midway = fold([...run, replay[0], replay[1], replay[2]]);
+		expect(midway.busy).toBe(false);
+		expect(midway.bashBusy).toBe(true);
+		expect(midway.items.map((i) => i.kind)).toEqual(["bash"]);
+	});
+
+	it("still shows a replayed human message of another uuid as a remote prompt", () => {
+		const other = [
+			"out",
+			{
+				type: "user",
+				uuid: "remote-1",
+				isReplay: true,
+				origin: { kind: "human" },
+				message: { role: "user", content: "hi" },
+			},
+		] as const;
+		const tr = fold([...run, ...replay, other]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash", "user"]);
+	});
+
+	it("lets the next prompt run a normal turn after the run settled", () => {
+		const prompt = [
+			"in",
+			{ type: "user", uuid: "u1", message: { role: "user", content: "Reply with the word ok." } },
+		] as const;
+		const tr = fold([
+			...run,
+			...replay,
+			prompt,
+			lifecycle("queued", "u1"),
+			lifecycle("started", "u1"),
+			[
+				"out",
+				{ type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, total_cost_usd: 0.01 },
+			],
+			lifecycle("completed", "u1"),
+		]);
+		expect(tr.items.map((i) => i.kind)).toEqual(["bash", "user", "turn_end"]);
+		expect(tr.busy).toBe(false);
+		expect(users(tr)[0].state).toBe("completed");
+	});
+});

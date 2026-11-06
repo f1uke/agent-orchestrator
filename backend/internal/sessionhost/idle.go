@@ -139,7 +139,7 @@ func (h *host) fireIdleLocked() {
 		return
 	}
 	t := h.folder.Transcript()
-	if t.Busy || len(t.Pending) > 0 || len(t.Queued) > 0 {
+	if t.Busy || len(t.Pending) > 0 || len(t.Queued) > 0 || t.Bash != nil {
 		return
 	}
 	if err := h.writeThenLogLocked(chatproto.UserInput{UUID: uuid.NewString(), Text: compactCommand}); err != nil {

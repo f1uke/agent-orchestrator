@@ -67,6 +67,19 @@ func renderNote(n chatproto.HostNote) []string {
 		}
 		_ = json.Unmarshal(n.Raw, &w)
 		return []string{dim("── claude exited on " + w.Signal)}
+	case chatproto.NoteBashStart:
+		lines := splitLines(n.Bash.Command)
+		out := make([]string, 0, len(lines))
+		for i, l := range lines {
+			prefix := "  "
+			if i == 0 {
+				prefix = "! "
+			}
+			out = append(out, cyan(prefix+l))
+		}
+		return out
+	case chatproto.NoteBashEnd:
+		return []string{dim("  ⎿ " + bashEndText(n))}
 	case noteNonJSON:
 		var w struct {
 			Text string `json:"text"`
@@ -77,9 +90,30 @@ func renderNote(n chatproto.HostNote) []string {
 	return nil
 }
 
+func bashEndText(n chatproto.HostNote) string {
+	var what string
+	switch {
+	case n.Bash.Stopped:
+		what = "stopped"
+	case n.Code != nil:
+		what = fmt.Sprintf("exit %d", *n.Code)
+	case n.Bash.Signal != nil:
+		what = "killed by " + *n.Bash.Signal
+	default:
+		what = "ended"
+	}
+	if n.Bash.Truncated {
+		what += ", output past 1 MiB not shown"
+	}
+	return what
+}
+
 func renderIn(ev chatproto.Event) []string {
 	switch ev := ev.(type) {
 	case chatproto.User:
+		if ev.NoQuery {
+			return nil
+		}
 		var text strings.Builder
 		images := 0
 		for _, b := range ev.Blocks {
