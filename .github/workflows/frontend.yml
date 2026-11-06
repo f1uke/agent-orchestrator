@@ -158,8 +158,20 @@ jobs:
   # `api-gateway` demo fixtures 2cb20c23e replaced with `ao-demo` now read
   # `ao-demo`, so the job runs the whole folder and a new spec is guarded the day
   # it lands.
-  glyph-legibility:
+  #
+  # The suite runs as SHARDS (playwright --shard=i/N), each on its own runner, so
+  # the PR waits for the slowest quarter rather than the whole folder: run on one
+  # runner it had grown past 16 minutes. Each shard is a separate machine, so the
+  # dev server's fixed port and test-results/ are never shared between them.
+  # Workers per shard stay at Playwright's CI default: raising them made chat
+  # specs fail under parallel load.
+  e2e:
+    name: e2e (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: frontend
@@ -177,5 +189,28 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run the Playwright e2e suite in a real browser
-        run: npx playwright test
+      - name: Run Playwright e2e shard ${{ matrix.shard }}/4 in a real browser
+        run: npx playwright test --shard=${{ matrix.shard }}/4 --trace=retain-on-failure
+
+      # Each failing test leaves its trace.zip here; open it with
+      # `npx playwright show-trace <trace.zip>` or at trace.playwright.dev.
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-shard-${{ matrix.shard }}
+          path: frontend/test-results/
+          retention-days: 14
+
+  # One verdict for the whole suite under the check name the suite has always
+  # reported as. `always()` makes it run when a shard fails or is cancelled, so it
+  # turns red instead of being skipped.
+  glyph-legibility:
+    needs: e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every e2e shard to pass
+        run: |
+          echo "e2e shards: ${{ needs.e2e.result }}"
+          test "${{ needs.e2e.result }}" = "success"
