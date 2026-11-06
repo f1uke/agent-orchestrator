@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageSrc, imagesOf } from "./chat-images";
+import { chatBlobUrl, imageSrc, imagesOf } from "./chat-images";
 
 const block = (media_type: string, data = "AAAA") => ({ type: "image", source: { type: "base64", media_type, data } });
 
@@ -25,6 +25,14 @@ describe("imagesOf", () => {
 		]);
 	});
 
+	it("keeps an image the daemon stores by reference as its blob name", () => {
+		const name = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4.png";
+		const ref = { type: "image", source: { type: "ao_blob", media_type: "image/png", blob: name, size: 2 } };
+		expect(imagesOf([ref, { type: "image", source: { type: "ao_blob", media_type: "image/png", blob: "" } }])).toEqual([
+			{ mediaType: "image/png", blob: name },
+		]);
+	});
+
 	it.each([["a string"], [undefined], [null], [{ type: "image" }], [42]])("returns nothing for %j", (content) => {
 		expect(imagesOf(content)).toEqual([]);
 	});
@@ -33,5 +41,13 @@ describe("imagesOf", () => {
 describe("imageSrc", () => {
 	it("builds a data URL the renderer CSP allows without a fetch", () => {
 		expect(imageSrc({ mediaType: "image/jpeg", base64: "QUJD" })).toBe("data:image/jpeg;base64,QUJD");
+	});
+});
+
+describe("chatBlobUrl", () => {
+	it("names the session's blob route, escaping the session id", () => {
+		expect(chatBlobUrl("http://127.0.0.1:4317", "ao 1", "ab.png")).toBe(
+			"http://127.0.0.1:4317/api/v1/sessions/ao%201/chat/blobs/ab.png",
+		);
 	});
 });

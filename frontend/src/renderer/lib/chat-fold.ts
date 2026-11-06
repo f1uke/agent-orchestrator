@@ -609,7 +609,9 @@ export class ChatFolder {
 		const images: ChatImage[] = [];
 		for (const block of blocks) {
 			if (block.type === "text") text += block.text;
-			else if (block.type === "image" && isImageMime(block.mediaType) && block.data !== "") {
+			else if (block.type === "image" && isImageMime(block.mediaType) && block.blob) {
+				images.push({ mediaType: block.mediaType, blob: block.blob });
+			} else if (block.type === "image" && isImageMime(block.mediaType) && block.data !== "") {
 				images.push({ mediaType: block.mediaType, base64: block.data });
 			}
 		}

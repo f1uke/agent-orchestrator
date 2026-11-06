@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEntry } from "../lib/chat-event";
 import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import type { MuxConnectionState } from "../lib/terminal-mux";
-import { useChatSession } from "./useChatSession";
+import { recentChats, useChatSession } from "./useChatSession";
 
 type FakeMux = {
 	mux: ChatMux;
@@ -76,6 +76,7 @@ function setup({ daemonReady = true, sessionLive = true } = {}) {
 
 beforeEach(() => {
 	vi.useFakeTimers();
+	recentChats.clear();
 });
 
 afterEach(() => {
@@ -303,5 +304,56 @@ describe("useChatSession", () => {
 		renders.length = 0;
 		view.rerender({ id: "chat-2" });
 		expect(renders.filter((r) => r.id === "chat-2").map((r) => r.texts)).not.toContainEqual(["from chat-1"]);
+	});
+
+	it("shows a session switched back to at once, and asks only for what was logged since", () => {
+		const muxes: FakeMux[] = [];
+		const createMux = () => {
+			const fake = createFakeMux();
+			muxes.push(fake);
+			return fake.mux;
+		};
+		const view = renderHook(({ id }) => useChatSession(id, { createMux, daemonReady: true, sessionLive: true }), {
+			initialProps: { id: "chat-1" },
+		});
+		act(() => {
+			muxes[0].listeners!.entry(userInput(1, "u1", "hello"));
+			muxes[0].listeners!.entry(assistant(2, "m1", "hi"));
+			muxes[0].listeners!.live();
+		});
+		act(() => void vi.advanceTimersToNextFrame());
+		view.rerender({ id: "chat-2" });
+		act(() => muxes[1].listeners!.live());
+		view.rerender({ id: "chat-1" });
+
+		expect(muxes[2].opens).toEqual([["chat-1", 2]]);
+		expect(view.result.current.replaying).toBe(false);
+		expect(view.result.current.transcript.items.map((i) => i.kind)).toEqual(["user", "assistant_text"]);
+		act(() => {
+			muxes[2].listeners!.entry(assistant(3, "m2", "again"));
+			muxes[2].listeners!.live();
+		});
+		act(() => void vi.advanceTimersToNextFrame());
+		expect(view.result.current.entries.map((e) => e.seq)).toEqual([1, 2, 3]);
+	});
+
+	it("does not keep a session whose replay was cut off, so its next open replays the whole log", () => {
+		const muxes: FakeMux[] = [];
+		const createMux = () => {
+			const fake = createFakeMux();
+			muxes.push(fake);
+			return fake.mux;
+		};
+		const view = renderHook(({ id }) => useChatSession(id, { createMux, daemonReady: true, sessionLive: true }), {
+			initialProps: { id: "chat-1" },
+		});
+		act(() => {
+			muxes[0].listeners!.entry(userInput(3, "u2", "second"));
+			muxes[0].listeners!.history();
+		});
+		view.rerender({ id: "chat-2" });
+		view.rerender({ id: "chat-1" });
+		expect(muxes[2].opens).toEqual([["chat-1", 0]]);
+		expect(view.result.current.replaying).toBe(true);
 	});
 });

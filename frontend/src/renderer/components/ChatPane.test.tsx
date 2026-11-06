@@ -9,6 +9,7 @@ import type { ChatMux, ChatMuxListeners } from "../lib/chat-mux";
 import { emptyOverlay } from "../lib/chat-stream";
 import { aoBridge } from "../lib/bridge";
 import { file, image, resolveCalls, stubChatFiles } from "../test/chat-files-stub";
+import { recentChats } from "../hooks/useChatSession";
 import { useUiStore } from "../stores/ui-store";
 import type { SubscriptionUsage } from "../lib/chat-usage";
 import type { WorkspaceSession } from "../types/workspace";
@@ -61,6 +62,7 @@ const out = (payload: object) => entry("out", payload);
 
 beforeEach(() => {
 	vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+	recentChats.clear();
 	listeners = undefined;
 	sharedUsage = undefined;
 	seq = 0;
@@ -207,6 +209,30 @@ describe("ChatPane", () => {
 		const dialog = await screen.findByRole("dialog");
 		expect(within(dialog).getByText("2 / 2")).toBeInTheDocument();
 		expect(within(dialog).getByRole("img")).toHaveAttribute("src", "data:image/png;base64,AAAA");
+	});
+
+	it("draws an image the log stores by reference from the session's blob route", async () => {
+		const fetchMock = stubChatFiles({});
+		const { feed } = renderPane();
+		const blob = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4.png";
+		feed(
+			entry("in", {
+				type: "user",
+				uuid: "u1",
+				message: {
+					content: [
+						{ type: "text", text: "see" },
+						{ type: "image", source: { type: "ao_blob", media_type: "image/png", blob, size: 3 } },
+					],
+				},
+			}),
+			out({ type: "command_lifecycle", command_uuid: "u1", state: "started" }),
+		);
+		const bubble = document.querySelector(".chat-user") as HTMLElement;
+		await waitFor(() => expect(within(bubble).getByRole("img")).toHaveAttribute("src", "blob:file-1"));
+		expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+			`/api/v1/sessions/${session.id}/chat/blobs/${blob}`,
+		);
 	});
 
 	it("ends a turn with how long it took, never a money amount", () => {
@@ -926,11 +952,13 @@ describe("ChatPane calm view", () => {
 			thinking.feed(...afterTools(), tokens(12));
 			const thinkingShape = shapeOf(liveRows()[0]);
 			thinking.unmount();
+			recentChats.clear();
 
 			const running = renderPane("chat", fakeApi(), rooted);
 			running.feed(...afterTools(), at(30, toolUse("c", "Bash", { command: "go test" })));
 			const runningShape = shapeOf(liveRows()[0]);
 			running.unmount();
+			recentChats.clear();
 
 			const waiting = renderPane("chat", fakeApi(), rooted);
 			waiting.feed(

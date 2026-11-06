@@ -2,7 +2,9 @@ import { isObject } from "./chat-event";
 
 export type ImageMime = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
-export type ChatImage = { mediaType: ImageMime; base64: string };
+export type InlineImage = { mediaType: ImageMime; base64: string };
+
+export type ChatImage = InlineImage | { mediaType: ImageMime; blob: string };
 
 const IMAGE_MIMES: ReadonlySet<string> = new Set<ImageMime>(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
@@ -15,7 +17,17 @@ export function imagesOf(content: unknown): ChatImage[] {
 	const images: ChatImage[] = [];
 	for (const block of content) {
 		if (!isObject(block) || block.type !== "image" || !isObject(block.source)) continue;
-		const { type, media_type: mediaType, data } = block.source;
+		const { type, media_type: mediaType, data, blob } = block.source;
+		if (
+			type === "ao_blob" &&
+			typeof mediaType === "string" &&
+			isImageMime(mediaType) &&
+			typeof blob === "string" &&
+			blob !== ""
+		) {
+			images.push({ mediaType, blob });
+			continue;
+		}
 		if (
 			type === "base64" &&
 			typeof mediaType === "string" &&
@@ -29,6 +41,10 @@ export function imagesOf(content: unknown): ChatImage[] {
 	return images;
 }
 
-export function imageSrc(image: ChatImage): string {
+export function imageSrc(image: InlineImage): string {
 	return `data:${image.mediaType};base64,${image.base64}`;
+}
+
+export function chatBlobUrl(apiBase: string, sessionId: string, blob: string): string {
+	return `${apiBase}/api/v1/sessions/${encodeURIComponent(sessionId)}/chat/blobs/${encodeURIComponent(blob)}`;
 }

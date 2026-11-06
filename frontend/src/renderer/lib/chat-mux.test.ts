@@ -65,7 +65,7 @@ describe("createChatMux", () => {
 		expect(socket.sent).toEqual([]);
 		socket.emitOpen();
 		expect(socket.sent.map((f) => JSON.parse(f))).toEqual([
-			{ ch: "chat", type: "open", id: "s1", fromSeq: 42, tail: true },
+			{ ch: "chat", type: "open", id: "s1", fromSeq: 42, tail: true, blobRefs: true },
 		]);
 		mux.close("s1");
 		expect(JSON.parse(socket.sent[1])).toEqual({ ch: "chat", type: "close", id: "s1" });

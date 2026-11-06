@@ -1,5 +1,5 @@
 import { docTag } from "./chat-docs";
-import { type ChatImage, type ImageMime, isImageMime } from "./chat-images";
+import { type ImageMime, type InlineImage, isImageMime } from "./chat-images";
 import { IMAGE_EXT } from "./chat-refs";
 
 export const MAX_IMAGES = 20;
@@ -8,7 +8,7 @@ const LONG_EDGE = 2000;
 const QUALITY = 0.9;
 
 export type PreparedImage =
-	{ ok: true; image: ChatImage; size: number } | { ok: false; reason: "too_large" | "unreadable" };
+	{ ok: true; image: InlineImage; size: number } | { ok: false; reason: "too_large" | "unreadable" };
 
 function toBase64(blob: Blob): Promise<string> {
 	return new Promise((resolve, reject) => {
