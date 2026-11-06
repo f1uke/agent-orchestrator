@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEvent } from "./chat-event";
+import { parseEvent, parseHostNote } from "./chat-event";
 
 describe("parseEvent", () => {
 	it("keeps the bytes of a user image block", () => {
@@ -21,6 +21,16 @@ describe("parseEvent", () => {
 				{ type: "image", mediaType: "image/png", data: "iVBORw==" },
 			],
 		});
+	});
+
+	it("keeps the blob name of an image the daemon stores by reference", () => {
+		const event = parseEvent({
+			type: "user",
+			message: {
+				content: [{ type: "image", source: { type: "ao_blob", media_type: "image/jpeg", blob: "ab.jpg", size: 9 } }],
+			},
+		});
+		expect(event).toMatchObject({ blocks: [{ type: "image", mediaType: "image/jpeg", data: "", blob: "ab.jpg" }] });
 	});
 
 	it("gives an image with a non-base64 source no bytes", () => {
@@ -87,5 +97,49 @@ describe("parseEvent", () => {
 				eventType: "prompt_suggestion",
 			});
 		});
+	});
+});
+
+describe("parseHostNote bash notes", () => {
+	it("reads a start, an output chunk and an end", () => {
+		expect(parseHostNote({ kind: "bash_start", id: "b1", command: "ls", cwd: "/w" })).toEqual({
+			kind: "bash_start",
+			id: "b1",
+			command: "ls",
+			cwd: "/w",
+		});
+		expect(parseHostNote({ kind: "bash_output", id: "b1", stream: "stderr", text: "e" })).toEqual({
+			kind: "bash_output",
+			id: "b1",
+			stream: "stderr",
+			text: "e",
+		});
+		expect(
+			parseHostNote({ kind: "bash_end", id: "b1", code: 3, signal: null, stopped: false, truncated: true }),
+		).toEqual({ kind: "bash_end", id: "b1", code: 3, signal: null, stopped: false, truncated: true });
+	});
+
+	it("reads an unknown stream as stdout and a missing code or signal as null", () => {
+		expect(parseHostNote({ kind: "bash_output", id: "b1", stream: "tty", text: "x" })).toMatchObject({
+			stream: "stdout",
+		});
+		expect(parseHostNote({ kind: "bash_end", id: "b1", stopped: true })).toEqual({
+			kind: "bash_end",
+			id: "b1",
+			code: null,
+			signal: null,
+			stopped: true,
+			truncated: false,
+		});
+	});
+});
+
+describe("parseEvent shouldQuery", () => {
+	const user = (extra: object) =>
+		parseEvent({ type: "user", uuid: "u1", message: { role: "user", content: "x" }, ...extra });
+
+	it("is true unless the message says false", () => {
+		expect(user({})).toMatchObject({ shouldQuery: true });
+		expect(user({ shouldQuery: false })).toMatchObject({ shouldQuery: false });
 	});
 });

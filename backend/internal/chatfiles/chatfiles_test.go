@@ -81,6 +81,9 @@ func TestOpenDescribesEachAllowedType(t *testing.T) {
 		{"a.gif", "image", "image/gif"},
 		{"a.webp", "image", "image/webp"},
 		{"a.svg", "image", "image/svg+xml"},
+		{"a.mp4", "video", "video/mp4"},
+		{"a.MOV", "video", "video/quicktime"},
+		{"a.webm", "video", "video/webm"},
 		{"a.md", "markdown", "text/markdown; charset=utf-8"},
 		{"a.markdown", "markdown", "text/markdown; charset=utf-8"},
 		{"a.html", "html", "text/html; charset=utf-8"},
@@ -220,6 +223,7 @@ func TestOpenEnforcesTheSizeCapOfTheType(t *testing.T) {
 		{"a.svg", 2 * mib, 2*mib + 1},
 		{"a.md", 2 * mib, 2*mib + 1},
 		{"a.pdf", 50 * mib, 50*mib + 1},
+		{"a.mp4", 1024 * mib, 1024*mib + 1},
 	}
 	for _, tc := range cases {
 		sparse(t, filepath.Join(f.worktree, "at-"+tc.name), tc.atCap)

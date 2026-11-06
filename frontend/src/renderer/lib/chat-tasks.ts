@@ -188,6 +188,7 @@ export function subagentTranscript(tr: Transcript, agentCallId: string): Transcr
 		agentModels: tr.agentModels,
 		remoteControl: REMOTE_CONTROL_OFF,
 		suggestion: "",
+		bashBusy: false,
 		lastSeq: tr.lastSeq,
 	};
 }

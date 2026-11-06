@@ -33,10 +33,17 @@ describe("buildContentSecurityPolicy", () => {
 		expect(connect).toContain("ws://127.0.0.1:*");
 	});
 
-	it("does not widen loopback http into img-src/media-src (bytes flow only through fetch)", () => {
+	it("lets img-src and media-src load straight from the loopback daemon", () => {
 		const csp = buildContentSecurityPolicy("");
-		expect(directive(csp, "img-src")).not.toContain("http://127.0.0.1");
-		expect(directive(csp, "media-src")).not.toContain("http://127.0.0.1");
+		expect(directive(csp, "img-src")).toContain("http://127.0.0.1:*");
+		expect(directive(csp, "media-src")).toContain("http://127.0.0.1:*");
+	});
+
+	it("keeps loopback http out of every other fetch directive", () => {
+		const csp = buildContentSecurityPolicy("");
+		for (const name of ["default-src", "script-src", "style-src", "frame-src", "object-src"]) {
+			expect(directive(csp, name)).not.toContain("http://127.0.0.1");
+		}
 	});
 
 	it("lets the app frame only its own origin, for the chat widget frame", () => {

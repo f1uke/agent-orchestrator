@@ -33,6 +33,12 @@ type rewindPreviewResponse struct {
 }
 
 func (h *host) rewind(r rewindRequest) (any, error) {
+	h.mu.Lock()
+	bashBusy := h.folder.Transcript().Bash != nil
+	h.mu.Unlock()
+	if bashBusy {
+		return nil, errBashBusy
+	}
 	if err := h.rewindConversation(r.UUID); err != nil {
 		return nil, err
 	}

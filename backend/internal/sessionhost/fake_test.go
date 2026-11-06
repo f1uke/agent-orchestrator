@@ -27,6 +27,7 @@ const (
 	envFakeParent   = "SESSIONHOST_FAKE_PARENT"
 	envFakeContext  = "SESSIONHOST_FAKE_CONTEXT"
 	envFakeEnv      = "SESSIONHOST_FAKE_ENV"
+	envFakeStdin    = "SESSIONHOST_FAKE_STDIN"
 )
 
 func TestMain(m *testing.M) {
@@ -110,6 +111,9 @@ func fakeClaude(fixture string) int {
 				}
 				return 0
 			}
+			if err := recordStdin(got); err != nil {
+				return fail("record stdin: %v", err)
+			}
 			want := messageKind(e.Payload)
 			if k := messageKind(got); k != want {
 				return fail("seq %d: got %s on stdin, want %s", e.Seq, k, want)
@@ -127,6 +131,23 @@ func fakeClaude(fixture string) int {
 		}
 	}
 	return 0
+}
+
+// recordStdin appends a line the fake read on stdin to the file envFakeStdin names.
+func recordStdin(line []byte) error {
+	p := os.Getenv(envFakeStdin)
+	if p == "" {
+		return nil
+	}
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(line); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func fakeContextBody() ([]byte, error) {

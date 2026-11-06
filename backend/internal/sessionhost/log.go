@@ -147,6 +147,29 @@ type originNote struct {
 	Origin chatproto.Origin       `json:"origin"`
 }
 
+type bashStartNote struct {
+	Kind    chatproto.HostNoteKind `json:"kind"`
+	ID      string                 `json:"id"`
+	Command string                 `json:"command"`
+	CWD     string                 `json:"cwd"`
+}
+
+type bashOutputNote struct {
+	Kind   chatproto.HostNoteKind `json:"kind"`
+	ID     string                 `json:"id"`
+	Stream chatproto.BashStream   `json:"stream"`
+	Text   string                 `json:"text"`
+}
+
+type bashEndNote struct {
+	Kind      chatproto.HostNoteKind `json:"kind"`
+	ID        string                 `json:"id"`
+	Code      *int                   `json:"code"`
+	Signal    *string                `json:"signal"`
+	Stopped   bool                   `json:"stopped"`
+	Truncated bool                   `json:"truncated"`
+}
+
 type nonJSONNote struct {
 	Kind chatproto.HostNoteKind `json:"kind"`
 	Text string                 `json:"text"`

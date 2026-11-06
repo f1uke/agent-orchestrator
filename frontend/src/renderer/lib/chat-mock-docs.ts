@@ -16,6 +16,12 @@ export const DOCS_LOG = "logs/export.log";
 export const DOCS_PATCH = "rate-limit.patch";
 export const DOCS_PDF = "docs/billing-export-spec.pdf";
 export const DOCS_HTML = "docs/preview.html";
+export const DOCS_VIDEO = "runs/demo-clip.webm";
+export const DOCS_SHOT = "runs/demo-shot.png";
+const DOCS_RUNS_DIR = "~/.ao/knowledge/ao-demo/runs";
+export const DOCS_VIDEO_REF = `${DOCS_RUNS_DIR}/demo-clip.webm`;
+export const DOCS_SHOT_REF = `${DOCS_RUNS_DIR}/demo-shot.png`;
+const DOCS_OPEN = 'D=$HOME/.ao/knowledge/ao-demo/runs; open $D/demo-clip.webm "$D/demo-shot.png"';
 export const DOCS_MISSING = "docs/never-saved.md";
 
 export const DOCS_PLAN_MD = [
@@ -103,6 +109,38 @@ export function docsEntries(): ChatEntry[] {
 					content: DOCS_PLAN_MD,
 					structuredPatch: [],
 					originalFile: null,
+				},
+			},
+		],
+		say("msg_d2a", "Plan saved. Opening the recording of the failing run."),
+		[
+			"out",
+			{
+				type: "assistant",
+				parent_tool_use_id: null,
+				session_id: SESSION,
+				message: {
+					id: "msg_d2b",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-docs-open",
+							name: "Bash",
+							input: { command: DOCS_OPEN, description: "Open the recording and its first frame" },
+						},
+					],
+				},
+			},
+		],
+		[
+			"out",
+			{
+				type: "user",
+				parent_tool_use_id: null,
+				session_id: SESSION,
+				message: {
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t-docs-open", content: "", is_error: false }],
 				},
 			},
 		],

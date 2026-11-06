@@ -8,6 +8,7 @@ import {
 	docTag,
 	type FileDoc,
 	fileDocOf,
+	openedPaths,
 	textView,
 	turnDocs,
 	writtenPath,
@@ -72,22 +73,52 @@ describe("docsOfTurn", () => {
 		]);
 	});
 
-	it("skips URLs, globs, commands, source files and images", () => {
+	it("skips URLs, globs, commands and source files", () => {
 		const items = [
-			say("`https://example.com/a.md` `docs/*.md` `go test ./...` `main.go` `v1.2` `.md` `shots/a.png`"),
+			say("`https://example.com/a.md` `docs/*.md` `go test ./...` `main.go` `v1.2` `.md` `shots/*.png`"),
 			say("and [site](https://example.com/page.html)"),
 		];
 		expect(docsOfTurn(items)).toEqual([]);
 	});
 
-	it("ignores a subagent's own calls and replies, an unrelated tool, and a Write of source code or an image", () => {
+	it("ignores a subagent's own calls and replies, an unrelated tool, and a Write of source code", () => {
 		const items = [
 			tool("Write", { file_path: "/work/a.md" }, "agent-1"),
 			say("`sub/agent.md`", "agent-1"),
 			tool("Read", { file_path: "/work/read.md" }),
 			tool("Write", { file_path: "/work/main.go" }),
-			tool("Write", { file_path: "/work/flow.svg" }),
 			tool("Write", {}),
+		];
+		expect(docsOfTurn(items)).toEqual([]);
+	});
+
+	it("takes a top-level Write of an image or a video, not only a document", () => {
+		expect(
+			docsOfTurn([tool("Write", { file_path: "out/chart.png" }), tool("Write", { file_path: "out/run.mp4" })]),
+		).toEqual(["out/chart.png", "out/run.mp4"]);
+	});
+
+	it("takes the images and videos a reply names beside its documents, but no glob", () => {
+		expect(
+			docsOfTurn([say("Clip `out/clip.mp4`, chart `out/diagram.png`, notes `docs/n.md`, all `shots/*.png`.")]),
+		).toEqual(["docs/n.md", "out/clip.mp4", "out/diagram.png"]);
+	});
+
+	it("takes the files a top-level Bash call opens, in call order with the rest", () => {
+		const items = [
+			tool("Write", { file_path: "docs/plan.md" }),
+			tool("Bash", { command: "open out/v.mp4 out/s.png" }),
+			say("Done, see `docs/plan.md`."),
+		];
+		expect(docsOfTurn(items)).toEqual(["docs/plan.md", "out/v.mp4", "out/s.png"]);
+	});
+
+	it("never takes a Read, a subagent's open, or a Bash call without a command", () => {
+		const items = [
+			tool("Read", { file_path: "shots/1.png" }),
+			tool("Bash", { command: "open v.mp4" }, "agent-1"),
+			tool("Bash", {}),
+			tool("Bash", { command: 7 }),
 		];
 		expect(docsOfTurn(items)).toEqual([]);
 	});
@@ -102,6 +133,87 @@ describe("docsOfTurn", () => {
 		expect(refs).toHaveLength(64);
 		expect(refs[0]).toBe("docs/0.md");
 		expect(refs).not.toContain("more/a.md");
+	});
+});
+
+describe("openedPaths", () => {
+	it("takes every showable word after open", () => {
+		expect(openedPaths("open a.mp4 b.png")).toEqual(["a.mp4", "b.png"]);
+		expect(openedPaths("/usr/bin/open docs/n.md")).toEqual(["docs/n.md"]);
+	});
+
+	it("skips open's flags and what they consume, and stops at --args", () => {
+		expect(openedPaths("open -a Preview x.png")).toEqual(["x.png"]);
+		expect(openedPaths("open -g -n -b com.example.App --env K=v.png x.png")).toEqual(["x.png"]);
+		expect(openedPaths("open --stdout o.log --stderr e.log y.mp4")).toEqual(["y.mp4"]);
+		expect(openedPaths("open -a App --args z.png")).toEqual([]);
+	});
+
+	it("keeps variable assignments of the same command and expands them in later words", () => {
+		expect(openedPaths('D=$HOME/k/p; open $D/v.mp4 "$D/s.png"')).toEqual(["~/k/p/v.mp4", "~/k/p/s.png"]);
+		expect(openedPaths("export OUT=${HOME}/r\nopen ${OUT}/a.png")).toEqual(["~/r/a.png"]);
+		expect(openedPaths("d=~/k && open $d/a.png")).toEqual(["~/k/a.png"]);
+		expect(openedPaths("A=/x/y; B=$A/z; open $B/c.mov")).toEqual(["/x/y/z/c.mov"]);
+	});
+
+	it("reads quotes, and drops a single-quoted $ that stays text", () => {
+		expect(openedPaths("open 'my dir/a.png' \"my dir/b.png\"")).toEqual(["my dir/a.png", "my dir/b.png"]);
+		expect(openedPaths("D=/k; open '$D/a.png'")).toEqual([]);
+	});
+
+	it("joins a relative path onto an absolute or ~ directory set by cd", () => {
+		expect(openedPaths("cd ~/k/plans && open d.png")).toEqual(["~/k/plans/d.png"]);
+		expect(openedPaths("cd /w/run/; open ./a.mp4")).toEqual(["/w/run/a.mp4"]);
+		expect(openedPaths("cd ~/k && cd plans && open d.png")).toEqual(["~/k/plans/d.png"]);
+		expect(openedPaths("cd ~/k && open /abs/e.png")).toEqual(["/abs/e.png"]);
+	});
+
+	it("drops a relative path when the directory is not known", () => {
+		expect(openedPaths("cd $UNSET && open d.png")).toEqual([]);
+		expect(openedPaths("cd sub && open d.png")).toEqual([]);
+	});
+
+	it("splits simple commands on newline ; && || | and &", () => {
+		const command = "echo hi; open a.png && open b.png || open c.png\nls | open d.png & open e.png";
+		expect(openedPaths(command)).toEqual(["a.png", "b.png", "c.png", "d.png", "e.png"]);
+	});
+
+	it("drops a word with an unresolved variable, a glob character, a URL or a command substitution", () => {
+		expect(openedPaths("open $UNSET/x.png")).toEqual([]);
+		expect(openedPaths("open ${UNSET}/x.png")).toEqual([]);
+		expect(openedPaths("open https://x.test/a.png file:///tmp/a.png")).toEqual([]);
+		expect(openedPaths("open shots/*.png shots/a?.png shots/[ab].png")).toEqual([]);
+		expect(openedPaths("open $(ls)/x.png `ls`/y.png")).toEqual([]);
+		expect(openedPaths("D=$(mktemp -d); open $D/x.png")).toEqual([]);
+		expect(openedPaths("D=`pwd`; open $D/x.png")).toEqual([]);
+	});
+
+	it("keeps only showable paths", () => {
+		expect(openedPaths("open main.go app.zip http://x.test out/a.png")).toEqual(["out/a.png"]);
+	});
+
+	it("skips the body of a heredoc but reads the command line that starts it", () => {
+		const command = ["cat <<'EOF' > notes.md", "open x.png", "EOF", "open after.png"].join("\n");
+		expect(openedPaths(command)).toEqual(["after.png"]);
+		expect(openedPaths("python3 - <<EOF\nopen('y.png')\nEOF")).toEqual([]);
+	});
+
+	it("is not a source for commands other than open", () => {
+		expect(openedPaths("cat a.png; cp a.png b.png; echo open")).toEqual([]);
+		expect(openedPaths("# open x.png")).toEqual([]);
+	});
+
+	it("reads an open that follows a keyword or a continued line", () => {
+		expect(openedPaths("for f in a; do open a.png; done")).toEqual(["a.png"]);
+		expect(openedPaths("open a.png \\\n  b.png")).toEqual(["a.png", "b.png"]);
+	});
+
+	it("keeps what the daemon accepts: at most 64 refs, each at most 1024 bytes, once each", () => {
+		const many = Array.from({ length: 70 }, (_, i) => `d/${i}.png`).join(" ");
+		const refs = openedPaths(`open ${many} d/0.png ${"a".repeat(1100)}.png`);
+		expect(refs).toHaveLength(64);
+		expect(refs[0]).toBe("d/0.png");
+		expect(new Set(refs).size).toBe(64);
 	});
 });
 
@@ -209,6 +321,9 @@ describe("file docs", () => {
 		["image", "a.svg", "SVG"],
 		["image", "a.png", "PNG"],
 		["image", "a.jpeg", "JPG"],
+		["video", "a.mp4", "MP4"],
+		["video", "a.MOV", "MOV"],
+		["video", "a.webm", "WEBM"],
 	] as const)("tags a %s file %s as %s", (kind, path, tag) => {
 		const doc: FileDoc = { source: "file", root: "worktree", path, kind, size: 1, title: path };
 		expect(docTag(doc)).toBe(tag);

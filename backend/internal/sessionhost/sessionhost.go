@@ -107,6 +107,12 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 	}
 	defer func() { _ = lg.file.Close() }()
 
+	dir := cfg.Dir
+	if dir == "" {
+		if dir, err = os.Getwd(); err != nil {
+			return 0, fmt.Errorf("sessionhost: working directory: %w", err)
+		}
+	}
 	t := folder.Transcript()
 	first := launch{attachDir: attachmentsBeside(cfg.LogPath), suggestions: !cfg.NoPromptSuggestions}.from(t, t.Chrome)
 	if hasUserInput(t) {
@@ -125,6 +131,8 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 		afterFunc:       realAfterFunc,
 		launched:        first,
 		relaunch:        make(chan launch, 1),
+		dir:             dir,
+		bashGrace:       orDefault(cfg.killGrace, defaultKillGrace),
 	}
 	return h.run(ctx, cfg, ln, first)
 }
@@ -208,6 +216,10 @@ type host struct {
 	tasks           map[string]struct{}
 	// claude reads --chrome only at start, so switching it replaces the process.
 	relaunch chan launch
+	// dir is where claude and "!" commands run.
+	dir       string
+	bashGrace time.Duration
+	bash      *bashRun
 }
 
 func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, l launch) (int, error) {
@@ -219,6 +231,7 @@ func (h *host) run(ctx context.Context, cfg Config, ln net.Listener, l launch) (
 				go srv.serve()
 			}
 		})
+		h.endBash()
 		if err != nil {
 			if srv != nil {
 				h.finish(nil, nil)
@@ -402,7 +415,7 @@ func (h *host) endProcessLocked() {
 	}
 }
 
-var errChromeBusy = errors.New("claude is busy: wait for the turn and its background tasks to end, then turn Chrome on or off")
+var errChromeBusy = errors.New(`claude is busy: wait for the turn, its background tasks and any "!" command to end, then turn Chrome on or off`)
 
 func (h *host) setChrome(enabled bool) (any, error) {
 	h.mu.Lock()
@@ -414,7 +427,7 @@ func (h *host) setChrome(enabled bool) (any, error) {
 		return okResponse{OK: true}, nil
 	}
 	t := h.folder.Transcript()
-	if t.Busy || len(t.Pending) > 0 || len(h.tasks) > 0 {
+	if t.Busy || len(t.Pending) > 0 || len(h.tasks) > 0 || t.Bash != nil {
 		return nil, errChromeBusy
 	}
 	select {

@@ -1,5 +1,7 @@
 import { type CSSProperties, useRef, useState } from "react";
-import { type ChatImage, imageSrc } from "../lib/chat-images";
+import { getApiBaseUrl } from "../lib/api-client";
+import { type ChatImage, chatBlobUrl, imageSrc } from "../lib/chat-images";
+import { useChatSessionId } from "./RefImages";
 import { MediaLightbox, type MediaItem, MediaThumb } from "./MediaLightbox";
 
 export function ChatImages({
@@ -13,12 +15,14 @@ export function ChatImages({
 }) {
 	const [open, setOpen] = useState<number | null>(null);
 	const trigger = useRef<HTMLElement | null>(null);
+	const sessionId = useChatSessionId();
 	const items: MediaItem[] = images.map((image, i) => ({
 		id: String(i),
 		filename: name(i),
 		mime: image.mediaType,
-		src: "",
-		dataUrl: imageSrc(image),
+		...("blob" in image
+			? { src: sessionId === undefined ? "" : chatBlobUrl(getApiBaseUrl(), sessionId, image.blob) }
+			: { src: "", dataUrl: imageSrc(image) }),
 	}));
 	return (
 		<>

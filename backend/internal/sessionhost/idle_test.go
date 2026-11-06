@@ -130,6 +130,12 @@ func TestIdleCompactionGates(t *testing.T) {
 				panic(err)
 			}
 		}, time.Hour, 0},
+		{"a \"!\" command that has not settled holds it", func(h *host) {
+			turn(h, 250_000, "1h")
+			h.mu.Lock()
+			h.noteLocked(bashStartNote{Kind: chatproto.NoteBashStart, ID: "b1", Command: "sleep 9", CWD: "/w"})
+			h.mu.Unlock()
+		}, time.Hour, 0},
 		{"the project setting turns it off", func(h *host) {
 			h.idleOff = true
 			turn(h, 250_000, "1h")

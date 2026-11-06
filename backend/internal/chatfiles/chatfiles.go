@@ -32,6 +32,7 @@ type Kind string
 // The kinds in the allowlist.
 const (
 	KindImage    Kind = "image"
+	KindVideo    Kind = "video"
 	KindMarkdown Kind = "markdown"
 	KindHTML     Kind = "html"
 	KindPDF      Kind = "pdf"
@@ -42,6 +43,9 @@ const (
 )
 
 const mib = 1 << 20
+
+// videoMax is far above the other caps because the route streams a video by Range request and never holds it whole.
+const videoMax = 1024 * mib
 
 const maxGlobMatches = 24
 
@@ -59,6 +63,9 @@ var kinds = map[string]kindSpec{
 	"gif":      {KindImage, "image/gif", 25 * mib},
 	"webp":     {KindImage, "image/webp", 25 * mib},
 	"svg":      {KindImage, "image/svg+xml", 2 * mib},
+	"mp4":      {KindVideo, "video/mp4", videoMax},
+	"mov":      {KindVideo, "video/quicktime", videoMax},
+	"webm":     {KindVideo, "video/webm", videoMax},
 	"md":       {KindMarkdown, "text/markdown; charset=utf-8", 2 * mib},
 	"markdown": {KindMarkdown, "text/markdown; charset=utf-8", 2 * mib},
 	"html":     {KindHTML, "text/html; charset=utf-8", 2 * mib},

@@ -17,7 +17,7 @@ export type Block =
 	| { type: "thinking"; text: string }
 	| { type: "tool_use"; id: string; name: string; input: unknown }
 	| { type: "tool_result"; toolUseId: string; isError: boolean; content: unknown }
-	| { type: "image"; mediaType: string; data: string }
+	| { type: "image"; mediaType: string; data: string; blob?: string }
 	| { type: "other"; blockType: string };
 
 export type CanUseTool = {
@@ -117,6 +117,8 @@ export type ChatEvent =
 			uuid: string;
 			parentToolUseId: string;
 			isReplay: boolean;
+			/** False on a message claude stores without answering, such as the result of a "!" command. */
+			shouldQuery: boolean;
 			originKind: string;
 			blocks: Block[];
 			structuredPatch?: PatchHunk[];
@@ -158,10 +160,15 @@ export const REMOTE_CONTROL_VIA = "remote_control";
 export const isPeerOrigin = (origin: Origin | undefined): origin is Origin =>
 	origin !== undefined && origin.via !== REMOTE_CONTROL_VIA;
 
+export type BashStream = "stdout" | "stderr";
+
 export type HostNote =
 	| { kind: "spawn"; resume: string; argv: string[] }
 	| { kind: "exit"; code: number | null }
 	| { kind: "user_origin"; uuid: string; origin?: Origin }
+	| { kind: "bash_start"; id: string; command: string; cwd: string }
+	| { kind: "bash_output"; id: string; stream: BashStream; text: string }
+	| { kind: "bash_end"; id: string; code: number | null; signal: string | null; stopped: boolean; truncated: boolean }
 	| { kind: "other"; noteKind: string };
 
 type Obj = Record<string, unknown>;
@@ -204,6 +211,9 @@ function decodeBlock(raw: unknown): Block {
 			};
 		case "image": {
 			const source = isObject(raw.source) ? raw.source : {};
+			if (source.type === "ao_blob") {
+				return { type: "image", mediaType: str(source.media_type), data: "", blob: str(source.blob) };
+			}
 			const base64 = source.type === "base64";
 			return { type: "image", mediaType: base64 ? str(source.media_type) : "", data: base64 ? str(source.data) : "" };
 		}
@@ -353,6 +363,7 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 				uuid: str(line.uuid),
 				parentToolUseId: str(line.parent_tool_use_id),
 				isReplay: line.isReplay === true,
+				shouldQuery: line.shouldQuery !== false,
 				originKind: isObject(line.origin) ? str(line.origin.kind) : "",
 				blocks: decodeBlocks(message.content),
 				structuredPatch: decodePatch(line.tool_use_result),
@@ -452,6 +463,24 @@ export function parseHostNote(payload: unknown): HostNote {
 				: undefined;
 			return { kind, uuid: str(payload.uuid), origin };
 		}
+		case "bash_start":
+			return { kind, id: str(payload.id), command: str(payload.command), cwd: str(payload.cwd) };
+		case "bash_output":
+			return {
+				kind,
+				id: str(payload.id),
+				stream: payload.stream === "stderr" ? "stderr" : "stdout",
+				text: str(payload.text),
+			};
+		case "bash_end":
+			return {
+				kind,
+				id: str(payload.id),
+				code: typeof payload.code === "number" ? payload.code : null,
+				signal: typeof payload.signal === "string" && payload.signal !== "" ? payload.signal : null,
+				stopped: payload.stopped === true,
+				truncated: payload.truncated === true,
+			};
 	}
 	return { kind: "other", noteKind: kind };
 }

@@ -12,6 +12,7 @@ export const image = (path: string, root: ResolvedFile["root"] = "knowledge"): R
 
 const MIME: Record<ResolvedFile["kind"], string> = {
 	image: "image/png",
+	video: "video/mp4",
 	markdown: "text/markdown; charset=utf-8",
 	html: "text/html; charset=utf-8",
 	pdf: "application/pdf",

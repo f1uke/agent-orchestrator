@@ -3655,6 +3655,121 @@ paths:
         so the answered path can go in the message for claude to read
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/bash:
+    post:
+      operationId: runChatBash
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersRunChatBashRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersChatBashResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Run a shell command the person typed with "!" in the chat composer,
+        and add it and its output to the conversation
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/chat/bash/stop:
+    post:
+      operationId: stopChatBash
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersStopChatBashRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop a running "!" command
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/blobs/{blob}:
     get:
       operationId: getChatBlob
@@ -10747,6 +10862,7 @@ components:
         kind:
           enum:
           - image
+          - video
           - markdown
           - html
           - pdf
@@ -11050,6 +11166,15 @@ components:
       - path
       - name
       - size
+      type: object
+    ControllersChatBashResponse:
+      properties:
+        id:
+          description: The run's id. Its bash_start, bash_output and bash_end notes
+            in the chat log carry it.
+          type: string
+      required:
+      - id
       type: object
     ControllersChatTaskOutputResponse:
       properties:
@@ -12441,6 +12566,19 @@ components:
       required:
       - uuid
       type: object
+    ControllersRunChatBashRequest:
+      properties:
+        command:
+          description: 'The shell command the person typed after "!" in the chat composer.
+            The session host runs it with /bin/sh -c in the session worktree, streams
+            its output into the chat log, and adds the command and its output to the
+            conversation without starting a turn, so Claude reads them with the next
+            message. The host refuses it while a turn or another command runs: that
+            is a 409 CHAT_REQUEST_REJECTED with its reason.'
+          type: string
+      required:
+      - command
+      type: object
     ControllersSessionPRAOReviewSummary:
       properties:
         preMr:
@@ -12964,6 +13102,15 @@ components:
           type: boolean
       required:
       - started
+      type: object
+    ControllersStopChatBashRequest:
+      properties:
+        id:
+          description: The id of the running command to stop. A finished or unknown
+            id is a no-op.
+          type: string
+      required:
+      - id
       type: object
     ControllersTestinyStepResultInput:
       properties:

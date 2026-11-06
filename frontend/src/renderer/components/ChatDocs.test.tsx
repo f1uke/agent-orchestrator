@@ -70,6 +70,13 @@ describe("ChatDocStrip", () => {
 		expect(resolveCalls(fetchMock)).toEqual([["a.md", "shots/a.png"]]);
 	});
 
+	it("draws a card for a video, which no thumbnail covers", async () => {
+		setup({ refs: ["out/clip.mp4"], artifacts: [] }, { "out/clip.mp4": [file("out/clip.mp4", "video")] });
+		const card = await screen.findByRole("group", { name: "clip.mp4" });
+		expect(within(card).getByText("MP4")).toBeInTheDocument();
+		expect(within(card).getByRole("button", { name: "Open clip.mp4" })).toBeInTheDocument();
+	});
+
 	it("opens the file in the Document tab when Open is pressed", async () => {
 		const { onOpen } = setup({ refs: ["a"], artifacts: [] }, { a: [survey] });
 		await userEvent.click(await screen.findByRole("button", { name: "Open demo--survey.md" }));
@@ -192,22 +199,26 @@ describe("useDocOf", () => {
 describe("sessionDocs", () => {
 	const plan = file("docs/plan.md", "markdown");
 	const shot = file("shots/a.png", "image");
+	const clip = file("out/clip.mp4", "video");
 	const turns: TurnDocs[] = [
 		{ refs: ["docs/plan.md", "plans/demo--survey.md"], artifacts: [] },
-		{ refs: ["shots/a.png", "docs/gone.md"], artifacts: [] },
+		{ refs: ["shots/a.png", "docs/gone.md", "out/clip.mp4"], artifacts: [] },
 		{ refs: ["plans/demo--survey.md"], artifacts: [] },
 	];
 	const known = new Map([
 		["docs/plan.md", [plan]],
 		["plans/demo--survey.md", [survey]],
 		["shots/a.png", [shot]],
+		["out/clip.mp4", [clip]],
 		["docs/gone.md", []],
 	]);
 
-	it("lists every confirmed document of the session, newest turn first, each once, without images", () => {
-		expect(sessionDocs(turns, known).map((d) => `${d.root}:${d.path}`)).toEqual([
-			"knowledge:plans/demo--survey.md",
-			"worktree:docs/plan.md",
+	it("lists every confirmed file of the session of any kind, newest turn first, each once at its newest place", () => {
+		expect(sessionDocs(turns, known).map((d) => `${d.kind}:${d.root}:${d.path}`)).toEqual([
+			"markdown:knowledge:plans/demo--survey.md",
+			"image:worktree:shots/a.png",
+			"video:worktree:out/clip.mp4",
+			"markdown:worktree:docs/plan.md",
 		]);
 	});
 

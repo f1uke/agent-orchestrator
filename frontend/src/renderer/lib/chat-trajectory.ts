@@ -1,11 +1,11 @@
 import { type ChatEntry, isObject, isPeerOrigin } from "./chat-event";
-import type { ChatItem, ToolCallItem, Transcript } from "./chat-fold";
+import type { BashItem, ChatItem, ToolCallItem, Transcript } from "./chat-fold";
 import { formatCost, formatTokens } from "./chat-inspect";
 import { noticeText } from "./chat-notice";
 import { formatDuration } from "./chat-time";
 import { inputSummary, resultText, toolFailed, toolRunning } from "./chat-tools";
 
-export type RowKind = "user" | "assistant" | "thinking" | "tool" | "task" | "turn_end" | "notice";
+export type RowKind = "user" | "assistant" | "thinking" | "tool" | "task" | "bash" | "turn_end" | "notice";
 
 export type Tone = "normal" | "dim" | "warn" | "error";
 
@@ -74,6 +74,12 @@ function turnEndFigures(took: number | undefined, calls: number, cost: number): 
 }
 
 const ms = (ts: string | undefined) => (ts === undefined || ts === "" ? Number.NaN : Date.parse(ts));
+
+function bashOutcome(item: BashItem): string {
+	if (item.state === "stopped") return "stopped";
+	if (item.state === "running") return "";
+	return item.signal ? item.signal : `exit ${item.code ?? 0}`;
+}
 
 function toolOutcome(call: ToolCallItem, live: boolean): { outcome: string; tone: Tone; running: boolean } {
 	const status = call.permission?.status;
@@ -163,6 +169,17 @@ export function buildTrajectory(
 				});
 				return;
 			}
+			case "bash":
+				push({
+					kind: "bash",
+					title: "!",
+					detail: firstLine(item.command),
+					outcome: bashOutcome(item),
+					tone: item.state === "running" ? "normal" : item.state === "stopped" || item.code ? "error" : "normal",
+					running: item.state === "running",
+					t0: ms(item.ts),
+				});
+				return;
 			case "assistant_text":
 			case "thinking":
 				if (item.parentToolUseId !== "" || item.text.trim() === "") return;
@@ -451,6 +468,12 @@ export function fullText(row: TrajectoryRow): RowText {
 			return { input: item.text, result: "", resultIsError: false };
 		case "task_message":
 			return { input: item.summary, result: item.result, resultIsError: row.tone === "error" };
+		case "bash":
+			return {
+				input: item.command,
+				result: item.chunks.map((c) => c.text).join(""),
+				resultIsError: row.tone === "error",
+			};
 		case "turn_end": {
 			const u = item.usage;
 			const lines = [

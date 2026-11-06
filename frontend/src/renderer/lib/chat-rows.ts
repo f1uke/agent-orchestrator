@@ -68,6 +68,7 @@ function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 		case "turn_end":
 		case "task_message":
 		case "notice":
+		case "bash":
 			return "break";
 	}
 }

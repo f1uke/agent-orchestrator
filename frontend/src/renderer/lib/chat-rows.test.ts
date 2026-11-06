@@ -91,6 +91,7 @@ function transcript(items: ChatItem[], extra: Partial<Transcript> = {}): Transcr
 		agentModels: {},
 		remoteControl: REMOTE_CONTROL_OFF,
 		suggestion: "",
+		bashBusy: false,
 		lastSeq: 0,
 		...extra,
 	};
