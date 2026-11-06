@@ -15,7 +15,6 @@ type TransportChoice struct {
 	Project  domain.Transport
 	Global   domain.Transport
 	Harness  domain.AgentHarness
-	Kind     domain.SessionKind
 }
 
 // ResolveTransport decides a new session's transport: explicit, project, global, then the built-in default.
@@ -23,7 +22,7 @@ func ResolveTransport(c TransportChoice) domain.Transport {
 	if c.Explicit != domain.TransportUnresolved {
 		return c.Explicit
 	}
-	if c.Kind == domain.KindOrchestrator || c.Harness != domain.HarnessClaudeCode {
+	if c.Harness != domain.HarnessClaudeCode {
 		return domain.TransportTerminal
 	}
 	for _, t := range []domain.Transport{c.Project, c.Global} {
@@ -31,15 +30,22 @@ func ResolveTransport(c TransportChoice) domain.Transport {
 			return t
 		}
 	}
-	return domain.DefaultWorkerTransport
+	return domain.DefaultClaudeCodeTransport
 }
 
+// resolveTransport feeds ResolveTransport the project and global setting that belong to the session's kind.
 func (m *Manager) resolveTransport(explicit domain.Transport, harness domain.AgentHarness, kind domain.SessionKind, project domain.ProjectConfig) domain.Transport {
-	var global domain.Transport
-	if m.workerTransport != nil {
-		global = m.workerTransport()
+	choice := TransportChoice{Explicit: explicit, Harness: harness}
+	global := m.workerTransport
+	choice.Project = project.WorkerTransport
+	if kind == domain.KindOrchestrator {
+		global = m.orchestratorTransport
+		choice.Project = project.OrchestratorTransport
 	}
-	return ResolveTransport(TransportChoice{Explicit: explicit, Project: project.WorkerTransport, Global: global, Harness: harness, Kind: kind})
+	if global != nil {
+		choice.Global = global()
+	}
+	return ResolveTransport(choice)
 }
 
 func (m *Manager) setTransport(ctx context.Context, id domain.SessionID, t domain.Transport) error {

@@ -666,7 +666,7 @@ func newManagerWithMessenger() (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspa
 	// Stub lookPath so the pre-launch agent-binary check passes; the fakeAgent
 	// returns argv ["launch"] which is not a real binary on PATH.
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: msgr, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: msgr, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 	return m, st, rt, ws, msgr
 }
 func testRoleAgents() domain.ProjectConfig {
@@ -695,7 +695,7 @@ func TestSpawn_ResolvesProjectConfig(t *testing.T) {
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	rec, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker})
 	if err != nil {
@@ -741,7 +741,7 @@ func TestSpawn_UsesBaseBranch(t *testing.T) {
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, BaseBranch: "PROJ-2270"}); err != nil {
 		t.Fatalf("spawn: %v", err)
@@ -770,7 +770,7 @@ func TestSpawn_PersistsResolvedTargetAndBaseBranch(t *testing.T) {
 			DefaultBranch: "develop",
 			Worker:        domain.RoleOverride{Harness: domain.HarnessClaudeCode},
 		}}
-		return New(Deps{WorkerTransport: terminalTransport,
+		return New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 			Runtime: &fakeRuntime{}, Agents: fakeAgents{}, Workspace: &fakeWorkspace{},
 			Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 			LookPath: func(string) (string, error) { return "/bin/true", nil },
@@ -837,7 +837,7 @@ func TestSpawnPassesProjectAndBranchToRuntime(t *testing.T) {
 func TestSpawn_RejectsMissingRoleHarness(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime: &fakeRuntime{}, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st,
 		Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		LookPath: func(string) (string, error) { return "/bin/true", nil },
@@ -857,7 +857,7 @@ func TestSpawn_RejectsMissingRoleHarness(t *testing.T) {
 func TestSpawn_ExplicitHarnessWinsWithoutProjectRoleHarness(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime: &fakeRuntime{}, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st,
 		Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		LookPath: func(string) (string, error) { return "/bin/true", nil },
@@ -973,7 +973,7 @@ func TestSpawn_WorkspaceProjectRecordsRootAndChildWorktrees(t *testing.T) {
 	}
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{path: managedPath}
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st,
 		Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		LookPath: func(string) (string, error) { return "/bin/true", nil },
@@ -1646,7 +1646,7 @@ func TestRestore_AppliesProjectAgentConfig(t *testing.T) {
 	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x"})
 	agent := &recordingAgent{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Restore(ctx, "mer-1"); err != nil {
 		t.Fatal(err)
@@ -1914,7 +1914,7 @@ func TestSpawn_ForwardsResolvedAgentConfigPermissions(t *testing.T) {
 	}}
 	agent := &recordingAgent{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker})
 	if err != nil {
@@ -1942,7 +1942,7 @@ func TestRestore_ForwardsResolvedAgentConfigPermissions(t *testing.T) {
 		Metadata:     domain.SessionMetadata{Branch: "ao/mer-1", WorkspacePath: "/tmp/ws", AgentSessionID: "native-1"},
 	}
 	agent := &recordingAgent{}
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }})
 
 	_, err := m.Restore(ctx, "mer-1")
 	if err != nil {
@@ -1966,7 +1966,7 @@ func TestSpawnWorker_AppendsActiveOrchestratorContact(t *testing.T) {
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	s, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "do it"})
 	if err != nil {
@@ -2002,7 +2002,7 @@ func TestSpawnWorker_SkipsTerminatedOrchestratorContact(t *testing.T) {
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "do it"})
 	if err != nil {
@@ -2032,7 +2032,7 @@ func TestSpawnWorker_MechanicalTaskSizeAuthorizesSkip(t *testing.T) {
 		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 		agent := &recordingAgent{}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		return New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath}), agent
+		return New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath}), agent
 	}
 
 	m, agent := newMgr()
@@ -2067,7 +2067,7 @@ func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator})
 	if err != nil {
@@ -2117,7 +2117,7 @@ func TestSpawnOrchestrator_WorkspaceProjectPromptListsRepos(t *testing.T) {
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator})
 	if err != nil {
@@ -2151,7 +2151,7 @@ func TestSpawnWorker_WorkspaceProjectPromptListsRepos(t *testing.T) {
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "fix api"})
 	if err != nil {
@@ -2200,7 +2200,7 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 				tc.prep(st)
 			}
 			lookPath := func(string) (string, error) { return "/bin/true", nil }
-			m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+			m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 			sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: tc.kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 			if err != nil {
@@ -2238,7 +2238,7 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 			st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
 		}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		return New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, ResponseLanguage: func() string { return globalLang }})
+		return New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, ResponseLanguage: func() string { return globalLang }})
 	}
 	buildRole := func(m *Manager, kind domain.SessionKind, role domain.CrewRole) string {
 		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: role})
@@ -2320,7 +2320,7 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 		// A nil getter (bare wiring) also means English / no directive.
 		st := newFakeStore()
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 		sp := build(m, domain.KindOrchestrator)
 		if strings.Contains(sp, "## Human-facing response language (AO)") {
 			t.Fatalf("nil ResponseLanguage getter must not inject a directive:\n%s", sp)
@@ -2339,7 +2339,7 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 			st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
 		}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		return New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		return New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
 		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
@@ -2436,7 +2436,7 @@ func TestSystemPrompt_SpawnConfirm(t *testing.T) {
 		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
 		st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		return New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, SpawnConfirmEnabled: enabled})
+		return New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, SpawnConfirmEnabled: enabled})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
 		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
@@ -2501,7 +2501,7 @@ func TestRestore_OrchestratorRederivesSystemPrompt(t *testing.T) {
 	}
 	agent := &recordingAgent{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Restore(ctx, "mer-1"); err != nil {
 		t.Fatal(err)
@@ -2522,7 +2522,7 @@ func TestRestore_FallbackLaunchCarriesSystemPrompt(t *testing.T) {
 	}
 	agent := &recordingAgent{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Restore(ctx, "mer-1"); err != nil {
 		t.Fatal(err)
@@ -2550,7 +2550,7 @@ func TestRestore_PromptlessOrchestratorResumesViaAdapter(t *testing.T) {
 	}
 	rt := &fakeRuntime{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: alwaysResumeAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: singleAgent{agent: alwaysResumeAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Restore(ctx, "mer-1"); err != nil {
 		t.Fatalf("promptless orchestrator must restore via adapter resume, got err = %v", err)
@@ -2581,7 +2581,7 @@ func TestRestore_PromptlessUnresumableRelaunchesFresh(t *testing.T) {
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
 	// fakeAgents resolves to fakeAgent, whose GetRestoreCommand returns ok=false
 	// without an agentSessionId, and GetLaunchCommand returns a valid argv.
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Restore(ctx, "mer-1"); err != nil {
 		t.Fatalf("promptless unresumable session must relaunch fresh, got err = %v", err)
@@ -2613,7 +2613,7 @@ func TestRestore_PromptlessWorkerNotResumable(t *testing.T) {
 	// fakeAgents resolves to fakeAgent, whose GetRestoreCommand returns ok=false
 	// when there is no AgentSessionID. With a KindWorker and empty Prompt, this
 	// must produce ErrNotResumable instead of a blank relaunch.
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	_, err := m.Restore(ctx, "mer-1")
 	if !errors.Is(err, ErrNotResumable) {
@@ -2639,7 +2639,7 @@ func TestRestore_WorkerPointsAtCurrentOrchestrator(t *testing.T) {
 	}
 	agent := &recordingAgent{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	if _, err := m.Restore(ctx, "mer-1"); err != nil {
 		t.Fatal(err)
@@ -2729,7 +2729,7 @@ func TestSpawn_RejectsMissingAgentBinary(t *testing.T) {
 		}
 		return "", fmt.Errorf("exec: %q: not found", name)
 	}
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: notFound})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: notFound})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker})
 	if !errors.Is(err, ports.ErrAgentBinaryNotFound) {
@@ -2760,7 +2760,7 @@ func TestSpawn_RejectsMissingTmuxBeforeSessionRow(t *testing.T) {
 		}
 		return "/bin/true", nil
 	}
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker})
 	if !errors.Is(err, ports.ErrRuntimePrerequisite) || !strings.Contains(err.Error(), "tmux required") {
@@ -2781,7 +2781,7 @@ func TestSpawn_RejectsUnknownHarness(t *testing.T) {
 	st := newFakeStore()
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: missingAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: missingAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }})
 
 	_, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Harness: "bogus"})
 	if !errors.Is(err, ErrUnknownHarness) {
@@ -2808,7 +2808,7 @@ func pathPinManager(executable func() (string, error)) (*Manager, *fakeStore, *f
 	rt := &fakeRuntime{}
 	logBuf := &bytes.Buffer{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st,
 		Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		LookPath: lookPath, Executable: executable,
@@ -2929,7 +2929,7 @@ func newLifecycleManager() (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspace) 
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime:   rt,
 		Agents:    fakeAgents{},
 		Workspace: ws,
@@ -3721,7 +3721,7 @@ func TestRestoreAll_ConflictLogsAndContinues(t *testing.T) {
 	ws := &fakeWorkspace{applyErr: fmt.Errorf("conflict: %w", ports.ErrPreservedConflict)}
 	var logBuf bytes.Buffer
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime:   rt,
 		Agents:    fakeAgents{},
 		Workspace: ws,
@@ -3866,7 +3866,7 @@ func TestReconcileLive_DeadSessionStashedAndTerminated(t *testing.T) {
 	ws := &fakeWorkspace{stashRef: "refs/ao/preserved/s1"}
 	lcm := &fakeLCM{store: st}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
 
 	rec := domain.SessionRecord{
 		ID:           "s1",
@@ -3913,7 +3913,7 @@ func TestReconcileLive_AliveSessionAdoptedNoop(t *testing.T) {
 	ws := &fakeWorkspace{}
 	lcm := &fakeLCM{store: st}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
 
 	rec := domain.SessionRecord{
 		ID: "s2", ProjectID: "p1", IsTerminated: false,
@@ -3937,7 +3937,7 @@ func TestReconcileLive_ProbeErrorIsNotDeath(t *testing.T) {
 	ws := &fakeWorkspace{}
 	lcm := &fakeLCM{store: st}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
 
 	rec := domain.SessionRecord{
 		ID:           "s3",
@@ -3987,7 +3987,7 @@ func TestReconcile_AdoptAcrossDaemonRestart(t *testing.T) {
 	ws := &fakeWorkspace{stashRef: "refs/ao/preserved/mer-3"}
 	lcm := &fakeLCM{store: st}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
 
 	// Alive orchestrator: the promptless session whose adoption failure used to
 	// mint a fresh orchestrator id. It must be adopted in place.
@@ -4099,7 +4099,7 @@ func newIdleManager(ttl time.Duration, now time.Time) (*Manager, *fakeStore, *fa
 	rt := &fakeRuntime{aliveByHandle: map[string]bool{}}
 	ws := &fakeWorkspace{}
 	lcm := &fakeLCM{store: st}
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st,
 		Messenger: &fakeMessenger{}, Lifecycle: lcm,
 		LookPath:     func(string) (string, error) { return "/bin/true", nil },
@@ -4675,7 +4675,7 @@ func TestSpawn_GitConventionEndToEnd(t *testing.T) {
 		agent := &recordingAgent{}
 		ws := &fakeWorkspace{}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 		return m, agent, ws
 	}
 
@@ -4724,7 +4724,7 @@ func TestSpawn_GitConventionEndToEnd(t *testing.T) {
 // getter exercises the built-in-defaults path.
 func layeredManager(st *fakeStore, overrides func() promptoverrides.Overrides) *Manager {
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	return New(Deps{WorkerTransport: terminalTransport,
+	return New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime:         &fakeRuntime{},
 		Agents:          singleAgent{agent: &recordingAgent{}},
 		Workspace:       &fakeWorkspace{},
@@ -5084,7 +5084,7 @@ func TestSystemPrompt_SkillPointerFollowsProjectWebUI(t *testing.T) {
 			st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
 		}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
@@ -5134,7 +5134,7 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		st := newFakeStore()
 		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
-		m := New(Deps{WorkerTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
@@ -5388,7 +5388,7 @@ func TestLaunch_AsksTheRuntimeToRecordTheAgentsExit(t *testing.T) {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	rt := &fakeRuntime{}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, DataDir: dataDir})
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport, Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, DataDir: dataDir})
 	want := filepath.Join(dataDir, endingslog.FileName)
 
 	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker}); err != nil {

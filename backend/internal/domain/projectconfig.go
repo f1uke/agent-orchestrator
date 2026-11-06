@@ -70,6 +70,9 @@ type ProjectConfig struct {
 
 	WorkerTransport Transport `json:"workerTransport,omitempty" enum:"terminal,chat"`
 
+	// OrchestratorTransport is WorkerTransport for the project's orchestrator.
+	OrchestratorTransport Transport `json:"orchestratorTransport,omitempty" enum:"terminal,chat"`
+
 	// NoIdleCompaction stops a chat session's host from sending /compact when a
 	// conversation of 200k tokens or more sits idle for 50 minutes on a 1-hour
 	// prompt cache. False, the default, keeps idle compaction on.
@@ -327,6 +330,9 @@ func (c ProjectConfig) Validate() error {
 	}
 	if _, err := ParseTransport(string(c.WorkerTransport)); err != nil {
 		return fmt.Errorf("workerTransport: %w", err)
+	}
+	if _, err := ParseTransport(string(c.OrchestratorTransport)); err != nil {
+		return fmt.Errorf("orchestratorTransport: %w", err)
 	}
 	if err := c.TrackerIntake.Validate(); err != nil {
 		return err

@@ -26,3 +26,14 @@ func TestProjectConfigValidate_WorkerTransport(t *testing.T) {
 		t.Error("workerTransport pigeon was accepted")
 	}
 }
+
+func TestProjectConfigValidate_OrchestratorTransport(t *testing.T) {
+	for _, ok := range []Transport{"", TransportTerminal, TransportChat} {
+		if err := (ProjectConfig{OrchestratorTransport: ok}).Validate(); err != nil {
+			t.Errorf("orchestratorTransport %q: %v", ok, err)
+		}
+	}
+	if err := (ProjectConfig{OrchestratorTransport: "pigeon"}).Validate(); err == nil {
+		t.Error("orchestratorTransport pigeon was accepted")
+	}
+}
