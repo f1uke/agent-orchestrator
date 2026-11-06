@@ -10308,10 +10308,14 @@ ol.note-prose__list {
 	background: var(--bg);
 }
 
+/* Covers the frame rather than hiding it. Chromium stops rendering a hidden
+   cross-origin frame, so a hidden widget never reports its size. */
 .chat-widget__loading {
 	position: absolute;
+	z-index: 1;
 	inset: 16px;
 	display: flex;
+	background: var(--bg);
 	align-items: center;
 	justify-content: center;
 	color: var(--fg-passive);
