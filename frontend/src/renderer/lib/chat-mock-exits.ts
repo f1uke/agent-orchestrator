@@ -36,7 +36,6 @@ const result = (id: string, content: string, isError: boolean): Step => [
 	},
 ];
 
-/** One turn of shell commands: four expected "no" exits, one passing command and two real failures. */
 export function exitsEntries(): ChatEntry[] {
 	const steps: Step[] = [
 		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],

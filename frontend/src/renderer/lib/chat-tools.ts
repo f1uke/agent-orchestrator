@@ -164,10 +164,6 @@ export function toolRunning(call: ToolCallItem): boolean {
 	return !call.result && call.permission?.status !== "denied" && call.permission?.status !== "cancelled";
 }
 
-/**
- * A tool that did not run to success: its result errored, the user denied it, or its background task failed.
- * A foreground Bash whose non-zero exit is an expected "no" (see `quietExit`) did not fail.
- */
 export function toolFailed(call: ToolCallItem, task?: BackgroundTask): boolean {
 	return (
 		(call.result?.isError === true && quietExit(call) === undefined) ||
@@ -176,7 +172,6 @@ export function toolFailed(call: ToolCallItem, task?: BackgroundTask): boolean {
 	);
 }
 
-/** For a foreground Bash that exited 1 as an expected "no", such as grep with no match, its label ("no match"). */
 function quietExit(call: ToolCallItem): string | undefined {
 	if (call.name !== "Bash" || call.result?.isError !== true || !isObject(call.input)) return undefined;
 	if (call.input.run_in_background === true) return undefined;

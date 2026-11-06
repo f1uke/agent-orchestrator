@@ -1,7 +1,3 @@
-/**
- * Commands whose exit code 1 answers "no" rather than reporting an error, keyed by
- * the program (plus the git subcommand or `command -v`), with the label a quiet row shows.
- */
 const QUIET_EXIT_1: Record<string, string> = {
 	grep: "no match",
 	egrep: "no match",
@@ -32,12 +28,8 @@ const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", 
 const SHELL_ERROR = /command not found|no such file or directory|permission denied/i;
 const DIFF_LINE = /^[<>+\- @]/;
 
-/**
- * The label for a Bash result whose non-zero exit is an expected "no" (grep found
- * nothing, diff found differences, test was false), or undefined when it is a real failure.
- * Claude Code writes a non-zero exit as `Exit code N` on the result's first line; the
- * exit belongs to the last command of the line, so only that command is judged.
- */
+// Claude Code writes a non-zero exit as `Exit code N` on the result's first line, and a
+// shell list exits with its last command's status, so only that command is judged.
 export function quietExitLabel(command: string, result: string): string | undefined {
 	const exit = /^Exit code (\d+)(?:\n|$)/.exec(result);
 	if (!exit || exit[1] !== "1") return undefined;
@@ -47,7 +39,6 @@ export function quietExitLabel(command: string, result: string): string | undefi
 	return key && Object.hasOwn(QUIET_EXIT_1, key) ? QUIET_EXIT_1[key] : undefined;
 }
 
-/** The last simple command of a shell line: the text after the last top-level `;`, `&&`, `||`, `|`, `&` or newline. */
 function lastCommand(line: string): string {
 	let quote = "";
 	let depth = 0;
