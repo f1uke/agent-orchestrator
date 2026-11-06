@@ -10,7 +10,11 @@ import {
 	parseCaFileLines,
 	simTrustSettingsQueryKey,
 } from "../../lib/sim-trust";
-import { orchestratorTransportQueryKey, responseLanguageQueryKey, workerTransportQueryKey } from "./useGlobalSettingsForm";
+import {
+	orchestratorTransportQueryKey,
+	responseLanguageQueryKey,
+	workerTransportQueryKey,
+} from "./useGlobalSettingsForm";
 import { BUILT_IN_ORCHESTRATOR_TRANSPORT, BUILT_IN_WORKER_TRANSPORT, type Transport } from "./transport";
 import { captureRendererEvent } from "../../lib/telemetry";
 import { useClaudeProfiles } from "../../lib/claude-profiles";

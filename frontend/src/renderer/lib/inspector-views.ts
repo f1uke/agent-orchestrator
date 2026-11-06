@@ -21,10 +21,7 @@ export type InspectorViewFlags = {
 };
 
 /** The rail tabs a session shows, in strip order. */
-export function allowedInspectorViews(
-	session: WorkspaceSession,
-	flags: InspectorViewFlags = {},
-): InspectorView[] {
+export function allowedInspectorViews(session: WorkspaceSession, flags: InspectorViewFlags = {}): InspectorView[] {
 	const isChat = session.transport === "chat";
 	if (isOrchestratorSession(session)) return isChat ? ["document", "tasks"] : [];
 	return INSPECTOR_VIEWS.filter((view) => {

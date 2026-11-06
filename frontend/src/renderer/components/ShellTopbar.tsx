@@ -239,7 +239,7 @@ export function ShellTopbar() {
 				) : null}
 				{isSessionRoute && session ? <ChatViewToggle session={session} style={noDragStyle} /> : null}
 				<NotificationCenter style={noDragStyle} />
-								{session && allowedInspectorViews(session).length > 0 ? (
+				{session && allowedInspectorViews(session).length > 0 ? (
 					<button
 						aria-label={isInspectorOpen ? "Close inspector panel" : "Open inspector panel"}
 						aria-pressed={isInspectorOpen}

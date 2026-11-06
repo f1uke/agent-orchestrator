@@ -93,7 +93,18 @@ const { workspaces, panels } = vi.hoisted(() => {
 			path: "/p",
 			type: "main",
 			hasWebUI: true,
-			sessions: [worker, worker2, worker3, orchestrator, chatOrchestrator, todo, crewDev, crewQa, ...extraWorkers, chat],
+			sessions: [
+				worker,
+				worker2,
+				worker3,
+				orchestrator,
+				chatOrchestrator,
+				todo,
+				crewDev,
+				crewQa,
+				...extraWorkers,
+				chat,
+			],
 		},
 	];
 	return { workspaces, panels: new Map<string, PanelEntry>() };
@@ -482,10 +493,7 @@ describe("SessionView", () => {
 		fireEvent.keyDown(window, { key: "F", metaKey: true, shiftKey: true });
 
 		expect(useUiStore.getState().isInspectorOpen).toBe(false);
-		expect(screen.getByRole("button", { name: "pop browser", hidden: true })).not.toHaveAttribute(
-			"data-view",
-			"files",
-		);
+		expect(screen.getByRole("button", { name: "pop browser", hidden: true })).not.toHaveAttribute("data-view", "files");
 	});
 
 	it("keeps project search for a chat worker", async () => {

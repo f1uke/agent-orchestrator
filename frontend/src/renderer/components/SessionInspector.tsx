@@ -341,7 +341,7 @@ export function SessionInspector({
 				{view === "tasks" ? (
 					<TasksPanel chat={chat} root={session.workspacePath ?? ""} sessionId={session.id} theme={theme ?? "dark"} />
 				) : null}
-				{view === "testiny" ?<TestinyView key={taskKeyOf(session)} session={session} /> : null}
+				{view === "testiny" ? <TestinyView key={taskKeyOf(session)} session={session} /> : null}
 				{/* The Simulator panel stays mounted while its tab is off so the chosen
 				    device survives a trip to another tab - with two simulators booted
 				    there is no default to fall back on, and re-picking on every tab

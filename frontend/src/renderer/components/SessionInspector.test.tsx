@@ -921,9 +921,7 @@ describe("SessionInspector tab-strip width class", () => {
 			usesTestiny?: boolean;
 			orchestrator?: boolean;
 		};
-		renderWithQuery(
-			<SessionInspector session={orchestrator ? chatOrchestrator : session([])} {...rest} />,
-		);
+		renderWithQuery(<SessionInspector session={orchestrator ? chatOrchestrator : session([])} {...rest} />);
 		const strip = screen.getByRole("tablist");
 		expect(strip).toHaveAttribute("data-tab-count", expected);
 		expect(screen.getAllByRole("tab")).toHaveLength(Number(expected));
