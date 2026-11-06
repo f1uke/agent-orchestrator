@@ -10,8 +10,8 @@ import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
 import { SettingEditorControl } from "./SettingEditorControl";
 import { SettingsReadOnlyPanel, ReadonlyRow } from "./SettingsReadOnlyPanel";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
-import { WorkerTransportSelect } from "./WorkerTransportSelect";
-import { workerTransportLabel } from "./worker-transport";
+import { TransportSelect } from "./TransportSelect";
+import { transportLabel } from "./transport";
 import { PROJECT_SECTIONS } from "./settings-sections";
 import type { SimTrustMode, useProjectSettingsForm } from "./useProjectSettingsForm";
 import { ClaudeProfileSelect } from "../ClaudeProfileSelect";
@@ -225,6 +225,7 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 		validationError,
 		claudeProfiles,
 		globalWorkerTransport,
+		globalOrchestratorTransport,
 	} = form;
 	// The supported list carries every agent's full identity, including its model
 	// tiers, so the per-kind model selectors resolve their options from the agent
@@ -306,27 +307,54 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 				<SettingRow
 					name="Worker transport"
 					summary="How a new Claude Code worker on this project is driven: Chat is a headless session behind the chat view, Terminal is its own TUI in the pane."
-					detail="Overrides the global default for this project. A worker keeps the transport it was spawned with, so changing this never moves a running one. The orchestrator and workers on other agents are always Terminal. Choose Terminal to go back; ao project set-config <id> --worker-transport terminal does the same."
+					detail="Overrides the global default for this project. A worker keeps the transport it was spawned with, so changing this never moves a running one. Workers on other agents are always Terminal. Choose Terminal to go back; ao project set-config <id> --worker-transport terminal does the same."
 					ownership={{
 						kind: "project-override",
-						globalValue: workerTransportLabel(globalWorkerTransport),
+						globalValue: transportLabel(globalWorkerTransport),
 						overriding: draft.workerTransport !== "",
 					}}
 					timing="next-worker"
 					value={
 						draft.workerTransport
-							? workerTransportLabel(draft.workerTransport)
-							: `${workerTransportLabel(globalWorkerTransport)} (inherited)`
+							? transportLabel(draft.workerTransport)
+							: `${transportLabel(globalWorkerTransport)} (inherited)`
 					}
 					modified={isFieldDirty("workerTransport")}
 					controlId="workerTransport"
 					onUseGlobal={() => setField("workerTransport", "")}
 				>
-					<WorkerTransportSelect
+					<TransportSelect
 						scope="project"
 						id="workerTransport"
 						value={draft.workerTransport}
 						onChange={(v) => setField("workerTransport", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Orchestrator transport"
+					summary="How a new Claude Code orchestrator on this project is driven: Chat is a headless session behind the chat view, Terminal is its own TUI in the pane."
+					detail="Overrides the global default for this project, and only for orchestrators started after you save. The running orchestrator keeps its transport until you restart it. Restart orchestrator on this project spawns a fresh one that uses this setting. Orchestrators on other agents are always Terminal. Choose Terminal to go back; ao project set-config <id> --orchestrator-transport terminal does the same."
+					ownership={{
+						kind: "project-override",
+						globalValue: transportLabel(globalOrchestratorTransport),
+						overriding: draft.orchestratorTransport !== "",
+					}}
+					timing="next-orchestrator"
+					value={
+						draft.orchestratorTransport
+							? transportLabel(draft.orchestratorTransport)
+							: `${transportLabel(globalOrchestratorTransport)} (inherited)`
+					}
+					modified={isFieldDirty("orchestratorTransport")}
+					controlId="orchestratorTransport"
+					onUseGlobal={() => setField("orchestratorTransport", "")}
+				>
+					<TransportSelect
+						scope="project"
+						id="orchestratorTransport"
+						value={draft.orchestratorTransport}
+						onChange={(v) => setField("orchestratorTransport", v)}
 					/>
 				</SettingRow>
 
