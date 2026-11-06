@@ -49,6 +49,7 @@ const rowsOf = (items: ChatItem[]) =>
 			agentModels: {},
 			remoteControl: REMOTE_CONTROL_OFF,
 			suggestion: "",
+			bashBusy: false,
 			lastSeq: 0,
 		} satisfies Transcript,
 		emptyOverlay,

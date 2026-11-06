@@ -19,6 +19,8 @@ export type UploadedFile = components["schemas"]["ControllersChatAttachment"];
 
 export type UploadResult = { ok: true; file: UploadedFile } | { ok: false; error: ChatActionError };
 
+export type BashResult = { ok: true; id: string } | { ok: false; error: ChatActionError };
+
 export type ChatApi = {
 	send: (sessionId: string, text: string, images: readonly ChatImage[]) => Promise<ChatResult>;
 	answer: (sessionId: string, body: AnswerBody) => Promise<ChatResult>;
@@ -28,6 +30,10 @@ export type ChatApi = {
 	/** Starts or stops Remote Control. The state and the session URL come back in the chat log, not in the result. */
 	setRemoteControl: (sessionId: string, enabled: boolean) => Promise<ChatResult>;
 	setChrome: (sessionId: string, enabled: boolean) => Promise<ChatResult>;
+	/** Runs a "!" command in the session's worktree as the person. The output comes back in the chat log, not in the result. */
+	runBash: (sessionId: string, command: string) => Promise<BashResult>;
+	/** Stops the running "!" command with this id. A finished or unknown id is a no-op. */
+	stopBash: (sessionId: string, id: string) => Promise<ChatResult>;
 	/** Saves a file where claude can read it; the answered path goes into the message. */
 	upload: (sessionId: string, file: File) => Promise<UploadResult>;
 	/** Ends a background task: a subagent or a background Bash. Resolves once claude has answered. */
@@ -56,10 +62,26 @@ export function chatError(status: number, body: unknown): ChatActionError {
 	return { kind: KIND_BY_CODE[code] ?? (status === 400 ? "invalid" : "failed"), message };
 }
 
+const path = (sessionId: string) => ({ params: { path: { sessionId } } });
+
 async function settle(call: Promise<{ error?: unknown; response: Response }>): Promise<ChatResult> {
 	try {
 		const { error, response } = await call;
 		return response.ok ? { ok: true } : { ok: false, error: chatError(response.status, error) };
+	} catch (err) {
+		return { ok: false, error: { kind: "failed", message: err instanceof Error ? err.message : String(err) } };
+	}
+}
+
+async function runBash(sessionId: string, command: string): Promise<BashResult> {
+	try {
+		const { data, error, response } = await apiClient.POST("/api/v1/sessions/{sessionId}/chat/bash", {
+			...path(sessionId),
+			body: { command },
+		});
+		if (!response.ok) return { ok: false, error: chatError(response.status, error) };
+		if (!data?.id) return { ok: false, error: { kind: "failed", message: "The daemon did not return the run's id." } };
+		return { ok: true, id: data.id };
 	} catch (err) {
 		return { ok: false, error: { kind: "failed", message: err instanceof Error ? err.message : String(err) } };
 	}
@@ -83,8 +105,6 @@ async function upload(sessionId: string, file: File): Promise<UploadResult> {
 	}
 }
 
-const path = (sessionId: string) => ({ params: { path: { sessionId } } });
-
 export const httpChatApi: ChatApi = {
 	send: (sessionId, text, images) =>
 		settle(
@@ -106,6 +126,9 @@ export const httpChatApi: ChatApi = {
 		),
 	setChrome: (sessionId, enabled) =>
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/chrome", { ...path(sessionId), body: { enabled } })),
+	runBash,
+	stopBash: (sessionId, id) =>
+		settle(apiClient.POST("/api/v1/sessions/{sessionId}/chat/bash/stop", { ...path(sessionId), body: { id } })),
 	upload,
 	stopTask: (sessionId, taskId) =>
 		settle(

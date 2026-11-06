@@ -109,6 +109,7 @@ describe("liveSuggestions", () => {
 				agentModels: {},
 				remoteControl: REMOTE_CONTROL_OFF,
 				suggestion: "",
+				bashBusy: false,
 				lastSeq: 0,
 			},
 			emptyOverlay,

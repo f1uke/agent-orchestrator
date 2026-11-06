@@ -211,3 +211,50 @@ describe("httpChatApi.upload", () => {
 		expect(await httpChatApi.upload("s1", new File(["x"], "a"))).toMatchObject({ ok: false });
 	});
 });
+
+describe("httpChatApi bash", () => {
+	it("posts the command and returns the run's id", async () => {
+		POST.mockResolvedValue({ data: { id: "run-1" }, response: new Response(null, { status: 200 }) });
+		expect(await httpChatApi.runBash("s1", "git status")).toEqual({ ok: true, id: "run-1" });
+		expect(POST).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/chat/bash", {
+			params: { path: { sessionId: "s1" } },
+			body: { command: "git status" },
+		});
+	});
+
+	it("reports a refusal while a turn runs with the host's reason", async () => {
+		POST.mockResolvedValue(
+			reply(409, { error: "x", code: "CHAT_REQUEST_REJECTED", message: "a turn is running", requestId: "q" }),
+		);
+		expect(await httpChatApi.runBash("s1", "ls")).toEqual({
+			ok: false,
+			error: { kind: "rejected", message: "a turn is running" },
+		});
+	});
+
+	it("reports a blank or oversize command as invalid", async () => {
+		POST.mockResolvedValue(
+			reply(400, { error: "x", code: "INVALID_COMMAND", message: "command is empty", requestId: "q" }),
+		);
+		expect(await httpChatApi.runBash("s1", " ")).toEqual({
+			ok: false,
+			error: { kind: "invalid", message: "command is empty" },
+		});
+	});
+
+	it("fails when the answer carries no id, or the request throws", async () => {
+		POST.mockResolvedValueOnce({ data: {}, response: new Response(null, { status: 200 }) });
+		expect(await httpChatApi.runBash("s1", "ls")).toMatchObject({ ok: false, error: { kind: "failed" } });
+		POST.mockRejectedValueOnce(new Error("offline"));
+		expect(await httpChatApi.runBash("s1", "ls")).toEqual({ ok: false, error: { kind: "failed", message: "offline" } });
+	});
+
+	it("posts the run id to the stop route", async () => {
+		POST.mockResolvedValue(reply(200));
+		expect(await httpChatApi.stopBash("s1", "run-1")).toEqual({ ok: true });
+		expect(POST).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/chat/bash/stop", {
+			params: { path: { sessionId: "s1" } },
+			body: { id: "run-1" },
+		});
+	});
+});
