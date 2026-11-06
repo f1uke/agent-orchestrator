@@ -36,7 +36,6 @@ export function useResolved(
 	return useMemo(() => (sessionId !== undefined && known ? { sessionId, known } : undefined), [sessionId, known]);
 }
 
-/** The chat session the images under ChatRefsProvider belong to. */
 export function useChatSessionId(): string | undefined {
 	return useContext(RefsContext)?.sessionId;
 }

@@ -3,13 +3,6 @@ import type { ChatFolder } from "./chat-fold";
 
 export type RecentChat = { entries: ChatEntry[]; folder: ChatFolder; bytes: number };
 
-/**
- * The logs of the chat sessions opened last, so switching back to one shows it
- * at once and asks the daemon only for what it logged since. Bounded by count
- * and by the summed size of the entries as they came off the socket; the
- * session put longest ago is dropped first. A session is taken out while it is
- * open, so one log has one owner.
- */
 export class RecentChats {
 	private held = new Map<string, RecentChat>();
 
@@ -27,6 +20,8 @@ export class RecentChats {
 		}
 	}
 
+	// The open session's hook keeps adding to the log it took, so the cache
+	// must not hand the same log to a second owner.
 	take(sessionId: string): RecentChat | undefined {
 		const held = this.held.get(sessionId);
 		this.held.delete(sessionId);

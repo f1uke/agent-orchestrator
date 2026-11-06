@@ -11,7 +11,6 @@ type ServerFrame = {
 };
 
 export type ChatMuxListeners = {
-	/** `bytes` is the size of the frame that carried it. */
 	entry: (entry: ChatEntry, bytes?: number) => void;
 	delta: (delta: unknown) => void;
 	/** A tailed replay sent its newest turns; the older entries follow, oldest first. */

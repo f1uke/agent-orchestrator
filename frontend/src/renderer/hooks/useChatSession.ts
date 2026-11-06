@@ -28,7 +28,6 @@ export type UseChatSessionOptions = {
 
 type Replay = "holdNewest" | "holdOlder" | "inOrder";
 
-/** The logs of the last chat sessions closed, so switching back is instant. */
 export const recentChats = new RecentChats({ sessions: 4, bytes: 64 * 1024 * 1024 });
 
 const RETRY_BASE_MS = 500;

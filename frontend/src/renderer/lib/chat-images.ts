@@ -4,7 +4,6 @@ export type ImageMime = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
 export type InlineImage = { mediaType: ImageMime; base64: string };
 
-/** An image's bytes inline, or the name the daemon stores them under (see chatBlobUrl). */
 export type ChatImage = InlineImage | { mediaType: ImageMime; blob: string };
 
 const IMAGE_MIMES: ReadonlySet<string> = new Set<ImageMime>(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -42,7 +41,6 @@ export function imagesOf(content: unknown): ChatImage[] {
 	return images;
 }
 
-/** The data URL of an image whose bytes are inline. */
 export function imageSrc(image: InlineImage): string {
 	return `data:${image.mediaType};base64,${image.base64}`;
 }
