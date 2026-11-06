@@ -32,17 +32,16 @@ function useDocText(url: string | undefined, revision = 0): Loaded {
 
 type ViewerProps = { doc: FileDoc; url: string; sessionId: string; active: boolean; revision: number };
 
-// One row per kind: what shows it, and whether the browser can show it better than the panel can.
-const KIND_VIEWS: Record<DocKind, { Viewer: ComponentType<ViewerProps>; browsable: boolean }> = {
-	markdown: { Viewer: TextDoc, browsable: false },
-	json: { Viewer: TextDoc, browsable: false },
-	text: { Viewer: TextDoc, browsable: false },
-	log: { Viewer: TextDoc, browsable: false },
-	diff: { Viewer: TextDoc, browsable: false },
-	html: { Viewer: HtmlDoc, browsable: true },
-	pdf: { Viewer: NativeDoc, browsable: true },
-	image: { Viewer: ImageDoc, browsable: true },
-	video: { Viewer: VideoDoc, browsable: true },
+const KIND_VIEWS: Record<DocKind, { Viewer: ComponentType<ViewerProps>; opensInBrowser: boolean }> = {
+	markdown: { Viewer: TextDoc, opensInBrowser: false },
+	json: { Viewer: TextDoc, opensInBrowser: false },
+	text: { Viewer: TextDoc, opensInBrowser: false },
+	log: { Viewer: TextDoc, opensInBrowser: false },
+	diff: { Viewer: TextDoc, opensInBrowser: false },
+	html: { Viewer: HtmlDoc, opensInBrowser: true },
+	pdf: { Viewer: NativeDoc, opensInBrowser: true },
+	image: { Viewer: ImageDoc, opensInBrowser: true },
+	video: { Viewer: VideoDoc, opensInBrowser: true },
 };
 
 function Thumbnail({ url }: { url: string }) {
@@ -102,7 +101,7 @@ export function DocumentPanel({
 		);
 	}
 	const url = chatFileUrl(sessionId, doc);
-	const { Viewer, browsable } = KIND_VIEWS[doc.kind];
+	const { Viewer, opensInBrowser } = KIND_VIEWS[doc.kind];
 	return (
 		<div className="document-panel" role="tabpanel">
 			<header className="document-panel__head">
@@ -112,7 +111,7 @@ export function DocumentPanel({
 						{docMeta(doc)}
 					</p>
 				</div>
-				{browsable ? (
+				{opensInBrowser ? (
 					<Button asChild size="sm" variant="outline">
 						<a href={url} rel="noreferrer noopener" target="_blank">
 							Open in browser
@@ -219,8 +218,6 @@ function PreviewFrame({ html, title }: { html: string; title: string }) {
 	);
 }
 
-// The daemon URL goes straight to the element, so Chromium streams a video with Range requests and
-// loads an image without holding its bytes in the renderer.
 function ImageDoc({ doc, url }: ViewerProps) {
 	const [fit, setFit] = useState(true);
 	const [failed, setFailed] = useState(false);

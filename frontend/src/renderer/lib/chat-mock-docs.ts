@@ -16,10 +16,8 @@ export const DOCS_LOG = "logs/export.log";
 export const DOCS_PATCH = "rate-limit.patch";
 export const DOCS_PDF = "docs/billing-export-spec.pdf";
 export const DOCS_HTML = "docs/preview.html";
-// What the daemon serves, relative to the project's knowledge root.
 export const DOCS_VIDEO = "runs/demo-clip.webm";
 export const DOCS_SHOT = "runs/demo-shot.png";
-// The shell `open` names them through a variable, and openedPaths expands that to a `~/` path.
 const DOCS_RUNS_DIR = "~/.ao/knowledge/ao-demo/runs";
 export const DOCS_VIDEO_REF = `${DOCS_RUNS_DIR}/demo-clip.webm`;
 export const DOCS_SHOT_REF = `${DOCS_RUNS_DIR}/demo-shot.png`;

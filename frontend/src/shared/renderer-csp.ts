@@ -3,17 +3,13 @@
 // time) and its unit test. The daemon is loopback-only, so network access is
 // pinned to 127.0.0.1 (REST + SSE over http, terminal mux over ws).
 //
-// `blob:` in img-src/media-src is required for the Jira media previews.
-// The renderer runs on the secure `app://` scheme, where a direct
-// <img>/<video src=http://127.0.0.1…> subresource is CSP-blocked (loopback http
-// lives only in connect-src). So the media bytes are fetched (connect-src)
-// and rendered from an object URL (`blob:app://renderer/…`); without `blob:`
-// here the element load is CSP-blocked and shows a broken thumbnail — the bug
-// that survived #111 (which added the blob fetch but not this CSP allowance).
+// `blob:` in img-src/media-src is required for the Jira media previews, which
+// fetch the bytes (connect-src) and render them from an object URL
+// (`blob:app://renderer/…`); without `blob:` here the element load is
+// CSP-blocked and shows a broken thumbnail, the bug that survived #111.
 //
-// Loopback http is also in img-src/media-src so the chat Document tab can point <img> and <video> at the
-// daemon: a video then streams by Range request instead of being read whole into a blob. This grants no
-// reach beyond connect-src, which already allows the same origin.
+// Loopback http is also in img-src/media-src so <img> and <video> can point at the daemon and a video
+// streams by Range request instead of being read whole into a blob.
 //
 // `frame-src 'self'` is for the chat widget frame on /widget-frame.html; srcdoc, data: and blob:
 // would inherit `script-src 'self'` and block the widget's inline scripts.

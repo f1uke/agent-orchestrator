@@ -44,6 +44,9 @@ const (
 
 const mib = 1 << 20
 
+// videoMax is far above the other caps because the route streams a video by Range request and never holds it whole.
+const videoMax = 1024 * mib
+
 const maxGlobMatches = 24
 
 type kindSpec struct {
@@ -54,16 +57,15 @@ type kindSpec struct {
 
 // kinds is the type allowlist: extension to kind, Content-Type and size cap.
 var kinds = map[string]kindSpec{
-	"png":  {KindImage, "image/png", 25 * mib},
-	"jpg":  {KindImage, "image/jpeg", 25 * mib},
-	"jpeg": {KindImage, "image/jpeg", 25 * mib},
-	"gif":  {KindImage, "image/gif", 25 * mib},
-	"webp": {KindImage, "image/webp", 25 * mib},
-	"svg":  {KindImage, "image/svg+xml", 2 * mib},
-	// A video is streamed by Range request, never held whole, so its cap is the largest of any kind.
-	"mp4":      {KindVideo, "video/mp4", 1024 * mib},
-	"mov":      {KindVideo, "video/quicktime", 1024 * mib},
-	"webm":     {KindVideo, "video/webm", 1024 * mib},
+	"png":      {KindImage, "image/png", 25 * mib},
+	"jpg":      {KindImage, "image/jpeg", 25 * mib},
+	"jpeg":     {KindImage, "image/jpeg", 25 * mib},
+	"gif":      {KindImage, "image/gif", 25 * mib},
+	"webp":     {KindImage, "image/webp", 25 * mib},
+	"svg":      {KindImage, "image/svg+xml", 2 * mib},
+	"mp4":      {KindVideo, "video/mp4", videoMax},
+	"mov":      {KindVideo, "video/quicktime", videoMax},
+	"webm":     {KindVideo, "video/webm", videoMax},
 	"md":       {KindMarkdown, "text/markdown; charset=utf-8", 2 * mib},
 	"markdown": {KindMarkdown, "text/markdown; charset=utf-8", 2 * mib},
 	"html":     {KindHTML, "text/html; charset=utf-8", 2 * mib},

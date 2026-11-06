@@ -38,7 +38,6 @@ function confirmedFiles(refs: readonly string[], known: ReadonlyMap<string, Reso
 	return docs;
 }
 
-/** Images stay with RefImages, so a card is never drawn for one. */
 const cardFiles = (refs: readonly string[], known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] =>
 	confirmedFiles(refs, known).filter((doc) => doc.kind !== "image");
 
@@ -140,7 +139,6 @@ export function useDocOf(path: string | undefined): { doc: FileDoc | undefined; 
 	}, [path, resolved, context]);
 }
 
-/** Every confirmed file of any kind the session's turns showed, newest turn first, each once: the Document tab's list. */
 export function sessionDocs(turns: readonly TurnDocs[], known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] {
 	const docs: FileDoc[] = [];
 	for (const turn of [...turns].reverse()) {

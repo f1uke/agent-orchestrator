@@ -33,8 +33,6 @@ describe("buildContentSecurityPolicy", () => {
 		expect(connect).toContain("ws://127.0.0.1:*");
 	});
 
-	// The chat Document tab points <img> and <video> straight at the daemon so a video streams by Range
-	// request instead of being read whole into a blob. Loopback is already fetchable via connect-src.
 	it("lets img-src and media-src load straight from the loopback daemon", () => {
 		const csp = buildContentSecurityPolicy("");
 		expect(directive(csp, "img-src")).toContain("http://127.0.0.1:*");

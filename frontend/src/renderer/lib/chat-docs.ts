@@ -40,12 +40,9 @@ const addRef = (found: Set<string>, ref: string) => {
 	if (found.size < MAX_REFS && new TextEncoder().encode(ref).length <= MAX_REF_BYTES) found.add(ref);
 };
 
-// A word is split into parts so quoting can decide what expands: a part is literal when single quotes or a
-// backslash keep it as written.
 type Part = { text: string; literal: boolean };
 type Word = Part[];
 
-/** Splits a shell script into its simple commands, each a list of words. Operators inside quotes stay in their word. */
 function simpleCommands(script: string): Word[][] {
 	const commands: Word[][] = [];
 	let words: Word[] = [];
@@ -93,7 +90,6 @@ function simpleCommands(script: string): Word[][] {
 
 const VARIABLE = /\$\{(\w+)\}|\$(\w+)/g;
 
-/** A word with its variables replaced, or undefined when it holds a substitution or a variable nothing set. */
 function expand(word: Word, vars: ReadonlyMap<string, string>): string | undefined {
 	let out = "";
 	for (const part of word) {
@@ -120,7 +116,6 @@ function assignmentOf(word: Word): { name: string; value: Word } | undefined {
 	return { name: match[1], value: [{ ...first, text: first.text.slice(match[0].length) }, ...rest] };
 }
 
-// A heredoc body is data for another program (a script with its own `open(...)` calls), not shell.
 const HEREDOC = /(?<!<)<<-?\s*(["']?)([A-Za-z_]\w*)\1/;
 
 function withoutHeredocs(command: string): string {
@@ -143,11 +138,20 @@ const LEADING_KEYWORDS = new Set(["then", "do", "else"]);
 const HAS_GLOB = /[*?[]/;
 const isAnchored = (path: string) => path.startsWith("/") || path === "~" || path.startsWith("~/");
 
-// The directory a `cd` leaves relative paths in: a path, null when unknown, undefined before any cd.
-function nextCwd(cwd: string | null | undefined, dir: string | undefined): string | null {
-	if (dir === undefined || dir === "" || dir === "-" || dir.split("/").includes("..")) return null;
-	if (isAnchored(dir)) return dir.replace(/\/+$/, "");
-	return typeof cwd === "string" ? `${cwd}/${dir.replace(/^\.\//, "").replace(/\/+$/, "")}` : null;
+// "session": no cd yet, so the daemon resolves a relative path against the session's roots.
+type Cwd = { kind: "session" } | { kind: "unknown" } | { kind: "dir"; dir: string };
+
+const trimDir = (dir: string) => dir.replace(/^\.\//, "").replace(/\/+$/, "");
+
+function nextCwd(cwd: Cwd, dir: string | undefined): Cwd {
+	if (dir === undefined || dir === "" || dir === "-" || dir.split("/").includes("..")) return { kind: "unknown" };
+	if (isAnchored(dir)) return { kind: "dir", dir: dir.replace(/\/+$/, "") };
+	return cwd.kind === "dir" ? { kind: "dir", dir: `${cwd.dir}/${trimDir(dir)}` } : { kind: "unknown" };
+}
+
+function refIn(cwd: Cwd, path: string): string | undefined {
+	if (isAnchored(path) || cwd.kind === "session") return path;
+	return cwd.kind === "dir" ? `${cwd.dir}/${path.replace(/^\.\//, "")}` : undefined;
 }
 
 /**
@@ -157,7 +161,7 @@ function nextCwd(cwd: string | null | undefined, dir: string | undefined): strin
 export function openedPaths(command: string): string[] {
 	const found = new Set<string>();
 	const vars = new Map([["HOME", "~"]]);
-	let cwd: string | null | undefined;
+	let cwd: Cwd = { kind: "session" };
 	for (const words of simpleCommands(withoutHeredocs(command))) {
 		let at = 0;
 		while (at < words.length && LEADING_KEYWORDS.has(expand(words[at], vars) ?? "")) at++;
@@ -183,8 +187,8 @@ export function openedPaths(command: string): string[] {
 			else if (arg === "--args") break;
 			else if (arg?.startsWith("-")) skip = OPEN_FLAGS_WITH_VALUE.has(arg);
 			else if (arg !== undefined && isShowablePath(arg) && !HAS_GLOB.test(arg)) {
-				if (isAnchored(arg) || cwd === undefined) addRef(found, arg);
-				else if (cwd !== null) addRef(found, `${cwd}/${arg.replace(/^\.\//, "")}`);
+				const ref = refIn(cwd, arg);
+				if (ref !== undefined) addRef(found, ref);
 			}
 		}
 	}

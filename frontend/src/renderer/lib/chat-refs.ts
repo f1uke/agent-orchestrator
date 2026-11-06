@@ -32,7 +32,6 @@ type Kind = { ends: RegExp; globs: boolean };
 const IMAGES: Kind = { ends: endsWith(IMAGE_EXT), globs: true };
 const VIDEOS: Kind = { ends: endsWith(VIDEO_EXT), globs: false };
 const DOCUMENTS: Kind = { ends: endsWith(DOC_EXT), globs: false };
-// A glob would let one reply list up to 24 files per pattern in the Document tab, so media refs have none.
 const MEDIA: Kind = { ends: endsWith([...IMAGE_EXT, ...VIDEO_EXT]), globs: false };
 
 function isRef(word: string, kind: Kind): boolean {
@@ -84,10 +83,8 @@ export const docRefs = (markdown: string): string[] => refsOf(markdown, DOCUMENT
 /** Whether a path the model wrote names a document, so a Write of `main.go` is never sent to be resolved. */
 export const isDocPath = (path: string): boolean => isRef(path, DOCUMENTS);
 
-/** The image and video paths a message names, without globs: what the Document tab lists beside the documents. */
 export const mediaRefs = (markdown: string): string[] => refsOf(markdown, MEDIA);
 
-/** Whether a path names a document, an image or a video: the files a Write row or a shell open may offer. */
 export const isShowablePath = (path: string): boolean =>
 	isRef(path, DOCUMENTS) || isRef(path, IMAGES) || isRef(path, VIDEOS);
 
