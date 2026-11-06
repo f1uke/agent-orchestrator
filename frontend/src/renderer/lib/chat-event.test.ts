@@ -23,6 +23,16 @@ describe("parseEvent", () => {
 		});
 	});
 
+	it("keeps the blob name of an image the daemon stores by reference", () => {
+		const event = parseEvent({
+			type: "user",
+			message: {
+				content: [{ type: "image", source: { type: "ao_blob", media_type: "image/jpeg", blob: "ab.jpg", size: 9 } }],
+			},
+		});
+		expect(event).toMatchObject({ blocks: [{ type: "image", mediaType: "image/jpeg", data: "", blob: "ab.jpg" }] });
+	});
+
 	it("gives an image with a non-base64 source no bytes", () => {
 		const event = parseEvent({
 			type: "user",
