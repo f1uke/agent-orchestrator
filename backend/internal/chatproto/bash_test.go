@@ -181,7 +181,9 @@ func TestFoldBashPhases(t *testing.T) {
 		{7, BashRunning},
 		{8, BashEnded},
 		{9, BashInjected},
-		{10, ""},
+		{12, BashInjected},
+		{13, ""},
+		{14, ""},
 	} {
 		tr := foldEntries(t, upTo(entries, s.seq))
 		got := BashPhase("")
