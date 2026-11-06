@@ -108,6 +108,11 @@ var ops = []op{
 	{"disable remote control", func(s *Service) error { return s.SetRemoteControl(context.Background(), "s-1", false) }, map[string]any{"op": "remote_control", "enabled": false}},
 	{"stop task", func(s *Service) error { return s.StopTask(context.Background(), "s-1", "bq3k9x1ab") }, map[string]any{"op": "stop_task", "task_id": "bq3k9x1ab"}},
 	{"rewind", func(s *Service) error { return s.Rewind(context.Background(), "s-1", "u-2", true) }, map[string]any{"op": "rewind", "uuid": "u-2", "restore_files": true}},
+	{"run bash", func(s *Service) error {
+		_, err := s.RunBash(context.Background(), "s-1", "git status")
+		return err
+	}, map[string]any{"op": "bash", "command": "git status"}},
+	{"stop bash", func(s *Service) error { return s.StopBash(context.Background(), "s-1", "b-1") }, map[string]any{"op": "bash_stop", "id": "b-1"}},
 	{"rewind preview", func(s *Service) error {
 		_, err := s.RewindPreview(context.Background(), "s-1", "u-2")
 		return err
@@ -150,6 +155,15 @@ func TestSendReturnsTheHostsUUID(t *testing.T) {
 	uuid, err := New(sessions(domain.TransportChat), dir).Send(context.Background(), "s-1", chatproto.UserInput{Text: "hi"})
 	if err != nil || uuid != "u-7" {
 		t.Fatalf("Send = %q, %v; want u-7", uuid, err)
+	}
+}
+
+func TestRunBashReturnsTheHostsRunID(t *testing.T) {
+	dir := shortDataDir(t)
+	startStubHost(t, dir, "s-1", `{"ok":true,"id":"b-7"}`)
+	id, err := New(sessions(domain.TransportChat), dir).RunBash(context.Background(), "s-1", "ls")
+	if err != nil || id != "b-7" {
+		t.Fatalf("RunBash = %q, %v; want b-7", id, err)
 	}
 }
 
