@@ -180,6 +180,8 @@ function mockGet(
 				return { data: { language: "English" }, error: undefined };
 			case "/api/v1/settings/worker-transport":
 				return { data: { workerTransport: "chat" }, error: undefined };
+			case "/api/v1/settings/orchestrator-transport":
+				return { data: { orchestratorTransport: "chat" }, error: undefined };
 			case "/api/v1/settings/reclaim":
 				return { data: { enabled: true, graceMinutes: 1440, artifactsEnabled: true }, error: undefined };
 			case "/api/v1/settings/wiki":
@@ -316,6 +318,21 @@ describe("GlobalSettingsForm", () => {
 			}),
 		);
 		expect(putMock).not.toHaveBeenCalledWith("/api/v1/settings/response-language", expect.anything());
+	});
+
+	it("routes the default orchestrator transport through the save bar without touching the worker transport", async () => {
+		renderForm();
+		await openRows();
+		const transport = await screen.findByRole("combobox", { name: "Default orchestrator transport" });
+		expect(transport).toHaveTextContent("Chat");
+		await chooseOption(transport, "Terminal");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/orchestrator-transport", {
+				body: { orchestratorTransport: "terminal" },
+			}),
+		);
+		expect(putMock).not.toHaveBeenCalledWith("/api/v1/settings/worker-transport", expect.anything());
 	});
 
 	it("routes the Auto-send toggle through the save bar (PUT auto-nudge)", async () => {

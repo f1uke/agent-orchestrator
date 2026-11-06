@@ -48,7 +48,7 @@ export const PROJECT_SECTIONS: SectionMeta[] = [
 		Icon: Users,
 		hint: "who AO puts on it, and how far it may go",
 		keywords:
-			"worker orchestrator agent harness claude code codex opencode model opus sonnet haiku worker transport chat terminal headless tui permission mode accept edits auto bypass crew qa tester automatic check-in pause before implementing needs you refresh agents availability cache",
+			"worker orchestrator agent harness claude code codex opencode model opus sonnet haiku worker transport orchestrator transport chat terminal headless tui permission mode accept edits auto bypass crew qa tester automatic check-in pause before implementing needs you refresh agents availability cache",
 	},
 	{
 		key: "told",
@@ -79,7 +79,7 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		keywords:
 			"response language thai english default localization system prompt base orchestrator worker qa reviewer coordination floor confidentiality placeholder project id " +
 			"claude profile profiles settings file omniroute subscription router proxy anthropic base url " +
-			"worker transport chat terminal headless tui session host rollback",
+			"worker transport orchestrator transport chat terminal headless tui session host rollback",
 	},
 	{
 		key: "running",
