@@ -32,6 +32,7 @@ type Kind string
 // The kinds in the allowlist.
 const (
 	KindImage    Kind = "image"
+	KindVideo    Kind = "video"
 	KindMarkdown Kind = "markdown"
 	KindHTML     Kind = "html"
 	KindPDF      Kind = "pdf"
@@ -53,12 +54,16 @@ type kindSpec struct {
 
 // kinds is the type allowlist: extension to kind, Content-Type and size cap.
 var kinds = map[string]kindSpec{
-	"png":      {KindImage, "image/png", 25 * mib},
-	"jpg":      {KindImage, "image/jpeg", 25 * mib},
-	"jpeg":     {KindImage, "image/jpeg", 25 * mib},
-	"gif":      {KindImage, "image/gif", 25 * mib},
-	"webp":     {KindImage, "image/webp", 25 * mib},
-	"svg":      {KindImage, "image/svg+xml", 2 * mib},
+	"png":  {KindImage, "image/png", 25 * mib},
+	"jpg":  {KindImage, "image/jpeg", 25 * mib},
+	"jpeg": {KindImage, "image/jpeg", 25 * mib},
+	"gif":  {KindImage, "image/gif", 25 * mib},
+	"webp": {KindImage, "image/webp", 25 * mib},
+	"svg":  {KindImage, "image/svg+xml", 2 * mib},
+	// A video is streamed by Range request, never held whole, so its cap is the largest of any kind.
+	"mp4":      {KindVideo, "video/mp4", 1024 * mib},
+	"mov":      {KindVideo, "video/quicktime", 1024 * mib},
+	"webm":     {KindVideo, "video/webm", 1024 * mib},
 	"md":       {KindMarkdown, "text/markdown; charset=utf-8", 2 * mib},
 	"markdown": {KindMarkdown, "text/markdown; charset=utf-8", 2 * mib},
 	"html":     {KindHTML, "text/html; charset=utf-8", 2 * mib},

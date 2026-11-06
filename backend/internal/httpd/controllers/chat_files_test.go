@@ -168,6 +168,40 @@ func TestChatFilesAnswersHeadAndRangeRequests(t *testing.T) {
 	}
 }
 
+func TestChatFilesStreamsAVideoInRanges(t *testing.T) {
+	env := newChatFilesEnv(t)
+	writeFile(t, filepath.Join(env.worktree, "out", "clip.mp4"), "0123456789ABCDEF")
+
+	files, status, body := env.resolve(t, "ao-1", "out/clip.mp4")
+	if status != http.StatusOK || len(files) != 1 || len(files[0].Matches) != 1 {
+		t.Fatalf("resolve = %d %s", status, body)
+	}
+	if m := files[0].Matches[0]; m.Kind != "video" || m.MIME != "video/mp4" {
+		t.Fatalf("resolve match = %+v, want kind video, mime video/mp4", m)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, env.srv.URL+"/api/v1/sessions/ao-1/chat/files/worktree/out/clip.mp4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Range", "bytes=0-9")
+	resp, err := env.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	part, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusPartialContent || string(part) != "0123456789" || len(part) != 10 {
+		t.Fatalf("range GET = %d %q, want 206 with 10 bytes", resp.StatusCode, part)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "video/mp4" {
+		t.Errorf("Content-Type = %q, want video/mp4", got)
+	}
+	if got := resp.Header.Get("Content-Range"); got != "bytes 0-9/16" {
+		t.Errorf("Content-Range = %q", got)
+	}
+}
+
 func TestChatFilesRefusesPathsThatEscapeTheRoot(t *testing.T) {
 	env := newChatFilesEnv(t)
 	writeFile(t, filepath.Join(env.worktree, "ok.png"), "OK")
