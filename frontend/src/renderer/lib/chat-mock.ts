@@ -14,7 +14,13 @@ import { errorEntries, MOCK_ERRORS_CHAT_SESSION } from "./chat-mock-errors";
 import { exitsEntries, MOCK_EXITS_CHAT_SESSION } from "./chat-mock-exits";
 import { MOCK_REFS_CHAT_SESSION, refsEntries } from "./chat-mock-refs";
 import { MOCK_TASKS_CHAT_SESSION, TASKS_SOAK_TASK, tasksEntries } from "./chat-mock-tasks";
-import { MOCK_WIDGETS_CHAT_SESSION, widgetEntries } from "./chat-mock-widgets";
+import {
+	MOCK_WIDGETS_CHAT_SESSION,
+	MOCK_WIDGETS_HISTORY_CHAT_SESSION,
+	widgetEntries,
+	widgetHistoryEntries,
+	widgetLiveTurn,
+} from "./chat-mock-widgets";
 import type { ChatMux, ChatMuxListeners } from "./chat-mux";
 import type { MuxConnectionState } from "./terminal-mux";
 
@@ -806,6 +812,8 @@ function playThinkingTail(id: string, session: StubSession): void {
 
 const liveTails = new Set<string>();
 
+const WIDGET_LIVE_TURN_MS = 800;
+
 function playLiveTail(id: string, session: StubSession): void {
 	if (liveTails.has(id)) return;
 	liveTails.add(id);
@@ -898,31 +906,33 @@ function stubSession(id: string): Promise<StubSession> {
 									? codeEntries()
 									: id === MOCK_WIDGETS_CHAT_SESSION
 										? widgetEntries()
-										: id === MOCK_CHAPTERS_CHAT_SESSION
-											? chapterEntries()
-											: id === MOCK_SUGGEST_CHAT_SESSION
-												? suggestEntries()
-												: id === MOCK_REFS_CHAT_SESSION
-													? refsEntries()
-													: id === MOCK_MARKDOWN_CHAT_SESSION
-														? markdownEntries()
-														: id === MOCK_DOCS_CHAT_SESSION
-															? docsEntries()
-															: id === MOCK_ERRORS_CHAT_SESSION
-																? errorEntries()
-																: id === MOCK_TASKS_CHAT_SESSION
-																	? tasksEntries()
-																	: id === MOCK_NEXT_CHAT_SESSION
-																		? nextEntries()
-																		: id === MOCK_CHROME_CHAT_SESSION
-																			? chromeEntries()
-																			: id === MOCK_EXITS_CHAT_SESSION
-																				? exitsEntries()
-																				: id === MOCK_FOLD_CHAT_SESSION
-																					? foldAnswerEntries()
-																					: long
-																						? fixture
-																						: mockChatEntries(fixture);
+										: id === MOCK_WIDGETS_HISTORY_CHAT_SESSION
+											? widgetHistoryEntries()
+											: id === MOCK_CHAPTERS_CHAT_SESSION
+												? chapterEntries()
+												: id === MOCK_SUGGEST_CHAT_SESSION
+													? suggestEntries()
+													: id === MOCK_REFS_CHAT_SESSION
+														? refsEntries()
+														: id === MOCK_MARKDOWN_CHAT_SESSION
+															? markdownEntries()
+															: id === MOCK_DOCS_CHAT_SESSION
+																? docsEntries()
+																: id === MOCK_ERRORS_CHAT_SESSION
+																	? errorEntries()
+																	: id === MOCK_TASKS_CHAT_SESSION
+																		? tasksEntries()
+																		: id === MOCK_NEXT_CHAT_SESSION
+																			? nextEntries()
+																			: id === MOCK_CHROME_CHAT_SESSION
+																				? chromeEntries()
+																				: id === MOCK_EXITS_CHAT_SESSION
+																					? exitsEntries()
+																					: id === MOCK_FOLD_CHAT_SESSION
+																						? foldAnswerEntries()
+																						: long
+																							? fixture
+																							: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
@@ -1201,7 +1211,10 @@ export function createStubChatMux(): ChatMux {
 		if (id === MOCK_TALL_CHAT_SESSION) playTallTail(id, session);
 		else if (id === MOCK_LIVE_CHAT_SESSION) playLiveTail(id, session);
 		else if (id === MOCK_THINKING_CHAT_SESSION) playThinkingTail(id, session);
-		else if (id === MOCK_MARKDOWN_CHAT_SESSION) {
+		else if (id === MOCK_WIDGETS_HISTORY_CHAT_SESSION && !liveTails.has(id)) {
+			liveTails.add(id);
+			later(() => append(id, session, widgetLiveTurn()), WIDGET_LIVE_TURN_MS);
+		} else if (id === MOCK_MARKDOWN_CHAT_SESSION) {
 			markdownDeltas().forEach((delta, i) => later(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));
 		} else if (id !== MOCK_REFS_CHAT_SESSION && id !== MOCK_DOCS_CHAT_SESSION && session.folder.transcript().busy) {
 			mockChatDeltas().forEach((delta, i) => later(() => each(id, (l) => l.delta(delta)), (i + 1) * DELTA_INTERVAL_MS));

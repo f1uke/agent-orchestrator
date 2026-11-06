@@ -149,10 +149,84 @@ export function widgetEntries(): ChatEntry[] {
 		["out", { type: "result", subtype: "success", is_error: false, num_turns: 3, total_cost_usd: 0.05 }],
 		["out", { type: "command_lifecycle", command_uuid: "w-1", state: "completed" }],
 	];
-	return steps.map(([dir, payload], i) => ({
+	return entries(steps);
+}
+
+const entries = (steps: Step[]): ChatEntry[] =>
+	steps.map(([dir, payload], i) => ({
 		seq: i + 1,
 		ts: new Date(START + i * 1_500).toISOString(),
 		dir,
 		payload,
 	}));
+
+export const MOCK_WIDGETS_HISTORY_CHAT_SESSION = "demo-chat-widgets-history";
+
+const TIMELINE = `<div style="display:grid;gap:8px">
+<svg id="timeline" viewBox="0 0 640 220" width="100%" role="img" aria-label="Vibration strength over the opening animation"></svg>
+<span id="picked" style="color:var(--text-secondary);font-size:13px">Click a bar for its detail</span>
+</div>
+<script>
+const svg = document.getElementById("timeline"), NS = "http://www.w3.org/2000/svg";
+const x = (ms) => 40 + (ms / 2000) * 540;
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  svg.appendChild(e);
+  return e;
 }
+el("line", { x1: 40, y1: 180, x2: 620, y2: 180, stroke: "var(--border-strong)" });
+[0, 500, 1000, 1500, 2000].forEach((ms) => {
+  el("text", { x: x(ms), y: 200, "text-anchor": "middle", "font-size": 11, fill: "var(--text-muted)" }).textContent = ms + " ms";
+});
+[[200, 0.3], [400, 0.5], [600, 0.7], [900, 1], [1200, 0.6], [1500, 0.4], [1800, 0.2]].forEach(([ms, power]) => {
+  const bar = el("rect", {
+    x: x(ms) - 4, y: 180 - power * 150, width: 8, height: power * 150, rx: 2,
+    fill: power > 0.6 ? "var(--accent)" : "var(--text-muted)",
+  });
+  bar.addEventListener("click", () => {
+    document.getElementById("picked").textContent = ms + " ms at strength " + power;
+  });
+});
+</script>`;
+
+const LONG_REPLY = Array.from(
+	{ length: 6 },
+	(_, i) =>
+		`Point ${i + 1}. The strongest pulse lands on the lid opening, and the pulses before it build up in even steps so the hand feels the box getting ready. The pulses after it fade out while the card rises, so the last thing the hand feels is a soft tap when the card settles.`,
+).join("\n\n");
+
+const ask = (uuid: string, text: string): Step[] => [
+	["in", { type: "user", uuid, session_id: "", message: { role: "user", content: text } }],
+	["out", { type: "command_lifecycle", command_uuid: uuid, state: "started" }],
+];
+const done = (uuid: string): Step[] => [
+	["out", { type: "result", subtype: "success", is_error: false, num_turns: 1, total_cost_usd: 0.01 }],
+	["out", { type: "command_lifecycle", command_uuid: uuid, state: "completed" }],
+];
+const timelineTurn = (n: string, prompt: string): Step[] => [
+	...ask(`h-${n}`, prompt),
+	tool(`h-widget-${n}`, `msg_h${n}a`, SHOW_WIDGET, {
+		title: `vibration_timeline_${n}`,
+		loading_messages: ["Plotting the pulses…"],
+		widget_code: TIMELINE,
+	}),
+	result(`h-widget-${n}`, SHOWN),
+	say(`msg_h${n}b`, "Each bar is one pulse; the tallest one is the lid opening."),
+	...done(`h-${n}`),
+];
+
+export function widgetHistoryEntries(): ChatEntry[] {
+	const later = ["2", "3", "4", "5"].flatMap((n): Step[] => [
+		...ask(`h-${n}`, `Walk me through part ${n} of the pattern.`),
+		say(`msg_h${n}`, LONG_REPLY),
+		...done(`h-${n}`),
+	]);
+	return entries([
+		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],
+		...timelineTurn("1", "Plot the vibration pattern of the gift box opening."),
+		...later,
+	]);
+}
+
+export const widgetLiveTurn = (): Step[] => timelineTurn("live", "Plot it once more for the new pattern.");
