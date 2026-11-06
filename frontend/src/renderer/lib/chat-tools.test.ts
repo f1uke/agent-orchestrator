@@ -217,6 +217,23 @@ describe("describeTool background Bash", () => {
 	});
 });
 
+describe("describeTool foreground Bash exit", () => {
+	const bash = (command: string, content: string) =>
+		describeTool(call("Bash", { command }, { isError: true, content }));
+
+	it("shows an expected non-zero exit as a grey answer, not a failure", () => {
+		const view = bash("cd frontend && grep -rn needle src", "Exit code 1");
+		expect(view.status).toEqual({ tone: "idle", text: "no match · exit 1" });
+		expect(view.body).toMatchObject({ kind: "bash", failed: false, exitCode: 1 });
+	});
+
+	it("keeps a real failure red", () => {
+		const view = bash("npm test", "Exit code 1\nFAIL src/a.test.ts");
+		expect(view.status).toEqual({ tone: "error", text: "Failed" });
+		expect(view.body).toMatchObject({ kind: "bash", failed: true, exitCode: 1, output: "FAIL src/a.test.ts" });
+	});
+});
+
 describe("describeTool Agent with a task", () => {
 	const agent = call(
 		"Agent",
@@ -339,6 +356,15 @@ describe("process summaries", () => {
 		};
 		expect(toolFailed(denied)).toBe(true);
 		expect(summarizeTools([denied]).failed).toBe(1);
+	});
+
+	it("does not count an expected non-zero exit as failed, and still counts a real one", () => {
+		const noMatch = call("Bash", { command: "git grep -c needle" }, { isError: true, content: "Exit code 1" }, "b1");
+		const differs = call("Bash", { command: "diff a b" }, { isError: true, content: "Exit code 1\n1c1" }, "b2");
+		const broken = call("Bash", { command: "npm test" }, { isError: true, content: "Exit code 1\nFAIL" }, "b3");
+		expect(summarizeTools([noMatch, differs, broken]).failed).toBe(1);
+		expect(toolFailed(noMatch)).toBe(false);
+		expect(toolFailed(broken)).toBe(true);
 	});
 
 	it.each([
