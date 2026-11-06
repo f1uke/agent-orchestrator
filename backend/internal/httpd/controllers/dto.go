@@ -2475,7 +2475,7 @@ type ResolveChatFilesRequest struct {
 type ChatFileMatch struct {
 	Root       string `json:"root" enum:"worktree,knowledge" description:"The root the file lives in; pass it back as {root} to GET the bytes."`
 	Path       string `json:"path" description:"Slash-separated, relative to the root; pass it back as the rest of the GET path."`
-	Kind       string `json:"kind" enum:"image,markdown,html,pdf,json,text,log,diff"`
+	Kind       string `json:"kind" enum:"image,video,markdown,html,pdf,json,text,log,diff"`
 	MIME       string `json:"mime"`
 	Size       int64  `json:"size"`
 	ModifiedAt string `json:"modifiedAt" format:"date-time"`

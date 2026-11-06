@@ -1,7 +1,7 @@
 import { type CodeView, languageOf, splitLines } from "./chat-code";
 import type { ChatItem, ToolCallItem } from "./chat-fold";
 import { isObject } from "./chat-event";
-import { docRefs, isDocPath } from "./chat-refs";
+import { docRefs, isShowablePath, mediaRefs } from "./chat-refs";
 import type { ResolvedFile } from "./chat-refs-store";
 
 export type DocKind = ResolvedFile["kind"];
@@ -36,16 +36,186 @@ export function writtenPath(call: ToolCallItem): string | undefined {
 	return typeof path === "string" && path !== "" ? path : undefined;
 }
 
+const addRef = (found: Set<string>, ref: string) => {
+	if (found.size < MAX_REFS && new TextEncoder().encode(ref).length <= MAX_REF_BYTES) found.add(ref);
+};
+
+type Part = { text: string; literal: boolean };
+type Word = Part[];
+
+function simpleCommands(script: string): Word[][] {
+	const commands: Word[][] = [];
+	let words: Word[] = [];
+	let word: Word = [];
+	let started = false;
+	let quote: string | undefined;
+	const push = (text: string, literal: boolean) => {
+		const last = word.at(-1);
+		if (last?.literal === literal) last.text += text;
+		else word.push({ text, literal });
+		started = true;
+	};
+	const endWord = () => {
+		if (started) words.push(word);
+		word = [];
+		started = false;
+	};
+	const endCommand = () => {
+		endWord();
+		if (words.length > 0) commands.push(words);
+		words = [];
+	};
+	for (let i = 0; i < script.length; i++) {
+		const c = script[i];
+		if (quote === "'") {
+			if (c === "'") quote = undefined;
+			else push(c, true);
+		} else if (c === "\\" && i + 1 < script.length && (quote === undefined || '$`"\\'.includes(script[i + 1]))) {
+			push(script[++i], true);
+		} else if (quote === '"') {
+			if (c === '"') quote = undefined;
+			else push(c, false);
+		} else if (c === "'" || c === '"') {
+			quote = c;
+			started = true;
+		} else if (c === "#" && !started) {
+			while (i + 1 < script.length && script[i + 1] !== "\n") i++;
+		} else if (c === ";" || c === "&" || c === "|" || c === "\n") endCommand();
+		else if (/\s/.test(c)) endWord();
+		else push(c, false);
+	}
+	endCommand();
+	return commands;
+}
+
+const VARIABLE = /\$\{(\w+)\}|\$(\w+)/g;
+
+function expand(word: Word, vars: ReadonlyMap<string, string>): string | undefined {
+	let out = "";
+	for (const part of word) {
+		if (part.literal) {
+			out += part.text;
+		} else if (part.text.includes("`") || part.text.includes("$(")) {
+			return undefined;
+		} else {
+			out += part.text.replace(
+				VARIABLE,
+				(match, braced?: string, bare?: string) => vars.get(braced ?? bare ?? "") ?? match,
+			);
+		}
+	}
+	return out.includes("$") ? undefined : out;
+}
+
+const ASSIGNMENT = /^([A-Za-z_]\w*)=/;
+
+function assignmentOf(word: Word): { name: string; value: Word } | undefined {
+	const [first, ...rest] = word;
+	const match = first && !first.literal ? ASSIGNMENT.exec(first.text) : null;
+	if (!first || !match) return undefined;
+	return { name: match[1], value: [{ ...first, text: first.text.slice(match[0].length) }, ...rest] };
+}
+
+const HEREDOC = /(?<!<)<<-?\s*(["']?)([A-Za-z_]\w*)\1/;
+
+function withoutHeredocs(command: string): string {
+	const kept: string[] = [];
+	let end: string | undefined;
+	for (const line of command.replace(/\\\n/g, " ").split("\n")) {
+		if (end !== undefined) {
+			if (line.trim() === end) end = undefined;
+			continue;
+		}
+		kept.push(line);
+		end = HEREDOC.exec(line)?.[2];
+	}
+	return kept.join("\n");
+}
+
+const OPENERS = new Set(["open", "/usr/bin/open"]);
+const OPEN_FLAGS_WITH_VALUE = new Set(["-a", "-b", "--env", "--stdin", "--stdout", "--stderr"]);
+const LEADING_KEYWORDS = new Set(["then", "do", "else"]);
+const HAS_GLOB = /[*?[]/;
+const isAnchored = (path: string) => path.startsWith("/") || path === "~" || path.startsWith("~/");
+
+// "session": no cd yet, so the daemon resolves a relative path against the session's roots.
+type Cwd = { kind: "session" } | { kind: "unknown" } | { kind: "dir"; dir: string };
+
+const trimDir = (dir: string) => dir.replace(/^\.\//, "").replace(/\/+$/, "");
+
+function nextCwd(cwd: Cwd, dir: string | undefined): Cwd {
+	if (dir === undefined || dir === "" || dir === "-" || dir.split("/").includes("..")) return { kind: "unknown" };
+	if (isAnchored(dir)) return { kind: "dir", dir: dir.replace(/\/+$/, "") };
+	return cwd.kind === "dir" ? { kind: "dir", dir: `${cwd.dir}/${trimDir(dir)}` } : { kind: "unknown" };
+}
+
+function refIn(cwd: Cwd, path: string): string | undefined {
+	if (isAnchored(path) || cwd.kind === "session") return path;
+	return cwd.kind === "dir" ? `${cwd.dir}/${path.replace(/^\.\//, "")}` : undefined;
+}
+
+/**
+ * The showable files a Bash command opens with `open`, best effort. It follows the variables a command assigns
+ * and the directory it `cd`s to, and drops what it cannot resolve: a path with an unset variable, a glob or a URL.
+ */
+export function openedPaths(command: string): string[] {
+	const found = new Set<string>();
+	const vars = new Map([["HOME", "~"]]);
+	let cwd: Cwd = { kind: "session" };
+	for (const words of simpleCommands(withoutHeredocs(command))) {
+		let at = 0;
+		while (at < words.length && LEADING_KEYWORDS.has(expand(words[at], vars) ?? "")) at++;
+		if (expand(words[at] ?? [], vars) === "export") at++;
+		for (let assignment = assignmentOf(words[at] ?? []); assignment; assignment = assignmentOf(words[at] ?? [])) {
+			const value = expand(assignment.value, vars);
+			if (value === undefined) vars.delete(assignment.name);
+			else vars.set(assignment.name, value);
+			at++;
+		}
+		const [head, ...args] = words.slice(at);
+		if (!head) continue;
+		const name = expand(head, vars) ?? "";
+		if (name === "cd") {
+			cwd = nextCwd(cwd, args.length === 1 ? expand(args[0], vars) : undefined);
+			continue;
+		}
+		if (!OPENERS.has(name)) continue;
+		let skip = false;
+		for (const word of args) {
+			const arg = expand(word, vars);
+			if (skip) skip = false;
+			else if (arg === "--args") break;
+			else if (arg?.startsWith("-")) skip = OPEN_FLAGS_WITH_VALUE.has(arg);
+			else if (arg !== undefined && isShowablePath(arg) && !HAS_GLOB.test(arg)) {
+				const ref = refIn(cwd, arg);
+				if (ref !== undefined) addRef(found, ref);
+			}
+		}
+	}
+	return [...found];
+}
+
+const bashCommand = (call: ToolCallItem): string | undefined =>
+	call.parentToolUseId === "" && call.name === "Bash" && isObject(call.input) && typeof call.input.command === "string"
+		? call.input.command
+		: undefined;
+
+/**
+ * What a turn showed the human, as refs for the daemon to confirm: the files a top-level Write or Edit changed, the
+ * files a top-level Bash `open` opened, and the documents, images and videos a top-level reply names. A Read is
+ * never a source, and a subagent's calls stay its own.
+ */
 export function docsOfTurn(items: readonly ChatItem[]): string[] {
 	const found = new Set<string>();
-	const add = (ref: string) => {
-		if (found.size < MAX_REFS && new TextEncoder().encode(ref).length <= MAX_REF_BYTES) found.add(ref);
-	};
 	for (const item of items) {
 		if (item.kind === "tool_call") {
 			const path = writtenPath(item);
-			if (path !== undefined && isDocPath(path)) add(path);
-		} else if (item.kind === "assistant_text" && item.parentToolUseId === "") docRefs(item.text).forEach(add);
+			if (path !== undefined && isShowablePath(path)) addRef(found, path);
+			const command = bashCommand(item);
+			if (command !== undefined) openedPaths(command).forEach((ref) => addRef(found, ref));
+		} else if (item.kind === "assistant_text" && item.parentToolUseId === "") {
+			for (const ref of [...docRefs(item.text), ...mediaRefs(item.text)]) addRef(found, ref);
+		}
 	}
 	return [...found];
 }
@@ -90,7 +260,7 @@ export function turnDocs(items: readonly ChatItem[]): TurnDocs | undefined {
 }
 
 // A row's code box already shows text, JSON, a log or a diff in full, so an Open action would only repeat it.
-const ROW_KINDS: ReadonlySet<DocKind> = new Set(["markdown", "html", "pdf", "image"]);
+const ROW_KINDS: ReadonlySet<DocKind> = new Set(["markdown", "html", "pdf", "image", "video"]);
 
 export const rowOpens = (doc: Pick<FileDoc, "kind">): boolean => ROW_KINDS.has(doc.kind);
 
@@ -107,7 +277,7 @@ export function fileDocOf(match: ResolvedFile): FileDoc {
 	};
 }
 
-const KIND_TAG: Record<Exclude<DocKind, "image">, string> = {
+const KIND_TAG: Record<Exclude<DocKind, "image" | "video">, string> = {
 	markdown: "MD",
 	html: "HTML",
 	pdf: "PDF",
@@ -117,10 +287,14 @@ const KIND_TAG: Record<Exclude<DocKind, "image">, string> = {
 	diff: "DIFF",
 };
 
-export function docTag(doc: Pick<FileDoc, "kind" | "path">): string {
-	if (doc.kind !== "image") return KIND_TAG[doc.kind];
-	const extension = doc.path.split(".").at(-1)?.toUpperCase() ?? "";
+function extensionTag(path: string): string {
+	const extension = path.split(".").at(-1)?.toUpperCase() ?? "";
 	return extension === "JPEG" ? "JPG" : extension;
+}
+
+export function docTag(doc: Pick<FileDoc, "kind" | "path">): string {
+	if (doc.kind === "image" || doc.kind === "video") return extensionTag(doc.path);
+	return KIND_TAG[doc.kind];
 }
 
 export function sizeText(bytes: number): string {

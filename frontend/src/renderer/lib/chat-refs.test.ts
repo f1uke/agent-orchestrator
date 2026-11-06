@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOC_EXT, docRefs, IMAGE_EXT, imageRefs } from "./chat-refs";
+import { DOC_EXT, docRefs, IMAGE_EXT, imageRefs, isShowablePath, mediaRefs, VIDEO_EXT } from "./chat-refs";
 
 describe("imageRefs", () => {
 	it("takes an inline code span that ends in an image extension, as a path, a glob, ~/ or an absolute path", () => {
@@ -156,5 +156,46 @@ describe("docRefs", () => {
 		const many = Array.from({ length: 80 }, (_, i) => `\`s/${i}.md\``).join(" ");
 		expect(docRefs(many)).toHaveLength(64);
 		expect(docRefs(`\`${"a".repeat(1100)}.md\` \`ok.md\``)).toEqual(["ok.md"]);
+	});
+});
+
+describe("mediaRefs", () => {
+	it("takes the images and videos a reply names, as a path, ~/ or an absolute path, in order", () => {
+		const md =
+			"Clip in `out/clip.mp4`, still in [the frame](out/frame.png), ![x](out/x.webp), ~/r/demo.mov and /work/project/run.webm.";
+		expect(mediaRefs(md)).toEqual([
+			"out/clip.mp4",
+			"out/frame.png",
+			"out/x.webp",
+			"~/r/demo.mov",
+			"/work/project/run.webm",
+		]);
+	});
+
+	it("takes every extension in VIDEO_EXT in any case", () => {
+		expect(VIDEO_EXT).toEqual(["mp4", "mov", "webm"]);
+		const md = VIDEO_EXT.map((ext) => `\`clip.${ext}\``).join(" ") + " `UP.MP4`";
+		expect(mediaRefs(md)).toEqual([...VIDEO_EXT.map((ext) => `clip.${ext}`), "UP.MP4"]);
+	});
+
+	it("takes no glob, since a reply glob could flood the list, and leaves documents out", () => {
+		const md = "`shots/*.png` `out/clip-*.mp4` `docs/a.md` `https://x.test/a.mp4` `out/ok.png`";
+		expect(mediaRefs(md)).toEqual(["out/ok.png"]);
+		expect(imageRefs(md)).toContain("shots/*.png");
+	});
+
+	it("leaves imageRefs alone, so the thumbnails under a reply do not change", () => {
+		const md = "`out/clip.mp4` `out/a.png`";
+		expect(imageRefs(md)).toEqual(["out/a.png"]);
+		expect(docRefs(md)).toEqual([]);
+	});
+});
+
+describe("isShowablePath", () => {
+	it("is true for a document, an image and a video, and false for source code", () => {
+		expect(isShowablePath("/w/out/clip.mp4")).toBe(true);
+		expect(isShowablePath("out/a.png")).toBe(true);
+		expect(isShowablePath("docs/a.md")).toBe(true);
+		expect(isShowablePath("main.go")).toBe(false);
 	});
 });

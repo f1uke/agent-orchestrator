@@ -465,7 +465,7 @@ describe("SessionInspector tabs", () => {
 		};
 		const { unmount } = renderWithQuery(<SessionInspector session={chatSession} view="document" />);
 		expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true");
-		expect(screen.getByText(/Open a document from the chat/)).toBeInTheDocument();
+		expect(screen.getByText(/Open a document or media from the chat/)).toBeInTheDocument();
 		unmount();
 
 		renderWithQuery(<SessionInspector openDoc={doc} session={chatSession} view="document" />);

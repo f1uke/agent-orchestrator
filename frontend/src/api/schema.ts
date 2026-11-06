@@ -3499,7 +3499,7 @@ export interface components {
         };
         ChatFileMatch: {
             /** @enum {string} */
-            kind: "image" | "markdown" | "html" | "pdf" | "json" | "text" | "log" | "diff";
+            kind: "image" | "video" | "markdown" | "html" | "pdf" | "json" | "text" | "log" | "diff";
             mime: string;
             /** Format: date-time */
             modifiedAt: string;

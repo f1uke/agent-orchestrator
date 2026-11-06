@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import {
 	DOCS_ARTIFACT_URL,
@@ -9,7 +11,11 @@ import {
 	DOCS_PDF,
 	DOCS_PLAN_MD,
 	DOCS_PLAN_PATH,
+	DOCS_SHOT,
+	DOCS_SHOT_REF,
 	DOCS_SURVEY,
+	DOCS_VIDEO,
+	DOCS_VIDEO_REF,
 } from "../src/renderer/lib/chat-mock-docs";
 
 const VIEWPORTS = [
@@ -19,7 +25,7 @@ const VIEWPORTS = [
 const SHOTS = process.env.AO_DOCS_SHOTS;
 const SESSION = "/#/projects/ao-demo/sessions/demo-chat-docs";
 
-type Kind = "markdown" | "html" | "pdf" | "json" | "text" | "log" | "diff";
+type Kind = "markdown" | "html" | "pdf" | "json" | "text" | "log" | "diff" | "image" | "video";
 type Root = "worktree" | "knowledge";
 
 const SURVEY_MD = [
@@ -80,8 +86,10 @@ const PREVIEW_HTML = [
 	"</script></body></html>",
 ].join("\n");
 
-type Served = { root: Root; kind: Kind; mime: string; body: string; size: number };
-const served = (root: Root, kind: Kind, mime: string, body: string, size = body.length): Served => ({
+const fixture = (name: string) => readFileSync(join(__dirname, "fixtures", name));
+
+type Served = { root: Root; kind: Kind; mime: string; body: string | Buffer; size: number };
+const served = (root: Root, kind: Kind, mime: string, body: string | Buffer, size = body.length): Served => ({
 	root,
 	kind,
 	mime,
@@ -98,6 +106,14 @@ const FILES: Record<string, Served & { path: string }> = {
 	[DOCS_PATCH]: { ...served("worktree", "diff", "text/plain", PATCH, 1_024), path: DOCS_PATCH },
 	[DOCS_PDF]: { ...served("worktree", "pdf", "application/pdf", "%PDF-1.4", 412_000), path: DOCS_PDF },
 	[DOCS_HTML]: { ...served("worktree", "html", "text/html", PREVIEW_HTML, 3_300), path: DOCS_HTML },
+	[DOCS_VIDEO_REF]: {
+		...served("knowledge", "video", "video/webm", fixture("demo-clip.webm")),
+		path: DOCS_VIDEO,
+	},
+	[DOCS_SHOT_REF]: {
+		...served("knowledge", "image", "image/png", fixture("demo-shot.png")),
+		path: DOCS_SHOT,
+	},
 };
 
 /** The daemon's two chat file routes. */
@@ -132,7 +148,18 @@ async function stubDaemon(page: Page) {
 		bytes.push(path);
 		const f = Object.values(FILES).find((x) => x.path === path);
 		if (!f) return route.fulfill({ status: 404, json: { code: "CHAT_FILE_NOT_FOUND" } });
-		return route.fulfill({ status: 200, contentType: f.mime, body: Buffer.from(f.body) });
+		const body = Buffer.from(f.body);
+		// Chromium asks a media element for a Range and wants a 206 back, as the daemon's ServeContent answers.
+		const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? "");
+		if (!range) return route.fulfill({ status: 200, contentType: f.mime, body });
+		const start = Number(range[1]);
+		const end = Math.min(range[2] ? Number(range[2]) : body.length - 1, body.length - 1);
+		return route.fulfill({
+			status: 206,
+			contentType: f.mime,
+			headers: { "Accept-Ranges": "bytes", "Content-Range": `bytes ${start}-${end}/${body.length}` },
+			body: body.subarray(start, end + 1),
+		});
 	});
 	return bytes;
 }
@@ -155,11 +182,12 @@ for (const viewport of VIEWPORTS) {
 			await expect(stream).toBeVisible();
 
 			const strip = stream.getByTestId("chat-docs");
-			await expect(strip.getByRole("group")).toHaveCount(8);
+			await expect(strip.getByRole("group")).toHaveCount(9);
 			await expect(
 				strip.getByRole("group").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label"))),
 			).resolves.toEqual([
 				"plan.md",
+				"demo-clip.webm",
 				"demo--survey.md",
 				"batch-3-response.json",
 				"export.log",
@@ -200,12 +228,63 @@ for (const viewport of VIEWPORTS) {
 
 			await inspector.getByRole("button", { name: "Close document" }).click();
 			await expect(strip.locator('[data-open="true"]')).toHaveCount(0);
-			const list = inspector.getByRole("list", { name: "Documents in this session" });
-			await expect(list.getByRole("listitem")).toHaveCount(7);
+			const list = inspector.getByRole("list", { name: "Results in this session" });
+			await expect(list.getByRole("listitem")).toHaveCount(9);
 			await expect(list.getByRole("button", { name: "Open billing-export-spec.pdf" })).toBeVisible();
 			await shot(page, info, "after-document-list");
 			await list.getByRole("button", { name: "Open demo--survey.md" }).click();
 			await expect(inspector.getByRole("heading", { name: "Chat attachments survey" })).toBeVisible();
+		});
+
+		test("lists a video and an image the worker opened with a shell open beside the documents, and plays the video", async ({
+			page,
+		}, info) => {
+			const fetched = await stubDaemon(page);
+			await page.goto(SESSION);
+			const inspector = page.getByRole("complementary", { name: "Session inspector" });
+			await inspector.getByRole("tab", { name: "Document" }).click();
+
+			const list = inspector.getByRole("list", { name: "Results in this session" });
+			await expect(list.getByRole("listitem")).toHaveCount(9);
+			await expect(list.getByRole("button", { name: "Open demo-clip.webm" })).toContainText("WEBM");
+			await expect(list.getByRole("button", { name: "Open demo-shot.png" })).toContainText("PNG");
+			await expect(list.getByRole("button", { name: "Open plan.md" })).toBeVisible();
+			const thumbs = list.locator("img[loading='lazy']");
+			await expect(thumbs).toHaveCount(1);
+			await expect.poll(() => thumbs.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+			await shot(page, info, "after-media-list");
+
+			await list.getByRole("button", { name: "Open demo-clip.webm" }).click();
+			await expect(inspector.getByRole("heading", { name: "demo-clip.webm" })).toBeVisible();
+			await expect(inspector.getByRole("link", { name: /Open in browser/ })).toHaveAttribute(
+				"href",
+				/\/chat\/files\/knowledge\/runs\/demo-clip\.webm$/,
+			);
+			const video = inspector.locator("video");
+			await expect(video).toHaveAttribute("controls", "");
+			await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+			await video.evaluate((v: HTMLVideoElement) => {
+				v.muted = true;
+				return v.play();
+			});
+			await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0);
+			await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
+			await expect(inspector.getByRole("alert")).toHaveCount(0);
+			await shot(page, info, "after-video");
+
+			await inspector.getByRole("button", { name: "Close document" }).click();
+			await list.getByRole("button", { name: "Open demo-shot.png" }).click();
+			const image = inspector.getByRole("img", { name: "demo-shot.png" });
+			await expect(image).toHaveAttribute("data-fit", "fit");
+			await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+			await expect(inspector.getByRole("link", { name: /Open in browser/ })).toBeVisible();
+			await shot(page, info, "after-image-fit");
+			await inspector.getByRole("button", { name: "Full size" }).click();
+			await expect(image).toHaveAttribute("data-fit", "full");
+			await shot(page, info, "after-image-full");
+			await image.click();
+			await expect(image).toHaveAttribute("data-fit", "fit");
+			expect(fetched).toEqual(expect.arrayContaining([DOCS_VIDEO, DOCS_SHOT]));
 		});
 
 		test("opens a Write row's file from the row, without expanding it", async ({ page }) => {

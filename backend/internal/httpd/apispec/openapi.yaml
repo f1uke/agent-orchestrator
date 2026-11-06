@@ -10747,6 +10747,7 @@ components:
         kind:
           enum:
           - image
+          - video
           - markdown
           - html
           - pdf
