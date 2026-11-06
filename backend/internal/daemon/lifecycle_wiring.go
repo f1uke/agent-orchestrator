@@ -210,9 +210,10 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// The global default response language is read at (re)launch and resolved
 		// against the per-project override, so a settings edit takes effect on the
 		// next spawn/restore.
-		ResponseLanguage: func() string { return responseLang.Language() },
-		WorkerTransport:  transportSettings.WorkerTransport,
-		ClaudeProfiles:   claudeProfiles,
+		ResponseLanguage:      func() string { return responseLang.Language() },
+		WorkerTransport:       transportSettings.WorkerTransport,
+		OrchestratorTransport: transportSettings.OrchestratorTransport,
+		ClaudeProfiles:        claudeProfiles,
 	})
 	// A crew is one task on one worktree. When the reducer terminates a dev
 	// because its PR merged (or its issue closed) it writes one row and nothing

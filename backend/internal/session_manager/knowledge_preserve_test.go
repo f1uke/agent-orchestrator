@@ -17,7 +17,7 @@ func managerWithKnowledgeDir(dataDir, knowledgeDir string) (*Manager, *fakeStore
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{WorkerTransport: terminalTransport,
+	m := New(Deps{WorkerTransport: terminalTransport, OrchestratorTransport: terminalTransport,
 		Runtime: &fakeRuntime{}, Agents: fakeAgents{}, Workspace: &fakeWorkspace{},
 		Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
 		DataDir: dataDir, KnowledgeDir: knowledgeDir, LookPath: lookPath,
