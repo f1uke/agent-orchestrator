@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiBaseUrl } from "../lib/api-client";
@@ -43,7 +43,7 @@ const DAEMON = "http://127.0.0.1:3001/api/v1/sessions/s1/chat/files";
 describe("DocumentPanel", () => {
 	it("says what to do while no document is open", () => {
 		panel(null);
-		expect(screen.getByText(/Open a document from the chat/)).toBeInTheDocument();
+		expect(screen.getByText("Open a document or media from the chat to see it here.")).toBeInTheDocument();
 	});
 
 	it("lists the session's documents while none is open, and opens the one clicked", async () => {
@@ -51,7 +51,7 @@ describe("DocumentPanel", () => {
 		const newest = doc({ path: "tmp/batch.json", kind: "json", title: "batch.json", size: 900 });
 		const older = doc({ root: "knowledge", path: "plans/x--survey.md", title: "x--survey.md" });
 		render(<DocumentPanel active doc={null} docs={[newest, older]} onClose={vi.fn()} onOpen={onOpen} sessionId="s1" />);
-		const list = screen.getByRole("list", { name: "Documents in this session" });
+		const list = screen.getByRole("list", { name: "Results in this session" });
 		const items = within(list).getAllByRole("listitem");
 		expect(items.map((item) => item.textContent)).toEqual([
 			expect.stringContaining("batch.json"),
@@ -59,7 +59,30 @@ describe("DocumentPanel", () => {
 		]);
 		await userEvent.setup().click(within(list).getByRole("button", { name: "Open x--survey.md" }));
 		expect(onOpen).toHaveBeenCalledWith(older);
-		expect(screen.queryByText(/Open a document from the chat/)).toBeNull();
+		expect(screen.queryByText(/Open a document or media/)).toBeNull();
+	});
+
+	it("lists a document, an image with a small lazy thumbnail and a video, in the order given", async () => {
+		const onOpen = vi.fn();
+		const clip = doc({ path: "out/clip.mp4", kind: "video", title: "clip.mp4", size: 3_145_728 });
+		const shot = doc({ path: "out/s h.png", kind: "image", title: "s h.png", size: 4096 });
+		const plan = doc({});
+		render(
+			<DocumentPanel active doc={null} docs={[clip, shot, plan]} onClose={vi.fn()} onOpen={onOpen} sessionId="s1" />,
+		);
+		const items = within(screen.getByRole("list", { name: "Results in this session" })).getAllByRole("listitem");
+		expect(items.map((item) => item.textContent)).toEqual([
+			"MP4clip.mp4worktree · out/clip.mp4 · 3.0 MB",
+			"PNGs h.pngworktree · out/s h.png · 4 KB",
+			"MDplan.mdworktree · docs/plan.md · 2 KB",
+		]);
+		const thumbs = screen.getAllByRole("presentation", { hidden: true });
+		expect(thumbs).toHaveLength(1);
+		expect(thumbs[0]).toHaveAttribute("loading", "lazy");
+		expect(thumbs[0]).toHaveAttribute("src", `${DAEMON}/worktree/out/s%20h.png`);
+		expect(within(items[0]).queryByRole("presentation", { hidden: true })).toBeNull();
+		await userEvent.setup().click(within(items[0]).getByRole("button", { name: "Open clip.mp4" }));
+		expect(onOpen).toHaveBeenCalledWith(clip);
 	});
 
 	it("names the file in the header with its place and size", async () => {
@@ -115,11 +138,75 @@ describe("DocumentPanel", () => {
 		expect(await screen.findByText("… 5 more lines")).toBeInTheDocument();
 	});
 
-	it("shows an image from the bytes through a blob URL", async () => {
-		fetchMock.mockImplementation(async () => new Response(new TextEncoder().encode("png"), { status: 200 }));
-		panel(doc({ kind: "image", path: "docs/shot.png", title: "shot.png" }));
-		const img = await screen.findByRole("img", { name: "shot.png" });
-		expect(img).toHaveAttribute("src", "blob:doc");
+	describe("image", () => {
+		const shot = doc({ kind: "image", path: "docs/shot.png", title: "shot.png" });
+
+		it("loads straight from the daemon, with no fetch of its own", () => {
+			panel(shot);
+			expect(screen.getByRole("img", { name: "shot.png" })).toHaveAttribute("src", `${DAEMON}/worktree/docs/shot.png`);
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+
+		it("fits the panel first, and the button and a click on the image switch to full size and back", async () => {
+			panel(shot);
+			const user = userEvent.setup();
+			const img = screen.getByRole("img", { name: "shot.png" });
+			expect(img).toHaveAttribute("data-fit", "fit");
+			await user.click(screen.getByRole("button", { name: "Full size" }));
+			expect(img).toHaveAttribute("data-fit", "full");
+			expect(screen.getByRole("button", { name: "Fit" })).toBeInTheDocument();
+			await user.click(img);
+			expect(img).toHaveAttribute("data-fit", "fit");
+			await user.click(img);
+			expect(img).toHaveAttribute("data-fit", "full");
+		});
+
+		it("offers Open in browser", () => {
+			panel(shot);
+			expect(screen.getByRole("link", { name: /Open in browser/ })).toHaveAttribute(
+				"href",
+				`${DAEMON}/worktree/docs/shot.png`,
+			);
+		});
+
+		it("says so when the image does not load", () => {
+			panel(shot);
+			fireEvent.error(screen.getByRole("img", { name: "shot.png" }));
+			expect(screen.getByRole("alert")).toHaveTextContent(/Could not open shot\.png/);
+		});
+	});
+
+	describe("video", () => {
+		const clip = doc({ kind: "video", path: "out/clip.mp4", title: "clip.mp4", size: 5_000_000 });
+		const videoOf = () => {
+			const video = document.querySelector("video");
+			if (!video) throw new Error("no video");
+			return video;
+		};
+
+		it("streams from the daemon URL with controls and metadata only, with no fetch of its own", () => {
+			panel(clip);
+			const video = videoOf();
+			expect(video).toHaveAttribute("src", `${DAEMON}/worktree/out/clip.mp4`);
+			expect(video).toHaveAttribute("controls");
+			expect(video).toHaveAttribute("preload", "metadata");
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+
+		it("offers Open in browser", () => {
+			panel(clip);
+			expect(screen.getByRole("link", { name: /Open in browser/ })).toHaveAttribute(
+				"href",
+				`${DAEMON}/worktree/out/clip.mp4`,
+			);
+		});
+
+		it("says so when the video does not load", () => {
+			panel(clip);
+			fireEvent.error(videoOf());
+			expect(screen.getByRole("alert")).toHaveTextContent(/Could not open clip\.mp4/);
+			expect(document.querySelector("video")).toBeNull();
+		});
 	});
 
 	it("says so when the daemon refuses the file", async () => {

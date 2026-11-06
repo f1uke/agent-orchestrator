@@ -11,6 +11,10 @@
 // here the element load is CSP-blocked and shows a broken thumbnail — the bug
 // that survived #111 (which added the blob fetch but not this CSP allowance).
 //
+// Loopback http is also in img-src/media-src so the chat Document tab can point <img> and <video> at the
+// daemon: a video then streams by Range request instead of being read whole into a blob. This grants no
+// reach beyond connect-src, which already allows the same origin.
+//
 // `frame-src 'self'` is for the chat widget frame on /widget-frame.html; srcdoc, data: and blob:
 // would inherit `script-src 'self'` and block the widget's inline scripts.
 export function buildContentSecurityPolicy(posthogOrigin: string): string {
@@ -18,8 +22,8 @@ export function buildContentSecurityPolicy(posthogOrigin: string): string {
 		"default-src 'self'",
 		"script-src 'self'",
 		"style-src 'self' 'unsafe-inline'",
-		"img-src 'self' data: blob:",
-		"media-src 'self' blob:",
+		"img-src 'self' data: blob: http://127.0.0.1:*",
+		"media-src 'self' blob: http://127.0.0.1:*",
 		"font-src 'self' data:",
 		["connect-src", "'self'", "http://127.0.0.1:*", "ws://127.0.0.1:*", posthogOrigin].filter(Boolean).join(" "),
 		"object-src 'none'",

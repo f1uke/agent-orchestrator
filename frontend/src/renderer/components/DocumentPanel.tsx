@@ -1,13 +1,12 @@
 import { ArrowUpRight, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentType, useEffect, useMemo, useRef, useState } from "react";
 import { useBrowserView } from "../hooks/useBrowserView";
-import { docMeta, docTag, type FileDoc, textView } from "../lib/chat-docs";
+import { type DocKind, docMeta, docTag, type FileDoc, textView } from "../lib/chat-docs";
 import { previewDocument } from "../lib/chat-preview";
 import { chatFileUrl } from "../lib/chat-refs-store";
 import { WIDGET_DOC_TYPE, WIDGET_FRAME_URL } from "../lib/chat-widget";
 import { useUiStore } from "../stores/ui-store";
 import { CodeBox } from "./ChatCodeBox";
-import { useObjectUrl } from "./MediaLightbox";
 import { NoteMarkdown } from "./NoteMarkdown";
 import { Button } from "./ui/button";
 
@@ -31,7 +30,26 @@ function useDocText(url: string | undefined, revision = 0): Loaded {
 	return loaded;
 }
 
-const LINKED_KINDS = new Set<FileDoc["kind"]>(["html", "pdf"]);
+type ViewerProps = { doc: FileDoc; url: string; sessionId: string; active: boolean; revision: number };
+
+// One row per kind: what shows it, and whether the browser can show it better than the panel can.
+const KIND_VIEWS: Record<DocKind, { Viewer: ComponentType<ViewerProps>; browsable: boolean }> = {
+	markdown: { Viewer: TextDoc, browsable: false },
+	json: { Viewer: TextDoc, browsable: false },
+	text: { Viewer: TextDoc, browsable: false },
+	log: { Viewer: TextDoc, browsable: false },
+	diff: { Viewer: TextDoc, browsable: false },
+	html: { Viewer: HtmlDoc, browsable: true },
+	pdf: { Viewer: NativeDoc, browsable: true },
+	image: { Viewer: ImageDoc, browsable: true },
+	video: { Viewer: VideoDoc, browsable: true },
+};
+
+function Thumbnail({ url }: { url: string }) {
+	const [failed, setFailed] = useState(false);
+	if (failed) return null;
+	return <img alt="" className="document-list__thumb" loading="lazy" onError={() => setFailed(true)} src={url} />;
+}
 
 export function DocumentPanel({
 	sessionId,
@@ -54,7 +72,7 @@ export function DocumentPanel({
 		return (
 			<div className="document-panel" role="tabpanel">
 				{docs.length > 0 && onOpen ? (
-					<ul aria-label="Documents in this session" className="document-list">
+					<ul aria-label="Results in this session" className="document-list">
 						{docs.map((d) => (
 							<li className="document-list__item" key={`${d.root}:${d.path}`}>
 								<button
@@ -72,17 +90,19 @@ export function DocumentPanel({
 											{docMeta(d)}
 										</span>
 									</span>
+									{d.kind === "image" ? <Thumbnail url={chatFileUrl(sessionId, d)} /> : null}
 								</button>
 							</li>
 						))}
 					</ul>
 				) : (
-					<p className="inspector-empty">Open a document from the chat to read it here.</p>
+					<p className="inspector-empty">Open a document or media from the chat to see it here.</p>
 				)}
 			</div>
 		);
 	}
 	const url = chatFileUrl(sessionId, doc);
+	const { Viewer, browsable } = KIND_VIEWS[doc.kind];
 	return (
 		<div className="document-panel" role="tabpanel">
 			<header className="document-panel__head">
@@ -92,7 +112,7 @@ export function DocumentPanel({
 						{docMeta(doc)}
 					</p>
 				</div>
-				{LINKED_KINDS.has(doc.kind) ? (
+				{browsable ? (
 					<Button asChild size="sm" variant="outline">
 						<a href={url} rel="noreferrer noopener" target="_blank">
 							Open in browser
@@ -105,21 +125,20 @@ export function DocumentPanel({
 				</Button>
 			</header>
 			<div className="document-panel__body">
-				{doc.kind === "pdf" ? (
-					<NativeDoc active={active} sessionId={sessionId} url={url} />
-				) : doc.kind === "html" ? (
-					<HtmlDoc doc={doc} key={`${doc.root}:${doc.path}`} revision={revision} url={url} />
-				) : doc.kind === "image" ? (
-					<ImageDoc doc={doc} url={url} />
-				) : (
-					<TextDoc doc={doc} url={url} />
-				)}
+				<Viewer
+					active={active}
+					doc={doc}
+					key={`${doc.root}:${doc.path}`}
+					revision={revision}
+					sessionId={sessionId}
+					url={url}
+				/>
 			</div>
 		</div>
 	);
 }
 
-function NativeDoc({ sessionId, url, active }: { sessionId: string; url: string; active: boolean }) {
+function NativeDoc({ sessionId, url, active }: ViewerProps) {
 	const native = Boolean(window.ao?.browser);
 	const view = useBrowserView({
 		sessionId,
@@ -144,7 +163,7 @@ const HTML_MODES: ReadonlyArray<readonly [HtmlMode, string]> = [
 	["source", "Source"],
 ];
 
-function HtmlDoc({ doc, url, revision }: { doc: FileDoc; url: string; revision: number }) {
+function HtmlDoc({ doc, url, revision }: ViewerProps) {
 	const theme = useUiStore((state) => state.theme);
 	const [mode, setMode] = useState<HtmlMode>("preview");
 	const loaded = useDocText(url, revision);
@@ -200,13 +219,52 @@ function PreviewFrame({ html, title }: { html: string; title: string }) {
 	);
 }
 
-function ImageDoc({ doc, url }: { doc: FileDoc; url: string }) {
-	const { url: blob, failed } = useObjectUrl(url);
+// The daemon URL goes straight to the element, so Chromium streams a video with Range requests and
+// loads an image without holding its bytes in the renderer.
+function ImageDoc({ doc, url }: ViewerProps) {
+	const [fit, setFit] = useState(true);
+	const [failed, setFailed] = useState(false);
 	if (failed) return <Failed doc={doc} />;
-	return blob ? <img alt={doc.title} className="document-panel__image" src={blob} /> : null;
+	return (
+		<div className="document-media">
+			<div className="document-media__bar">
+				<Button onClick={() => setFit(!fit)} size="sm" type="button" variant="outline">
+					{fit ? "Full size" : "Fit"}
+				</Button>
+			</div>
+			<div className="document-media__stage">
+				<img
+					alt={doc.title}
+					className="document-media__image"
+					data-fit={fit ? "fit" : "full"}
+					onClick={() => setFit(!fit)}
+					onError={() => setFailed(true)}
+					src={url}
+				/>
+			</div>
+		</div>
+	);
 }
 
-function TextDoc({ doc, url }: { doc: FileDoc; url: string }) {
+function VideoDoc({ doc, url }: ViewerProps) {
+	const [failed, setFailed] = useState(false);
+	if (failed) return <Failed doc={doc} />;
+	return (
+		<div className="document-media">
+			<div className="document-media__stage">
+				<video
+					className="document-media__video"
+					controls
+					onError={() => setFailed(true)}
+					preload="metadata"
+					src={url}
+				/>
+			</div>
+		</div>
+	);
+}
+
+function TextDoc({ doc, url }: ViewerProps) {
 	const theme = useUiStore((state) => state.theme);
 	const loaded = useDocText(url);
 	const view = useMemo(

@@ -10840,6 +10840,16 @@ ol.note-prose__list {
 	background: var(--bg-2);
 }
 
+.document-list__thumb {
+	width: 40px;
+	height: 40px;
+	flex: none;
+	margin-left: auto;
+	border-radius: 8px;
+	background: var(--bg-3);
+	object-fit: cover;
+}
+
 .document-panel__body {
 	position: relative;
 	min-height: 0;
@@ -10858,10 +10868,50 @@ ol.note-prose__list {
 	min-height: 1px;
 }
 
-.document-panel__image {
+.document-media {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.document-media__bar {
+	display: flex;
+	flex: none;
+	justify-content: flex-end;
+	padding: 8px 14px;
+}
+
+.document-media__stage {
+	position: relative;
+	min-height: 0;
+	flex: 1;
+	margin: 0 14px 14px;
+	overflow: auto;
+}
+
+.document-media__image[data-fit="fit"],
+.document-media__video {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.document-media__image[data-fit="fit"] {
+	cursor: zoom-in;
+}
+
+.document-media__image[data-fit="full"] {
 	display: block;
-	max-width: 100%;
-	margin: 18px auto;
+	max-width: none;
+	cursor: zoom-out;
+}
+
+.document-media__video {
+	border-radius: 8px;
+	background: var(--bg-3);
 }
 
 .document-panel__error {
