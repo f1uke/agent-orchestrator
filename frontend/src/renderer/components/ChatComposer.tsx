@@ -4,6 +4,7 @@ import type { ChatActions } from "../hooks/useChatActions";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import type { PermissionMode } from "../lib/chat-answers";
 import type { ChatResult } from "../lib/chat-api";
+import { BASH_BLOCK_TEXT, BASH_HINT, bashBlock, bashModeEntry } from "../lib/chat-bash";
 import { MAX_IMAGES, prepareImage, withAttachedPaths } from "../lib/chat-attach";
 import type { ChatCommand, ChatModel, RemoteControl, UserItem } from "../lib/chat-fold";
 import { isImageMime } from "../lib/chat-images";
@@ -15,6 +16,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover";
 
 const MENU_ID = "chat-token-menu";
 const SUGGESTION_ID = "chat-suggestion-description";
+const BASH_HINT_ID = "chat-bash-hint";
 const MAX_FILES = 8;
 
 type Choice = { insert: string; hint?: string };
@@ -53,10 +55,15 @@ function mentionMenu(files: FilesState, query: string): TokenMenuModel {
 
 export type Prefill = { text: string; seq: number };
 
+/** What Enter does: "prompt" sends the text to Claude, "bash" runs it as a shell command. */
+type Mode = "prompt" | "bash";
+
 type ComposerProps = {
 	sessionId: string;
 	actions: ChatActions;
 	busy: boolean;
+	/** A "!" command is running or has not yet reached Claude. */
+	bashBusy: boolean;
 	queued: readonly UserItem[];
 	permissionMode: string;
 	commands: readonly ChatCommand[];
@@ -74,6 +81,7 @@ export function ChatComposer({
 	sessionId,
 	actions,
 	busy,
+	bashBusy,
 	queued,
 	permissionMode,
 	commands,
@@ -86,6 +94,7 @@ export function ChatComposer({
 	prefill,
 }: ComposerProps) {
 	const [text, setText] = useState("");
+	const [mode, setMode] = useState<Mode>("prompt");
 	const [caret, setCaret] = useState(0);
 	const [chips, setChips] = useState<Chip[]>([]);
 	const [preparing, setPreparing] = useState(0);
@@ -104,12 +113,16 @@ export function ChatComposer({
 	const images = chips.flatMap((c) => (c.kind === "image" ? [c.image] : []));
 	const uploaded = chips.flatMap((c) => (c.kind === "file" && c.upload.phase === "ready" ? [c.upload.path] : []));
 	const settled = preparing === 0 && chips.every((c) => c.kind === "image" || c.upload.phase === "ready");
-	const canSend = !disabled && !sending && settled && (text.trim() !== "" || chips.length > 0);
+	const bash = mode === "bash";
+	const block = bashBlock({ busy, bashBusy });
+	const canSend = !disabled && !sending && !bashBusy && settled && (text.trim() !== "" || chips.length > 0);
+	const canRun = !disabled && !sending && block === null && text.trim() !== "";
 
 	if (suggestion === "" && dismissedSuggestion !== null) setDismissedSuggestion(null);
-	const suggesting = suggestion !== "" && text === "" && !busy && !disabled && dismissedSuggestion !== suggestion;
+	const suggesting =
+		suggestion !== "" && text === "" && !busy && !disabled && !bash && dismissedSuggestion !== suggestion;
 
-	const token: ComposerToken | null = disabled || dismissedForText === text ? null : tokenAt(text, caret);
+	const token: ComposerToken | null = disabled || bash || dismissedForText === text ? null : tokenAt(text, caret);
 	if (token?.kind === "mention" && !wantFiles) setWantFiles(true);
 	const fileIndex = useWorkspaceFiles(sessionId, wantFiles);
 	const filesLoading = fileIndex.isPending && wantFiles;
@@ -148,7 +161,8 @@ export function ChatComposer({
 	useLayoutEffect(() => {
 		if (!prefill || prefill.seq === seenPrefill.current) return;
 		seenPrefill.current = prefill.seq;
-		const next = text.trim() === "" ? prefill.text : `${text}\n\n${prefill.text}`;
+		const next = bash || text.trim() === "" ? prefill.text : `${text}\n\n${prefill.text}`;
+		setMode("prompt");
 		edit(next, next.length);
 	});
 
@@ -222,6 +236,25 @@ export function ChatComposer({
 		}
 	};
 
+	const run = async () => {
+		if (!canRun) return;
+		setSending(true);
+		const result = await actions.runBash(text.trim());
+		setSending(false);
+		if (result.ok) {
+			setText("");
+			setCaret(0);
+			setMode("prompt");
+		} else if (result.error.kind !== "host_not_running") {
+			onToast(result.error.message);
+		}
+	};
+
+	const leaveBash = () => {
+		setMode("prompt");
+		edit("", 0);
+	};
+
 	const report = async (call: Promise<ChatResult>) => {
 		const result = await call;
 		if (!result.ok && result.error.kind !== "host_not_running") onToast(result.error.message);
@@ -229,6 +262,16 @@ export function ChatComposer({
 
 	const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.nativeEvent.isComposing) return;
+		if (bash) {
+			if (e.key === "Escape" || (e.key === "Backspace" && text === "")) {
+				e.preventDefault();
+				leaveBash();
+			} else if (e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				void run();
+			}
+			return;
+		}
 		if (menu) {
 			const n = menu.choices.length;
 			if (n > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -312,15 +355,39 @@ export function ChatComposer({
 							onRemove={(id) => setChips((prev) => prev.filter((c) => c.id !== id))}
 							onRetry={retry}
 						/>
-						<div className="chat-composer__field">
+						{bash ? (
+							<div className="chat-composer__mode" data-testid="chat-bash-mode">
+								<span className="chat-composer__mode-chip">! bash</span>
+								<span
+									className="chat-composer__mode-hint"
+									data-blocked={block ? "" : undefined}
+									id={BASH_HINT_ID}
+									role={block ? "status" : undefined}
+								>
+									{block ? BASH_BLOCK_TEXT[block] : BASH_HINT}
+								</span>
+							</div>
+						) : null}
+						<div className="chat-composer__field" data-mode={bash ? "bash" : undefined}>
+							{bash ? (
+								<span aria-hidden="true" className="chat-composer__bang">
+									!
+								</span>
+							) : null}
 							<textarea
 								aria-activedescendant={menu && activeIndex >= 0 ? optionId(MENU_ID, activeIndex) : undefined}
 								aria-controls={menu ? MENU_ID : undefined}
-								aria-describedby={suggesting ? SUGGESTION_ID : undefined}
-								aria-label="Message Claude"
+								aria-describedby={bash ? BASH_HINT_ID : suggesting ? SUGGESTION_ID : undefined}
+								aria-label={bash ? "Shell command" : "Message Claude"}
 								className="chat-composer__input"
 								disabled={disabled}
 								onChange={(e) => {
+									const entered = bash || chips.length > 0 ? null : bashModeEntry(text, e.target.value);
+									if (entered !== null) {
+										setMode("bash");
+										edit(entered, entered.length);
+										return;
+									}
 									setText(e.target.value);
 									setCaret(e.target.selectionStart);
 								}}
@@ -333,11 +400,13 @@ export function ChatComposer({
 								}}
 								onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
 								placeholder={
-									suggesting
-										? ""
-										: busy
-											? "Message Claude. It queues until the current turn ends."
-											: "Message Claude. / for commands and skills, @ for files, paste, drop or attach files."
+									bash
+										? "git status"
+										: suggesting
+											? ""
+											: busy
+												? "Message Claude. It queues until the current turn ends."
+												: "Message Claude. / for commands and skills, @ for files, paste, drop or attach files."
 								}
 								ref={input}
 								value={text}
@@ -364,7 +433,7 @@ export function ChatComposer({
 							<button
 								aria-label="Attach files"
 								className="chat-composer__tool"
-								disabled={disabled}
+								disabled={disabled || bash}
 								onClick={() => picker.current?.click()}
 								title="Attach files"
 								type="button"
@@ -388,7 +457,7 @@ export function ChatComposer({
 							<button
 								aria-label="Commands and skills"
 								className="chat-composer__tool"
-								disabled={disabled}
+								disabled={disabled || bash}
 								onClick={() => startToken("/")}
 								title="Commands and skills"
 								type="button"
@@ -398,7 +467,7 @@ export function ChatComposer({
 							<button
 								aria-label="Mention a file"
 								className="chat-composer__tool"
-								disabled={disabled}
+								disabled={disabled || bash}
 								onClick={() => startToken("@")}
 								title="Mention a file"
 								type="button"
@@ -431,11 +500,21 @@ export function ChatComposer({
 								</button>
 							) : null}
 							<button
-								aria-label="Send"
+								aria-label={bash ? "Run command" : "Send"}
 								className="chat-send"
-								disabled={!canSend}
-								onClick={() => void submit()}
-								title={busy ? "Send (queues while Claude works)" : "Send"}
+								disabled={bash ? !canRun : !canSend}
+								onClick={() => void (bash ? run() : submit())}
+								title={
+									bash
+										? block
+											? BASH_BLOCK_TEXT[block]
+											: "Run command"
+										: bashBusy
+											? BASH_BLOCK_TEXT.bash
+											: busy
+												? "Send (queues while Claude works)"
+												: "Send"
+								}
 								type="button"
 							>
 								<ArrowUp className="chat-send__icon" aria-hidden="true" />

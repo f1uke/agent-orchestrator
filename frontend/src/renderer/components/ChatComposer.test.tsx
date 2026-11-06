@@ -51,7 +51,13 @@ const MODELS: ChatModel[] = [
 
 function renderComposer(
 	over: Partial<ChatActions> = {},
-	props: { suggestion?: string; busy?: boolean; remoteControl?: RemoteControl; chrome?: boolean } = {},
+	props: {
+		suggestion?: string;
+		busy?: boolean;
+		bashBusy?: boolean;
+		remoteControl?: RemoteControl;
+		chrome?: boolean;
+	} = {},
 ) {
 	const actions = {
 		send: vi.fn<ChatActions["send"]>(async () => OK),
@@ -71,19 +77,21 @@ function renderComposer(
 		hostDown: false,
 		...over,
 	};
+	const live = { ...props };
 	const onToast = vi.fn();
 	const parentKeys = vi.fn((e: React.KeyboardEvent) => e.defaultPrevented);
-	const tree = (prefill?: Prefill, suggestion = props.suggestion ?? "") => (
+	const tree = (prefill?: Prefill, suggestion = live.suggestion ?? "") => (
 		<div onKeyDown={parentKeys}>
 			<ChatComposer
 				actions={actions}
-				busy={props.busy ?? false}
-				chrome={props.chrome ?? false}
+				bashBusy={live.bashBusy ?? false}
+				busy={live.busy ?? false}
+				chrome={live.chrome ?? false}
 				suggestion={suggestion}
 				commands={COMMANDS}
 				model="claude-opus-5-5"
 				models={MODELS}
-				remoteControl={props.remoteControl ?? REMOTE_CONTROL_OFF}
+				remoteControl={live.remoteControl ?? REMOTE_CONTROL_OFF}
 				onToast={onToast}
 				permissionMode="default"
 				prefill={prefill}
@@ -102,6 +110,10 @@ function renderComposer(
 		user: userEvent.setup(),
 		prefill: (next: Prefill) => rerender(tree(next)),
 		suggest: (next: string) => rerender(tree(undefined, next)),
+		rerenderWith: (next: typeof props) => {
+			Object.assign(live, next);
+			rerender(tree());
+		},
 	};
 }
 
@@ -663,5 +675,199 @@ describe("ChatComposer attachments", () => {
 		await user.upload(fileInput(), png("late.png"));
 		await waitFor(() => expect(onToast).toHaveBeenCalledTimes(2));
 		expect(chips()).toHaveLength(20);
+	});
+});
+
+describe("ChatComposer bash mode", () => {
+	const shell = () => screen.getByRole("textbox", { name: "Shell command" });
+	const mode = () => screen.queryByTestId("chat-bash-mode");
+
+	it("enters on a leading ! in an empty box, consumes it, and shows the mode", async () => {
+		const { input, user } = renderComposer();
+		expect(mode()).toBeNull();
+		await user.type(input, "!");
+		expect(mode()).toHaveTextContent("! bash");
+		expect(mode()).toHaveTextContent("Runs in the worktree as you. Claude sees the output next message.");
+		expect(shell()).toHaveValue("");
+		await user.type(shell(), "git status");
+		expect(shell()).toHaveValue("git status");
+	});
+
+	it("enters on a paste that starts with ! and keeps the rest as the command", () => {
+		const { input } = renderComposer();
+		fireEvent.change(input, { target: { value: "!git log --oneline" } });
+		expect(mode()).not.toBeNull();
+		expect(shell()).toHaveValue("git log --oneline");
+	});
+
+	it.each([
+		["a ! after other text", "echo !"],
+		["a space then !", " !ls"],
+	])("stays a prompt for %s", async (_name, typed) => {
+		const { input, user } = renderComposer();
+		await user.type(input, typed);
+		expect(mode()).toBeNull();
+		expect(input).toHaveValue(typed);
+	});
+
+	it("does not enter once a file is attached", async () => {
+		const { input, user } = renderComposer();
+		await user.upload(screen.getByTestId("chat-file-input"), new File(["x"], "a.txt", { type: "text/plain" }));
+		await screen.findByText("a.txt");
+		await user.type(input, "!ls");
+		expect(mode()).toBeNull();
+		expect(input).toHaveValue("!ls");
+	});
+
+	it("runs the command on Enter, trims it, clears the box and leaves the mode", async () => {
+		const { input, user, actions } = renderComposer();
+		await user.type(input, "!  git status ");
+		await user.keyboard("{Enter}");
+		expect(actions.runBash).toHaveBeenCalledExactlyOnceWith("git status");
+		expect(actions.send).not.toHaveBeenCalled();
+		await waitFor(() => expect(mode()).toBeNull());
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("");
+	});
+
+	it("runs from the button too, labelled Run command", async () => {
+		const { input, user, actions } = renderComposer();
+		await user.type(input, "!ls");
+		expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+		await user.click(screen.getByRole("button", { name: "Run command" }));
+		expect(actions.runBash).toHaveBeenCalledExactlyOnceWith("ls");
+	});
+
+	it("keeps a newline on Shift+Enter instead of running", async () => {
+		const { input, user, actions } = renderComposer();
+		await user.type(input, "!echo a");
+		await user.keyboard("{Shift>}{Enter}{/Shift}");
+		expect(actions.runBash).not.toHaveBeenCalled();
+		expect(shell()).toHaveValue("echo a\n");
+	});
+
+	it("does nothing on Enter for a blank command", async () => {
+		const { input, user, actions } = renderComposer();
+		await user.type(input, "!");
+		await user.keyboard("{Enter}");
+		await user.type(shell(), "   {Enter}");
+		expect(actions.runBash).not.toHaveBeenCalled();
+		expect(screen.getByRole("button", { name: "Run command" })).toBeDisabled();
+	});
+
+	it("leaves on Backspace in an empty box, and not while there is text", async () => {
+		const { input, user } = renderComposer();
+		await user.type(input, "!ab");
+		await user.keyboard("{Backspace}{Backspace}");
+		expect(mode()).not.toBeNull();
+		await user.keyboard("{Backspace}");
+		expect(mode()).toBeNull();
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("");
+	});
+
+	it("leaves on Esc, drops the text, and does not let the pane read that Esc as an interrupt", async () => {
+		const { input, user, parentKeys } = renderComposer();
+		await user.type(input, "!ls");
+		parentKeys.mockClear();
+		await user.keyboard("{Escape}");
+		expect(mode()).toBeNull();
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("");
+		expect(parentKeys).toHaveReturnedWith(true);
+	});
+
+	it("does not open the slash or mention menus, and disables their buttons", async () => {
+		const { input, user } = renderComposer();
+		await user.type(input, "!");
+		await user.type(shell(), "/co @RE");
+		expect(screen.queryByRole("listbox")).toBeNull();
+		expect(screen.getByRole("button", { name: "Attach files" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Commands and skills" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Mention a file" })).toBeDisabled();
+	});
+
+	it("keeps the text and mode and toasts the reason when the host refuses", async () => {
+		const runBash = vi.fn<ChatActions["runBash"]>(async () => ({
+			ok: false,
+			error: { kind: "rejected", message: "claude is busy" },
+		}));
+		const { input, user, onToast } = renderComposer({ runBash });
+		await user.type(input, "!ls");
+		await user.keyboard("{Enter}");
+		await waitFor(() => expect(onToast).toHaveBeenCalledWith("claude is busy"));
+		expect(shell()).toHaveValue("ls");
+	});
+
+	describe("while a turn runs", () => {
+		it("still enters the mode but says why Enter and the button do nothing", async () => {
+			const { input, user, actions } = renderComposer({}, { busy: true });
+			await user.type(input, "!ls");
+			expect(mode()).toHaveTextContent("Claude is working. Wait for the turn to end to run a command.");
+			expect(screen.getByRole("button", { name: "Run command" })).toBeDisabled();
+			await user.keyboard("{Enter}");
+			expect(actions.runBash).not.toHaveBeenCalled();
+			expect(actions.send).not.toHaveBeenCalled();
+			expect(shell()).toHaveValue("ls");
+		});
+
+		it("runs once the turn ends", async () => {
+			const { input, user, actions, rerenderWith } = renderComposer({}, { busy: true });
+			await user.type(input, "!ls");
+			rerenderWith({ busy: false });
+			await user.type(shell(), "{Enter}");
+			expect(actions.runBash).toHaveBeenCalledExactlyOnceWith("ls");
+		});
+	});
+
+	describe("while a run is busy", () => {
+		it("refuses a second command with the reason", async () => {
+			const { input, user, actions } = renderComposer({}, { bashBusy: true });
+			await user.type(input, "!ls");
+			expect(mode()).toHaveTextContent("A command is still running or being passed to Claude.");
+			await user.keyboard("{Enter}");
+			expect(actions.runBash).not.toHaveBeenCalled();
+		});
+
+		it("disables the normal Send and does not send on Enter", async () => {
+			const { input, user, actions } = renderComposer({}, { bashBusy: true });
+			await user.type(input, "hello");
+			const send = screen.getByRole("button", { name: "Send" });
+			expect(send).toBeDisabled();
+			expect(send).toHaveAttribute(
+				"title",
+				"A command is still running or being passed to Claude. Wait for it to finish.",
+			);
+			await user.keyboard("{Enter}");
+			expect(actions.send).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("never runs a command by itself", () => {
+		it("a prefill that starts with ! fills the box as a prompt and sends nothing", async () => {
+			const { prefill, input, user, actions } = renderComposer();
+			prefill({ text: "!rm -rf build", seq: 1 });
+			expect(mode()).toBeNull();
+			expect(input).toHaveValue("!rm -rf build");
+			expect(actions.runBash).not.toHaveBeenCalled();
+			await user.click(input);
+			await user.keyboard("{Enter}");
+			expect(actions.runBash).not.toHaveBeenCalled();
+			expect(actions.send).toHaveBeenCalledWith("!rm -rf build", []);
+		});
+
+		it("a prefill replaces a half-typed command and leaves bash mode", async () => {
+			const { prefill, input, user } = renderComposer();
+			await user.type(input, "!echo hi");
+			prefill({ text: "Run this command:", seq: 1 });
+			expect(mode()).toBeNull();
+			expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("Run this command:");
+		});
+
+		it("a suggestion on Tab fills a prompt and does not enter the mode", async () => {
+			const { input, user, actions } = renderComposer({}, { suggestion: "!rm -rf build" });
+			await user.click(input);
+			await user.keyboard("{Tab}");
+			expect(input).toHaveValue("!rm -rf build");
+			expect(mode()).toBeNull();
+			expect(actions.runBash).not.toHaveBeenCalled();
+		});
 	});
 });

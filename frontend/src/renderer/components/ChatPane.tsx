@@ -257,7 +257,8 @@ export function ChatPane({
 										{view === "chat" ? (
 											<ChatComposer
 												actions={actions}
-													busy={transcript.busy}
+												bashBusy={transcript.bashBusy}
+												busy={transcript.busy}
 												chrome={transcript.chrome}
 												commands={transcript.commands}
 												model={transcript.model}
