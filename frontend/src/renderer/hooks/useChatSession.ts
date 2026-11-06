@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiBaseUrl } from "../lib/api-client";
 import type { ChatEntry } from "../lib/chat-event";
 import { ChatFolder, type Transcript } from "../lib/chat-fold";
+import { RecentChats } from "../lib/chat-recent";
 import { createStubChatMux } from "../lib/chat-mock";
 import { type ChatMux, createChatMux } from "../lib/chat-mux";
 import { applyDelta, emptyOverlay, settleOverlay, type StreamOverlay } from "../lib/chat-stream";
@@ -26,6 +27,9 @@ export type UseChatSessionOptions = {
 };
 
 type Replay = "holdNewest" | "holdOlder" | "inOrder";
+
+/** The logs of the last chat sessions closed, so switching back is instant. */
+export const recentChats = new RecentChats({ sessions: 4, bytes: 64 * 1024 * 1024 });
 
 const RETRY_BASE_MS = 500;
 const RETRY_MAX_MS = 8_000;
@@ -60,6 +64,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 	const r = useRef({
 		folder: new ChatFolder(),
 		entries: [] as ChatEntry[],
+		bytes: 0,
 		overlay: emptyOverlay,
 		lastSeq: 0,
 		mux: null as ChatMux | null,
@@ -123,6 +128,7 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 	const forgetLog = useCallback(() => {
 		r.folder = new ChatFolder();
 		r.entries = [];
+		r.bytes = 0;
 		r.lastSeq = 0;
 	}, [r]);
 
@@ -151,15 +157,17 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		const current = () => r.generation === generation;
 		r.stopListening.push(
 			mux.listen(sessionId, {
-				entry: (entry) => {
+				entry: (entry, size = 0) => {
 					if (!current()) return;
 					if (r.replay === "holdOlder") {
 						r.entries.push(entry);
+						r.bytes += size;
 						return;
 					}
 					if (entry.seq <= r.lastSeq) return;
 					r.lastSeq = entry.seq;
 					r.entries.push(entry);
+					r.bytes += size;
 					try {
 						r.folder.apply(entry);
 					} catch (err) {
@@ -218,7 +226,24 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		r.overlay = emptyOverlay;
 		r.attempts = 0;
 		r.sessionId = sessionId;
-		setSnapshot(emptySnapshot(sessionId));
+		const kept = sessionId === undefined ? undefined : recentChats.take(sessionId);
+		if (kept) {
+			r.folder = kept.folder;
+			r.entries = kept.entries;
+			r.bytes = kept.bytes;
+			r.lastSeq = kept.folder.lastSeq;
+		}
+		setSnapshot(
+			kept
+				? {
+						sessionId,
+						transcript: kept.folder.transcript(),
+						overlay: emptyOverlay,
+						entries: [...kept.entries],
+						replaying: false,
+					}
+				: emptySnapshot(sessionId),
+		);
 		if (!sessionId) return;
 		if (optionsRef.current.daemonReady) {
 			transition("connecting");
@@ -229,6 +254,9 @@ export function useChatSession(sessionId: string | undefined, given: UseChatSess
 		return () => {
 			r.generation += 1;
 			teardown(sessionId);
+			if (r.replay === "inOrder" && r.lastSeq > 0) {
+				recentChats.put(sessionId, { entries: r.entries, folder: r.folder, bytes: r.bytes });
+			}
 			if (r.frame !== null) cancelAnimationFrame(r.frame);
 			r.frame = null;
 		};

@@ -1,10 +1,10 @@
 import { Loader2, RotateCw, X } from "lucide-react";
 import { attachTag } from "../lib/chat-attach";
 import { sizeText } from "../lib/chat-docs";
-import type { ChatImage } from "../lib/chat-images";
+import type { InlineImage } from "../lib/chat-images";
 
 export type Chip =
-	| { kind: "image"; id: number; name: string; image: ChatImage }
+	| { kind: "image"; id: number; name: string; image: InlineImage }
 	| { kind: "file"; id: number; name: string; size: number; file: File; upload: Upload };
 
 export type Upload = { phase: "uploading" } | { phase: "ready"; path: string } | { phase: "failed"; message: string };

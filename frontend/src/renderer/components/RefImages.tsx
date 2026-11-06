@@ -36,6 +36,11 @@ export function useResolved(
 	return useMemo(() => (sessionId !== undefined && known ? { sessionId, known } : undefined), [sessionId, known]);
 }
 
+/** The chat session the images under ChatRefsProvider belong to. */
+export function useChatSessionId(): string | undefined {
+	return useContext(RefsContext)?.sessionId;
+}
+
 /** One RefStore per chat session, so a ref is resolved once however many blocks name it. */
 export function ChatRefsProvider({ sessionId, children }: { sessionId: string; children: ReactNode }) {
 	const value = useMemo(() => ({ sessionId, store: new RefStore(resolveOverHttp(sessionId)) }), [sessionId]);

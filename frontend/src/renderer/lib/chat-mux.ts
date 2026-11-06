@@ -11,7 +11,8 @@ type ServerFrame = {
 };
 
 export type ChatMuxListeners = {
-	entry: (entry: ChatEntry) => void;
+	/** `bytes` is the size of the frame that carried it. */
+	entry: (entry: ChatEntry, bytes?: number) => void;
 	delta: (delta: unknown) => void;
 	/** A tailed replay sent its newest turns; the older entries follow, oldest first. */
 	history: () => void;
@@ -80,7 +81,7 @@ export function createChatMux(url: string, WebSocketImpl: typeof WebSocket = Web
 		for (const l of [...targets]) {
 			switch (frame.type) {
 				case "entry":
-					if (frame.entry) l.entry(frame.entry);
+					if (frame.entry) l.entry(frame.entry, event.data.length);
 					break;
 				case "delta":
 					if (frame.delta !== undefined) l.delta(frame.delta);
@@ -102,7 +103,7 @@ export function createChatMux(url: string, WebSocketImpl: typeof WebSocket = Web
 	});
 
 	return {
-		open: (id, fromSeq) => send({ ch: "chat", type: "open", id, fromSeq, tail: true }),
+		open: (id, fromSeq) => send({ ch: "chat", type: "open", id, fromSeq, tail: true, blobRefs: true }),
 		close: (id) => send({ ch: "chat", type: "close", id }),
 		listen: (id, listeners) => {
 			const set = sessions.get(id) ?? new Set<ChatMuxListeners>();
