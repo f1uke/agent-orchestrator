@@ -187,6 +187,24 @@ func (c Client) RemoteControl(ctx context.Context, enabled bool) error {
 	return c.call(ctx, map[string]any{"op": "remote_control", "enabled": enabled}, &okResponse{})
 }
 
+// RunBash runs command, which the person typed after "!" in the chat, in the
+// session's worktree and returns the run's id. The host logs the output as it
+// comes and then adds the command and its output to claude's conversation
+// without starting a turn. It refuses, as a RefusedError, while a turn is open,
+// a permission is pending or another command has not finished.
+func (c Client) RunBash(ctx context.Context, command string) (string, error) {
+	var resp bashResponse
+	if err := c.call(ctx, map[string]string{"op": "bash", "command": command}, &resp); err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+// StopBash stops the "!" command run id. A finished or unknown id is a no-op.
+func (c Client) StopBash(ctx context.Context, id string) error {
+	return c.call(ctx, map[string]string{"op": "bash_stop", "id": id}, &okResponse{})
+}
+
 // State reports what the host knows about its session right now.
 func (c Client) State(ctx context.Context) (State, error) {
 	var resp stateResponse
