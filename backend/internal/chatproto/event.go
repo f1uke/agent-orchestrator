@@ -56,12 +56,15 @@ type Assistant struct {
 
 // User is a user message event: a replay of an input, or tool results.
 // String content becomes a single TextBlock. OriginKind is claude's
-// origin.kind, "human" for a message a person typed.
+// origin.kind, "human" for a message a person typed. NoQuery is set for a
+// message sent with shouldQuery false, which claude appends to the
+// conversation without starting a turn.
 type User struct {
 	UUID            string
 	SessionID       string
 	ParentToolUseID string
 	IsReplay        bool
+	NoQuery         bool
 	OriginKind      string
 	Blocks          []Block
 }
@@ -353,6 +356,7 @@ func decodeUser(line []byte) (Event, bool) {
 		SessionID       string `json:"session_id"`
 		ParentToolUseID string `json:"parent_tool_use_id"`
 		IsReplay        bool   `json:"isReplay"`
+		ShouldQuery     *bool  `json:"shouldQuery"`
 		Origin          struct {
 			Kind string `json:"kind"`
 		} `json:"origin"`
@@ -369,7 +373,8 @@ func decodeUser(line []byte) (Event, bool) {
 	}
 	return User{
 		UUID: w.UUID, SessionID: w.SessionID, ParentToolUseID: w.ParentToolUseID,
-		IsReplay: w.IsReplay, OriginKind: w.Origin.Kind, Blocks: blocks,
+		IsReplay: w.IsReplay, NoQuery: w.ShouldQuery != nil && !*w.ShouldQuery,
+		OriginKind: w.Origin.Kind, Blocks: blocks,
 	}, true
 }
 

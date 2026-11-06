@@ -34,6 +34,8 @@ type chatCall struct {
 	uuid      string
 	restore   bool
 	enabled   bool
+	command   string
+	runID     string
 }
 
 type fakeChatService struct {
@@ -69,6 +71,16 @@ func (f *fakeChatService) SetModel(_ context.Context, id domain.SessionID, model
 
 func (f *fakeChatService) SetRemoteControl(_ context.Context, id domain.SessionID, enabled bool) error {
 	f.calls = append(f.calls, chatCall{op: "remote_control", id: id, enabled: enabled})
+	return f.err
+}
+
+func (f *fakeChatService) RunBash(_ context.Context, id domain.SessionID, command string) (string, error) {
+	f.calls = append(f.calls, chatCall{op: "bash", id: id, command: command})
+	return f.uuid, f.err
+}
+
+func (f *fakeChatService) StopBash(_ context.Context, id domain.SessionID, runID string) error {
+	f.calls = append(f.calls, chatCall{op: "bash_stop", id: id, runID: runID})
 	return f.err
 }
 
@@ -115,6 +127,51 @@ var chatRoutes = []chatRoute{
 	{"stop task", "POST", "/api/v1/sessions/s-1/chat/tasks/bq3k9x1ab/stop", ``},
 	{"rewind", "POST", "/api/v1/sessions/s-1/chat/rewind", `{"uuid":"u-2"}`},
 	{"rewind preview", "POST", "/api/v1/sessions/s-1/chat/rewind/preview", `{"uuid":"u-2"}`},
+	{"run bash", "POST", "/api/v1/sessions/s-1/chat/bash", `{"command":"git status"}`},
+	{"stop bash", "POST", "/api/v1/sessions/s-1/chat/bash/stop", `{"id":"b-1"}`},
+}
+
+func TestChatRunBash(t *testing.T) {
+	svc := &fakeChatService{uuid: "b-1"}
+	srv := newChatTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/bash", `{"command":"  git log --oneline\t-3 &&\nls \n"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", status, body)
+	}
+	var resp controllers.ChatBashResponse
+	mustJSON(t, body, &resp)
+	if resp.ID != "b-1" {
+		t.Errorf("id = %q, want the service's", resp.ID)
+	}
+	want := []chatCall{{op: "bash", id: "s-1", command: "git log --oneline\t-3 &&\nls"}}
+	if !reflect.DeepEqual(svc.calls, want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
+func TestChatRunBashTakesACommandUpTo64KiB(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	command := strings.Repeat("x", 64<<10)
+	if body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/bash", `{"command":"`+command+`"}`); status != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", status, body)
+	}
+	if len(svc.calls) != 1 || svc.calls[0].command != command {
+		t.Errorf("the service did not get the whole command")
+	}
+}
+
+func TestChatStopBash(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/s-1/chat/bash/stop", `{"id":"b-1"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", status, body)
+	}
+	want := []chatCall{{op: "bash_stop", id: "s-1", runID: "b-1"}}
+	if !reflect.DeepEqual(svc.calls, want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
 }
 
 func TestChatRewind(t *testing.T) {
@@ -344,6 +401,16 @@ func TestChatBadRequestsNeverReachTheService(t *testing.T) {
 		{"model: not JSON", "PUT", "model", `{`, "INVALID_JSON"},
 		{"model: empty", "PUT", "model", `{}`, "MODEL_REQUIRED"},
 		{"model: blank", "PUT", "model", `{"model":"  "}`, "MODEL_REQUIRED"},
+		{"bash: not JSON", "POST", "bash", `{`, "INVALID_JSON"},
+		{"bash: no command", "POST", "bash", `{}`, "COMMAND_REQUIRED"},
+		{"bash: blank command", "POST", "bash", `{"command":" \t\n "}`, "COMMAND_REQUIRED"},
+		{"bash: over 64 KiB", "POST", "bash", `{"command":"` + strings.Repeat("x", 64<<10+1) + `"}`, "COMMAND_TOO_LONG"},
+		{"bash: an escape character", "POST", "bash", `{"command":"echo \u001b[2J"}`, "COMMAND_CONTROL_CHARS"},
+		{"bash: a carriage return", "POST", "bash", `{"command":"ls\r"}`, "COMMAND_CONTROL_CHARS"},
+		{"bash: a NUL", "POST", "bash", `{"command":"ls\u0000"}`, "COMMAND_CONTROL_CHARS"},
+		{"bash: a C1 control", "POST", "bash", `{"command":"ls\u009b"}`, "COMMAND_CONTROL_CHARS"},
+		{"bash stop: not JSON", "POST", "bash/stop", `[`, "INVALID_JSON"},
+		{"bash stop: no id", "POST", "bash/stop", `{}`, "ID_REQUIRED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &fakeChatService{}

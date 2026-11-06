@@ -154,6 +154,8 @@ func Encode(o Outbound) ([]byte, error) {
 	switch m := o.(type) {
 	case UserInput:
 		return encodeUserInput(m)
+	case BashResult:
+		return encodeBashResult(m)
 	case Initialize:
 		req := map[string]any{"subtype": "initialize"}
 		if len(m.SDKMCPServers) > 0 {
