@@ -27,18 +27,20 @@ export function ChatDocsProvider({
 const sameFile = (a: Pick<FileDoc, "root" | "path">, b: Pick<FileDoc, "root" | "path">) =>
 	a.root === b.root && a.path === b.path;
 
-/** Images stay with RefImages, so a card is never drawn for one. */
-function cardFiles(refs: readonly string[], known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] {
+function confirmedFiles(refs: readonly string[], known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] {
 	const docs: FileDoc[] = [];
 	for (const ref of refs) {
 		for (const match of known.get(ref) ?? []) {
-			if (match.kind === "image") continue;
 			const doc = fileDocOf(match);
 			if (!docs.some((d) => sameFile(d, doc))) docs.push(doc);
 		}
 	}
 	return docs;
 }
+
+/** Images stay with RefImages, so a card is never drawn for one. */
+const cardFiles = (refs: readonly string[], known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] =>
+	confirmedFiles(refs, known).filter((doc) => doc.kind !== "image");
 
 /**
  * The cards of a finished turn, under its last reply: a file the daemon confirmed opens in the Document
@@ -138,11 +140,11 @@ export function useDocOf(path: string | undefined): { doc: FileDoc | undefined; 
 	}, [path, resolved, context]);
 }
 
-/** Every confirmed document the session's turns wrote or named, newest turn first, each once: the cards' set. */
+/** Every confirmed file of any kind the session's turns showed, newest turn first, each once: the Document tab's list. */
 export function sessionDocs(turns: readonly TurnDocs[], known: ReadonlyMap<string, ResolvedFile[]>): FileDoc[] {
 	const docs: FileDoc[] = [];
 	for (const turn of [...turns].reverse()) {
-		for (const doc of cardFiles(turn.refs, known)) {
+		for (const doc of confirmedFiles(turn.refs, known)) {
 			if (!docs.some((d) => sameFile(d, doc))) docs.push(doc);
 		}
 	}
