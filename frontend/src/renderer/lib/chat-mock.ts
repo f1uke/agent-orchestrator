@@ -1121,7 +1121,6 @@ export const stubChatApi: ChatApi = {
 		const runId = `stub-bash-${++session.sent}`;
 		const stdout = `ran: ${command}\n`;
 		append(id, session, [bashStart(runId, command), bashOutput(runId, "stdout", stdout)]);
-		// A command that sleeps stays running until it is stopped, so a preview can show the Stop button.
 		if (!/\bsleep\b/.test(command)) {
 			setTimeout(() => {
 				append(id, session, bashFinish(runId, command, { stdout, stderr: "", code: 0 }));

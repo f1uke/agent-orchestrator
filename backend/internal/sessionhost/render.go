@@ -112,7 +112,6 @@ func renderIn(ev chatproto.Event) []string {
 	switch ev := ev.(type) {
 	case chatproto.User:
 		if ev.NoQuery {
-			// A "!" command's result: its notes already showed it.
 			return nil
 		}
 		var text strings.Builder

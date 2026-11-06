@@ -59,7 +59,6 @@ func (o *BashOutput) clip(budget int) string {
 	keep := budget - budget/2
 	last := o.tail
 	if len(last) < keep {
-		// The tail never overflowed, so head and tail are the whole stream.
 		last = append(slices.Clone(o.head), o.tail...)
 	}
 	last = last[len(last)-keep:]

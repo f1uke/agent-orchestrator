@@ -100,7 +100,7 @@ func TestEncodeBashResult(t *testing.T) {
 
 func TestEncodeBashResultKeepsTheTrueTailOfAStreamFarPastTheCap(t *testing.T) {
 	var o BashOutput
-	const lines = 400_000 // 5.2 MB
+	const lines = 400_000
 	for i := range lines {
 		_, _ = fmt.Fprintf(&o, "line %07d\n", i)
 	}

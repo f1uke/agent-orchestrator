@@ -230,7 +230,6 @@ export type Transcript = {
 // user]", or "... for tool use]").
 const INTERRUPT_MARKER = "[Request interrupted by user";
 
-// A run is injected once its result went to claude as a user message, and settled once claude's empty result for it came back.
 type BashPhase = "running" | "ended" | "injected" | "settled";
 
 type Permission = { toolUseId?: string; out: PermissionOutcome };
