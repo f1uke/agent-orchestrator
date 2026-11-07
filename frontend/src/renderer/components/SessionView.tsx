@@ -24,6 +24,7 @@ import { useProjectSearchShortcut } from "../hooks/useProjectSearchShortcut";
 import { taskKeyOf } from "../lib/task-key";
 import { isMacPlatform } from "../lib/platform";
 import { SessionInspector } from "./SessionInspector";
+import { IosRunBar } from "./IosRunBar";
 import { allowedInspectorViews, type InspectorView } from "../lib/inspector-views";
 import { useSessionTasksUi, useTasksUi } from "../stores/tasks-ui";
 import { SplitSessionPicker } from "./SplitSessionPicker";
@@ -809,20 +810,34 @@ export function SessionView({ sessionId }: SessionViewProps) {
 			return <TodoSessionPane session={session} />;
 		}
 		const centerView = centerViewOf(session, chatViews);
-		if (session && centerView !== "terminal") {
+		const watchingRun = terminalTarget.kind === "run";
+		if (session && centerView !== "terminal" && !watchingRun) {
 			return (
-				<ChatPane
-					chat={chat}
-					daemonReady={daemonStatus.state === "ready"}
-					key={session.id}
-					onOpenDoc={openDocument}
-					openDoc={openDoc}
-					onDocs={setSessionDocs}
-					onOpenTasks={openTasks}
-					session={session}
-					theme={theme}
-					view={centerView}
-				/>
+				<div className="flex h-full min-h-0 flex-col">
+					<IosRunBar
+						key={session.id}
+						onOpenWorkspaceFile={openWorkspaceFile}
+						onShowAgent={() => setTerminalTarget({ kind: "worker" })}
+						onShowRun={(handleId) => setTerminalTarget({ kind: "run", handleId })}
+						sessionId={session.id}
+						task={task}
+						terminalTarget={terminalTarget}
+					/>
+					<div className="min-h-0 flex-1">
+						<ChatPane
+							chat={chat}
+							daemonReady={daemonStatus.state === "ready"}
+							key={session.id}
+							onOpenDoc={openDocument}
+							openDoc={openDoc}
+							onDocs={setSessionDocs}
+							onOpenTasks={openTasks}
+							session={session}
+							theme={theme}
+							view={centerView}
+						/>
+					</div>
+				</div>
 			);
 		}
 		return (

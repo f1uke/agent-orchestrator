@@ -131,18 +131,49 @@ vi.mock("./CenterPane", () => ({
 		splitControls,
 		pane,
 		session,
+		terminalTarget,
+		onSelectRunTerminal,
+		onSelectWorkerTerminal,
 	}: {
 		onOpenWorkspaceFile?: (f: unknown) => void;
 		splitControls?: ReactNode;
 		pane?: { focused: boolean };
 		session?: { id: string };
+		terminalTarget?: { kind: string; handleId?: string };
+		onSelectRunTerminal?: (handleId: string) => void;
+		onSelectWorkerTerminal?: () => void;
 	}) => (
-		<div data-pane-focused={pane ? String(pane.focused) : undefined} data-testid={`center-${session?.id ?? "none"}`}>
+		<div
+			data-pane-focused={pane ? String(pane.focused) : undefined}
+			data-run-bar={onSelectRunTerminal ? "true" : undefined}
+			data-terminal-target={terminalTarget ? JSON.stringify(terminalTarget) : undefined}
+			data-testid={`center-${session?.id ?? "none"}`}
+		>
 			terminal center
+			<button type="button" onClick={() => onSelectWorkerTerminal?.()}>
+				back to agent
+			</button>
 			<button type="button" onClick={() => onOpenWorkspaceFile?.(openFileArg.current)}>
 				open workspace file
 			</button>
 			{splitControls}
+		</div>
+	),
+}));
+vi.mock("./IosRunBar", () => ({
+	IosRunBar: ({
+		sessionId,
+		terminalTarget,
+		onShowRun,
+	}: {
+		sessionId: string;
+		terminalTarget: { kind: string };
+		onShowRun: (handleId: string) => void;
+	}) => (
+		<div data-testid="ios-run-bar" data-session={sessionId} data-watching={String(terminalTarget.kind === "run")}>
+			<button type="button" onClick={() => onShowRun("run-handle-1")}>
+				run ios app
+			</button>
 		</div>
 	),
 }));
@@ -684,6 +715,61 @@ describe("SessionView", () => {
 
 		expect(screen.getByText("terminal center")).toBeInTheDocument();
 		expect(screen.queryByText(/todo editor/)).not.toBeInTheDocument();
+	});
+});
+
+describe("SessionView iOS run bar", () => {
+	beforeEach(() => {
+		useUiStore.setState({ isInspectorOpen: true, splitLayouts: {}, chatViews: {} });
+		panels.clear();
+		wakeMock.mockReset().mockResolvedValue({ error: undefined });
+	});
+
+	it("puts the run bar above a chat worker's chat", () => {
+		render(<SessionView sessionId="sess-chat" />);
+
+		expect(screen.getByTestId("ios-run-bar")).toHaveAttribute("data-session", "sess-chat");
+		expect(screen.getByTestId("ios-run-bar")).toHaveAttribute("data-watching", "false");
+		expect(screen.getByTestId("chat-sess-chat")).toBeInTheDocument();
+	});
+
+	it("puts the run bar above a chat orchestrator's chat", () => {
+		render(<SessionView sessionId="sess-orch-chat" />);
+
+		expect(screen.getByTestId("ios-run-bar")).toHaveAttribute("data-session", "sess-orch-chat");
+	});
+
+	it("keeps the run bar on a chat session's trajectory view", () => {
+		useUiStore.setState({ chatViews: { "sess-chat": "trajectory" } });
+		render(<SessionView sessionId="sess-chat" />);
+
+		expect(screen.getByTestId("ios-run-bar")).toBeInTheDocument();
+		expect(screen.getByText("chat pane: trajectory")).toBeInTheDocument();
+	});
+
+	it("shows a run started from the chat in its run pane, and goes back to the chat from it", () => {
+		render(<SessionView sessionId="sess-chat" />);
+
+		fireEvent.click(screen.getByRole("button", { name: "run ios app" }));
+
+		expect(screen.queryByTestId("chat-sess-chat")).not.toBeInTheDocument();
+		expect(screen.getByTestId("center-sess-chat")).toHaveAttribute(
+			"data-terminal-target",
+			JSON.stringify({ kind: "run", handleId: "run-handle-1" }),
+		);
+		expect(screen.getByTestId("center-sess-chat")).toHaveAttribute("data-run-bar", "true");
+
+		fireEvent.click(screen.getByRole("button", { name: "back to agent" }));
+
+		expect(screen.getByTestId("chat-sess-chat")).toBeInTheDocument();
+		expect(screen.getByTestId("ios-run-bar")).toHaveAttribute("data-session", "sess-chat");
+	});
+
+	it("leaves a terminal session's run bar to the terminal pane, with no second bar", () => {
+		render(<SessionView sessionId="sess-1" />);
+
+		expect(screen.getByTestId("center-sess-1")).toHaveAttribute("data-run-bar", "true");
+		expect(screen.queryByTestId("ios-run-bar")).not.toBeInTheDocument();
 	});
 });
 
