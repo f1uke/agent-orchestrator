@@ -23,7 +23,8 @@ import { useFileHistory } from "../hooks/useFileHistory";
 import { useProjectSearchShortcut } from "../hooks/useProjectSearchShortcut";
 import { taskKeyOf } from "../lib/task-key";
 import { isMacPlatform } from "../lib/platform";
-import { SessionInspector, type InspectorView } from "./SessionInspector";
+import { SessionInspector } from "./SessionInspector";
+import { allowedInspectorViews, type InspectorView } from "../lib/inspector-views";
 import { useSessionTasksUi, useTasksUi } from "../stores/tasks-ui";
 import { SplitSessionPicker } from "./SplitSessionPicker";
 import { SplitTreeView } from "./SplitTreeView";
@@ -150,8 +151,6 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const splitRoot = storedSplitRoot && paneCount(storedSplitRoot) > 1 ? storedSplitRoot : undefined;
 	const [splitToast, setSplitToast] = useState<string | null>(null);
 	const isOrchestrator = session ? isOrchestratorSession(session) : false;
-	// Orchestrator sessions are terminal-only; only worker sessions have the rail.
-	const hasInspector = !isOrchestrator;
 	// Whether this session's project renders in a browser (ProjectConfig.hasWebUI,
 	// opt-in). It gates the whole browser surface: the rail's Browser tab, the
 	// BrowserView host, and the `ao preview` reveal below. A session may still
@@ -161,6 +160,10 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// not on the URL's presence.
 	const hasWebUI = workspace?.hasWebUI ?? false;
 	const hasIOSSimulator = workspace?.hasIOSSimulator ?? false;
+	const inspectorViews = session ? allowedInspectorViews(session, { hasWebUI, hasIOSSimulator }) : [];
+	const hasInspector = inspectorViews.length > 0;
+	const hasBrowserTab = inspectorViews.includes("browser");
+	const hasWorktree = !isOrchestrator;
 	const previewUrl = session?.previewUrl?.trim() || undefined;
 	const previewRevision = session?.previewRevision;
 	const sessionLoaded = Boolean(session);
@@ -241,7 +244,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 
 	const browserView = useBrowserView({
 		sessionId,
-		active: Boolean(session && hasInspector && hasWebUI && (browserPoppedOut || isInspectorOpen)),
+		active: Boolean(session && hasBrowserTab && (browserPoppedOut || isInspectorOpen)),
 		poppedOut: browserPoppedOut,
 		terminated: session?.status === "terminated",
 		previewUrl,
@@ -557,9 +560,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// previewRevision, so a URL change is also treated as a fresh preview.
 	useEffect(() => {
 		if (!sessionLoaded) return;
-		// No web UI means no Browser tab to reveal: selecting it would leave the rail
-		// on a view that does not exist.
-		if (!hasWebUI) return;
+		if (!hasBrowserTab) return;
 		const revision = previewRevision ?? 0;
 		const url = previewUrl ?? "";
 		const prev = previewRevealRef.current;
@@ -569,7 +570,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		if (!url) return;
 		setInspectorView("browser");
 		if (!useUiStore.getState().isInspectorOpen) toggleInspector();
-	}, [sessionLoaded, sessionId, hasWebUI, previewRevision, previewUrl, toggleInspector]);
+	}, [sessionLoaded, sessionId, hasBrowserTab, previewRevision, previewUrl, toggleInspector]);
 
 	// Computed when the inspector panel mounts and frozen while it stays
 	// mounted: rrp re-registers the panel (a layout effect keyed on defaultSize,
@@ -606,9 +607,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// ⌘⇧F opens the rail, selects the Files tab and asks that tab for its Search
 	// mode, because that is where the results live: the rail is already the app's
 	// files surface and a hit opens exactly the way a Browse row does.
-	// `hasInspector` is the "this session has a worktree" test; an orchestrator
-	// has none to search.
-	useProjectSearchShortcut(hasInspector, () => {
+	useProjectSearchShortcut(hasWorktree, () => {
 		setInspectorView("files");
 		if (!useUiStore.getState().isInspectorOpen) toggleInspector();
 		setSearchRequest((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, seed: editorSelection.current || undefined }));
@@ -993,16 +992,16 @@ export function SessionView({ sessionId }: SessionViewProps) {
 			{splitToast ? <Toast text={splitToast} /> : null}
 			{/* ⌘⇧O. Owns its own shortcut and open state, so it costs one line here
           and knows nothing about the viewer above — which is why swapping that
-          viewer for Monaco did not touch it. `hasInspector` is the "this session
-          has a worktree" test; an orchestrator has none to index. */}
+          viewer for Monaco did not touch it. An orchestrator has no worktree to
+          index. */}
 			<OpenQuicklyPalette
-				enabled={hasInspector}
+				enabled={hasWorktree}
 				onOpenFile={openWorkspaceFile}
 				sessionId={sessionId}
 				workspaceRoot={directory}
 			/>
 			<SplitDragLayer />
-			{browserPoppedOut && hasWebUI && session
+			{browserPoppedOut && hasBrowserTab && session
 				? createPortal(
 						<div className="browser-popout-overlay">
 							<BrowserPanelView

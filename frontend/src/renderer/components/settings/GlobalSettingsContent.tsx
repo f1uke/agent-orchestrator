@@ -15,8 +15,8 @@ import { CompanionPreview } from "./CompanionPreview";
 import { PetLibrary } from "./PetLibrary";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
-import { WorkerTransportSelect } from "./WorkerTransportSelect";
-import { workerTransportLabel } from "./worker-transport";
+import { TransportSelect } from "./TransportSelect";
+import { transportLabel } from "./transport";
 import { ShortcutField } from "./ShortcutField";
 import { DEFAULT_EDITOR_SETTINGS } from "../../../shared/editor-settings";
 import { shortcutLabel } from "../../../shared/editor-shortcuts";
@@ -122,18 +122,36 @@ function EveryAgentSection({ form }: { form: GlobalForm }) {
 				<SettingRow
 					name="Default worker transport"
 					summary="How a new Claude Code worker is driven: Chat is a headless session behind the chat view, Terminal is its own TUI in the pane."
-					detail="Applies to every project that does not set its own. A worker keeps the transport it was spawned with, so changing this never moves a running one. Orchestrators and other agents are always Terminal. Set Terminal here to go back for every project; ao settings worker-transport terminal does the same."
+					detail="Applies to every project that does not set its own. A worker keeps the transport it was spawned with, so changing this never moves a running one. Other agents are always Terminal. Set Terminal here to go back for every project; ao settings worker-transport terminal does the same."
 					ownership={{ kind: "global-overridable" }}
 					timing="next-worker"
-					value={workerTransportLabel(draft.workerTransport)}
+					value={transportLabel(draft.workerTransport)}
 					modified={isFieldDirty("workerTransport")}
 					controlId="workerTransport"
 				>
-					<WorkerTransportSelect
+					<TransportSelect
 						scope="global"
 						id="workerTransport"
 						value={draft.workerTransport}
 						onChange={(v) => setField("workerTransport", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Default orchestrator transport"
+					summary="How a new Claude Code orchestrator is driven: Chat is a headless session behind the chat view, Terminal is its own TUI in the pane."
+					detail="Applies to every project that does not set its own, and only to orchestrators started after you save. A running orchestrator keeps its transport until the project's orchestrator is restarted. Restart orchestrator on the project spawns a fresh one that uses the current setting. Other agents are always Terminal. Set Terminal here to go back for every project; ao settings orchestrator-transport terminal does the same."
+					ownership={{ kind: "global-overridable" }}
+					timing="next-orchestrator"
+					value={transportLabel(draft.orchestratorTransport)}
+					modified={isFieldDirty("orchestratorTransport")}
+					controlId="orchestratorTransport"
+				>
+					<TransportSelect
+						scope="global"
+						id="orchestratorTransport"
+						value={draft.orchestratorTransport}
+						onChange={(v) => setField("orchestratorTransport", v)}
 					/>
 				</SettingRow>
 

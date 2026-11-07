@@ -8,6 +8,7 @@ import { isOrchestratorSession, type SessionActivityState, type WorkspaceSession
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { useUiStore } from "../stores/ui-store";
 import { OrchestratorIcon } from "./icons";
+import { allowedInspectorViews } from "../lib/inspector-views";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { CopyButton } from "./CopyButton";
 import { CrewSwitcher } from "./CrewSwitcher";
@@ -238,11 +239,7 @@ export function ShellTopbar() {
 				) : null}
 				{isSessionRoute && session ? <ChatViewToggle session={session} style={noDragStyle} /> : null}
 				<NotificationCenter style={noDragStyle} />
-				{/* Worker sessions keep only the inspector toggle after the bell. Kill
-				    moved to the terminal toolbar (icon-only, beside Restart); the
-				    Orchestrator link is redundant with the sidebar's per-project
-				    Orchestrator button and was removed. */}
-				{isSessionRoute && !isOrchestrator ? (
+				{session && allowedInspectorViews(session).length > 0 ? (
 					<button
 						aria-label={isInspectorOpen ? "Close inspector panel" : "Open inspector panel"}
 						aria-pressed={isInspectorOpen}

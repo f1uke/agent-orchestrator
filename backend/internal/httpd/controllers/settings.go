@@ -26,8 +26,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
+	"github.com/aoagents/agent-orchestrator/backend/internal/transportsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
-	"github.com/aoagents/agent-orchestrator/backend/internal/workertransport"
 )
 
 // SettingsService is the reclaim-settings store surface the controller needs.
@@ -65,10 +65,11 @@ type ResponseLanguageService interface {
 	Set(responselang.Settings) error
 }
 
-// WorkerTransportService is the worker-transport settings store the controller needs.
-type WorkerTransportService interface {
-	Get() workertransport.Settings
-	Set(workertransport.Settings) error
+// TransportSettingsService is the global transport settings store the controller needs.
+type TransportSettingsService interface {
+	Get() transportsettings.Settings
+	SetWorker(domain.Transport) error
+	SetOrchestrator(domain.Transport) error
 }
 
 // WikiSettingsService is the Wiki settings store surface the controller needs.
@@ -126,19 +127,19 @@ type MessageTemplatesService interface {
 // routes registered but returns OpenAPI-backed 501s, matching every other
 // controller in this package.
 type SettingsController struct {
-	Svc              SettingsService
-	SpawnConfirm     SpawnConfirmService
-	ClaudeProfiles   ClaudeProfilesService
-	AutoNudge        AutoNudgeService
-	ResponseLanguage ResponseLanguageService
-	WorkerTransport  WorkerTransportService
-	Wiki             WikiSettingsService
-	RefLinks         RefLinksService
-	QAEvidence       QAEvidenceSettingsService
-	SimTrust         SimTrustSettingsService
-	SimBoot          SimBootSettingsService
-	SystemPrompts    SystemPromptsService
-	MessageTemplates MessageTemplatesService
+	Svc               SettingsService
+	SpawnConfirm      SpawnConfirmService
+	ClaudeProfiles    ClaudeProfilesService
+	AutoNudge         AutoNudgeService
+	ResponseLanguage  ResponseLanguageService
+	TransportSettings TransportSettingsService
+	Wiki              WikiSettingsService
+	RefLinks          RefLinksService
+	QAEvidence        QAEvidenceSettingsService
+	SimTrust          SimTrustSettingsService
+	SimBoot           SimBootSettingsService
+	SystemPrompts     SystemPromptsService
+	MessageTemplates  MessageTemplatesService
 }
 
 // Register mounts the settings routes on the supplied router.
@@ -155,6 +156,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/response-language", c.setResponseLanguage)
 	r.Get("/settings/worker-transport", c.getWorkerTransport)
 	r.Put("/settings/worker-transport", c.setWorkerTransport)
+	r.Get("/settings/orchestrator-transport", c.getOrchestratorTransport)
+	r.Put("/settings/orchestrator-transport", c.setOrchestratorTransport)
 	r.Get("/settings/wiki", c.getWiki)
 	r.Put("/settings/wiki", c.setWiki)
 	r.Get("/settings/wiki/tasks", c.getWikiTasks)
@@ -324,33 +327,60 @@ func (c *SettingsController) setResponseLanguage(w http.ResponseWriter, r *http.
 }
 
 func (c *SettingsController) getWorkerTransport(w http.ResponseWriter, r *http.Request) {
-	if c.WorkerTransport == nil {
+	if c.TransportSettings == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/worker-transport")
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, WorkerTransportSettingsResponse{WorkerTransport: c.WorkerTransport.Get().WorkerTransport})
+	envelope.WriteJSON(w, http.StatusOK, WorkerTransportSettingsResponse{WorkerTransport: c.TransportSettings.Get().WorkerTransport})
 }
 
 func (c *SettingsController) setWorkerTransport(w http.ResponseWriter, r *http.Request) {
-	if c.WorkerTransport == nil {
+	if c.TransportSettings == nil {
 		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/worker-transport")
 		return
 	}
 	var in SetWorkerTransportSettingsRequest
-	if err := decodeJSON(r, &in); err != nil {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+	if !c.setTransport(w, r, &in, func() domain.Transport { return in.WorkerTransport }, c.TransportSettings.SetWorker) {
 		return
 	}
-	transport, err := domain.ParseTransport(strings.TrimSpace(string(in.WorkerTransport)))
+	envelope.WriteJSON(w, http.StatusOK, WorkerTransportSettingsResponse{WorkerTransport: c.TransportSettings.Get().WorkerTransport})
+}
+
+func (c *SettingsController) getOrchestratorTransport(w http.ResponseWriter, r *http.Request) {
+	if c.TransportSettings == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/orchestrator-transport")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, OrchestratorTransportSettingsResponse{OrchestratorTransport: c.TransportSettings.Get().OrchestratorTransport})
+}
+
+func (c *SettingsController) setOrchestratorTransport(w http.ResponseWriter, r *http.Request) {
+	if c.TransportSettings == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/orchestrator-transport")
+		return
+	}
+	var in SetOrchestratorTransportSettingsRequest
+	if !c.setTransport(w, r, &in, func() domain.Transport { return in.OrchestratorTransport }, c.TransportSettings.SetOrchestrator) {
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, OrchestratorTransportSettingsResponse{OrchestratorTransport: c.TransportSettings.Get().OrchestratorTransport})
+}
+
+func (c *SettingsController) setTransport(w http.ResponseWriter, r *http.Request, in any, read func() domain.Transport, set func(domain.Transport) error) bool {
+	if err := decodeJSON(r, in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return false
+	}
+	transport, err := domain.ParseTransport(strings.TrimSpace(string(read())))
 	if err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "TRANSPORT_INVALID", err.Error(), nil)
-		return
+		return false
 	}
-	if err := c.WorkerTransport.Set(workertransport.Settings{WorkerTransport: transport}); err != nil {
+	if err := set(transport); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
-		return
+		return false
 	}
-	envelope.WriteJSON(w, http.StatusOK, WorkerTransportSettingsResponse{WorkerTransport: c.WorkerTransport.Get().WorkerTransport})
+	return true
 }
 
 func (c *SettingsController) getWiki(w http.ResponseWriter, r *http.Request) {

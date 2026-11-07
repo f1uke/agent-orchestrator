@@ -18,7 +18,7 @@ import {
 	simTrustSettingsQueryKey,
 	type SimTrustSettings,
 } from "../../lib/sim-trust";
-import { BUILT_IN_WORKER_TRANSPORT, type WorkerTransport } from "./worker-transport";
+import { BUILT_IN_ORCHESTRATOR_TRANSPORT, BUILT_IN_WORKER_TRANSPORT, type Transport } from "./transport";
 import {
 	claudeProfilesQueryKey,
 	fetchClaudeProfiles,
@@ -47,6 +47,7 @@ const autoNudgeQueryKey = ["settings", "autoNudge"] as const;
 // override is overriding - the one true Global -> Project override on the page.
 export const responseLanguageQueryKey = ["settings", "responseLanguage"] as const;
 export const workerTransportQueryKey = ["settings", "workerTransport"] as const;
+export const orchestratorTransportQueryKey = ["settings", "orchestratorTransport"] as const;
 export const wikiSettingsQueryKey = ["settings", "wiki"] as const;
 const reclaimSettingsQueryKey = ["settings", "reclaim"] as const;
 const qaEvidenceSettingsQueryKey = ["settings", "qaEvidence"] as const;
@@ -59,7 +60,8 @@ export type GlobalDraft = {
 	spawnConfirm: boolean;
 	autoNudge: boolean;
 	responseLanguage: string;
-	workerTransport: WorkerTransport;
+	workerTransport: Transport;
+	orchestratorTransport: Transport;
 	wikiVaultPath: string;
 	// Where Jira keys / GitLab `!N` in text link to. The alias map is edited as
 	// `alias = group/project` lines and parsed back on save.
@@ -91,6 +93,7 @@ export type GlobalScalarField =
 	| "autoNudge"
 	| "responseLanguage"
 	| "workerTransport"
+	| "orchestratorTransport"
 	| "wikiVaultPath"
 	| "refJiraBaseUrl"
 	| "refGitlabBaseUrl"
@@ -115,6 +118,7 @@ const EMPTY_DRAFT: GlobalDraft = {
 	autoNudge: false,
 	responseLanguage: "English",
 	workerTransport: BUILT_IN_WORKER_TRANSPORT,
+	orchestratorTransport: BUILT_IN_ORCHESTRATOR_TRANSPORT,
 	wikiVaultPath: "",
 	refJiraBaseUrl: "",
 	refGitlabBaseUrl: "",
@@ -199,6 +203,14 @@ export function useGlobalSettingsForm() {
 			const { data, error } = await apiClient.GET("/api/v1/settings/worker-transport", {});
 			if (error) throw new Error(apiErrorMessage(error));
 			return data as components["schemas"]["WorkerTransportSettingsResponse"];
+		},
+	});
+	const orchestratorTransportQuery = useQuery({
+		queryKey: orchestratorTransportQueryKey,
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/orchestrator-transport", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as components["schemas"]["OrchestratorTransportSettingsResponse"];
 		},
 	});
 	const wikiQuery = useQuery({
@@ -313,6 +325,14 @@ export function useGlobalSettingsForm() {
 	}, [workerTransportQuery.data]);
 
 	useEffect(() => {
+		if (!orchestratorTransportQuery.data || seeded.current.has("orchestratorTransport")) return;
+		seeded.current.add("orchestratorTransport");
+		const v = orchestratorTransportQuery.data.orchestratorTransport;
+		setDraft((d) => ({ ...d, orchestratorTransport: v }));
+		setBaseline((b) => ({ ...b, orchestratorTransport: v }));
+	}, [orchestratorTransportQuery.data]);
+
+	useEffect(() => {
 		if (!wikiQuery.data || seeded.current.has("wiki")) return;
 		seeded.current.add("wiki");
 		const v = wikiQuery.data.vaultPath ?? "";
@@ -419,6 +439,7 @@ export function useGlobalSettingsForm() {
 		draft.autoNudge !== baseline.autoNudge ||
 		draft.responseLanguage !== baseline.responseLanguage ||
 		draft.workerTransport !== baseline.workerTransport ||
+		draft.orchestratorTransport !== baseline.orchestratorTransport ||
 		draft.wikiVaultPath !== baseline.wikiVaultPath ||
 		refLinksDirty(draft, baseline) ||
 		draft.simTrustCaFiles !== baseline.simTrustCaFiles ||
@@ -541,6 +562,16 @@ export function useGlobalSettingsForm() {
 					(async () => {
 						const { error } = await apiClient.PUT("/api/v1/settings/worker-transport", {
 							body: { workerTransport: draft.workerTransport },
+						});
+						if (error) throw new Error(apiErrorMessage(error));
+					})(),
+				);
+			}
+			if (draft.orchestratorTransport !== baseline.orchestratorTransport) {
+				ops.push(
+					(async () => {
+						const { error } = await apiClient.PUT("/api/v1/settings/orchestrator-transport", {
+							body: { orchestratorTransport: draft.orchestratorTransport },
 						});
 						if (error) throw new Error(apiErrorMessage(error));
 					})(),
@@ -692,6 +723,7 @@ export function useGlobalSettingsForm() {
 			void queryClient.invalidateQueries({ queryKey: autoNudgeQueryKey });
 			void queryClient.invalidateQueries({ queryKey: responseLanguageQueryKey });
 			void queryClient.invalidateQueries({ queryKey: workerTransportQueryKey });
+			void queryClient.invalidateQueries({ queryKey: orchestratorTransportQueryKey });
 			void queryClient.invalidateQueries({ queryKey: wikiSettingsQueryKey });
 			// The sidebar's Wiki row exists only while a vault is configured, and it
 			// reads the wiki STATUS (not this settings query) without polling. Setting

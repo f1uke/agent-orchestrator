@@ -58,6 +58,8 @@ const session = (prs: PullRequestFacts[], overrides: Partial<WorkspaceSession> =
 	...overrides,
 });
 
+const chatOrchestrator = session([], { id: "sess-orch", kind: "orchestrator", transport: "chat" });
+
 const sessionWithProvider = (prs: PullRequestFacts[], provider: WorkspaceSession["provider"]): WorkspaceSession => ({
 	...session(prs),
 	provider,
@@ -381,11 +383,21 @@ describe("SessionInspector tabs", () => {
 		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Browser"]);
 	});
 
-	// An orchestrator's workspace is the project checkout, not a per-task
-	// worktree, and it has no branch of its own to diff.
-	it("hides Files for an orchestrator session", () => {
+	it("gives a chat orchestrator exactly Document and Tasks, opening on Document", () => {
+		renderWithQuery(<SessionInspector session={chatOrchestrator} />);
+		expect(tabNames()).toEqual(["Document", "Tasks"]);
+		expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true");
+	});
+
+	it("draws no rail for a terminal orchestrator", () => {
 		renderWithQuery(<SessionInspector hasWebUI session={{ ...session([]), kind: "orchestrator" }} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Browser"]);
+		expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+		expect(screen.queryAllByRole("tab")).toHaveLength(0);
+	});
+
+	it("offers a chat orchestrator no Browser, Device or Testiny tab even when the project enables them", () => {
+		renderWithQuery(<SessionInspector hasIOSSimulator hasWebUI usesTestiny session={chatOrchestrator} />);
+		expect(tabNames()).toEqual(["Document", "Tasks"]);
 	});
 
 	it("still defaults to Summary rather than the new Files tab", () => {
@@ -401,33 +413,32 @@ describe("SessionInspector tabs", () => {
 		expect(screen.queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
 	});
 
-	it("hides Browser for an orchestrator in a project with no web UI", () => {
-		renderWithQuery(<SessionInspector session={{ ...session([]), kind: "orchestrator" }} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews"]);
-	});
-
 	it("still opens on Summary when Browser is hidden", () => {
 		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
 		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 	});
 
-	// The remembered/controlled tab can name a view this session no longer shows —
-	// a session whose tab was Browser when the project got switched off, or the
-	// long-standing Files-on-an-orchestrator case. Falling through would render a
-	// tab strip with nothing selected above an empty body.
-	it.each([
-		{ name: "Browser on a project with no web UI", props: { view: "browser" as const } },
-		{
-			name: "Files on an orchestrator",
-			props: { view: "files" as const, session: { ...session([]), kind: "orchestrator" as const } },
-		},
-	])("falls back to Summary when the active view is not available ($name)", ({ props }) => {
-		const { session: overrideSession, ...rest } = props as { view: "browser" | "files"; session?: WorkspaceSession };
-		renderWithQuery(<SessionInspector session={overrideSession ?? session([pr(1, "open")])} {...rest} />);
+	it("falls back to Summary when the active view is not available (Browser on a project with no web UI)", () => {
+		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} view="browser" />);
 
 		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 		// And the body actually renders Summary, not nothing.
 		expect(screen.getByText("Branch")).toBeInTheDocument();
+	});
+
+	it.each(["summary", "reviews", "files", "browser", "simulator", "testiny"] as const)(
+		"falls back to Document when a chat orchestrator is handed the %s view",
+		(view) => {
+			renderWithQuery(<SessionInspector hasWebUI view={view} session={chatOrchestrator} />);
+
+			expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true");
+			expect(screen.queryByText("Branch")).not.toBeInTheDocument();
+		},
+	);
+
+	it("keeps Tasks when a chat orchestrator is handed it", () => {
+		renderWithQuery(<SessionInspector view="tasks" session={chatOrchestrator} />);
+		expect(screen.getByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true");
 	});
 
 	it("shows a chat session the same tabs as a terminal one, opening on Summary", () => {
@@ -901,8 +912,8 @@ describe("SessionInspector tab-strip width class", () => {
 		{ name: "worker with a web UI", props: { hasWebUI: true }, expected: "4" },
 		{ name: "worker with iOS only", props: { hasIOSSimulator: true }, expected: "4" },
 		{ name: "worker with no web UI", props: {}, expected: "3" },
-		{ name: "orchestrator with a web UI", props: { hasWebUI: true, orchestrator: true }, expected: "3" },
-		{ name: "orchestrator with no web UI", props: { orchestrator: true }, expected: "2" },
+		{ name: "chat orchestrator with a web UI", props: { hasWebUI: true, orchestrator: true }, expected: "2" },
+		{ name: "chat orchestrator with no web UI", props: { orchestrator: true }, expected: "2" },
 	])("reports $expected tabs to the stylesheet for a $name", ({ props, expected }) => {
 		const { orchestrator, ...rest } = props as {
 			hasWebUI?: boolean;
@@ -910,9 +921,7 @@ describe("SessionInspector tab-strip width class", () => {
 			usesTestiny?: boolean;
 			orchestrator?: boolean;
 		};
-		renderWithQuery(
-			<SessionInspector session={orchestrator ? { ...session([]), kind: "orchestrator" } : session([])} {...rest} />,
-		);
+		renderWithQuery(<SessionInspector session={orchestrator ? chatOrchestrator : session([])} {...rest} />);
 		const strip = screen.getByRole("tablist");
 		expect(strip).toHaveAttribute("data-tab-count", expected);
 		expect(screen.getAllByRole("tab")).toHaveLength(Number(expected));

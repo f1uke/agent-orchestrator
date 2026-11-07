@@ -2023,7 +2023,7 @@ type SetResponseLanguageSettingsRequest struct {
 	Language string `json:"language"`
 }
 
-// WorkerTransportSettingsResponse mirrors workertransport.Settings on the wire.
+// WorkerTransportSettingsResponse mirrors transportsettings.Settings on the wire.
 // It is the body of GET/PUT /api/v1/settings/worker-transport: how a new
 // claude-code worker is driven unless its project or its spawn says otherwise.
 type WorkerTransportSettingsResponse struct {
@@ -2034,6 +2034,19 @@ type WorkerTransportSettingsResponse struct {
 // /api/v1/settings/worker-transport.
 type SetWorkerTransportSettingsRequest struct {
 	WorkerTransport domain.Transport `json:"workerTransport" enum:"terminal,chat"`
+}
+
+// OrchestratorTransportSettingsResponse is the body of GET/PUT
+// /api/v1/settings/orchestrator-transport: how a new claude-code orchestrator
+// is driven unless its project says otherwise.
+type OrchestratorTransportSettingsResponse struct {
+	OrchestratorTransport domain.Transport `json:"orchestratorTransport" enum:"terminal,chat"`
+}
+
+// SetOrchestratorTransportSettingsRequest is the body of PUT
+// /api/v1/settings/orchestrator-transport.
+type SetOrchestratorTransportSettingsRequest struct {
+	OrchestratorTransport domain.Transport `json:"orchestratorTransport" enum:"terminal,chat"`
 }
 
 // SystemPromptItem is one editable prompt kind on the wire: its built-in default

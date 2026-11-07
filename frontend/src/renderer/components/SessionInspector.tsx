@@ -38,11 +38,9 @@ import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
 import { cn } from "../lib/utils";
 import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
+import { allowedInspectorViews, type InspectorView } from "../lib/inspector-views";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
-
-export type InspectorView =
-	"summary" | "reviews" | "files" | "document" | "tasks" | "testiny" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -235,34 +233,17 @@ export function SessionInspector({
 		setInternalView(next);
 		onViewChange?.(next);
 	};
-	// An orchestrator's workspace is the project checkout, not a per-task worktree,
-	// and it has no branch of its own to diff — the same reason the readiness strip
-	// is hidden for it.
-	const showFiles = session?.kind !== "orchestrator";
-	// Documents come from chat cards, so a terminal session has nothing to put in the tab.
-	const showDocument = session?.transport === "chat";
-	const showTasks = session?.transport === "chat";
+	const allowed = useMemo(
+		() => (session ? allowedInspectorViews(session, { hasWebUI, hasIOSSimulator, usesTestiny }) : []),
+		[session, hasWebUI, hasIOSSimulator, usesTestiny],
+	);
 	const chatItems = chat?.transcript.items;
 	const docRevision = useMemo(
 		() => (openDoc && chatItems ? writeRevision(chatItems, openDoc) : 0),
 		[openDoc, chatItems],
 	);
-	// A project with no web UI has nothing to preview, so the Browser tab is not
-	// offered at all — an always-empty tab is worse than one tab fewer.
-	const views = VIEWS.filter((v) => {
-		if (v.id === "files") return showFiles;
-		if (v.id === "document") return showDocument;
-		if (v.id === "tasks") return showTasks;
-		if (v.id === "browser") return hasWebUI;
-		if (v.id === "simulator") return hasIOSSimulator;
-		if (v.id === "testiny") return usesTestiny;
-		return true;
-	});
-	// The requested tab can name a view this session does not show: a remembered
-	// Browser tab in a project that has since switched the web UI off, or Files on
-	// an orchestrator. Without this the strip would render with nothing selected
-	// above an empty body.
-	const view = views.some((v) => v.id === requestedView) ? requestedView : views[0].id;
+	const views = VIEWS.filter((v) => allowed.includes(v.id));
+	const view = allowed.includes(requestedView) ? requestedView : allowed.at(0);
 
 	if (!session) {
 		return (
@@ -273,6 +254,7 @@ export function SessionInspector({
 			</aside>
 		);
 	}
+	if (!view) return null;
 
 	return (
 		<aside className="session-inspector" aria-label="Session inspector">
@@ -325,7 +307,7 @@ export function SessionInspector({
 				{view === "reviews" ? (
 					<ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} onOpenFile={onOpenFile} session={session} />
 				) : null}
-				{view === "files" && showFiles ? (
+				{view === "files" ? (
 					// KEYED by the task, not the session: dev and qa share one worktree,
 					// so switching between them keeps the same panel — and therefore the
 					// same folds, scroll and mode — over the same files. A different task
@@ -345,7 +327,7 @@ export function SessionInspector({
 						reveal={revealInTree}
 					/>
 				) : null}
-				{view === "document" && showDocument ? (
+				{view === "document" ? (
 					<DocumentPanel
 						active={isInspectorVisible}
 						doc={openDoc}
@@ -356,10 +338,10 @@ export function SessionInspector({
 						sessionId={session.id}
 					/>
 				) : null}
-				{view === "tasks" && showTasks ? (
+				{view === "tasks" ? (
 					<TasksPanel chat={chat} root={session.workspacePath ?? ""} sessionId={session.id} theme={theme ?? "dark"} />
 				) : null}
-				{view === "testiny" && usesTestiny ? <TestinyView key={taskKeyOf(session)} session={session} /> : null}
+				{view === "testiny" ? <TestinyView key={taskKeyOf(session)} session={session} /> : null}
 				{/* The Simulator panel stays mounted while its tab is off so the chosen
 				    device survives a trip to another tab - with two simulators booted
 				    there is no default to fall back on, and re-picking on every tab
@@ -369,7 +351,7 @@ export function SessionInspector({
 				    Keyed by session so switching sessions tears the stream down and
 				    resets driving to off, rather than carrying a live socket - and a
 				    drivable device - across to a session that did not ask for it. */}
-				{hasIOSSimulator ? (
+				{allowed.includes("simulator") ? (
 					<div className="contents" hidden={view !== "simulator"}>
 						<SimulatorPanel
 							isActive={view === "simulator" && isInspectorVisible}

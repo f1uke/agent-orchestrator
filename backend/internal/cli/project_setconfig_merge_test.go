@@ -141,6 +141,10 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--worker-transport", "terminal"},
 		want: domain.ProjectConfig{WorkerTransport: domain.TransportTerminal},
 	},
+	"orchestrator-transport": {
+		args: []string{"--orchestrator-transport", "terminal"},
+		want: domain.ProjectConfig{OrchestratorTransport: domain.TransportTerminal},
+	},
 	"claude-profile": {
 		args: []string{"--claude-profile", "OmniRoute"},
 		want: domain.ProjectConfig{ClaudeProfile: "OmniRoute"},

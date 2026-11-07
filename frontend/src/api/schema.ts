@@ -2923,6 +2923,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/orchestrator-transport": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the global default transport for new claude-code orchestrators */
+        get: operations["getOrchestratorTransportSettings"];
+        /** Replace the global default transport for new claude-code orchestrators */
+        put: operations["setOrchestratorTransportSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/prompts": {
         parameters: {
             query?: never;
@@ -5099,6 +5117,10 @@ export interface components {
             projectId: string;
             projectName?: string;
         };
+        OrchestratorTransportSettingsResponse: {
+            /** @enum {string} */
+            orchestratorTransport: "terminal" | "chat";
+        };
         PRReviewState: {
             branch?: string;
             latestRun?: components["schemas"]["ReviewRun"];
@@ -5145,6 +5167,8 @@ export interface components {
             noIdleCompaction?: boolean;
             noPromptSuggestions?: boolean;
             orchestrator?: components["schemas"]["RoleOverride"];
+            /** @enum {string} */
+            orchestratorTransport?: "terminal" | "chat";
             pauseBeforeImplementing?: boolean;
             postCreate?: string[];
             responseLanguage?: string;
@@ -6761,6 +6785,10 @@ export interface components {
         };
         SetMessageTemplateRequest: {
             template: string;
+        };
+        SetOrchestratorTransportSettingsRequest: {
+            /** @enum {string} */
+            orchestratorTransport: "terminal" | "chat";
         };
         SetProjectConfigInput: {
             config: components["schemas"]["ProjectConfig"];
@@ -19114,6 +19142,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageTemplatesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getOrchestratorTransportSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrchestratorTransportSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setOrchestratorTransportSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetOrchestratorTransportSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrchestratorTransportSettingsResponse"];
                 };
             };
             /** @description Bad Request */

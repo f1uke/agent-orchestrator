@@ -13,23 +13,20 @@ func TestResolveTransport(t *testing.T) {
 		terminal = domain.TransportTerminal
 		chat     = domain.TransportChat
 		claude   = domain.HarnessClaudeCode
-		worker   = domain.KindWorker
 	)
 	for _, tc := range []struct {
 		name string
 		in   TransportChoice
 		want domain.Transport
 	}{
-		{"nothing set is the built-in chat", TransportChoice{Harness: claude, Kind: worker}, chat},
-		{"the global setting beats the built-in", TransportChoice{Global: terminal, Harness: claude, Kind: worker}, terminal},
-		{"the project beats the global setting", TransportChoice{Project: chat, Global: terminal, Harness: claude, Kind: worker}, chat},
-		{"the project beats the global setting, the other way", TransportChoice{Project: terminal, Global: chat, Harness: claude, Kind: worker}, terminal},
-		{"an explicit terminal beats a project chat", TransportChoice{Explicit: terminal, Project: chat, Global: chat, Harness: claude, Kind: worker}, terminal},
-		{"an explicit chat beats a project terminal", TransportChoice{Explicit: chat, Project: terminal, Global: terminal, Harness: claude, Kind: worker}, chat},
-		{"a worker with no kind named is a worker", TransportChoice{Harness: claude}, chat},
-		{"another agent is terminal whatever the settings say", TransportChoice{Project: chat, Global: chat, Harness: domain.HarnessCodex, Kind: worker}, terminal},
-		{"an orchestrator is terminal whatever the settings say", TransportChoice{Project: chat, Global: chat, Harness: claude, Kind: domain.KindOrchestrator}, terminal},
-		{"an explicit chat reaches an agent that cannot host it, for validateTransport to refuse", TransportChoice{Explicit: chat, Harness: domain.HarnessCodex, Kind: worker}, chat},
+		{"nothing set is the built-in chat", TransportChoice{Harness: claude}, chat},
+		{"the global setting beats the built-in", TransportChoice{Global: terminal, Harness: claude}, terminal},
+		{"the project beats the global setting", TransportChoice{Project: chat, Global: terminal, Harness: claude}, chat},
+		{"the project beats the global setting, the other way", TransportChoice{Project: terminal, Global: chat, Harness: claude}, terminal},
+		{"an explicit terminal beats a project chat", TransportChoice{Explicit: terminal, Project: chat, Global: chat, Harness: claude}, terminal},
+		{"an explicit chat beats a project terminal", TransportChoice{Explicit: chat, Project: terminal, Global: terminal, Harness: claude}, chat},
+		{"another agent is terminal whatever the settings say", TransportChoice{Project: chat, Global: chat, Harness: domain.HarnessCodex}, terminal},
+		{"an explicit chat reaches an agent that cannot host it, for validateTransport to refuse", TransportChoice{Explicit: chat, Harness: domain.HarnessCodex}, chat},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := ResolveTransport(tc.in); got != tc.want {
@@ -40,28 +37,40 @@ func TestResolveTransport(t *testing.T) {
 }
 
 func TestSpawnResolvesTheTransportFromTheSettings(t *testing.T) {
+	const (
+		terminal = domain.TransportTerminal
+		chat     = domain.TransportChat
+	)
+	type settings struct{ projectWorker, projectOrch, globalWorker, globalOrch domain.Transport }
 	for _, tc := range []struct {
 		name         string
-		project      domain.Transport
-		global       domain.Transport
+		settings     settings
 		spawn        ports.SpawnConfig
 		wantTerminal bool
 	}{
 		{name: "nothing set gives a chat worker", spawn: ports.SpawnConfig{Kind: domain.KindWorker}},
-		{name: "a project terminal gives a terminal worker", project: domain.TransportTerminal, spawn: ports.SpawnConfig{Kind: domain.KindWorker}, wantTerminal: true},
-		{name: "a global terminal gives a terminal worker", global: domain.TransportTerminal, spawn: ports.SpawnConfig{Kind: domain.KindWorker}, wantTerminal: true},
-		{name: "a project chat beats a global terminal", project: domain.TransportChat, global: domain.TransportTerminal, spawn: ports.SpawnConfig{Kind: domain.KindWorker}},
-		{name: "an explicit terminal beats a project chat", project: domain.TransportChat, spawn: ports.SpawnConfig{Kind: domain.KindWorker, Transport: domain.TransportTerminal}, wantTerminal: true},
-		{name: "another agent stays terminal and the setting is no error", project: domain.TransportChat, global: domain.TransportChat, spawn: ports.SpawnConfig{Kind: domain.KindWorker, Harness: domain.HarnessCodex}, wantTerminal: true},
-		{name: "an orchestrator stays terminal", project: domain.TransportChat, global: domain.TransportChat, spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator}, wantTerminal: true},
+		{name: "a project terminal gives a terminal worker", settings: settings{projectWorker: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindWorker}, wantTerminal: true},
+		{name: "a global terminal gives a terminal worker", settings: settings{globalWorker: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindWorker}, wantTerminal: true},
+		{name: "a project chat beats a global terminal", settings: settings{projectWorker: chat, globalWorker: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindWorker}},
+		{name: "an explicit terminal beats a project chat", settings: settings{projectWorker: chat}, spawn: ports.SpawnConfig{Kind: domain.KindWorker, Transport: terminal}, wantTerminal: true},
+		{name: "another agent stays terminal and the setting is no error", settings: settings{projectWorker: chat, globalWorker: chat}, spawn: ports.SpawnConfig{Kind: domain.KindWorker, Harness: domain.HarnessCodex}, wantTerminal: true},
+		{name: "the orchestrator settings do not move a worker", settings: settings{projectOrch: terminal, globalOrch: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindWorker}},
+
+		{name: "nothing set gives a chat orchestrator", spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator}},
+		{name: "a project terminal gives a terminal orchestrator", settings: settings{projectOrch: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator}, wantTerminal: true},
+		{name: "a global terminal gives a terminal orchestrator", settings: settings{globalOrch: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator}, wantTerminal: true},
+		{name: "a project chat beats a global terminal for an orchestrator", settings: settings{projectOrch: chat, globalOrch: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator}},
+		{name: "the worker settings do not move an orchestrator", settings: settings{projectWorker: terminal, globalWorker: terminal}, spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator}},
+		{name: "an explicit terminal beats an orchestrator project chat", settings: settings{projectOrch: chat}, spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator, Transport: terminal}, wantTerminal: true},
+		{name: "another agent's orchestrator stays terminal", settings: settings{projectOrch: chat, globalOrch: chat}, spawn: ports.SpawnConfig{Kind: domain.KindOrchestrator, Harness: domain.HarnessCodex}, wantTerminal: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newChatFixture(t)
 			cfg := testRoleAgents()
-			cfg.WorkerTransport = tc.project
+			cfg.WorkerTransport, cfg.OrchestratorTransport = tc.settings.projectWorker, tc.settings.projectOrch
 			f.st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
-			global := tc.global
-			f.m.workerTransport = func() domain.Transport { return global }
+			f.m.workerTransport = func() domain.Transport { return tc.settings.globalWorker }
+			f.m.orchestratorTransport = func() domain.Transport { return tc.settings.globalOrch }
 
 			tc.spawn.ProjectID, tc.spawn.Prompt = "mer", "do it"
 			rec, err := f.m.Spawn(ctx, tc.spawn)
@@ -69,12 +78,12 @@ func TestSpawnResolvesTheTransportFromTheSettings(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.wantTerminal {
-				if rec.Transport != domain.TransportTerminal || f.rt.lastCfg.Argv[0] == daemonExe {
+				if rec.Transport != terminal || f.rt.lastCfg.Argv[0] == daemonExe {
 					t.Fatalf("transport = %q, argv = %q; want a terminal launch", rec.Transport, f.rt.lastCfg.Argv)
 				}
 				return
 			}
-			if rec.Transport != domain.TransportChat {
+			if rec.Transport != chat {
 				t.Fatalf("stored transport = %q, want chat", rec.Transport)
 			}
 			f.assertHostLaunch(t, rec.ID, "spawn")
@@ -115,6 +124,33 @@ func TestChangingASettingNeverMovesAnExistingSession(t *testing.T) {
 	}
 	if got := f.st.sessions[terminalRec.ID].Transport; got != domain.TransportTerminal || f.rt.lastCfg.Argv[0] == daemonExe {
 		t.Fatalf("restore of a terminal session after the project went to chat: transport = %q, argv = %q; want terminal", got, f.rt.lastCfg.Argv)
+	}
+}
+
+func TestChangingASettingNeverMovesAnExistingOrchestrator(t *testing.T) {
+	f := newChatFixture(t)
+	cfg := testRoleAgents()
+	cfg.OrchestratorTransport = domain.TransportTerminal
+	f.st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+	terminalRec, err := f.m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator, Prompt: "do it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminalRec.Transport != domain.TransportTerminal {
+		t.Fatalf("spawned under a terminal project: transport = %q, want terminal", terminalRec.Transport)
+	}
+	row := f.st.sessions[terminalRec.ID]
+	row.IsTerminated = true
+	f.st.sessions[terminalRec.ID] = row
+
+	cfg.OrchestratorTransport = domain.TransportChat
+	f.st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+	f.m.orchestratorTransport = func() domain.Transport { return domain.TransportChat }
+	if _, err := f.m.Restore(ctx, terminalRec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.st.sessions[terminalRec.ID].Transport; got != domain.TransportTerminal || f.rt.lastCfg.Argv[0] == daemonExe {
+		t.Fatalf("restore of a terminal orchestrator after the default went to chat: transport = %q, argv = %q; want terminal", got, f.rt.lastCfg.Argv)
 	}
 }
 

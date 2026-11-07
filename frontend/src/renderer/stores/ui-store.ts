@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { InspectorView } from "../components/SessionInspector";
+import type { InspectorView } from "../lib/inspector-views";
 import { parseSplitLayouts, serializeSplitLayouts, type SplitNode } from "../lib/split-layout";
 
 export type Theme = "light" | "dark";

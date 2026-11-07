@@ -82,38 +82,39 @@ type workspaceRepoDetails struct {
 // impossible to lose, because there is nothing left to keep in sync.
 
 type projectSetConfigOptions struct {
-	defaultBranch     string
-	sessionPrefix     string
-	model             string
-	permission        string
-	workerAgent       string
-	orchestratorAgent string
-	env               []string
-	symlink           []string
-	postCreate        []string
-	trackerIntake     bool
-	trackerProvider   string
-	trackerRepo       string
-	trackerAssignee   string
-	gitWorkflow       string
-	branchPrefix      string
-	hasWebUI          bool
-	hasIOSSimulator   bool
-	mobileScripts     string
-	mobilePlatform    string
-	mobileStore       string
-	mobileVerifySkill string
-	simTrustCAs       []string
-	noAutoCrew        bool
-	pauseBeforeImpl   bool
-	learnFromSessions bool
-	usesTestiny       bool
-	testinySkill      string
-	claudeProfile     string
-	workerTransport   string
-	configJSON        string
-	clear             bool
-	json              bool
+	defaultBranch         string
+	sessionPrefix         string
+	model                 string
+	permission            string
+	workerAgent           string
+	orchestratorAgent     string
+	env                   []string
+	symlink               []string
+	postCreate            []string
+	trackerIntake         bool
+	trackerProvider       string
+	trackerRepo           string
+	trackerAssignee       string
+	gitWorkflow           string
+	branchPrefix          string
+	hasWebUI              bool
+	hasIOSSimulator       bool
+	mobileScripts         string
+	mobilePlatform        string
+	mobileStore           string
+	mobileVerifySkill     string
+	simTrustCAs           []string
+	noAutoCrew            bool
+	pauseBeforeImpl       bool
+	learnFromSessions     bool
+	usesTestiny           bool
+	testinySkill          string
+	claudeProfile         string
+	workerTransport       string
+	orchestratorTransport string
+	configJSON            string
+	clear                 bool
+	json                  bool
 }
 
 type projectListResult struct {
@@ -320,7 +321,8 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.testinySkill, "testiny-skill", "", "With --testiny: the folder (absolute or ~/) of the skill holding the team's Testiny conventions (case standard, case language, plans, runs, evidence folder). Agents are pointed at it once it holds a SKILL.md; without one they ask the human. \"\" clears it")
 	f.BoolVar(&opts.usesTestiny, "testiny", false, "This project keeps its manual test cases in Testiny, so its tasks get the Testiny tab and its agents the Testiny guidance. Not tied to one Testiny project: each linked run carries its own")
 	f.StringVar(&opts.claudeProfile, "claude-profile", "", "Claude profile (see ao claude-profile ls) this project's claude-code sessions and reviewers launch with unless a spawn names another; \"\" goes back to Subscription")
-	f.StringVar(&opts.workerTransport, "worker-transport", "", "How this project's new claude-code workers are driven unless a spawn says otherwise: chat (a headless claude behind the chat view) or terminal (the agent's own TUI). \"\" inherits the global setting (ao settings worker-transport). Existing sessions keep theirs; orchestrators and other agents are always terminal")
+	f.StringVar(&opts.workerTransport, "worker-transport", "", "How this project's new claude-code workers are driven unless a spawn says otherwise: chat (a headless claude behind the chat view) or terminal (the agent's own TUI). \"\" inherits the global setting (ao settings worker-transport). Existing sessions keep theirs; other agents are always terminal")
+	f.StringVar(&opts.orchestratorTransport, "orchestrator-transport", "", "How this project's new claude-code orchestrator is driven: chat (a headless claude behind the chat view) or terminal (the agent's own TUI). \"\" inherits the global setting (ao settings orchestrator-transport). Only an orchestrator spawned after the change picks it up; an existing session keeps its transport through restore and restart")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
@@ -381,6 +383,7 @@ var setConfigFieldFlags = []struct {
 	{flag: "testiny-skill", path: "testinySkill"},
 	{flag: "claude-profile", path: "claudeProfile"},
 	{flag: "worker-transport", path: "workerTransport"},
+	{flag: "orchestrator-transport", path: "orchestratorTransport"},
 }
 
 // resolveSetConfigWrite decides what this invocation writes and how: the config
@@ -448,16 +451,21 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 	if err != nil {
 		return domain.ProjectConfig{}, usageError{fmt.Errorf("--worker-transport must be terminal or chat, not %q", opts.workerTransport)}
 	}
+	orchestratorTransport, err := domain.ParseTransport(strings.TrimSpace(opts.orchestratorTransport))
+	if err != nil {
+		return domain.ProjectConfig{}, usageError{fmt.Errorf("--orchestrator-transport must be terminal or chat, not %q", opts.orchestratorTransport)}
+	}
 	cfg := domain.ProjectConfig{
-		WorkerTransport: workerTransport,
-		DefaultBranch:   opts.defaultBranch,
-		SessionPrefix:   opts.sessionPrefix,
-		Env:             env,
-		Symlinks:        opts.symlink,
-		PostCreate:      opts.postCreate,
-		AgentConfig:     domain.AgentConfig{Model: opts.model, Permissions: domain.PermissionMode(opts.permission)},
-		Worker:          domain.RoleOverride{Harness: domain.AgentHarness(opts.workerAgent)},
-		Orchestrator:    domain.RoleOverride{Harness: domain.AgentHarness(opts.orchestratorAgent)},
+		WorkerTransport:       workerTransport,
+		OrchestratorTransport: orchestratorTransport,
+		DefaultBranch:         opts.defaultBranch,
+		SessionPrefix:         opts.sessionPrefix,
+		Env:                   env,
+		Symlinks:              opts.symlink,
+		PostCreate:            opts.postCreate,
+		AgentConfig:           domain.AgentConfig{Model: opts.model, Permissions: domain.PermissionMode(opts.permission)},
+		Worker:                domain.RoleOverride{Harness: domain.AgentHarness(opts.workerAgent)},
+		Orchestrator:          domain.RoleOverride{Harness: domain.AgentHarness(opts.orchestratorAgent)},
 		TrackerIntake: domain.TrackerIntakeConfig{
 			Enabled:  opts.trackerIntake,
 			Provider: domain.TrackerProvider(trackerProvider),

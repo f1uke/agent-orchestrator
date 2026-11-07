@@ -81,6 +81,11 @@ const { workspaces, panels } = vi.hoisted(() => {
 		branch: "ao/chat",
 		transport: "chat" as const,
 	} satisfies WorkspaceSession;
+	const chatOrchestrator = {
+		...orchestrator,
+		id: "sess-orch-chat",
+		transport: "chat" as const,
+	} satisfies WorkspaceSession;
 	const workspaces: WorkspaceSummary[] = [
 		{
 			id: "proj-1",
@@ -88,7 +93,18 @@ const { workspaces, panels } = vi.hoisted(() => {
 			path: "/p",
 			type: "main",
 			hasWebUI: true,
-			sessions: [worker, worker2, worker3, orchestrator, todo, crewDev, crewQa, ...extraWorkers, chat],
+			sessions: [
+				worker,
+				worker2,
+				worker3,
+				orchestrator,
+				chatOrchestrator,
+				todo,
+				crewDev,
+				crewQa,
+				...extraWorkers,
+				chat,
+			],
 		},
 	];
 	return { workspaces, panels: new Map<string, PanelEntry>() };
@@ -457,6 +473,37 @@ describe("SessionView", () => {
 		// The shortcut is inactive without an inspector.
 		fireEvent.keyDown(window, { key: "B", metaKey: true, shiftKey: true });
 		expect(useUiStore.getState().isInspectorOpen).toBe(true);
+	});
+
+	it("gives a chat orchestrator the inspector rail, toggled by the same shortcut", () => {
+		useUiStore.setState({ isInspectorOpen: false });
+		render(<SessionView sessionId="sess-orch-chat" />);
+
+		expect(screen.getByTestId("panel-inspector")).toBeInTheDocument();
+		expect(screen.getByTestId("resize-handle")).toBeInTheDocument();
+
+		fireEvent.keyDown(window, { key: "B", metaKey: true, shiftKey: true });
+		expect(useUiStore.getState().isInspectorOpen).toBe(true);
+	});
+
+	it("leaves a chat orchestrator without project search, which belongs to the Files tree", () => {
+		useUiStore.setState({ isInspectorOpen: false });
+		render(<SessionView sessionId="sess-orch-chat" />);
+
+		fireEvent.keyDown(window, { key: "F", metaKey: true, shiftKey: true });
+
+		expect(useUiStore.getState().isInspectorOpen).toBe(false);
+		expect(screen.getByRole("button", { name: "pop browser", hidden: true })).not.toHaveAttribute("data-view", "files");
+	});
+
+	it("keeps project search for a chat worker", async () => {
+		useUiStore.setState({ isInspectorOpen: false });
+		render(<SessionView sessionId="sess-chat" />);
+
+		fireEvent.keyDown(window, { key: "F", metaKey: true, shiftKey: true });
+
+		await waitFor(() => expect(useUiStore.getState().isInspectorOpen).toBe(true));
+		expect(screen.getByRole("button", { name: "pop browser" })).toHaveAttribute("data-view", "files");
 	});
 
 	it("maximizes the browser over the whole app window and returns to the rail", () => {
@@ -829,7 +876,7 @@ describe("SessionView split view", () => {
 		fireEvent.click(within(screen.getByTestId("center-sess-1")).getByLabelText(splitEntryLabel));
 		await screen.findByText("third thing");
 
-		expect(screen.getByText("Orchestrator")).toBeInTheDocument();
+		expect(screen.getAllByText("Orchestrator")).toHaveLength(2);
 		expect(screen.queryByText("queued-task")).not.toBeInTheDocument();
 		// On-screen sessions are structurally absent from the list: "second
 		// thing" (sess-2) appears nowhere in the picker because its only other

@@ -70,9 +70,9 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
+	"github.com/aoagents/agent-orchestrator/backend/internal/transportsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/treewatch"
 	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
-	"github.com/aoagents/agent-orchestrator/backend/internal/workertransport"
 )
 
 // Run starts the daemon and blocks until it exits. SIGINT/SIGTERM drive
@@ -287,7 +287,7 @@ func Run() error {
 		return fmt.Errorf("response-language settings: %w", err)
 	}
 
-	workerTransportSettings, err := workertransport.NewStore(cfg.DataDir)
+	transportSettings, err := transportsettings.NewStore(cfg.DataDir)
 	if err != nil {
 		stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
@@ -435,7 +435,7 @@ func Run() error {
 	// counter per worktree: qa's `ao crew run` bracket, and a review pass over a
 	// crew's shared checkout.
 	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
-	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, claudeProfiles, promptOverrides, responseLangSettings, workerTransportSettings, reclaimSettings.Get, treeWatchers, log)
+	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, claudeProfiles, promptOverrides, responseLangSettings, transportSettings, reclaimSettings.Get, treeWatchers, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -605,7 +605,7 @@ func Run() error {
 		ClaudeProfiles:     claudeProfiles,
 		AutoNudge:          autoNudge,
 		ResponseLanguage:   responseLangSettings,
-		WorkerTransport:    workerTransportSettings,
+		TransportSettings:  transportSettings,
 		WikiSettings:       wikiSettings,
 		RefLinks:           refLinkSettings,
 		QAEvidence:         qaEvidenceSettings,

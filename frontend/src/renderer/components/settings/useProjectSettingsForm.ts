@@ -10,8 +10,12 @@ import {
 	parseCaFileLines,
 	simTrustSettingsQueryKey,
 } from "../../lib/sim-trust";
-import { responseLanguageQueryKey, workerTransportQueryKey } from "./useGlobalSettingsForm";
-import { BUILT_IN_WORKER_TRANSPORT, type WorkerTransport } from "./worker-transport";
+import {
+	orchestratorTransportQueryKey,
+	responseLanguageQueryKey,
+	workerTransportQueryKey,
+} from "./useGlobalSettingsForm";
+import { BUILT_IN_ORCHESTRATOR_TRANSPORT, BUILT_IN_WORKER_TRANSPORT, type Transport } from "./transport";
 import { captureRendererEvent } from "../../lib/telemetry";
 import { useClaudeProfiles } from "../../lib/claude-profiles";
 import { spawnOrchestrator } from "../../lib/spawn-orchestrator";
@@ -76,7 +80,8 @@ export type ProjectSettingsFormState = {
 	workerPrompt: string;
 	reviewerPrompt: string;
 	responseLanguage: string;
-	workerTransport: WorkerTransport | "";
+	workerTransport: Transport | "";
+	orchestratorTransport: Transport | "";
 	idleCompaction: boolean;
 	promptSuggestions: boolean;
 };
@@ -123,6 +128,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		reviewerPrompt: config.systemPromptAdditions?.reviewer ?? "",
 		responseLanguage: config.responseLanguage ?? "",
 		workerTransport: config.workerTransport ?? "",
+		orchestratorTransport: config.orchestratorTransport ?? "",
 		idleCompaction: !config.noIdleCompaction,
 		promptSuggestions: !config.noPromptSuggestions,
 	};
@@ -247,6 +253,16 @@ export function useProjectSettingsForm({
 		},
 	});
 	const globalWorkerTransport = globalWorkerTransportQuery.data?.workerTransport ?? BUILT_IN_WORKER_TRANSPORT;
+	const globalOrchestratorTransportQuery = useQuery({
+		queryKey: orchestratorTransportQueryKey,
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/orchestrator-transport", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as components["schemas"]["OrchestratorTransportSettingsResponse"];
+		},
+	});
+	const globalOrchestratorTransport =
+		globalOrchestratorTransportQuery.data?.orchestratorTransport ?? BUILT_IN_ORCHESTRATOR_TRANSPORT;
 	// The global root-CA list this project's override replaces, stated at the
 	// field for the same reason as the response language above.
 	const globalSimTrustQuery = useQuery({ queryKey: simTrustSettingsQueryKey, queryFn: fetchSimTrustSettings });
@@ -350,6 +366,7 @@ export function useProjectSettingsForm({
 				// otherwise-unset config still persists as unset.
 				responseLanguage: form.responseLanguage || undefined,
 				workerTransport: form.workerTransport || undefined,
+				orchestratorTransport: form.orchestratorTransport || undefined,
 				noIdleCompaction: !form.idleCompaction || undefined,
 				noPromptSuggestions: !form.promptSuggestions || undefined,
 				claudeProfile: form.claudeProfile || undefined,
@@ -437,6 +454,7 @@ export function useProjectSettingsForm({
 		missingRequiredAgent,
 		globalResponseLanguage,
 		globalWorkerTransport,
+		globalOrchestratorTransport,
 		globalSimTrustCaFiles,
 		intakeForm,
 		patchIntake,

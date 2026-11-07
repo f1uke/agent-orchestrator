@@ -323,8 +323,9 @@ type Manager struct {
 	// responseLanguage returns the global default human-facing response language.
 	// Nil (bare Manager/omitting wiring) means English (no directive) — the safe
 	// default that leaves every prompt byte-for-byte unchanged.
-	responseLanguage func() string
-	workerTransport  func() domain.Transport
+	responseLanguage      func() string
+	workerTransport       func() domain.Transport
+	orchestratorTransport func() domain.Transport
 	// sessionPaneReaper closes the AUXILIARY panes a session leaves behind when
 	// it is torn down: its reviewer pane and its iOS run pane. Both are bare
 	// runtime handles named after the session id - no database row, no worktree,
@@ -403,6 +404,8 @@ type Deps struct {
 	// defaults to English (no directive injected).
 	ResponseLanguage func() string
 	WorkerTransport  func() domain.Transport
+	// OrchestratorTransport is WorkerTransport for orchestrators.
+	OrchestratorTransport func() domain.Transport
 	// ClaudeProfiles resolves the Claude profile a claude-code session launches
 	// with. Nil knows only the built-in profiles.
 	ClaudeProfiles ClaudeProfileRegistry
@@ -412,25 +415,26 @@ type Deps struct {
 // time.Now when Deps.Clock is nil.
 func New(d Deps) *Manager {
 	m := &Manager{
-		runtime:             d.Runtime,
-		agents:              d.Agents,
-		workspace:           d.Workspace,
-		store:               d.Store,
-		messenger:           d.Messenger,
-		lcm:                 d.Lifecycle,
-		dataDir:             d.DataDir,
-		knowledgeDir:        d.KnowledgeDir,
-		runFile:             d.RunFile,
-		clock:               d.Clock,
-		idleCloseTTL:        d.IdleCloseTTL,
-		lookPath:            d.LookPath,
-		executable:          d.Executable,
-		logger:              d.Logger,
-		spawnConfirmEnabled: d.SpawnConfirmEnabled,
-		promptOverrides:     d.PromptOverrides,
-		responseLanguage:    d.ResponseLanguage,
-		workerTransport:     d.WorkerTransport,
-		claudeProfiles:      d.ClaudeProfiles,
+		runtime:               d.Runtime,
+		agents:                d.Agents,
+		workspace:             d.Workspace,
+		store:                 d.Store,
+		messenger:             d.Messenger,
+		lcm:                   d.Lifecycle,
+		dataDir:               d.DataDir,
+		knowledgeDir:          d.KnowledgeDir,
+		runFile:               d.RunFile,
+		clock:                 d.Clock,
+		idleCloseTTL:          d.IdleCloseTTL,
+		lookPath:              d.LookPath,
+		executable:            d.Executable,
+		logger:                d.Logger,
+		spawnConfirmEnabled:   d.SpawnConfirmEnabled,
+		promptOverrides:       d.PromptOverrides,
+		responseLanguage:      d.ResponseLanguage,
+		workerTransport:       d.WorkerTransport,
+		orchestratorTransport: d.OrchestratorTransport,
+		claudeProfiles:        d.ClaudeProfiles,
 	}
 	if m.claudeProfiles == nil {
 		m.claudeProfiles = claudeprofile.Builtins()

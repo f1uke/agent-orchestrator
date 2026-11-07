@@ -40,10 +40,11 @@ type Config struct {
 	// user's next message after each turn.
 	NoPromptSuggestions bool
 
-	stdinGrace     time.Duration
-	killGrace      time.Duration
-	controlTimeout time.Duration
-	contextTimeout time.Duration
+	stdinGrace      time.Duration
+	killGrace       time.Duration
+	controlTimeout  time.Duration
+	contextTimeout  time.Duration
+	predecessorWait time.Duration
 }
 
 const (
@@ -51,8 +52,10 @@ const (
 	defaultKillGrace      = 2 * time.Second
 	defaultControlTimeout = requestTimeout / 2
 	// Claude may not know get_context_usage, so a missing answer is dropped, not retried.
-	defaultContextTimeout = 5 * time.Second
-	contextRequestPrefix  = "ctx-"
+	defaultContextTimeout  = 5 * time.Second
+	defaultPredecessorWait = 10 * time.Second
+	predecessorPoll        = 50 * time.Millisecond
+	contextRequestPrefix   = "ctx-"
 	// stdoutDrain bounds the wait for claude's stdout to reach EOF after it
 	// exits, in case a leftover subprocess still holds the pipe open.
 	stdoutDrain = 2 * time.Second
@@ -89,11 +92,11 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	ln, err := listen(ctx, cfg.SocketPath)
+	ln, err := listen(ctx, cfg.SocketPath, orDefault(cfg.predecessorWait, defaultPredecessorWait))
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = os.Remove(cfg.SocketPath) }()
+	// UnixListener.Close unlinks the socket; a later Remove could delete a successor host's socket.
 	defer func() { _ = ln.Close() }()
 
 	lg, folder, err := openLog(cfg.LogPath)
@@ -176,11 +179,23 @@ func hasUserInput(t chatproto.Transcript) bool {
 	return false
 }
 
-func listen(ctx context.Context, socketPath string) (net.Listener, error) {
+func listen(ctx context.Context, socketPath string, wait time.Duration) (net.Listener, error) {
 	d := net.Dialer{Timeout: time.Second}
-	if c, err := d.DialContext(ctx, "unix", socketPath); err == nil {
+	deadline := time.Now().Add(wait)
+	for {
+		c, err := d.DialContext(ctx, "unix", socketPath)
+		if err != nil {
+			break
+		}
 		_ = c.Close()
-		return nil, fmt.Errorf("sessionhost: session host already running on %s", socketPath)
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("sessionhost: session host already running on %s", socketPath)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(predecessorPoll):
+		}
 	}
 	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("sessionhost: remove stale socket: %w", err)

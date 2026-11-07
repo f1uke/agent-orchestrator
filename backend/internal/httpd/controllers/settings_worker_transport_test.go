@@ -9,21 +9,21 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
-	"github.com/aoagents/agent-orchestrator/backend/internal/workertransport"
+	"github.com/aoagents/agent-orchestrator/backend/internal/transportsettings"
 )
 
 type workerTransportBody struct {
 	WorkerTransport string `json:"workerTransport"`
 }
 
-func newWorkerTransportServer(t *testing.T, dir string) *httptest.Server {
+func newTransportSettingsServer(t *testing.T, dir string) *httptest.Server {
 	t.Helper()
-	store, err := workertransport.NewStore(dir)
+	store, err := transportsettings.NewStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{WorkerTransport: store}, httpd.ControlDeps{}))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{TransportSettings: store}, httpd.ControlDeps{}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -41,7 +41,7 @@ func TestWorkerTransportRoutes_DefaultToStubsWithoutService(t *testing.T) {
 
 func TestWorkerTransportSetting_ShipsChatAndSurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
-	srv := newWorkerTransportServer(t, dir)
+	srv := newTransportSettingsServer(t, dir)
 
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/worker-transport", "")
 	var got workerTransportBody
@@ -56,7 +56,7 @@ func TestWorkerTransportSetting_ShipsChatAndSurvivesARestart(t *testing.T) {
 		t.Fatalf("PUT terminal: %d %s", status, body)
 	}
 
-	restarted := newWorkerTransportServer(t, dir)
+	restarted := newTransportSettingsServer(t, dir)
 	body, status, _ = doRequest(t, restarted, "GET", "/api/v1/settings/worker-transport", "")
 	mustJSON(t, body, &got)
 	if status != http.StatusOK || got.WorkerTransport != "terminal" {
@@ -65,7 +65,7 @@ func TestWorkerTransportSetting_ShipsChatAndSurvivesARestart(t *testing.T) {
 }
 
 func TestWorkerTransportSetting_RefusesWhatIsNotATransportAndKeepsTheValue(t *testing.T) {
-	srv := newWorkerTransportServer(t, t.TempDir())
+	srv := newTransportSettingsServer(t, t.TempDir())
 	if _, status, _ := doRequest(t, srv, "PUT", "/api/v1/settings/worker-transport", `{"workerTransport":"terminal"}`); status != http.StatusOK {
 		t.Fatalf("PUT terminal = %d", status)
 	}

@@ -154,6 +154,8 @@ function mockProject(project: Record<string, unknown>) {
 		if (path === "/api/v1/settings/sim-trust") return globalSimTrustResponse;
 		if (path === "/api/v1/settings/claude-profiles") return claudeProfilesResponse;
 		if (path === "/api/v1/settings/worker-transport") return { data: { workerTransport: "chat" }, error: undefined };
+		if (path === "/api/v1/settings/orchestrator-transport")
+			return { data: { orchestratorTransport: "chat" }, error: undefined };
 		return {
 			data: {
 				status: "ok",
@@ -680,6 +682,63 @@ describe("ProjectSettingsForm", () => {
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		expect(putMock.mock.calls[0][1].body.config.noPromptSuggestions).toBeUndefined();
+	});
+
+	it("shows the inherited orchestrator transport and saves an override without touching the worker transport", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "claude-code" },
+				orchestrator: { agent: "claude-code" },
+				workerTransport: "chat",
+			},
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const transport = await screen.findByRole("combobox", { name: "Orchestrator transport" });
+		expect(transport).toHaveTextContent("Inherit global default");
+		await chooseOption(transport, "Terminal");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.orchestratorTransport).toBe("terminal");
+		expect(body.workerTransport).toBe("chat");
+	});
+
+	it("omits orchestratorTransport when the project goes back to inheriting the global default", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "claude-code" },
+				orchestrator: { agent: "claude-code" },
+				orchestratorTransport: "terminal",
+				workerTransport: "terminal",
+			},
+		});
+		renderSettings();
+		await goToSection("Starting a task");
+
+		const transport = await screen.findByRole("combobox", { name: "Orchestrator transport" });
+		expect(transport).toHaveTextContent("Terminal");
+		await chooseOption(transport, "Inherit global default");
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0][1].body.config;
+		expect(body.orchestratorTransport).toBeUndefined();
+		expect(body.workerTransport).toBe("terminal");
 	});
 
 	// One flag behind three effects (Browser tab, `ao preview` guidance, the
