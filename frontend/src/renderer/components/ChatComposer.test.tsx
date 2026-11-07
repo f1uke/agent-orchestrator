@@ -57,6 +57,7 @@ function renderComposer(
 		bashBusy?: boolean;
 		remoteControl?: RemoteControl;
 		chrome?: boolean;
+		sessionId?: string;
 	} = {},
 ) {
 	const actions = {
@@ -96,17 +97,18 @@ function renderComposer(
 				permissionMode="default"
 				prefill={prefill}
 				queued={[]}
-				sessionId="chat-1"
+				sessionId={live.sessionId ?? "chat-1"}
 			/>
 		</div>
 	);
-	const { rerender } = render(tree());
-	const input = screen.getByRole("textbox", { name: "Message Claude" });
+	const { rerender, unmount } = render(tree());
+	const input = screen.getByRole("textbox", { name: /^(Message Claude|Shell command)$/ });
 	return {
 		actions,
 		onToast,
 		parentKeys,
 		input,
+		unmount,
 		user: userEvent.setup(),
 		prefill: (next: Prefill) => rerender(tree(next)),
 		suggest: (next: string) => rerender(tree(undefined, next)),
@@ -368,6 +370,80 @@ describe("ChatComposer prefill", () => {
 	});
 });
 
+describe("ChatComposer draft", () => {
+	it("brings back unsent text after the composer is unmounted and mounted again", async () => {
+		const { input, user, unmount, actions } = renderComposer();
+		await user.type(input, "Half a thought");
+		unmount();
+		renderComposer();
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("Half a thought");
+		expect(actions.send).not.toHaveBeenCalled();
+	});
+
+	it("keeps a draft per session", async () => {
+		const first = renderComposer({}, { sessionId: "chat-1" });
+		await first.user.type(first.input, "For the first session");
+		first.unmount();
+		const second = renderComposer({}, { sessionId: "chat-2" });
+		expect(second.input).toHaveValue("");
+		await second.user.type(second.input, "For the second");
+		second.unmount();
+		const back = renderComposer({}, { sessionId: "chat-1" });
+		expect(back.input).toHaveValue("For the first session");
+		back.unmount();
+		renderComposer({}, { sessionId: "chat-2" });
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("For the second");
+	});
+
+	it("forgets the draft once the message is sent", async () => {
+		const { input, user, unmount, actions } = renderComposer();
+		await user.type(input, "Ship it{Enter}");
+		await waitFor(() => expect(actions.send).toHaveBeenCalledWith("Ship it", []));
+		await waitFor(() => expect(input).toHaveValue(""));
+		unmount();
+		renderComposer();
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("");
+	});
+
+	it("keeps the draft when sending fails", async () => {
+		const { input, user, unmount } = renderComposer({
+			send: vi.fn<ChatActions["send"]>(async () => ({ ok: false, error: { kind: "failed", message: "nope" } })),
+		});
+		await user.type(input, "Try again later{Enter}");
+		unmount();
+		renderComposer();
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("Try again later");
+	});
+
+	it("forgets the draft when the box is cleared", async () => {
+		const { input, user, unmount } = renderComposer();
+		await user.type(input, "Never mind");
+		await user.clear(input);
+		unmount();
+		renderComposer();
+		expect(screen.getByRole("textbox", { name: "Message Claude" })).toHaveValue("");
+	});
+
+	it("brings a shell command back in shell mode", async () => {
+		const { input, user, unmount } = renderComposer();
+		await user.type(input, "!git status");
+		unmount();
+		expect(renderComposer().input).toHaveAccessibleName("Shell command");
+		expect(screen.getByRole("textbox", { name: "Shell command" })).toHaveValue("git status");
+	});
+
+	it("does not open the slash menu for a restored draft until it is edited", async () => {
+		const { input, user, unmount } = renderComposer();
+		await user.type(input, "/rev");
+		expect(screen.getByRole("listbox")).toBeInTheDocument();
+		unmount();
+		const again = renderComposer();
+		expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+		await again.user.type(again.input, "i");
+		expect(screen.getByRole("listbox")).toBeInTheDocument();
+	});
+});
+
 const SUGGESTION = "what happens if I forget to cancel it?";
 const ghost = () => screen.queryByTestId("chat-suggestion");
 
@@ -493,6 +569,7 @@ const failed = (message = "Request failed (HTTP 500)"): UploadResult => ({
 });
 
 afterEach(() => {
+	window.localStorage.clear();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
