@@ -125,6 +125,31 @@ func TestResponseLanguageDirective_NamesTheSlipPoints(t *testing.T) {
 	}
 }
 
+// TestResponseLanguageDirective_CoversPeerMessages. Agents read `ao send` traffic
+// (worker reports, orchestrator messages, dev/qa handovers) as agent-to-agent and
+// wrote it in English, but the human reads each one as a peer-message card in the
+// chat view. The directive must name those message bodies as human-facing and keep
+// their identifiers in English; the English default still renders nothing.
+func TestResponseLanguageDirective_CoversPeerMessages(t *testing.T) {
+	got := ResponseLanguageDirective("Thai")
+	for _, want := range []string{
+		"`--message` body of every `ao send`",
+		"reports to the orchestrator, messages to workers, dev/qa handovers",
+		"peer-message card in the chat, so it is human-facing too",
+		"branch names, paths, commands, PR numbers, and identifiers stay in English",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("directive does not cover ao send messages with %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "`ao send`") > strings.Index(got, "Before you send any prose") {
+		t.Fatalf("the ao send clause must come before the closing self-check:\n%s", got)
+	}
+	if def := ResponseLanguageDirective(DefaultResponseLanguage); def != "" {
+		t.Fatalf("English default must render no directive, got %q", def)
+	}
+}
+
 // TestResponseLanguageDirective_EndsWithSelfCheck. The directive is the last
 // section of every assembled prompt, and its last sentence is a check the agent
 // runs before sending prose, so the final thing it reads is the language rule.
