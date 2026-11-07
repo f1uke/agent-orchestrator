@@ -97,9 +97,9 @@ describe("buildTrajectory on the recorded long session", () => {
 		expect(second.detail).toMatch(/\$0\.028/);
 	});
 
-	it("draws one Tools bar per call on every axis, inside the strip", () => {
-		for (const axis of ["duration", "turns", "calls"] as const) {
-			const bars = layoutBars(t, axis, NOW);
+	it("draws one Tools bar per call in both modes, inside the strip", () => {
+		for (const axis of ["steps", "duration"] as const) {
+			const { bars } = layoutBars(t, axis, NOW);
 			expect(bars.filter((b) => b.lane === "tools")).toHaveLength(27);
 			expect(bars.filter((b) => b.lane === "input")).toHaveLength(2);
 			expect(bars.length).toBeGreaterThan(27 + 2);
@@ -245,46 +245,92 @@ describe("buildTrajectory on a crafted session", () => {
 		expect([t.calls, t.errors, t.turns]).toEqual([5, 1, 2]);
 	});
 
-	it("places Input, Model and Tools bars by real time on the duration axis", () => {
+	it("places Input, Model and Tools bars by real time in duration mode, with a divider where turn 2 starts", () => {
 		const t = trajectoryOf(log());
-		const bars = layoutBars(t, "duration", Date.UTC(2026, 9, 30, 10, 0, 20));
+		const { bars, dividers } = layoutBars(t, "duration", Date.UTC(2026, 9, 30, 10, 0, 20));
 		const total = 20;
 		const lane = (name: string) => bars.filter((b) => b.lane === name);
 		expect(lane("input").map((b) => b.start)).toEqual([0, 12 / total]);
+		expect(dividers).toEqual([12 / total]);
 		const read = lane("tools").find((b) => b.label.startsWith("Read"))!;
 		expect(read.start).toBeCloseTo(2 / total);
 		expect(read.end).toBeCloseTo(3 / total);
 		const running = lane("tools").at(-1)!;
 		expect(running.running).toBe(true);
 		expect(running.end).toBeCloseTo(1);
-		const failed = lane("tools").find((b) => b.error)!;
+		const failed = lane("tools").find((b) => b.tone === "error")!;
 		expect(failed.label).toMatch(/^Bash/);
 		expect(lane("model").length).toBeGreaterThan(0);
 	});
 
-	it("gives every turn an equal slot on the turns axis and every call one on the calls axis", () => {
+	it("gives every step its own equal column in steps mode, in order, with a divider where each turn starts", () => {
 		const t = trajectoryOf(log());
-		const byTurn = layoutBars(t, "turns", NOW);
-		const firstTurn = byTurn.filter((b) => b.turn === 1);
-		const secondTurn = byTurn.filter((b) => b.turn === 2);
-		expect(firstTurn.every((b) => b.start >= 0 && b.end <= 0.5)).toBe(true);
-		expect(secondTurn.every((b) => b.start >= 0.5 && b.end <= 1)).toBe(true);
-
-		const byCall = layoutBars(t, "calls", NOW).filter((b) => b.lane === "tools");
-		expect(byCall).toHaveLength(5);
-		byCall.forEach((b, i) => {
-			expect(b.start).toBeCloseTo(i / 5);
-			expect(b.end).toBeCloseTo((i + 1) / 5);
+		const { bars, dividers } = layoutBars(t, "steps", NOW);
+		const n = bars.length;
+		expect(new Set(bars.map((b) => b.start)).size).toBe(n);
+		bars.forEach((b, i) => {
+			expect(b.start).toBeCloseTo(i / n);
+			expect(b.end).toBeCloseTo((i + 1) / n);
 		});
+		const secondTurn = bars.findIndex((b) => b.turn === 2);
+		expect(dividers).toHaveLength(1);
+		expect(dividers[0]).toBeCloseTo(secondTurn / n);
+		expect(bars.slice(0, secondTurn).every((b) => b.turn === 1)).toBe(true);
+	});
+
+	it("colours typed input blue, the model purple, a tool orange and a failed tool red", () => {
+		const t = trajectoryOf(log());
+		const { bars } = layoutBars(t, "steps", NOW);
+		const tones = (lane: string) => new Set(bars.filter((b) => b.lane === lane).map((b) => b.tone));
+		expect(tones("input")).toEqual(new Set(["input"]));
+		expect(tones("model")).toEqual(new Set(["model"]));
+		expect(tones("tools")).toEqual(new Set(["tool", "error"]));
+		expect(bars.find((b) => b.label.startsWith("Bash go"))!.tone).toBe("error");
+		expect(bars.find((b) => b.label.startsWith("Read"))!.tone).toBe("tool");
+	});
+
+	it("colours injected context green: a task brief, a peer message and a background task that opens a turn", () => {
+		seq = 0;
+		const note = (sec: number, payload: object) => e(sec, "host" as ChatEntry["dir"], payload);
+		const entries = [
+			note(0, { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }),
+			...ask(1, "b", "/pstack:poteto-mode # Goal"),
+			result(2, 0.1),
+			note(3, { kind: "user_origin", uuid: "p", origin: { via: "ao_send", from: "agent-orchestrator-orchestrator" } }),
+			...ask(3, "p", "[from @agent-orchestrator-orchestrator] hello"),
+			result(4, 0.2),
+			e(5, "out", {
+				type: "user",
+				isReplay: true,
+				message: {
+					role: "user",
+					content:
+						"<task-notification>\n<task-id>k1</task-id>\n<status>completed</status>\n<summary>done</summary>\n</task-notification>",
+				},
+			}),
+			result(6, 0.3),
+			...ask(7, "u", "typed by a person"),
+		];
+		const { bars } = layoutBars(trajectoryOf(entries), "steps", NOW);
+		expect(bars.filter((b) => b.lane === "input").map((b) => [b.label, b.tone])).toEqual([
+			["Task brief", "context"],
+			["orchestrator", "context"],
+			["completed", "context"],
+			["Input", "input"],
+		]);
 	});
 
 	it("points every bar at a row, and a sub-agent call's bar at its nested row", () => {
 		const t = trajectoryOf(log());
 		const keys = new Set(t.rows.map((r) => r.key));
-		const bars = layoutBars(t, "duration", NOW);
+		const { bars } = layoutBars(t, "duration", NOW);
 		expect(bars.every((b) => keys.has(b.key))).toBe(true);
 		const grep = bars.find((b) => b.label.startsWith("Grep"))!;
 		expect(t.rows.find((r) => r.key === grep.key)?.parent).toBeDefined();
+	});
+
+	it("has no bars and no dividers for an empty log", () => {
+		expect(layoutBars(trajectoryOf([]), "steps", NOW)).toEqual({ bars: [], dividers: [] });
 	});
 
 	it("finds the log entries a row came from: a tool call's request, result and nothing else", () => {

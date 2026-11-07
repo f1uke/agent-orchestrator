@@ -9915,11 +9915,34 @@ ol.note-prose__list {
 
 .chat-traj__lanes {
 	position: relative;
-	display: flex;
 	min-width: 0;
 	flex: 1;
-	flex-direction: column;
 	margin-right: 18px;
+}
+
+.chat-traj__scroller {
+	height: 100%;
+	overflow-x: auto;
+	overflow-y: hidden;
+}
+
+.chat-traj__scroller::-webkit-scrollbar {
+	height: 6px;
+}
+
+.chat-traj__track {
+	position: relative;
+	display: flex;
+	height: 100%;
+	flex-direction: column;
+}
+
+.chat-traj__divider {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--border-1);
 }
 
 .chat-traj__lane {
@@ -9933,7 +9956,6 @@ ol.note-prose__list {
 	height: 10px;
 	min-width: 3px;
 	border-radius: 2px;
-	background: var(--amber);
 	opacity: 0.85;
 	transform: translateY(-50%);
 }
@@ -9944,16 +9966,24 @@ ol.note-prose__list {
 	outline: 1px solid var(--fg);
 }
 
-.chat-traj__bar-mark[data-lane="input"] {
+.chat-traj__bar-mark[data-tone="context"] {
+	background: var(--green);
+}
+
+.chat-traj__bar-mark[data-tone="input"] {
 	background: var(--accent);
 }
 
-.chat-traj__bar-mark[data-lane="model"] {
+.chat-traj__bar-mark[data-tone="model"] {
 	background: var(--purple);
 }
 
-.chat-traj__bar-mark--error {
-	background: var(--red) !important;
+.chat-traj__bar-mark[data-tone="tool"] {
+	background: var(--orange);
+}
+
+.chat-traj__bar-mark[data-tone="error"] {
+	background: var(--red);
 }
 
 .chat-traj__bar-mark[data-running] {

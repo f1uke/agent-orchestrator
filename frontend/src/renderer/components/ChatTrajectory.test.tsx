@@ -140,8 +140,7 @@ describe("ChatTrajectory", () => {
 		expect(rows()).toHaveLength(5);
 	});
 
-	it("draws the strip with three lanes, one Tools bar per call, and an axis toggle", async () => {
-		const user = userEvent.setup();
+	it("draws the strip with three lanes and one Tools bar per call, in Steps mode first", () => {
 		renderTrajectory();
 		const strip = screen.getByTestId("chat-trajectory-strip");
 		expect(strip).toHaveTextContent("Input");
@@ -149,10 +148,49 @@ describe("ChatTrajectory", () => {
 		expect(strip).toHaveTextContent("Tools");
 		expect(strip.querySelectorAll('[data-lane="tools"][data-key]')).toHaveLength(3 + 1);
 		expect(screen.getByTestId("chat-trajectory")).toHaveAttribute("data-calls", "4");
+		expect(screen.getByRole("button", { name: "Steps" })).toHaveAttribute("aria-pressed", "true");
+		expect(screen.getByRole("button", { name: "Duration" })).toHaveAttribute("aria-pressed", "false");
+		expect(screen.getByTestId("chat-trajectory")).toHaveAttribute("data-axis", "steps");
+	});
+
+	it("switches to Duration and back", async () => {
+		const user = userEvent.setup();
+		renderTrajectory();
+		await user.click(screen.getByRole("button", { name: "Duration" }));
 		expect(screen.getByRole("button", { name: "Duration" })).toHaveAttribute("aria-pressed", "true");
-		await user.click(screen.getByRole("button", { name: "Calls" }));
-		expect(screen.getByRole("button", { name: "Calls" })).toHaveAttribute("aria-pressed", "true");
-		expect(screen.getByTestId("chat-trajectory")).toHaveAttribute("data-axis", "calls");
+		expect(screen.getByRole("button", { name: "Steps" })).toHaveAttribute("aria-pressed", "false");
+		expect(screen.getByTestId("chat-trajectory")).toHaveAttribute("data-axis", "duration");
+		await user.click(screen.getByRole("button", { name: "Steps" }));
+		expect(screen.getByTestId("chat-trajectory")).toHaveAttribute("data-axis", "steps");
+	});
+
+	it("colours each bar by what it is, and a failed tool red", () => {
+		renderTrajectory();
+		const strip = screen.getByTestId("chat-trajectory-strip");
+		const tone = (label: RegExp) => screen.getByRole("button", { name: label }).getAttribute("data-tone");
+		expect(tone(/^Input:/)).toBe("input");
+		expect(tone(/^Tools: Read/)).toBe("tool");
+		expect(tone(/^Tools: Bash go test/)).toBe("error");
+		expect(strip.querySelector('button[data-lane="model"]')).toHaveAttribute("data-tone", "model");
+	});
+
+	it("marks where a new turn starts with a divider, in both modes", async () => {
+		const user = userEvent.setup();
+		const entries = [
+			...log(),
+			e(12, "in", { type: "user", uuid: "u2", message: { content: "again" } }),
+			e(12, "out", { type: "command_lifecycle", command_uuid: "u2", state: "started" }),
+			use(13, "t5", "Read", { file_path: "/w/b.go" }),
+		];
+		renderTrajectory(entries);
+		expect(screen.getAllByTestId("chat-trajectory-divider")).toHaveLength(1);
+		await user.click(screen.getByRole("button", { name: "Duration" }));
+		expect(screen.getAllByTestId("chat-trajectory-divider")).toHaveLength(1);
+	});
+
+	it("draws no divider for a single turn", () => {
+		renderTrajectory();
+		expect(screen.queryByTestId("chat-trajectory-divider")).toBeNull();
 	});
 
 	it("scrolls a clicked bar's row into view and flashes it", async () => {

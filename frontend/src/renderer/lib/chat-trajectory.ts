@@ -23,7 +23,6 @@ export type TrajectoryRow = {
 	/** 1-based; 0 before the first turn. */
 	turn: number;
 	startsTurn: boolean;
-	callsBefore: number;
 	parent?: string;
 	children: number;
 	/** Epoch ms of the row, NaN when the log does not say. */
@@ -127,7 +126,6 @@ export function buildTrajectory(
 			outcome: "",
 			startsTurn: false,
 			children: 0,
-			callsBefore: calls,
 			t0: ms(seqTs),
 			t1: Number.NaN,
 		};
@@ -286,45 +284,56 @@ export function visibleRows(rows: readonly TrajectoryRow[], open: ReadonlySet<st
 	return rows.filter((row) => row.parent === undefined || open.has(row.parent));
 }
 
-export type Axis = "duration" | "turns" | "calls";
+export type Axis = "steps" | "duration";
 
 export type Lane = "input" | "model" | "tools";
 
 export const LANES: readonly Lane[] = ["input", "model", "tools"];
 
+export type StepTone = "context" | "input" | "model" | "tool" | "error";
+
+export type Step = {
+	key: string;
+	lane: Lane;
+	tone: StepTone;
+	turn: number;
+	t0: number;
+	t1: number;
+	label: string;
+	running: boolean;
+};
+
 export type Bar = {
 	key: string;
 	lane: Lane;
+	tone: StepTone;
 	start: number;
 	end: number;
 	label: string;
 	turn: number;
 	ms: number;
-	error?: boolean;
-	running?: boolean;
+	running: boolean;
 };
 
-type Span = {
-	key: string;
-	lane: Lane;
-	t0: number;
-	t1: number;
-	turn: number;
-	callsBefore: number;
-	label: string;
-	ordinal: number;
+export type Layout = {
+	bars: Bar[];
+	dividers: number[];
 };
 
-function spansOf(
-	rows: readonly TrajectoryRow[],
-	now: number,
-): { spans: Span[]; errors: Set<string>; running: Set<string> } {
+function inputTone(row: TrajectoryRow): StepTone {
+	const item = row.item;
+	return item.kind === "user" && !item.brief && !isPeerOrigin(item.origin) ? "input" : "context";
+}
+
+const laneTone: Record<Exclude<Lane, "input">, (row: TrajectoryRow) => StepTone> = {
+	model: () => "model",
+	tools: (row) => (row.tone === "error" ? "error" : "tool"),
+};
+
+function stepsOf(rows: readonly TrajectoryRow[], now: number): Step[] {
 	const chrono = [...rows].sort((a, b) => a.order - b.order);
-	const errors = new Set<string>();
-	const running = new Set<string>();
-	const spans: Span[] = [];
+	const steps: Step[] = [];
 	const inputs: number[] = [];
-	let ordinal = 0;
 	for (const row of chrono) {
 		if (row.startsTurn && !Number.isNaN(row.t0)) inputs.push(row.t0);
 		if (row.kind === "tool" && row.parent === undefined && !Number.isNaN(row.t1)) inputs.push(row.t1);
@@ -335,17 +344,16 @@ function spansOf(
 	let modelSeq = -1;
 	for (const row of chrono) {
 		const turn = Math.max(1, row.turn);
-		const label = `${row.title} ${row.detail}`.trim();
 		if (row.startsTurn && !Number.isNaN(row.t0)) {
-			spans.push({
+			steps.push({
 				key: row.key,
 				lane: "input",
+				tone: inputTone(row),
+				turn,
 				t0: row.t0,
 				t1: row.t0,
-				turn,
-				callsBefore: row.callsBefore,
 				label: row.title || "Input",
-				ordinal,
+				running: false,
 			});
 		}
 		const modelRow =
@@ -355,88 +363,66 @@ function spansOf(
 			const before = inputs.filter((t) => t <= row.t0).at(-1) ?? row.t0;
 			const start = Math.min(row.t0, Math.max(before, modelEnd));
 			modelEnd = row.t0;
-			spans.push({
+			steps.push({
 				key: row.key,
 				lane: "model",
+				tone: laneTone.model(row),
+				turn,
 				t0: start,
 				t1: row.t0,
-				turn,
-				callsBefore: row.callsBefore,
 				label: "Model",
-				ordinal,
+				running: false,
 			});
 		}
 		if (row.kind === "tool" && !Number.isNaN(row.t0)) {
-			const t1 = Number.isNaN(row.t1) ? (row.running ? Math.max(now, row.t0) : row.t0) : row.t1;
-			spans.push({
+			steps.push({
 				key: row.key,
 				lane: "tools",
-				t0: row.t0,
-				t1,
+				tone: laneTone.tools(row),
 				turn,
-				callsBefore: row.callsBefore,
-				label,
-				ordinal: ordinal++,
+				t0: row.t0,
+				t1: Number.isNaN(row.t1) ? (row.running ? Math.max(now, row.t0) : row.t0) : row.t1,
+				label: `${row.title} ${row.detail}`.trim(),
+				running: row.running,
 			});
-			if (row.tone === "error") errors.add(row.key);
-			if (row.running) running.add(row.key);
 		}
 	}
-	return { spans, errors, running };
+	return steps;
 }
 
-export function layoutBars(trajectory: Trajectory, axis: Axis, now: number): Bar[] {
-	const { spans, errors, running } = spansOf(trajectory.rows, now);
-	if (spans.length === 0) return [];
-	const make = (s: Span, start: number, end: number): Bar => ({
+export function layoutBars(trajectory: Trajectory, axis: Axis, now: number): Layout {
+	const steps = stepsOf(trajectory.rows, now);
+	if (steps.length === 0) return { bars: [], dividers: [] };
+	const make = (s: Step, start: number, end: number): Bar => ({
 		key: s.key,
 		lane: s.lane,
+		tone: s.tone,
 		start,
 		end,
 		label: s.label,
 		turn: s.turn,
 		ms: s.t1 - s.t0,
-		...(errors.has(s.key) && s.lane === "tools" && { error: true }),
-		...(running.has(s.key) && s.lane === "tools" && { running: true }),
+		running: s.running,
 	});
 
 	if (axis === "duration") {
-		const from = Math.min(...spans.map((s) => s.t0));
-		const to = Math.max(...spans.map((s) => s.t1));
+		const from = Math.min(...steps.map((s) => s.t0));
+		const to = Math.max(...steps.map((s) => s.t1));
 		const total = Math.max(to - from, 1);
-		return spans.map((s) => make(s, (s.t0 - from) / total, (s.t1 - from) / total));
+		const turnStart = new Map<number, number>();
+		for (const s of steps) turnStart.set(s.turn, Math.min(turnStart.get(s.turn) ?? s.t0, s.t0));
+		const dividers = [...turnStart]
+			.sort(([a], [b]) => a - b)
+			.slice(1)
+			.map(([, t]) => (t - from) / total);
+		return { bars: steps.map((s) => make(s, (s.t0 - from) / total, (s.t1 - from) / total)), dividers };
 	}
 
-	if (axis === "turns") {
-		const slots = Math.max(1, trajectory.turns);
-		const range = new Map<number, [number, number]>();
-		for (const s of spans) {
-			const r = range.get(s.turn) ?? [s.t0, s.t1];
-			range.set(s.turn, [Math.min(r[0], s.t0), Math.max(r[1], s.t1)]);
-		}
-		return spans.map((s) => {
-			const [from, to] = range.get(s.turn)!;
-			const width = to - from;
-			const at = (t: number) => (width > 0 ? (t - from) / width : 0);
-			const slot = Math.min(s.turn, slots) - 1;
-			return make(s, (slot + at(s.t0)) / slots, (slot + at(s.t1)) / slots);
-		});
-	}
-
-	const slots = Math.max(1, trajectory.calls);
-	const sharing = new Map<string, Span[]>();
-	for (const s of spans) {
-		if (s.lane === "tools") continue;
-		const id = `${s.lane}:${Math.min(s.callsBefore, slots - 1)}`;
-		sharing.set(id, [...(sharing.get(id) ?? []), s]);
-	}
-	return spans.map((s) => {
-		if (s.lane === "tools") return make(s, s.ordinal / slots, (s.ordinal + 1) / slots);
-		const slot = Math.min(s.callsBefore, slots - 1);
-		const group = sharing.get(`${s.lane}:${slot}`)!;
-		const at = group.indexOf(s);
-		return make(s, (slot + at / group.length) / slots, (slot + (at + 1) / group.length) / slots);
-	});
+	const n = steps.length;
+	return {
+		bars: steps.map((s, i) => make(s, i / n, (i + 1) / n)),
+		dividers: steps.flatMap((s, i) => (i > 0 && s.turn !== steps[i - 1].turn ? [i / n] : [])),
+	};
 }
 
 export function rawEntries(row: TrajectoryRow, entries: readonly ChatEntry[]): ChatEntry[] {

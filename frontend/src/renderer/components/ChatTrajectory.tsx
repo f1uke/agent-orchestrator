@@ -14,6 +14,7 @@ import {
 	fullText,
 	isFiltering,
 	type KindFilter,
+	type Layout,
 	LANES,
 	layoutBars,
 	rawEntries,
@@ -47,10 +48,11 @@ const KIND_LABEL: Record<RowKind, string> = {
 };
 
 const AXES: Array<{ axis: Axis; label: string }> = [
+	{ axis: "steps", label: "Steps" },
 	{ axis: "duration", label: "Duration" },
-	{ axis: "turns", label: "Turns" },
-	{ axis: "calls", label: "Calls" },
 ];
+
+const STEP_PX = 12;
 
 const LANE_LABEL = { input: "Input", model: "Model", tools: "Tools" } as const;
 
@@ -70,7 +72,7 @@ type Props = {
 
 export function ChatTrajectory({ transcript, entries, root }: Props) {
 	const trajectory = useMemo(() => buildTrajectory(transcript, entries, { root }), [transcript, entries, root]);
-	const [axis, setAxis] = useState<Axis>("duration");
+	const [axis, setAxis] = useState<Axis>("steps");
 	const [filter, setFilter] = useState<RowFilter>({ query: "", kind: "all" });
 	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
 	const [openAgents, setOpenAgents] = useState<ReadonlySet<string>>(new Set());
@@ -90,7 +92,7 @@ export function ChatTrajectory({ transcript, entries, root }: Props) {
 		() => (isFiltering(filter) ? filterRows(trajectory.rows, filter) : visibleRows(trajectory.rows, openAgents)),
 		[trajectory.rows, filter, openAgents],
 	);
-	const bars = useMemo(() => layoutBars(trajectory, axis, now), [trajectory, axis, now]);
+	const layout = useMemo(() => layoutBars(trajectory, axis, now), [trajectory, axis, now]);
 
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const followingRef = useRef(true);
@@ -206,7 +208,7 @@ export function ChatTrajectory({ transcript, entries, root }: Props) {
 	return (
 		<div className="chat-traj" data-axis={axis} data-calls={trajectory.calls} data-testid="chat-trajectory">
 			<TrajectoryToolbar axis={axis} filter={filter} onAxis={setAxis} onFilter={setFilter} trajectory={trajectory} />
-			<TimelineStrip bars={bars} onBar={onBar} />
+			<TimelineStrip axis={axis} layout={layout} onBar={onBar} />
 			<div className="chat-traj__body">
 				<div
 					className="chat-traj__scroll"
@@ -358,13 +360,30 @@ function TrajectoryToolbar({
 
 type Hover = { bar: Bar; left: number };
 
-function TimelineStrip({ bars, onBar }: { bars: readonly Bar[]; onBar: (key: string) => void }) {
+function barStyle(b: Bar, stepped: boolean): React.CSSProperties {
+	const left = `${b.start * 100}%`;
+	const width = `${(b.end - b.start) * 100}%`;
+	return stepped
+		? { left: `calc(${left} + 1px)`, width: `max(3px, calc(${width} - 2px))` }
+		: { left, width: `max(3px, ${width})` };
+}
+
+function TimelineStrip({ axis, layout, onBar }: { axis: Axis; layout: Layout; onBar: (key: string) => void }) {
+	const { bars, dividers } = layout;
 	const [hover, setHover] = useState<Hover>();
-	const stripRef = useRef<HTMLDivElement | null>(null);
+	const lanesRef = useRef<HTMLDivElement | null>(null);
+	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const scrolls = axis === "steps";
+
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (scrolls && el) el.scrollLeft = el.scrollWidth;
+	}, [scrolls, bars.length]);
+
 	const show = (bar: Bar, el: HTMLElement) => {
-		const strip = stripRef.current?.getBoundingClientRect();
+		const lanes = lanesRef.current?.getBoundingClientRect();
 		const rect = el.getBoundingClientRect();
-		setHover({ bar, left: strip ? rect.left - strip.left + rect.width / 2 : 0 });
+		setHover({ bar, left: lanes ? rect.left - lanes.left + rect.width / 2 : 0 });
 	};
 	return (
 		<div className="chat-traj__strip" data-testid="chat-trajectory-strip">
@@ -373,29 +392,51 @@ function TimelineStrip({ bars, onBar }: { bars: readonly Bar[]; onBar: (key: str
 					<span key={lane}>{LANE_LABEL[lane]}</span>
 				))}
 			</div>
-			<div className="chat-traj__lanes" onMouseLeave={() => setHover(undefined)} ref={stripRef}>
-				{LANES.map((lane) => (
-					<div className="chat-traj__lane" data-lane={lane} key={lane}>
-						{bars
-							.filter((b) => b.lane === lane)
-							.map((b) => (
-								<button
-									aria-label={`${LANE_LABEL[lane]}: ${b.label}`}
-									className={cn("chat-traj__bar-mark", b.error && "chat-traj__bar-mark--error")}
-									data-key={b.key}
-									data-lane={lane}
-									data-running={b.running ? "" : undefined}
-									key={`${lane}:${b.key}`}
-									onBlur={() => setHover(undefined)}
-									onClick={() => onBar(b.key)}
-									onFocus={(e) => show(b, e.currentTarget)}
-									onMouseEnter={(e) => show(b, e.currentTarget)}
-									style={{ left: `${b.start * 100}%`, width: `max(3px, ${(b.end - b.start) * 100}%)` }}
-									type="button"
-								/>
-							))}
+			<div className="chat-traj__lanes" onMouseLeave={() => setHover(undefined)} ref={lanesRef}>
+				<div
+					className="chat-traj__scroller"
+					data-scrolls={scrolls ? "" : undefined}
+					onScroll={() => setHover(undefined)}
+					ref={scrollRef}
+				>
+					<div
+						className="chat-traj__track"
+						style={scrolls ? { minWidth: `max(100%, ${bars.length * STEP_PX}px)` } : undefined}
+					>
+						{dividers.map((x) => (
+							<span
+								aria-hidden="true"
+								className="chat-traj__divider"
+								data-testid="chat-trajectory-divider"
+								key={x}
+								style={{ left: `${x * 100}%` }}
+							/>
+						))}
+						{LANES.map((lane) => (
+							<div className="chat-traj__lane" data-lane={lane} key={lane}>
+								{bars
+									.filter((b) => b.lane === lane)
+									.map((b) => (
+										<button
+											aria-label={`${LANE_LABEL[lane]}: ${b.label}`}
+											className="chat-traj__bar-mark"
+											data-key={b.key}
+											data-lane={lane}
+											data-running={b.running ? "" : undefined}
+											data-tone={b.tone}
+											key={`${lane}:${b.key}`}
+											onBlur={() => setHover(undefined)}
+											onClick={() => onBar(b.key)}
+											onFocus={(e) => show(b, e.currentTarget)}
+											onMouseEnter={(e) => show(b, e.currentTarget)}
+											style={barStyle(b, scrolls)}
+											type="button"
+										/>
+									))}
+							</div>
+						))}
 					</div>
-				))}
+				</div>
 				{hover ? (
 					<div className="chat-traj__tip" role="tooltip" style={{ left: hover.left }}>
 						<b>{LANE_LABEL[hover.bar.lane]}</b> · Turn {hover.bar.turn}

@@ -108,11 +108,11 @@ for (const viewport of VIEWPORTS) {
 			expect(overlapFrames, "frames painting a row over the next").toBe(0);
 			await shot("row-open");
 
-			await page.getByRole("button", { name: "Turns", exact: true }).click();
-			await expect(trajectory).toHaveAttribute("data-axis", "turns");
+			await page.getByRole("button", { name: "Duration", exact: true }).click();
+			await expect(trajectory).toHaveAttribute("data-axis", "duration");
 			await bars.first().hover();
 			await expect(page.getByRole("tooltip")).toBeVisible();
-			await shot("turns-axis");
+			await shot("duration-mode");
 
 			await page
 				.getByRole("group", { name: "Show steps" })
