@@ -46,7 +46,12 @@ export function railTurns(rows: readonly ChatRow[]): RailTurn[] {
 	return turns;
 }
 
-export function activeTurnIndex(starts: readonly number[], probe: number): number {
+/**
+ * The turn under the probe line. At the end of the stream the latest turn is active, since a short
+ * last turn never reaches the probe line.
+ */
+export function activeTurnIndex(starts: readonly number[], probe: number, atEnd = false): number {
+	if (atEnd && starts.length > 0) return starts.length - 1;
 	let active = 0;
 	starts.forEach((start, i) => {
 		if (start <= probe) active = i;
