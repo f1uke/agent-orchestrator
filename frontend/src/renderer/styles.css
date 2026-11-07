@@ -8611,7 +8611,6 @@ ol.note-prose__list {
 }
 
 .chat-peer {
-	padding: 10px 14px;
 	border: 1px solid color-mix(in srgb, var(--purple) 35%, transparent);
 	border-radius: 10px;
 	background: color-mix(in srgb, var(--purple) 7%, transparent);
@@ -8619,18 +8618,40 @@ ol.note-prose__list {
 
 .chat-peer__from {
 	display: flex;
+	width: 100%;
+	min-width: 0;
 	align-items: center;
 	gap: 8px;
-	margin-bottom: 4px;
+	padding: 8px 14px;
 	color: var(--purple);
 	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.chat-peer__title {
+	flex: none;
+}
+
+.chat-peer__preview {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	color: var(--fg-muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .chat-peer__via {
+	flex: none;
 	margin-left: auto;
 	color: var(--fg-passive);
 	font-family: var(--font-mono);
 	font-size: 11px;
+}
+
+.chat-peer__body {
+	padding: 0 14px 10px 36px;
 }
 
 .chat-peer--orchestrator {
