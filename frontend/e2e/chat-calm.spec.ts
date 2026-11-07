@@ -16,9 +16,7 @@ for (const viewport of VIEWPORTS) {
 			const stream = page.getByTestId("chat-stream");
 			await expect(stream).toBeVisible();
 
-			await expect(stream.locator("[data-turn] .chat-group__head").first()).toHaveText(
-				/^Worked for \d+(s|m \d+s)$/,
-			);
+			await expect(stream.locator("[data-turn] .chat-group__head").first()).toHaveText(/^Worked for \d+(s|m \d+s)$/);
 			await expect(stream.locator("[data-group]")).toHaveCount(0);
 			await expect(stream.locator('[data-tool="Bash"]')).toHaveCount(0);
 			await expect(stream.getByRole("button", { name: /Thought/ })).toHaveCount(0);
