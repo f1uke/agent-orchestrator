@@ -1,6 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ChevronRight, Clock, Search, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { ContextInjection, ModelContext, ModelShape } from "../lib/chat-api";
+import { sizeText } from "../lib/chat-docs";
 import type { ChatEntry } from "../lib/chat-event";
 import type { Transcript } from "../lib/chat-fold";
 import { formatDuration } from "../lib/chat-time";
@@ -12,6 +14,7 @@ import {
 	filterRows,
 	formatSpan,
 	fullText,
+	injectionText,
 	isFiltering,
 	type KindFilter,
 	type Layout,
@@ -20,6 +23,7 @@ import {
 	rawEntries,
 	type RowFilter,
 	type RowKind,
+	sourceLabel,
 	type TrajectoryRow,
 	visibleRows,
 } from "../lib/chat-trajectory";
@@ -27,6 +31,7 @@ import { measuredOrFallbackRect } from "../lib/virtual-rect";
 import { cn } from "../lib/utils";
 import { CopyButton } from "./CopyButton";
 import { Input } from "./ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 const ROW_PX = 28;
 const RESULT_LINES = 12;
@@ -37,6 +42,8 @@ const AT_END_PX = 2;
 const SCROLL_UP_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
 
 const KIND_LABEL: Record<RowKind, string> = {
+	system: "SYSTEM",
+	context: "CONTEXT",
 	user: "USER",
 	assistant: "ASSISTANT",
 	thinking: "THINKING",
@@ -68,10 +75,36 @@ type Props = {
 	transcript: Transcript;
 	entries: readonly ChatEntry[];
 	root: string;
+	/** What the agent was given; absent where the harness writes no transcript AO can read. */
+	loadContext?: () => Promise<ModelContext | null>;
 };
 
-export function ChatTrajectory({ transcript, entries, root }: Props) {
-	const trajectory = useMemo(() => buildTrajectory(transcript, entries, { root }), [transcript, entries, root]);
+const PANE_KINDS: ReadonlySet<RowKind> = new Set(["system", "context"]);
+
+function useModelContext(load: Props["loadContext"], transcript: Transcript): ModelContext | null {
+	const turnsEnded = useMemo(() => transcript.items.filter((i) => i.kind === "turn_end").length, [transcript.items]);
+	const [loaded, setLoaded] = useState<{ from: Props["loadContext"]; context: ModelContext | null }>();
+	useEffect(() => {
+		if (!load) return;
+		let live = true;
+		void load().then((context) => {
+			if (live) setLoaded({ from: load, context });
+		});
+		return () => {
+			live = false;
+		};
+	}, [load, turnsEnded]);
+	return loaded && loaded.from === load ? loaded.context : null;
+}
+
+export function ChatTrajectory({ transcript, entries, root, loadContext }: Props) {
+	const context = useModelContext(loadContext, transcript);
+	const trajectory = useMemo(
+		() => buildTrajectory(transcript, entries, { root, context }),
+		[transcript, entries, root, context],
+	);
+	const [paneKey, setPaneKey] = useState<string | null>(null);
+	const paneRow = paneKey === null ? undefined : trajectory.rows.find((r) => r.key === paneKey);
 	const [axis, setAxis] = useState<Axis>("steps");
 	const [filter, setFilter] = useState<RowFilter>({ query: "", kind: "all" });
 	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
@@ -152,8 +185,12 @@ export function ChatTrajectory({ transcript, entries, root }: Props) {
 	};
 
 	const toggleRow = useCallback(
-		(key: string) => {
+		(key: string, kind: RowKind) => {
 			setFollowing(false);
+			if (PANE_KINDS.has(kind)) {
+				setPaneKey((prev) => (prev === key ? null : key));
+				return;
+			}
 			setOpenRows((prev) => {
 				const next = new Set(prev);
 				if (!next.delete(key)) next.add(key);
@@ -175,6 +212,7 @@ export function ChatTrajectory({ transcript, entries, root }: Props) {
 			const row = trajectory.rows.find((r) => r.key === key);
 			if (!row) return;
 			if (row.parent) setOpenAgents((prev) => new Set(prev).add(row.parent!));
+			if (PANE_KINDS.has(row.kind)) setPaneKey(key);
 			if (isFiltering(filter) && !filterRows(trajectory.rows, filter).includes(row)) {
 				setFilter({ query: "", kind: "all" });
 			}
@@ -199,6 +237,8 @@ export function ChatTrajectory({ transcript, entries, root }: Props) {
 		return () => clearTimeout(timer);
 	}, [flash]);
 
+	const closePane = useCallback(() => setPaneKey(null), []);
+
 	const jumpToLatest = () => {
 		setFollowing(true);
 		const el = scrollRef.current;
@@ -206,62 +246,76 @@ export function ChatTrajectory({ transcript, entries, root }: Props) {
 	};
 
 	return (
-		<div className="chat-traj" data-axis={axis} data-calls={trajectory.calls} data-testid="chat-trajectory">
+		<div
+			className="chat-traj"
+			data-axis={axis}
+			data-calls={trajectory.calls}
+			data-testid="chat-trajectory"
+			// Handled here so the chat pane does not also read this Esc as "interrupt".
+			onKeyDown={(e) => {
+				if (e.key !== "Escape" || !paneRow || e.defaultPrevented || isEditable(e.target)) return;
+				e.preventDefault();
+				closePane();
+			}}
+		>
 			<TrajectoryToolbar axis={axis} filter={filter} onAxis={setAxis} onFilter={setFilter} trajectory={trajectory} />
 			<TimelineStrip axis={axis} layout={layout} onBar={onBar} />
 			<div className="chat-traj__body">
-				<div
-					className="chat-traj__scroll"
-					data-testid="chat-trajectory-rows"
-					onKeyDown={(e) => {
-						if (SCROLL_UP_KEYS.has(e.key) && !isEditable(e.target)) setFollowing(false);
-					}}
-					onPointerDown={onPointerDown}
-					onScroll={onScroll}
-					ref={scrollRef}
-				>
-					{shown.length === 0 ? (
-						<div className="chat-empty">
-							{trajectory.rows.length === 0 ? "Nothing in this session's log yet." : "No steps match."}
-						</div>
-					) : null}
-					<div className="relative" style={{ height: virtualizer.getTotalSize() }}>
-						{virtualizer.getVirtualItems().map((v) => {
-							const row = shown[v.index];
-							return (
-								<div
-									className="chat-traj__item"
-									data-index={v.index}
-									key={v.key}
-									ref={virtualizer.measureElement}
-									style={{ transform: `translateY(${v.start}px)` }}
-								>
-									<TrajectoryRowView
-										agentOpen={openAgents.has(row.key)}
-										entries={entries}
-										flashing={flash === row.key}
-										now={now}
-										onAgent={toggleAgent}
-										onToggle={toggleRow}
-										open={openRows.has(row.key)}
-										row={row}
-									/>
-								</div>
-							);
-						})}
-					</div>
-				</div>
-				{following ? null : (
-					<button
-						aria-label="Jump to latest"
-						className="chat-jump"
-						onClick={jumpToLatest}
-						title="Jump to latest"
-						type="button"
+				<div className="chat-traj__list">
+					<div
+						className="chat-traj__scroll"
+						data-testid="chat-trajectory-rows"
+						onKeyDown={(e) => {
+							if (SCROLL_UP_KEYS.has(e.key) && !isEditable(e.target)) setFollowing(false);
+						}}
+						onPointerDown={onPointerDown}
+						onScroll={onScroll}
+						ref={scrollRef}
 					>
-						<ArrowDown className="chat-icon" aria-hidden="true" />
-					</button>
-				)}
+						{shown.length === 0 ? (
+							<div className="chat-empty">
+								{trajectory.rows.length === 0 ? "Nothing in this session's log yet." : "No steps match."}
+							</div>
+						) : null}
+						<div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+							{virtualizer.getVirtualItems().map((v) => {
+								const row = shown[v.index];
+								return (
+									<div
+										className="chat-traj__item"
+										data-index={v.index}
+										key={v.key}
+										ref={virtualizer.measureElement}
+										style={{ transform: `translateY(${v.start}px)` }}
+									>
+										<TrajectoryRowView
+											agentOpen={openAgents.has(row.key)}
+											entries={entries}
+											flashing={flash === row.key}
+											now={now}
+											onAgent={toggleAgent}
+											onToggle={toggleRow}
+											open={PANE_KINDS.has(row.kind) ? paneKey === row.key : openRows.has(row.key)}
+											row={row}
+										/>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+					{following ? null : (
+						<button
+							aria-label="Jump to latest"
+							className="chat-jump"
+							onClick={jumpToLatest}
+							title="Jump to latest"
+							type="button"
+						>
+							<ArrowDown className="chat-icon" aria-hidden="true" />
+						</button>
+					)}
+				</div>
+				{paneRow ? <ContextPane onClose={closePane} row={paneRow} /> : null}
 			</div>
 		</div>
 	);
@@ -465,9 +519,10 @@ function TrajectoryRowView({
 	flashing: boolean;
 	now: number;
 	entries: readonly ChatEntry[];
-	onToggle: (key: string) => void;
+	onToggle: (key: string, kind: RowKind) => void;
 	onAgent: (key: string) => void;
 }) {
+	const inPane = PANE_KINDS.has(row.kind);
 	const elapsed = row.running && !Number.isNaN(row.t0) ? formatDuration(now - row.t0) : "";
 	const took = !Number.isNaN(row.t0) && !Number.isNaN(row.t1) ? formatSpan(row.t1 - row.t0) : "";
 	return (
@@ -477,10 +532,17 @@ function TrajectoryRowView({
 			data-key={row.key}
 			data-kind={row.kind}
 			data-open={open ? "" : undefined}
+			data-selected={inPane && open ? "" : undefined}
 			data-tone={row.tone}
 		>
 			<span className="chat-traj__gutter">{row.startsTurn ? `Turn ${row.turn}` : ""}</span>
-			<button aria-expanded={open} className="chat-traj__head" onClick={() => onToggle(row.key)} type="button">
+			<button
+				aria-expanded={inPane ? undefined : open}
+				aria-pressed={inPane ? open : undefined}
+				className="chat-traj__head"
+				onClick={() => onToggle(row.key, row.kind)}
+				type="button"
+			>
 				<span className="chat-traj__badge" data-kind={row.kind}>
 					{KIND_LABEL[row.kind]}
 				</span>
@@ -513,7 +575,7 @@ function TrajectoryRowView({
 			) : (
 				<span />
 			)}
-			{open ? <RowDetail entries={entries} row={row} /> : null}
+			{open && !inPane ? <RowDetail entries={entries} row={row} /> : null}
 		</div>
 	);
 }
@@ -564,5 +626,127 @@ function RowDetail({ row, entries }: { row: TrajectoryRow; entries: readonly Cha
 				</div>
 			) : null}
 		</div>
+	);
+}
+
+function ContextPane({ row, onClose }: { row: TrajectoryRow; onClose: () => void }) {
+	const item = row.item;
+	if (item.kind !== "model_shape" && item.kind !== "model_injection") return null;
+	return (
+		<aside aria-label={row.title} className="chat-traj__pane" data-testid="chat-trajectory-pane">
+			<header className="chat-traj__panehead">
+				<span className="chat-traj__panechip" data-kind={row.kind}>
+					{KIND_LABEL[row.kind]}
+				</span>
+				<span className="chat-traj__panetitle">{row.turn > 0 ? `Turn ${row.turn} · ${row.title}` : row.title}</span>
+				<button aria-label="Close" className="chat-traj__paneclose" onClick={onClose} type="button">
+					<X className="chat-icon" aria-hidden="true" />
+				</button>
+			</header>
+			{item.kind === "model_shape" ? (
+				<ShapeTabs key={row.key} shape={item.shape} />
+			) : (
+				<InjectionTabs injection={item.injection} key={row.key} />
+			)}
+		</aside>
+	);
+}
+
+function PaneTabs({ tabs, children }: { tabs: readonly string[]; children: React.ReactNode }) {
+	return (
+		<Tabs className="chat-traj__tabs" defaultValue={tabs[0]}>
+			<TabsList aria-label="Detail" className="chat-traj__tablist">
+				{tabs.map((tab) => (
+					<TabsTrigger key={tab} value={tab}>
+						{tab}
+					</TabsTrigger>
+				))}
+			</TabsList>
+			{children}
+		</Tabs>
+	);
+}
+
+function ShapeTabs({ shape }: { shape: ModelShape }) {
+	return (
+		<PaneTabs tabs={["System Prompt", "Tools"]}>
+			<TabsContent className="chat-traj__panebody" value="System Prompt">
+				{shape.system.map((block, i) => (
+					<pre className="chat-traj__pre chat-traj__pre--pane" key={i}>
+						{block}
+					</pre>
+				))}
+			</TabsContent>
+			<TabsContent className="chat-traj__panebody" value="Tools">
+				<ul aria-label="Tools" className="chat-traj__tools">
+					{shape.tools.map((tool) => (
+						<ToolEntry description={tool.description} key={tool.name} name={tool.name} schema={tool.inputSchema} />
+					))}
+				</ul>
+			</TabsContent>
+		</PaneTabs>
+	);
+}
+
+const firstParagraph = (text: string) => text.split(/\n\s*\n/)[0].trim();
+
+function ToolEntry({ name, description, schema }: { name: string; description: string; schema: unknown }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<li className="chat-traj__tool">
+			<div className="chat-traj__toolname">{name}</div>
+			{description !== "" ? <p className="chat-traj__tooldesc">{firstParagraph(description)}</p> : null}
+			{schema !== undefined ? (
+				<>
+					<button aria-expanded={open} className="chat-traj__rawlink" onClick={() => setOpen((v) => !v)} type="button">
+						Input schema
+					</button>
+					{open ? <pre className="chat-traj__pre">{JSON.stringify(schema, null, 2)}</pre> : null}
+				</>
+			) : null}
+		</li>
+	);
+}
+
+const PREVIEW_LINES = 20;
+
+function InjectionTabs({ injection }: { injection: ContextInjection }) {
+	const text = injectionText(injection.text);
+	const preview = capText(text, PREVIEW_LINES, RESULT_CHARS);
+	const label = sourceLabel(injection.source);
+	const time = injection.ts === "" ? "unknown" : new Date(injection.ts).toLocaleString();
+	const size = sizeText(new TextEncoder().encode(injection.text).length);
+	return (
+		<PaneTabs tabs={["Summary", "Preview", "Raw"]}>
+			<TabsContent className="chat-traj__panebody" value="Summary">
+				<dl className="chat-traj__facts">
+					<dt>Source</dt>
+					<dd>
+						{label}
+						{label !== injection.source ? <span className="chat-traj__factraw">{injection.source}</span> : null}
+					</dd>
+					<dt>Role</dt>
+					<dd>{injection.role || "unknown"}</dd>
+					<dt>Time</dt>
+					<dd>{time}</dd>
+					<dt>Size</dt>
+					<dd>{injection.truncated ? `${size}, cut at the cap` : size}</dd>
+				</dl>
+				<pre className="chat-traj__pre chat-traj__pre--pane" data-section="preview">
+					{preview.hidden > 0 ? `${preview.text}\n…` : preview.text}
+				</pre>
+			</TabsContent>
+			<TabsContent className="chat-traj__panebody" value="Preview">
+				<div className="chat-traj__panecopy">
+					<CopyButton named={false} value={text} what="context" />
+				</div>
+				<pre className="chat-traj__pre chat-traj__pre--pane">{text}</pre>
+			</TabsContent>
+			<TabsContent className="chat-traj__panebody" value="Raw">
+				<pre className="chat-traj__pre chat-traj__pre--pane" data-section="raw">
+					{JSON.stringify(injection, null, 2)}
+				</pre>
+			</TabsContent>
+		</PaneTabs>
 	);
 }

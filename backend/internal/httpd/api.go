@@ -10,6 +10,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/chatusage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
@@ -38,9 +39,11 @@ type APIDeps struct {
 	Activity  controllers.ActivityRecorder
 	Chat      controllers.ChatService
 	ChatUsage *chatusage.Store
-	Jira      controllers.JiraService
-	PRs       prsvc.ActionManager
-	Reviews   reviewsvc.Manager
+	// LocateTranscript finds a session's agent transcript; nil answers model-context 501.
+	LocateTranscript func(domain.SessionRecord) string
+	Jira             controllers.JiraService
+	PRs              prsvc.ActionManager
+	Reviews          reviewsvc.Manager
 	// Testiny is a task's Testiny tab: the test runs linked to the task, read
 	// live from Testiny. nil answers 501.
 	Testiny controllers.TestinyService
@@ -203,7 +206,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 			Feed:     deps.ActivityFeed,
 		},
 		chat:           &controllers.ChatController{Svc: deps.Chat},
-		chatFiles:      &controllers.ChatFilesController{Sessions: deps.Sessions, KnowledgeDir: cfg.KnowledgeDir, DataDir: cfg.DataDir},
+		chatFiles:      &controllers.ChatFilesController{Sessions: deps.Sessions, KnowledgeDir: cfg.KnowledgeDir, DataDir: cfg.DataDir, LocateTranscript: deps.LocateTranscript},
 		chatUsage:      &controllers.ChatUsageController{Store: deps.ChatUsage},
 		jira:           &controllers.JiraController{Svc: deps.Jira},
 		prs:            &controllers.PRsController{Svc: deps.PRs},

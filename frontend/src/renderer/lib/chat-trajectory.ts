@@ -1,3 +1,4 @@
+import type { ContextInjection, ModelContext, ModelShape } from "./chat-api";
 import { type ChatEntry, isObject, isPeerOrigin } from "./chat-event";
 import type { BashItem, ChatItem, ToolCallItem, Transcript } from "./chat-fold";
 import { formatCost, formatTokens } from "./chat-inspect";
@@ -5,7 +6,15 @@ import { noticeText } from "./chat-notice";
 import { formatDuration } from "./chat-time";
 import { inputSummary, resultText, toolFailed, toolRunning } from "./chat-tools";
 
-export type RowKind = "user" | "assistant" | "thinking" | "tool" | "task" | "bash" | "turn_end" | "notice";
+export type RowKind =
+	"system" | "context" | "user" | "assistant" | "thinking" | "tool" | "task" | "bash" | "turn_end" | "notice";
+
+/** What the agent was given, as a row: a system prompt and tool set, or one block its CLI injected. */
+export type ContextItem =
+	| { kind: "model_shape"; shape: ModelShape; initial: boolean }
+	| { kind: "model_injection"; injection: ContextInjection };
+
+export type RowItem = ChatItem | ContextItem;
 
 export type Tone = "normal" | "dim" | "warn" | "error";
 
@@ -29,7 +38,7 @@ export type TrajectoryRow = {
 	t0: number;
 	/** Epoch ms the row ended: a tool's result, NaN while it runs or when unknown. */
 	t1: number;
-	item: ChatItem;
+	item: RowItem;
 };
 
 export type Trajectory = {
@@ -93,11 +102,138 @@ function toolOutcome(call: ToolCallItem, live: boolean): { outcome: string; tone
 	return { outcome: firstLine(resultText(call.result)), tone: toolFailed(call) ? "error" : "normal", running: false };
 }
 
+const SOURCE_LABEL: Record<string, string> = {
+	skill_listing: "Skill catalog",
+	instructions: "Instructions",
+	environment: "Environment",
+	date: "Date",
+	hook_success: "Hook output",
+	hook_additional_context: "Hook context",
+	mcp_instructions_delta: "MCP instructions",
+	agent_listing_delta: "Agent list",
+	deferred_tools_delta: "Deferred tools",
+	auto_mode: "Auto mode",
+	model: "Model",
+	session_context: "Session context",
+	remote_session_change: "Session change",
+	task_reminder: "Task reminder",
+	todo_reminder: "Todo reminder",
+	silent_turn_reminder: "Silent turn reminder",
+	queued_command: "Queued message",
+};
+
+export const sourceLabel = (source: string): string =>
+	Object.hasOwn(SOURCE_LABEL, source) ? SOURCE_LABEL[source] : source || "Context";
+
+const REMINDER_OPEN = /^\s*<system-reminder>\s*/;
+const REMINDER_CLOSE = /\s*<\/system-reminder>\s*$/;
+
+export const injectionText = (text: string): string => text.replace(REMINDER_OPEN, "").replace(REMINDER_CLOSE, "");
+
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+function shapeRow(shape: ModelShape, index: number, turn: number, order: number): TrajectoryRow {
+	const initial = index === 0;
+	return {
+		key: `model-shape:${index}`,
+		seq: Number.NaN,
+		order,
+		kind: "system",
+		title: initial ? "Initial System Prompt" : "System prompt changed",
+		detail: `${plural(shape.system.length, "block")} · ${plural(shape.tools.length, "tool")}`,
+		outcome: "",
+		tone: "normal",
+		running: false,
+		turn,
+		startsTurn: false,
+		children: 0,
+		t0: ms(shape.ts),
+		t1: Number.NaN,
+		item: { kind: "model_shape", shape, initial },
+	};
+}
+
+function injectionRow(injection: ContextInjection, index: number, turn: number, order: number): TrajectoryRow {
+	return {
+		key: `model-context:${index}`,
+		seq: Number.NaN,
+		order,
+		kind: "context",
+		title: sourceLabel(injection.source),
+		detail: firstLine(injectionText(injection.text)),
+		outcome: "",
+		tone: "normal",
+		running: false,
+		turn,
+		startsTurn: false,
+		children: 0,
+		t0: ms(injection.ts),
+		t1: Number.NaN,
+		item: { kind: "model_injection", injection },
+	};
+}
+
+const sortTime = (t: number) => (Number.isNaN(t) ? Number.MIN_SAFE_INTEGER : t);
+
+type Placed = { ts: number; make: (turn: number, order: number) => TrajectoryRow };
+
+// The CLI builds its first context while it reads the first message, so context from before that message joins turn 1.
+function placeContext(rows: readonly TrajectoryRow[], context: ModelContext): TrajectoryRow[] {
+	const placed: Placed[] = [
+		...context.shapes.slice(1).map((shape, i) => ({
+			ts: ms(shape.ts),
+			make: (turn: number, order: number) => shapeRow(shape, i + 1, turn, order),
+		})),
+		...context.injections.map((injection, i) => ({
+			ts: ms(injection.ts),
+			make: (turn: number, order: number) => injectionRow(injection, i, turn, order),
+		})),
+	].sort((a, b) => sortTime(a.ts) - sortTime(b.ts));
+
+	const suffixMin = new Array<number>(rows.length + 1).fill(Number.POSITIVE_INFINITY);
+	for (let i = rows.length - 1; i >= 0; i--) {
+		suffixMin[i] = Number.isNaN(rows[i].t0) ? suffixMin[i + 1] : Math.min(rows[i].t0, suffixMin[i + 1]);
+	}
+	const lastAtOrBefore = (ts: number): number => {
+		let lo = 0;
+		let hi = rows.length;
+		while (lo < hi) {
+			const mid = (lo + hi) >> 1;
+			if (suffixMin[mid] <= ts) lo = mid + 1;
+			else hi = mid;
+		}
+		return lo - 1;
+	};
+
+	const firstTurn = rows.findIndex((r) => r.startsTurn);
+	const after = new Map<number, Placed[]>();
+	for (const p of placed) {
+		const anchor = Math.max(Number.isNaN(p.ts) ? -1 : lastAtOrBefore(p.ts), firstTurn);
+		const group = after.get(anchor);
+		if (group) group.push(p);
+		else after.set(anchor, [p]);
+	}
+
+	const out: TrajectoryRow[] = [];
+	const emit = (anchor: number) => {
+		const group = after.get(anchor) ?? [];
+		const base = anchor < 0 ? -1 : rows[anchor].order;
+		const turn = anchor < 0 ? 0 : rows[anchor].turn;
+		group.forEach((p, k) => out.push(p.make(turn, base + (k + 1) / (group.length + 1))));
+	};
+	emit(-1);
+	rows.forEach((row, i) => {
+		out.push(row);
+		emit(i);
+	});
+	return out;
+}
+
 // An assistant message has no time of its own in the transcript, so its row takes the time of its log entry.
 export function buildTrajectory(
 	transcript: Transcript,
 	entries: readonly ChatEntry[],
-	{ root }: { root: string },
+	{ root, context }: { root: string; context?: ModelContext | null },
 ): Trajectory {
 	const tsOfSeq = new Map(entries.map((e) => [e.seq, e.ts]));
 	const { items, itemKeys } = transcript;
@@ -237,8 +373,8 @@ export function buildTrajectory(
 
 	const keyOfTool = new Map(rows.flatMap((r) => (r.item.kind === "tool_call" ? [[r.item.id, r.key] as const] : [])));
 	const nested = new Map<string, TrajectoryRow[]>();
-	const top: TrajectoryRow[] = [];
-	for (const row of rows) {
+	const top: TrajectoryRow[] = context?.shapes.length ? [shapeRow(context.shapes[0], 0, 0, -1)] : [];
+	for (const row of context ? placeContext(rows, context) : rows) {
 		const parentKey = row.item.kind === "tool_call" && row.parent !== undefined ? keyOfTool.get(row.parent) : undefined;
 		if (parentKey === undefined) {
 			top.push({ ...row, parent: undefined });
@@ -271,13 +407,15 @@ const KIND_TEST: Record<KindFilter, (row: TrajectoryRow) => boolean> = {
 	turns: (row) => row.startsTurn || row.kind === "turn_end",
 };
 
+const searchText = (row: TrajectoryRow): string =>
+	row.item.kind === "model_injection"
+		? `${row.title} ${row.item.injection.text}`
+		: `${row.title} ${row.detail} ${row.outcome}`;
+
 export function filterRows(rows: readonly TrajectoryRow[], { query, kind }: RowFilter): TrajectoryRow[] {
 	const needle = query.trim().toLowerCase();
 	const kindTest = KIND_TEST[kind];
-	return rows.filter(
-		(row) =>
-			kindTest(row) && (needle === "" || `${row.title} ${row.detail} ${row.outcome}`.toLowerCase().includes(needle)),
-	);
+	return rows.filter((row) => kindTest(row) && (needle === "" || searchText(row).toLowerCase().includes(needle)));
 }
 
 export function visibleRows(rows: readonly TrajectoryRow[], open: ReadonlySet<string>): TrajectoryRow[] {
@@ -344,6 +482,18 @@ function stepsOf(rows: readonly TrajectoryRow[], now: number): Step[] {
 	let modelSeq = -1;
 	for (const row of chrono) {
 		const turn = Math.max(1, row.turn);
+		if ((row.kind === "system" || row.kind === "context") && !Number.isNaN(row.t0)) {
+			steps.push({
+				key: row.key,
+				lane: "input",
+				tone: "context",
+				turn,
+				t0: row.t0,
+				t1: row.t0,
+				label: row.title,
+				running: false,
+			});
+		}
 		if (row.startsTurn && !Number.isNaN(row.t0)) {
 			steps.push({
 				key: row.key,
@@ -471,6 +621,10 @@ export function fullText(row: TrajectoryRow): RowText {
 		}
 		case "notice":
 			return { input: item.text, result: "", resultIsError: row.tone === "error" };
+		case "model_shape":
+			return { input: item.shape.system.join("\n\n"), result: "", resultIsError: false };
+		case "model_injection":
+			return { input: injectionText(item.injection.text), result: "", resultIsError: false };
 	}
 }
 

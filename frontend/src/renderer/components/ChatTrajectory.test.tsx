@@ -1,6 +1,7 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ModelContext } from "../lib/chat-api";
 import type { ChatEntry } from "../lib/chat-event";
 import { foldEntries } from "../lib/chat-fold";
 import { centerViewOf, useUiStore } from "../stores/ui-store";
@@ -242,6 +243,123 @@ describe("ChatTrajectory", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+describe("ChatTrajectory with the model's context", () => {
+	const context: ModelContext = {
+		shapes: [
+			{
+				ts: at(0),
+				system: ["You are a coding agent.", "Run the tests."],
+				tools: [
+					{ name: "Read", description: "Reads a file.", inputSchema: { type: "object", properties: { path: {} } } },
+					{ name: "Bash", description: "Runs a command.\n\nLong detail nobody reads." },
+				],
+			},
+		],
+		injections: [
+			{
+				ts: at(0),
+				source: "skill_listing",
+				role: "system",
+				text: "<system-reminder>\nThe following skills are available:\n- deploy\n</system-reminder>",
+				truncated: false,
+			},
+			{ ts: at(5), source: "task_reminder", role: "system", text: "Use the task tools.", truncated: false },
+		],
+		truncated: false,
+	};
+
+	async function renderWithContext(load = vi.fn(async () => context)) {
+		const entries = log();
+		const view = render(
+			<ChatTrajectory entries={entries} loadContext={load} root="/w" transcript={foldEntries(entries)} />,
+		);
+		await screen.findByText("Initial System Prompt");
+		return { ...view, load, entries };
+	}
+
+	it("adds the system prompt first and each injection as a context row in its turn", async () => {
+		await renderWithContext();
+		expect(rows().map((r) => r.getAttribute("data-kind"))).toEqual([
+			"system",
+			"user",
+			"context",
+			"tool",
+			"tool",
+			"context",
+			"tool",
+			"turn_end",
+		]);
+		expect(rowOf("Skill catalog")).toHaveTextContent("The following skills are available:");
+		const strip = screen.getByTestId("chat-trajectory-strip");
+		expect(strip.querySelectorAll('[data-lane="input"][data-tone="context"]')).toHaveLength(3);
+	});
+
+	it("opens a context row in the side pane, with its summary and its raw record", async () => {
+		const user = userEvent.setup();
+		await renderWithContext();
+		await user.click(within(rowOf("Skill catalog")).getAllByRole("button")[0]);
+		const pane = screen.getByTestId("chat-trajectory-pane");
+		expect(within(pane).getByText("CONTEXT")).toBeInTheDocument();
+		expect(pane).toHaveTextContent("Turn 1");
+		expect(within(pane).getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+		expect(pane).toHaveTextContent("Skill catalog");
+		expect(pane).toHaveTextContent("skill_listing");
+		expect(pane.querySelector('[data-section="preview"]')).toHaveTextContent("- deploy");
+		expect(screen.queryByTestId("chat-trajectory-detail")).toBeNull();
+
+		await user.click(within(pane).getByRole("tab", { name: "Raw" }));
+		const raw = pane.querySelector('[data-section="raw"]')!;
+		expect(JSON.parse(raw.textContent!)).toEqual(context.injections[0]);
+	});
+
+	it("opens the system row to its prompt and lists the tools by name", async () => {
+		const user = userEvent.setup();
+		await renderWithContext();
+		await user.click(within(rowOf("Initial System Prompt")).getAllByRole("button")[0]);
+		const pane = screen.getByTestId("chat-trajectory-pane");
+		expect(within(pane).getByText("SYSTEM")).toBeInTheDocument();
+		expect(pane).toHaveTextContent("You are a coding agent.");
+		await user.click(within(pane).getByRole("tab", { name: "Tools" }));
+		const tools = within(pane).getByRole("list", { name: "Tools" });
+		expect(
+			within(tools)
+				.getAllByRole("listitem")
+				.map((li) => li.querySelector(".chat-traj__toolname")?.textContent),
+		).toEqual(["Read", "Bash"]);
+		expect(tools).not.toHaveTextContent("Long detail nobody reads.");
+		await user.click(within(tools).getAllByRole("button", { name: "Input schema" })[0]);
+		expect(tools).toHaveTextContent('"properties"');
+	});
+
+	it("closes the pane with Esc and with the close button", async () => {
+		const user = userEvent.setup();
+		await renderWithContext();
+		await user.click(within(rowOf("Task reminder")).getAllByRole("button")[0]);
+		expect(screen.getByTestId("chat-trajectory-pane")).toBeInTheDocument();
+		await user.keyboard("{Escape}");
+		expect(screen.queryByTestId("chat-trajectory-pane")).toBeNull();
+		await user.click(within(rowOf("Task reminder")).getAllByRole("button")[0]);
+		await user.click(screen.getByRole("button", { name: "Close" }));
+		expect(screen.queryByTestId("chat-trajectory-pane")).toBeNull();
+	});
+
+	it("reads the context again when a turn ends, and shows nothing extra when there is none", async () => {
+		const load = vi.fn(async (): Promise<ModelContext | null> => null);
+		const entries = log().slice(0, -1);
+		const { rerender } = render(
+			<ChatTrajectory entries={entries} loadContext={load} root="/w" transcript={foldEntries(entries)} />,
+		);
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+		expect(rows().some((r) => r.getAttribute("data-kind") === "context")).toBe(false);
+
+		load.mockResolvedValue(context);
+		const ended = log();
+		rerender(<ChatTrajectory entries={ended} loadContext={load} root="/w" transcript={foldEntries(ended)} />);
+		await screen.findByText("Initial System Prompt");
+		expect(load).toHaveBeenCalledTimes(2);
 	});
 });
 

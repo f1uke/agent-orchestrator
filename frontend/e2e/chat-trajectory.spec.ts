@@ -141,3 +141,51 @@ for (const viewport of VIEWPORTS) {
 		});
 	});
 }
+
+test.describe("chat trajectory shows what the model was given", () => {
+	test.use({ viewport: { width: 1920, height: 1080 }, colorScheme: "dark" });
+
+	test("the system row opens its prompt and tools, and a context row its summary, preview and raw", async ({
+		page,
+	}, info) => {
+		const shot = (name: string) => page.screenshot({ path: info.outputPath(`trajectory-${name}-1920x1080.png`) });
+		const trajectory = await openTrajectory(page);
+		const rows = trajectory.locator(".chat-traj__row");
+		await expect(rows.first()).toHaveAttribute("data-kind", "system");
+		await expect(rows.first()).toContainText("Initial System Prompt");
+		const contextBars = page
+			.getByTestId("chat-trajectory-strip")
+			.locator('[data-lane="input"][data-tone="context"][data-key^="model-"]');
+		await expect(contextBars).toHaveCount(6);
+
+		await rows.first().locator(".chat-traj__head").click();
+		const pane = page.getByTestId("chat-trajectory-pane");
+		await expect(pane).toBeVisible();
+		await expect(pane).toContainText("SYSTEM");
+		await expect(pane).toContainText("You are a coding agent");
+		await shot("system-prompt");
+		await pane.getByRole("tab", { name: "Tools" }).click();
+		await expect(pane.getByRole("tab", { name: "Tools" })).toHaveAttribute("aria-selected", "true");
+		await expect(pane.getByRole("list", { name: "Tools" }).getByRole("listitem")).toHaveCount(4);
+		await page.waitForTimeout(250);
+		await shot("system-tools");
+
+		const skills = trajectory.locator('.chat-traj__row[data-kind="context"]', { hasText: "Skill catalog" });
+		await skills.locator(".chat-traj__head").click();
+		await expect(pane).toContainText("CONTEXT");
+		await expect(pane).toContainText("Turn 1");
+		await expect(pane.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+		await expect(pane).toContainText("skill_listing");
+		const paneBox = (await pane.boundingBox())!;
+		const rowsBox = (await page.getByTestId("chat-trajectory-rows").boundingBox())!;
+		expect(rowsBox.x + rowsBox.width).toBeLessThanOrEqual(paneBox.x + 1);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await shot("context-summary");
+		await pane.getByRole("tab", { name: "Raw" }).click();
+		await expect(pane.locator('[data-section="raw"]')).toContainText('"source": "skill_listing"');
+		await shot("context-raw");
+
+		await page.keyboard.press("Escape");
+		await expect(pane).toBeHidden();
+	});
+});

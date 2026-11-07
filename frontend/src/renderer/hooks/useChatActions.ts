@@ -6,6 +6,7 @@ import {
 	type ChatImage,
 	type ChatResult,
 	httpChatApi,
+	type ModelContext,
 	type RewindPreview,
 	type TaskOutput,
 	type UploadResult,
@@ -28,6 +29,7 @@ export type ChatActions = {
 	taskOutput: (taskId: string) => Promise<TaskOutput | null>;
 	rewind: (uuid: string, restoreFiles: boolean) => Promise<ChatResult>;
 	rewindPreview: (uuid: string) => Promise<RewindPreview | null>;
+	modelContext: () => Promise<ModelContext | null>;
 	hostDown: boolean;
 };
 
@@ -66,6 +68,7 @@ export function useChatActions(sessionId: string, connection: ChatConnection, ap
 			taskOutput: (taskId) => api.taskOutput(sessionId, taskId),
 			rewind: (uuid, restoreFiles) => run(api.rewind(sessionId, uuid, restoreFiles)),
 			rewindPreview: (uuid) => api.rewindPreview(sessionId, uuid),
+			modelContext: () => api.modelContext(sessionId),
 			hostDown,
 		}),
 		[api, hostDown, run, sessionId],

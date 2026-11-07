@@ -41,6 +41,9 @@ type ChatFilesController struct {
 	// KnowledgeDir is the knowledge store root; a session reads KnowledgeDir/<project>.
 	KnowledgeDir string
 	DataDir      string
+	// LocateTranscript names the agent's own transcript for a session, or ""
+	// when its harness writes none AO can read. nil answers model-context 501.
+	LocateTranscript func(domain.SessionRecord) string
 
 	taskOutputs taskOutputPaths
 }
@@ -52,6 +55,7 @@ func (c *ChatFilesController) Register(r chi.Router) {
 	r.Head("/sessions/{sessionId}/chat/files/{root}/*", c.serve)
 	r.Get("/sessions/{sessionId}/chat/blobs/{blob}", c.blob)
 	r.Get("/sessions/{sessionId}/chat/tasks/{taskId}/output", c.taskOutput)
+	r.Get("/sessions/{sessionId}/chat/model-context", c.modelContext)
 	r.Post("/sessions/{sessionId}/chat/attachments", c.attach)
 }
 

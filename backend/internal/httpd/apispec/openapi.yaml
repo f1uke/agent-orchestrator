@@ -4253,6 +4253,52 @@ paths:
       summary: Switch the model of a chat session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/model-context:
+    get:
+      operationId: getChatModelContext
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatModelContextResponse'
+          description: OK
+        "204":
+          description: No Content
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'What a chat session''s agent was given, read from the agent CLI''s
+        own transcript: each distinct system prompt and tool set it sent, and every
+        context block the CLI added to the conversation (skill catalog, instructions,
+        environment, date, hook output, reminders). Claude Code only; 204 when the
+        session''s harness writes no transcript AO can read, or it does not exist
+        yet'
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/remote-control:
     put:
       operationId: setChatRemoteControl
@@ -10906,6 +10952,31 @@ components:
       required:
       - ok
       type: object
+    ChatContextInjection:
+      properties:
+        role:
+          description: 'The role it was sent under: user or system.'
+          type: string
+        source:
+          description: What added it, as the CLI names it, e.g. skill_listing, instructions,
+            environment, date, hook_success.
+          type: string
+        text:
+          description: The exact text sent, at most 256 KiB.
+          type: string
+        truncated:
+          description: True when text was cut at the cap.
+          type: boolean
+        ts:
+          description: When the CLI added it, RFC 3339; empty when unknown.
+          type: string
+      required:
+      - ts
+      - source
+      - role
+      - text
+      - truncated
+      type: object
     ChatFileMatch:
       properties:
         kind:
@@ -10974,6 +11045,61 @@ components:
       required:
       - mediaType
       - base64
+      type: object
+    ChatModelContextResponse:
+      properties:
+        injections:
+          description: The context blocks the agent CLI added to the conversation
+            (skill catalog, instructions, environment, date, hook output, reminders),
+            oldest first. At most the newest 2000.
+          items:
+            $ref: '#/components/schemas/ChatContextInjection'
+          type: array
+        shapes:
+          description: Each distinct system prompt and tool set sent, oldest first.
+            The first is the initial system prompt; a later one means they changed
+            mid-session. At most 20.
+          items:
+            $ref: '#/components/schemas/ChatModelShape'
+          type: array
+        truncated:
+          description: True when a cap dropped shapes or injections, or cut a text.
+          type: boolean
+      required:
+      - shapes
+      - injections
+      - truncated
+      type: object
+    ChatModelShape:
+      properties:
+        system:
+          description: The system prompt's text blocks, each at most 256 KiB.
+          items:
+            type: string
+          type: array
+        tools:
+          items:
+            $ref: '#/components/schemas/ChatModelTool'
+          type: array
+        ts:
+          description: When the CLI first sent this shape, RFC 3339; empty when unknown.
+          type: string
+      required:
+      - ts
+      - system
+      - tools
+      type: object
+    ChatModelTool:
+      properties:
+        description:
+          type: string
+        inputSchema:
+          description: The tool's JSON Schema, as sent.
+        name:
+          type: string
+      required:
+      - name
+      - description
       type: object
     ChildBriefResponse:
       properties:

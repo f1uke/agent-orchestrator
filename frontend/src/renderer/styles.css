@@ -10043,8 +10043,15 @@ ol.note-prose__list {
 }
 
 .chat-traj__body {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+}
+
+.chat-traj__list {
 	position: relative;
 	display: flex;
+	min-width: 0;
 	min-height: 0;
 	flex: 1;
 	flex-direction: column;
@@ -10276,6 +10283,164 @@ ol.note-prose__list {
 	margin-top: 6px;
 	color: var(--fg-passive);
 	font-size: 10px;
+}
+
+.chat-traj__badge[data-kind="system"],
+.chat-traj__badge[data-kind="context"] {
+	color: var(--green);
+}
+
+.chat-traj__row[data-kind="context"] .chat-traj__detail {
+	color: var(--fg-muted);
+}
+
+.chat-traj__row[data-selected] {
+	background: var(--interactive-active);
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.chat-traj__pane {
+	display: flex;
+	width: min(560px, 42%);
+	min-width: 320px;
+	flex: none;
+	flex-direction: column;
+	border-left: 1px solid var(--border);
+	background: var(--bg-1);
+}
+
+.chat-traj__panehead {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 12px 10px 18px;
+	border-bottom: 1px solid var(--border);
+}
+
+.chat-traj__panechip {
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--green) 16%, transparent);
+	color: var(--green);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+}
+
+.chat-traj__panetitle {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	color: var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-traj__paneclose {
+	display: inline-flex;
+	width: 24px;
+	height: 24px;
+	align-items: center;
+	justify-content: center;
+	border-radius: 6px;
+	color: var(--fg-muted);
+}
+
+.chat-traj__paneclose:hover {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.chat-traj__tabs {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.chat-traj__tablist {
+	flex: none;
+	align-self: flex-start;
+	margin: 10px 18px 0;
+}
+
+.chat-traj__panebody {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 10px;
+	overflow: auto;
+	padding: 12px 18px 18px;
+}
+
+.chat-traj__panebody[hidden] {
+	display: none;
+}
+
+.chat-traj__pre--pane {
+	max-height: none;
+	overflow: visible;
+}
+
+.chat-traj__facts {
+	display: grid;
+	grid-template-columns: 72px minmax(0, 1fr);
+	gap: 6px 12px;
+	margin: 0;
+}
+
+.chat-traj__facts dt {
+	color: var(--fg-passive);
+}
+
+.chat-traj__facts dd {
+	margin: 0;
+	color: var(--fg);
+	overflow-wrap: anywhere;
+}
+
+.chat-traj__factraw {
+	margin-left: 8px;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+.chat-traj__panecopy {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.chat-traj__tools {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.chat-traj__tool {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.chat-traj__toolname {
+	color: var(--fg);
+	font-family: var(--font-mono);
+	font-weight: 600;
+}
+
+.chat-traj__tooldesc {
+	margin: 0;
+	color: var(--fg-muted);
+	line-height: 1.5;
 }
 
 .chat-viewseg {
