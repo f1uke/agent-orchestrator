@@ -360,7 +360,6 @@ function TrajectoryToolbar({
 
 type Hover = { bar: Bar; left: number };
 
-// In steps mode each block is inset a pixel a side so neighbours do not fuse.
 function barStyle(b: Bar, stepped: boolean): React.CSSProperties {
 	const left = `${b.start * 100}%`;
 	const width = `${(b.end - b.start) * 100}%`;
@@ -376,7 +375,6 @@ function TimelineStrip({ axis, layout, onBar }: { axis: Axis; layout: Layout; on
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const scrolls = axis === "steps";
 
-	// Start at the newest steps, and stay there while more arrive.
 	useLayoutEffect(() => {
 		const el = scrollRef.current;
 		if (scrolls && el) el.scrollLeft = el.scrollWidth;

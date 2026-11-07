@@ -307,7 +307,6 @@ export type Bar = {
 	key: string;
 	lane: Lane;
 	tone: StepTone;
-	/** Fractions of the strip's width, 0..1. */
 	start: number;
 	end: number;
 	label: string;
@@ -318,11 +317,9 @@ export type Bar = {
 
 export type Layout = {
 	bars: Bar[];
-	/** Where each turn but the first begins, as a fraction of the strip's width. */
 	dividers: number[];
 };
 
-// Only a turn-opening row sits in the Input lane, and what injected it decides its colour.
 function inputTone(row: TrajectoryRow): StepTone {
 	const item = row.item;
 	return item.kind === "user" && !item.brief && !isPeerOrigin(item.origin) ? "input" : "context";
