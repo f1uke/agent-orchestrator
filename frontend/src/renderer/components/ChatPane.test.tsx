@@ -824,24 +824,34 @@ describe("ChatPane calm view", () => {
 		expect(document.querySelectorAll("[data-tool]")).toHaveLength(3);
 	});
 
-	it("keeps a failed call visible under a closed group header and counts it", () => {
-		const { feed } = renderPane();
-		feed(
+	it("draws a closed group holding a failed call exactly like one without, and shows the failure once opened", async () => {
+		const calls = (failed: boolean) => [
 			userIn("u1", "fix it"),
 			toolUse("a", "Read", { file_path: "a.go" }),
 			toolDone("a"),
 			toolUse("b", "Bash", { command: "go test" }),
-			toolDone("b", "Exit code 1\nFAIL", true),
-		);
-		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(
-			/^Ran a command, read a file \(1 failed\)$/,
-		);
-		const shown = document.querySelectorAll("[data-tool]");
-		expect(shown).toHaveLength(1);
-		expect(shown[0]).toHaveAttribute("data-tool", "Bash");
+			failed ? toolDone("b", "Exit code 1\nFAIL", true) : toolDone("b", "ok"),
+		];
+		const clean = renderPane();
+		clean.feed(...calls(false));
+		const cleanHtml = document.querySelector("[data-group]")!.outerHTML;
+		clean.unmount();
+
+		const { feed, user } = renderPane();
+		feed(...calls(true));
+		const group = document.querySelector("[data-group]")!;
+		expect(group.outerHTML).toBe(cleanHtml);
+		expect(group.querySelector(".chat-group__head")).toHaveTextContent(/^Ran a command, read a file$/);
+		expect(document.querySelector("[data-tool]")).toBeNull();
+
+		await user.click(group.querySelector(".chat-group__head")!);
+		const bash = document.querySelector('[data-tool="Bash"]')!;
+		expect(bash.querySelector(".chat-tool__status--error")).toHaveTextContent("Failed");
+		await user.click(bash.querySelector(".chat-tool__head")!);
+		expect(bash.querySelector(".chat-tool__body")).toHaveTextContent("FAIL");
 	});
 
-	it("keeps an expected non-zero exit inside a closed group and out of the failed count", () => {
+	it("keeps every call, failed or not, inside a closed group", () => {
 		const { feed } = renderPane();
 		feed(
 			userIn("u1", "look"),
@@ -852,10 +862,8 @@ describe("ChatPane calm view", () => {
 			toolUse("c", "Bash", { command: "go test" }),
 			toolDone("c", "Exit code 1\nFAIL", true),
 		);
-		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(/^Ran 3 commands \(1 failed\)$/);
-		const shown = document.querySelectorAll("[data-tool]");
-		expect(shown).toHaveLength(1);
-		expect(shown[0]).toHaveTextContent("go test");
+		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(/^Ran 3 commands$/);
+		expect(document.querySelector("[data-tool]")).toBeNull();
 	});
 
 	it("shows the running call as a plain verb with a timer that ticks each second", () => {
@@ -1063,7 +1071,7 @@ describe("ChatPane calm view", () => {
 		expect(turn.querySelectorAll("[data-tool]")).toHaveLength(0);
 	});
 
-	it("says how long a finished turn worked, and how many of its calls failed", () => {
+	it("says how long a finished turn worked, with no failure count while it is closed", () => {
 		const { feed } = renderPane();
 		const at = (sec: number, e: ChatEntry): ChatEntry => ({
 			...e,
@@ -1080,8 +1088,7 @@ describe("ChatPane calm view", () => {
 			at(36, out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0.01 })),
 		);
 		const head = document.querySelector("[data-turn] .chat-group__head")!;
-		expect(head).toHaveTextContent(/^Worked for 36s · 1 failed$/);
-		expect(head.querySelector(".chat-group__failed")).toHaveTextContent("1 failed");
+		expect(head).toHaveTextContent(/^Worked for 36s$/);
 		expect(document.querySelector('[data-notice="turn_end"]')).toBeNull();
 		expect(rowOf("turn_end")[0].querySelector("[data-answer-bar]")).not.toBeNull();
 	});

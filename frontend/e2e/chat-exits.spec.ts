@@ -11,10 +11,10 @@ for (const viewport of [
 	test.describe(`chat command exits at ${size}`, () => {
 		test.use({ viewport, colorScheme: "dark" });
 
-		test("counts only real failures and keeps expected exits grey", async ({ page }, info) => {
+		test("shows no failure on the closed turn, and only real failures in red once opened", async ({ page }, info) => {
 			await page.goto("/#/projects/ao-demo/sessions/demo-chat-exits");
 			const turn = page.locator("[data-turn] .chat-group__head").first();
-			await expect(turn).toHaveText(/^Worked for \d+s · 2 failed$/);
+			await expect(turn).toHaveText(/^Worked for \d+s$/);
 			await page.screenshot({ path: SHOTS ? `${SHOTS}-folded-${size}.png` : info.outputPath(`folded-${size}.png`) });
 
 			await turn.click();
