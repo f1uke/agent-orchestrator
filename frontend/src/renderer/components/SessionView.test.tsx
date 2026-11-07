@@ -716,7 +716,6 @@ describe("SessionView", () => {
 		expect(screen.getByText("terminal center")).toBeInTheDocument();
 		expect(screen.queryByText(/todo editor/)).not.toBeInTheDocument();
 	});
-
 });
 
 describe("SessionView iOS run bar", () => {
