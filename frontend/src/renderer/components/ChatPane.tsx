@@ -585,8 +585,9 @@ function ChatStream({
 		if (!el) return;
 		const start = (i: number) => virtualizer.measurementsCache[i]?.start ?? 0;
 		const probe = el.scrollTop + el.clientHeight / 3 - (colRef.current?.offsetTop ?? 0);
-		setActiveTurn(activeTurnIndex(turnRows.map(start), probe));
-		setActiveChapter(activeTurnIndex(chapterRows.map(start), probe));
+		const atEnd = followingRef.current || distanceFromEnd(el) <= AT_END_PX;
+		setActiveTurn(activeTurnIndex(turnRows.map(start), probe, atEnd));
+		setActiveChapter(activeTurnIndex(chapterRows.map(start), probe, atEnd));
 	}, [turnRows, chapterRows, virtualizer]);
 
 	useLayoutEffect(findActiveTurn, [findActiveTurn]);

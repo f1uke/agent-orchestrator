@@ -63,4 +63,11 @@ describe("activeTurnIndex", () => {
 	it("is the first turn when no opening row is above the probe yet", () => {
 		expect(activeTurnIndex([300, 900], 100)).toBe(0);
 	});
+
+	it("is the latest turn at the end of the stream, however short that turn is", () => {
+		const starts = [0, 400, 1800];
+		expect(activeTurnIndex(starts, 1400)).toBe(1);
+		expect(activeTurnIndex(starts, 1400, true)).toBe(2);
+		expect(activeTurnIndex([], 1400, true)).toBe(0);
+	});
 });
