@@ -61,6 +61,7 @@ const entry = (dir: ChatEntry["dir"], payload: object): ChatEntry => ({
 const out = (payload: object) => entry("out", payload);
 
 beforeEach(() => {
+	window.localStorage.clear();
 	vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
 	recentChats.clear();
 	listeners = undefined;

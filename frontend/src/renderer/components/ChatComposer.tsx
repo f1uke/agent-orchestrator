@@ -1,11 +1,12 @@
 import { ArrowUp, AtSign, History, Paperclip, Slash } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatActions } from "../hooks/useChatActions";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import type { PermissionMode } from "../lib/chat-answers";
 import type { ChatResult } from "../lib/chat-api";
 import { BASH_BLOCK_TEXT, BASH_HINT, bashBlock, bashModeEntry } from "../lib/chat-bash";
 import { MAX_IMAGES, prepareImage, withAttachedPaths } from "../lib/chat-attach";
+import { loadDraft, saveDraft } from "../lib/chat-draft";
 import type { ChatCommand, ChatModel, RemoteControl, UserItem } from "../lib/chat-fold";
 import { isImageMime } from "../lib/chat-images";
 import { type ComposerToken, replaceToken, slashGroups, tokenAt } from "../lib/chat-menus";
@@ -93,13 +94,15 @@ export function ChatComposer({
 	onToast,
 	prefill,
 }: ComposerProps) {
-	const [text, setText] = useState("");
-	const [mode, setMode] = useState<Mode>("prompt");
-	const [caret, setCaret] = useState(0);
+	const [restored] = useState(() => loadDraft(sessionId));
+	const [text, setText] = useState(restored?.text ?? "");
+	const [mode, setMode] = useState<Mode>(restored?.mode ?? "prompt");
+	const [caret, setCaret] = useState(restored?.text.length ?? 0);
 	const [chips, setChips] = useState<Chip[]>([]);
 	const [preparing, setPreparing] = useState(0);
 	const [sending, setSending] = useState(false);
-	const [dismissedForText, setDismissedForText] = useState<string | null>(null);
+	// A restored draft does not pop its slash or @ menu open until the person edits it.
+	const [dismissedForText, setDismissedForText] = useState<string | null>(restored?.text ?? null);
 	const [active, setActive] = useState(0);
 	const [argHint, setArgHint] = useState<{ after: string; hint: string } | null>(null);
 	const [wantFiles, setWantFiles] = useState(false);
@@ -143,6 +146,8 @@ export function ChatComposer({
 		return null;
 	}, [kind, query, commands, filesLoading, paths]);
 	const activeIndex = menu ? Math.min(active, menu.choices.length - 1) : -1;
+
+	useEffect(() => saveDraft(sessionId, { text, mode }), [sessionId, text, mode]);
 
 	useLayoutEffect(() => {
 		if (pendingCaret.current === null || !input.current) return;
