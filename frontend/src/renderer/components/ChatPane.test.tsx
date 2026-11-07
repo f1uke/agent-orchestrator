@@ -730,10 +730,10 @@ describe("ChatPane rewind", () => {
 });
 
 describe("ChatViewToggle", () => {
-	it("reads Chat, Trajectory, Terminal, in that order", () => {
+	it("reads Chat, Trajectory, in that order, with no Terminal tab", () => {
 		render(<ChatViewToggle session={session} />);
 		const group = screen.getByRole("group", { name: "Session view" });
-		expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Chat", "Trajectory", "Terminal"]);
+		expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Chat", "Trajectory"]);
 		expect(screen.queryByRole("button", { name: "Events" })).toBeNull();
 	});
 
@@ -744,6 +744,12 @@ describe("ChatViewToggle", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 		expect(useUiStore.getState().chatViews["chat-1"]).toBe("trajectory");
 		expect(screen.getByRole("button", { name: "Trajectory" })).toHaveAttribute("aria-pressed", "true");
+	});
+
+	it("shows a stored Terminal view as Chat", () => {
+		useUiStore.setState({ chatViews: { "chat-1": "terminal" } });
+		render(<ChatViewToggle session={session} />);
+		expect(screen.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-pressed", "true");
 	});
 
 	it('shows a stored "events" view as Trajectory', () => {
