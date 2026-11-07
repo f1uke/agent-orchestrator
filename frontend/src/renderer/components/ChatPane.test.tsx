@@ -188,6 +188,52 @@ describe("ChatPane", () => {
 		expect(screen.getByText("$0.044 this session")).toBeInTheDocument();
 	});
 
+	describe("a peer message", () => {
+		const peerIn = (text: string) => [
+			userIn("u1", "go"),
+			lifecycle("u1", "completed"),
+			entry("host", { kind: "user_origin", uuid: "p1", origin: { via: "ao_send", from: "billing-portal-12" } }),
+			entry("in", { type: "user", uuid: "p1", message: { content: `[from @billing-portal-12] ${text}` } }),
+			lifecycle("p1", "completed"),
+		];
+
+		it("folds to one row with the sender and the first line of the body", () => {
+			const { feed } = renderPane();
+			feed(...peerIn("\nPR is open.\n\n## Details\nCI is **green**."));
+			const head = screen.getByRole("button", { name: /peer message/ });
+			expect(head).toHaveAttribute("aria-expanded", "false");
+			expect(head).toHaveTextContent("invoice CSV export · peer message");
+			expect(head.querySelector(".chat-peer__preview")).toHaveTextContent(/^PR is open\.$/);
+			expect(screen.queryByRole("heading", { name: "Details" })).toBeNull();
+			expect(screen.queryByText("green")).toBeNull();
+		});
+
+		it("opens to the whole body as markdown on click and folds again", async () => {
+			const { feed, user } = renderPane();
+			feed(...peerIn("PR is open.\n\n## Details\nCI is **green**."));
+			const head = screen.getByRole("button", { name: /peer message/ });
+			await user.click(head);
+			expect(head).toHaveAttribute("aria-expanded", "true");
+			expect(head.querySelector(".chat-peer__preview")).toBeNull();
+			expect(screen.getByRole("heading", { name: "Details" })).toBeInTheDocument();
+			expect(screen.getByText("green").tagName).toBe("STRONG");
+			await user.click(head);
+			expect(head).toHaveAttribute("aria-expanded", "false");
+			expect(screen.queryByRole("heading", { name: "Details" })).toBeNull();
+		});
+
+		it("opens and folds from the keyboard", async () => {
+			const { feed, user } = renderPane();
+			feed(...peerIn("PR is open.\n\n## Details"));
+			const head = screen.getByRole("button", { name: /peer message/ });
+			head.focus();
+			await user.keyboard("{Enter}");
+			expect(head).toHaveAttribute("aria-expanded", "true");
+			await user.keyboard(" ");
+			expect(head).toHaveAttribute("aria-expanded", "false");
+		});
+	});
+
 	it("draws a pasted image in the user bubble as a thumbnail, not as a count", async () => {
 		const { feed, user } = renderPane();
 		const png = (data: string) => ({ type: "image", source: { type: "base64", media_type: "image/png", data } });
@@ -1876,9 +1922,9 @@ describe("ChatPane image refs", () => {
 		expect(screen.getByText("shots/gone.png")).toBeInTheDocument();
 	});
 
-	it("draws them under a peer message and an orchestrator message", async () => {
+	it("draws them under a peer message and an orchestrator message once each is open", async () => {
 		stubChatFiles(known);
-		const { feed } = renderPane();
+		const { feed, user } = renderPane();
 		feed(
 			userIn("u1", "go"),
 			lifecycle("u1", "completed"),
@@ -1899,6 +1945,9 @@ describe("ChatPane image refs", () => {
 		);
 		const peer = document.querySelector(".chat-peer:not(.chat-peer--orchestrator)")! as HTMLElement;
 		const orchestrator = document.querySelector(".chat-peer--orchestrator")! as HTMLElement;
+		expect(within(peer).queryByRole("img")).toBeNull();
+		await user.click(within(peer).getByRole("button"));
+		await user.click(within(orchestrator).getByRole("button"));
 		await waitFor(() => expect(within(peer).getAllByRole("img")).toHaveLength(2));
 		await waitFor(() => expect(within(orchestrator).getAllByRole("img")).toHaveLength(1));
 	});

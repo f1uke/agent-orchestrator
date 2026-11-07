@@ -816,7 +816,17 @@ function ItemRow({
 }) {
 	switch (item.kind) {
 		case "user":
-			if (isPeerOrigin(item.origin)) return <PeerMessage item={item} sessionNames={sessionNames} theme={theme} />;
+			if (isPeerOrigin(item.origin)) {
+				return (
+					<PeerMessage
+						item={item}
+						onToggle={(open) => toggleRow(rowKey, open)}
+						open={openRows[rowKey] ?? false}
+						sessionNames={sessionNames}
+						theme={theme}
+					/>
+				);
+			}
 			if (item.brief) {
 				return (
 					<TaskBrief
@@ -1098,10 +1108,14 @@ function TaskBrief({
 
 function PeerMessage({
 	item,
+	open,
+	onToggle,
 	sessionNames,
 	theme,
 }: {
 	item: UserItem;
+	open: boolean;
+	onToggle: (open: boolean) => void;
 	sessionNames: ReadonlyMap<string, string>;
 	theme: Theme;
 }) {
@@ -1109,18 +1123,27 @@ function PeerMessage({
 	const orchestrator = origin.from.endsWith("-orchestrator");
 	const name = orchestrator ? "orchestrator" : (sessionNames.get(origin.from) ?? `@${origin.from}`);
 	const body = item.text.replace(/^\[from @[^\]]*\]\s*/, "");
+	const preview = body.split("\n").find((line) => line.trim() !== "") ?? "";
 	const Icon = orchestrator ? OrchestratorIcon : MessageSquare;
 	return (
 		<div className={cn("chat-peer", orchestrator && "chat-peer--orchestrator")} data-origin={origin.via}>
-			<div className="chat-peer__from">
+			<button aria-expanded={open} className="chat-peer__from" onClick={() => onToggle(!open)} type="button">
+				<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
 				<Icon className="chat-icon" aria-hidden="true" />
-				<b>{name}</b> · {orchestrator ? "orchestrator message" : "peer message"}
+				<span className="chat-peer__title">
+					<b>{name}</b> · {orchestrator ? "orchestrator message" : "peer message"}
+				</span>
+				{open ? null : <span className="chat-peer__preview">{preview}</span>}
 				<span className="chat-peer__via">{origin.via.replace(/_/g, " ")}</span>
-			</div>
-			<div className="note-prose chat-md">
-				<NoteMarkdown source={body} theme={theme} />
-			</div>
-			<RefImages source={body} />
+			</button>
+			{open ? (
+				<div className="chat-peer__body">
+					<div className="note-prose chat-md">
+						<NoteMarkdown source={body} theme={theme} />
+					</div>
+					<RefImages source={body} />
+				</div>
+			) : null}
 		</div>
 	);
 }
