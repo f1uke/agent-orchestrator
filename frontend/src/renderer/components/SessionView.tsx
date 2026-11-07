@@ -810,9 +810,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 			return <TodoSessionPane session={session} />;
 		}
 		const centerView = centerViewOf(session, chatViews);
-		// A run's output is a terminal pane, so a chat session that is watching
-		// its run shows that pane until "Back to agent" returns it to the chat.
-		if (session && centerView !== "terminal" && terminalTarget.kind !== "run") {
+		const watchingRun = terminalTarget.kind === "run";
+		if (session && centerView !== "terminal" && !watchingRun) {
 			return (
 				<div className="flex h-full min-h-0 flex-col">
 					<IosRunBar
