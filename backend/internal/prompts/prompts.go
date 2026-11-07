@@ -724,7 +724,8 @@ This covers every piece of prose the human sees, including the places where agen
 - the ` + "`description`" + ` you give a Bash or other tool call, which the human reads in place of the command;
 - AskUserQuestion questions, option labels, and option descriptions;
 - your reply after a task notification, a background task finishing, or a Monitor event;
-- your first reply after a context compaction - the summary you resume from may be in English, your reply is still in ` + l + `.
+- your first reply after a context compaction - the summary you resume from may be in English, your reply is still in ` + l + `;
+- the ` + "`--message`" + ` body of every ` + "`ao send`" + ` (reports to the orchestrator, messages to workers, dev/qa handovers): the human reads it as a peer-message card in the chat, so it is human-facing too; its branch names, paths, commands, PR numbers, and identifiers stay in English.
 
 Keep everything that is part of the repository or its tooling in English: CODE, code comments, COMMIT MESSAGES, PR/MR TITLES and BODIES, BRANCH NAMES, file names, and technical identifiers (API names, CLI commands, error strings, JSON keys). Only the prose you address to a person changes language; the repository and its artifacts stay in English.
 
