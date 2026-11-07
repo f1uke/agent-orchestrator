@@ -93,6 +93,7 @@ function fakeApi() {
 			deletions: 1,
 		})),
 		taskOutput: vi.fn<ChatApi["taskOutput"]>(async () => null),
+		modelContext: vi.fn<ChatApi["modelContext"]>(async () => null),
 		upload: vi.fn<ChatApi["upload"]>(async (_id, file) => ({
 			ok: true,
 			file: { path: `/data/attachments/ab12/${file.name}`, name: file.name, size: file.size },

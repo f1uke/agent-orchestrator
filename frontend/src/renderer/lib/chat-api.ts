@@ -9,6 +9,13 @@ export type TaskOutput = components["schemas"]["ControllersChatTaskOutputRespons
 
 export type RewindPreview = components["schemas"]["ControllersRewindChatPreviewResponse"];
 
+/** What the agent was given: each system prompt and tool set it sent, and the context blocks its CLI injected. */
+export type ModelContext = components["schemas"]["ChatModelContextResponse"];
+
+export type ModelShape = components["schemas"]["ChatModelShape"];
+
+export type ContextInjection = components["schemas"]["ChatContextInjection"];
+
 export type ChatErrorKind = "host_not_running" | "rejected" | "not_chat" | "invalid" | "failed";
 
 export type ChatActionError = { kind: ChatErrorKind; message: string };
@@ -44,6 +51,8 @@ export type ChatApi = {
 	rewind: (sessionId: string, uuid: string, restoreFiles: boolean) => Promise<ChatResult>;
 	/** What restoring files to before uuid would change; null when the daemon could not say. */
 	rewindPreview: (sessionId: string, uuid: string) => Promise<RewindPreview | null>;
+	/** What the agent was given, read from its own transcript; null when its harness writes none or the daemon could not say. */
+	modelContext: (sessionId: string) => Promise<ModelContext | null>;
 };
 
 const KIND_BY_CODE: Record<string, ChatErrorKind> = {
@@ -147,6 +156,17 @@ export const httpChatApi: ChatApi = {
 				body: { uuid },
 			});
 			return data ?? null;
+		} catch {
+			return null;
+		}
+	},
+	modelContext: async (sessionId) => {
+		try {
+			const { data, response } = await apiClient.GET(
+				"/api/v1/sessions/{sessionId}/chat/model-context",
+				path(sessionId),
+			);
+			return response.status === 200 && data ? data : null;
 		} catch {
 			return null;
 		}

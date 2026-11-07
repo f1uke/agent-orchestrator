@@ -74,6 +74,7 @@ function renderComposer(
 		taskOutput: vi.fn<ChatActions["taskOutput"]>(async () => null),
 		rewind: vi.fn<ChatActions["rewind"]>(async () => ({ ok: true })),
 		rewindPreview: vi.fn<ChatActions["rewindPreview"]>(async () => null),
+		modelContext: vi.fn<ChatActions["modelContext"]>(async () => null),
 		upload: vi.fn<ChatActions["upload"]>(async (file) => saved(file)),
 		hostDown: false,
 		...over,

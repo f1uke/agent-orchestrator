@@ -2572,3 +2572,33 @@ type ChatTaskOutputResponse struct {
 	Truncated  bool   `json:"truncated" description:"True when text is only the end of the file."`
 	ModifiedAt string `json:"modifiedAt" format:"date-time"`
 }
+
+// ChatModelContextResponse is the body of GET /api/v1/sessions/{sessionId}/chat/model-context.
+type ChatModelContextResponse struct {
+	Shapes     []ChatModelShape       `json:"shapes" description:"Each distinct system prompt and tool set sent, oldest first. The first is the initial system prompt; a later one means they changed mid-session. At most 20."`
+	Injections []ChatContextInjection `json:"injections" description:"The context blocks the agent CLI added to the conversation (skill catalog, instructions, environment, date, hook output, reminders), oldest first. At most the newest 2000."`
+	Truncated  bool                   `json:"truncated" description:"True when a cap dropped shapes or injections, or cut a text."`
+}
+
+// ChatModelShape is one system prompt and tool set the agent sent to the model.
+type ChatModelShape struct {
+	TS     string          `json:"ts" description:"When the CLI first sent this shape, RFC 3339; empty when unknown."`
+	System []string        `json:"system" description:"The system prompt's text blocks, each at most 256 KiB."`
+	Tools  []ChatModelTool `json:"tools"`
+}
+
+// ChatModelTool is one tool definition sent with a request.
+type ChatModelTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema,omitempty" description:"The tool's JSON Schema, as sent."`
+}
+
+// ChatContextInjection is one context block the agent CLI added to the conversation.
+type ChatContextInjection struct {
+	TS        string `json:"ts" description:"When the CLI added it, RFC 3339; empty when unknown."`
+	Source    string `json:"source" description:"What added it, as the CLI names it, e.g. skill_listing, instructions, environment, date, hook_success."`
+	Role      string `json:"role" description:"The role it was sent under: user or system."`
+	Text      string `json:"text" description:"The exact text sent, at most 256 KiB."`
+	Truncated bool   `json:"truncated" description:"True when text was cut at the cap."`
+}

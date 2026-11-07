@@ -582,6 +582,7 @@ func Run() error {
 		}),
 		Chat:               chatsvc.New(store, cfg.DataDir),
 		ChatUsage:          chatUsage,
+		LocateTranscript:   locateTranscript,
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
 		Scripts:            scriptsSvc,

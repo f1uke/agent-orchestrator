@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { ContextInjection, ModelContext } from "./chat-api";
 import type { ChatEntry } from "./chat-event";
 import { foldEntries } from "./chat-fold";
 import {
@@ -12,6 +13,7 @@ import {
 	fullText,
 	layoutBars,
 	rawEntries,
+	sourceLabel,
 	type Trajectory,
 	visibleRows,
 } from "./chat-trajectory";
@@ -351,6 +353,139 @@ describe("buildTrajectory on a crafted session", () => {
 			["second", "queued", false, "dim"],
 		]);
 		expect(t.turns).toBe(1);
+	});
+});
+
+describe("what the model was given", () => {
+	let seq = 0;
+	const at = (sec: number) => new Date(Date.UTC(2026, 10, 7, 10, 0, sec)).toISOString();
+	const e = (sec: number, dir: ChatEntry["dir"], payload: object): ChatEntry => ({
+		seq: ++seq,
+		ts: at(sec),
+		dir,
+		payload,
+	});
+	const ask = (sec: number, uuid: string, text: string) => [
+		e(sec, "in", { type: "user", uuid, message: { content: text } }),
+		e(sec, "out", { type: "command_lifecycle", command_uuid: uuid, state: "started" }),
+	];
+	const use = (sec: number, id: string) =>
+		e(sec, "out", {
+			type: "assistant",
+			message: { id: `m-${id}`, content: [{ type: "tool_use", id, name: "Read", input: { file_path: "/w/a" } }] },
+		});
+	const done = (sec: number, id: string) =>
+		e(sec, "out", { type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+	const result = (sec: number) =>
+		e(sec, "out", { type: "result", subtype: "success", is_error: false, total_cost_usd: 0.1 });
+
+	const log = (): ChatEntry[] => {
+		seq = 0;
+		return [
+			...ask(10, "u1", "first"),
+			use(12, "t1"),
+			done(14, "t1"),
+			result(16),
+			...ask(20, "u2", "second"),
+			result(25),
+		];
+	};
+	const inject = (sec: number, source: string, text: string): ContextInjection => ({
+		ts: at(sec),
+		source,
+		role: "system",
+		text,
+		truncated: false,
+	});
+	const shape = (sec: number, tools: string[]) => ({
+		ts: at(sec),
+		system: ["You are a coding agent."],
+		tools: tools.map((name) => ({ name, description: `${name} tool` })),
+	});
+	const context: ModelContext = {
+		shapes: [shape(10, ["Read", "Bash"]), shape(21, ["Read", "Bash", "Grep"])],
+		injections: [
+			inject(9, "skill_listing", "<system-reminder>\nThe following skills are available\n- deploy\n</system-reminder>"),
+			inject(9, "date", "<system-reminder>\nToday's date is 2026-11-07.\n</system-reminder>"),
+			inject(13, "task_reminder", "Use the task tools."),
+			inject(20, "environment", "# Environment update"),
+			inject(30, "hook_brand_new", "something new"),
+		],
+		truncated: false,
+	};
+	const build = (ctx: ModelContext | null = context) => {
+		const entries = log();
+		return buildTrajectory(foldEntries(entries), entries, { root: "/w", context: ctx });
+	};
+
+	it("puts the initial system prompt first, then each injection in the turn whose row it follows", () => {
+		const t = build();
+		expect(t.rows.map((r) => [r.kind, r.title, r.turn])).toEqual([
+			["system", "Initial System Prompt", 0],
+			["user", "", 1],
+			["context", "Skill catalog", 1],
+			["context", "Date", 1],
+			["tool", "Read", 1],
+			["context", "Task reminder", 1],
+			["turn_end", "Completed", 1],
+			["user", "", 2],
+			["context", "Environment", 2],
+			["system", "System prompt changed", 2],
+			["turn_end", "Completed", 2],
+			["context", "hook_brand_new", 2],
+		]);
+		expect(t.turns).toBe(2);
+		expect(t.calls).toBe(1);
+	});
+
+	it("shows an injection's first line without the reminder wrapper, and counts a shape's blocks and tools", () => {
+		const rows = build().rows;
+		expect(rows.find((r) => r.title === "Skill catalog")?.detail).toBe("The following skills are available");
+		expect(rows.find((r) => r.title === "Date")?.detail).toBe("Today's date is 2026-11-07.");
+		expect(rows[0].detail).toBe("1 block · 2 tools");
+		expect(fullText(rows.find((r) => r.title === "Date")!).input).toBe("Today's date is 2026-11-07.");
+	});
+
+	it("labels a known source and keeps an unknown one as the CLI named it", () => {
+		expect([sourceLabel("skill_listing"), sourceLabel("instructions"), sourceLabel("hook_success")]).toEqual([
+			"Skill catalog",
+			"Instructions",
+			"Hook output",
+		]);
+		expect(sourceLabel("something_new")).toBe("something_new");
+		expect(sourceLabel("toString")).toBe("toString");
+	});
+
+	it("adds nothing when there is no model context", () => {
+		const without = build(null);
+		expect(without.rows.some((r) => r.kind === "system" || r.kind === "context")).toBe(false);
+		expect(build({ shapes: [], injections: [], truncated: false }).rows).toHaveLength(without.rows.length);
+	});
+
+	it("draws the system prompt and each injection as a green context step in the Input lane", () => {
+		const t = build();
+		const { bars } = layoutBars(t, "steps", NOW);
+		const input = bars.filter((b) => b.lane === "input");
+		expect(input.map((b) => [b.tone, b.label])).toEqual([
+			["context", "Initial System Prompt"],
+			["input", "Input"],
+			["context", "Skill catalog"],
+			["context", "Date"],
+			["context", "Task reminder"],
+			["input", "Input"],
+			["context", "Environment"],
+			["context", "System prompt changed"],
+			["context", "hook_brand_new"],
+		]);
+		expect(input[0].turn).toBe(1);
+		const order = bars.map((b) => b.key);
+		expect(order.indexOf("model-context:0")).toBeGreaterThan(order.indexOf(t.rows[1].key));
+		expect(order.indexOf("model-context:2")).toBeGreaterThan(order.indexOf(t.rows[4].key));
+	});
+
+	it("finds a context row by text past its first line", () => {
+		const t = build();
+		expect(filterRows(t.rows, { query: "deploy", kind: "all" }).map((r) => r.title)).toEqual(["Skill catalog"]);
 	});
 });
 

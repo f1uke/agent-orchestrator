@@ -44,6 +44,7 @@ function fakeApi() {
 		upload: vi.fn<ChatApi["upload"]>(async () => ({ ok: true, file: { path: "/x", name: "x", size: 1 } })),
 		rewind: vi.fn<ChatApi["rewind"]>(async () => ({ ok: true })),
 		rewindPreview: vi.fn<ChatApi["rewindPreview"]>(async () => null),
+		modelContext: vi.fn<ChatApi["modelContext"]>(async () => null),
 	};
 }
 

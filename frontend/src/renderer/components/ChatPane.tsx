@@ -231,7 +231,12 @@ export function ChatPane({
 								<SessionDocsReporter onDocs={onDocs} turns={turnDocs} />
 								<div className="chat-pane" data-session={session.id} data-testid="chat-pane" onKeyDown={onKeyDown}>
 									{view === "trajectory" ? (
-										<ChatTrajectory entries={chat.entries} root={root} transcript={transcript} />
+										<ChatTrajectory
+											entries={chat.entries}
+											loadContext={actions.modelContext}
+											root={root}
+											transcript={transcript}
+										/>
 									) : (
 										<ChatStream
 											disabled={actions.hostDown}

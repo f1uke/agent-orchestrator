@@ -1,5 +1,5 @@
 import type { AnswerBody } from "./chat-answers";
-import type { ChatApi, ChatResult } from "./chat-api";
+import type { ChatApi, ChatResult, ModelContext } from "./chat-api";
 import { type ChatEntry, type Direction, isObject, unfinished } from "./chat-event";
 import { CHROME_FLAG, ChatFolder, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
@@ -1182,6 +1182,7 @@ export const stubChatApi: ChatApi = {
 		]);
 		return OK;
 	},
+	modelContext: async (id) => (id === MOCK_LONG_CHAT_SESSION ? LONG_MODEL_CONTEXT : null),
 	taskOutput: async (id, taskId) => {
 		const session = await stubSession(id);
 		const task = session.folder.transcript().tasks.find((t) => t.id === taskId);
@@ -1192,6 +1193,88 @@ export const stubChatApi: ChatApi = {
 		const text = soakOutput(Math.floor((Date.now() - Date.parse(task.startedTs)) / SOAK_RUN_MS));
 		return { text, size: text.length, truncated: false, modifiedAt: new Date().toISOString() };
 	},
+};
+
+const reminder = (text: string) => `<system-reminder>\n${text}\n</system-reminder>`;
+
+const pathSchema = (extra: Record<string, unknown> = {}) => ({
+	type: "object",
+	properties: { file_path: { type: "string", description: "Absolute path to the file" }, ...extra },
+	required: ["file_path"],
+});
+
+const LONG_MODEL_CONTEXT: ModelContext = {
+	shapes: [
+		{
+			ts: "2026-10-30T10:55:33.900Z",
+			system: [
+				"You are a coding agent working in the user's repository. Make the smallest change that solves the task.",
+				"Run the tests before you say a change works. Report what you ran and what it printed.",
+			],
+			tools: [
+				{ name: "Read", description: "Reads a file from the local filesystem.", inputSchema: pathSchema() },
+				{
+					name: "Edit",
+					description: "Replaces an exact string in a file.",
+					inputSchema: pathSchema({ old_string: { type: "string" }, new_string: { type: "string" } }),
+				},
+				{
+					name: "Bash",
+					description: "Runs a shell command and returns its output.",
+					inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+				},
+				{
+					name: "Grep",
+					description: "Searches file contents with a regular expression.",
+					inputSchema: { type: "object", properties: { pattern: { type: "string" }, path: { type: "string" } } },
+				},
+			],
+		},
+	],
+	injections: [
+		{
+			ts: "2026-10-30T10:55:33.700Z",
+			source: "skill_listing",
+			role: "system",
+			text: reminder(
+				"The following skills are available for use with the Skill tool:\n\n- review: Review the current diff for bugs.\n- release: Cut a release branch and bump the version.",
+			),
+			truncated: false,
+		},
+		{
+			ts: "2026-10-30T10:55:33.700Z",
+			source: "instructions",
+			role: "user",
+			text: reminder(
+				"Codebase and user instructions are shown below.\n\nContents of /work/billing/AGENTS.md:\n\n- Run go test ./... before every commit.\n- Keep handlers thin; business logic lives in internal/.",
+			),
+			truncated: false,
+		},
+		{
+			ts: "2026-10-30T10:55:33.700Z",
+			source: "environment",
+			role: "system",
+			text: reminder(
+				"# Environment\n - Primary working directory: /work/billing\n - Is a git repository: true\n - Platform: darwin",
+			),
+			truncated: false,
+		},
+		{
+			ts: "2026-10-30T10:55:33.700Z",
+			source: "date",
+			role: "system",
+			text: reminder("Today's date is 2026-10-30."),
+			truncated: false,
+		},
+		{
+			ts: "2026-10-30T10:56:55.400Z",
+			source: "task_reminder",
+			role: "system",
+			text: reminder("The task tools haven't been used recently. Consider tracking progress with them."),
+			truncated: false,
+		},
+	],
+	truncated: false,
 };
 
 const SOAK_RUN_MS = 700;

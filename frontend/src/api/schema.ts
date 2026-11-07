@@ -1479,6 +1479,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/chat/model-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What a chat session's agent was given, read from the agent CLI's own transcript: each distinct system prompt and tool set it sent, and every context block the CLI added to the conversation (skill catalog, instructions, environment, date, hook output, reminders). Claude Code only; 204 when the session's harness writes no transcript AO can read, or it does not exist yet */
+        get: operations["getChatModelContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/chat/remote-control": {
         parameters: {
             query?: never;
@@ -3549,6 +3566,18 @@ export interface components {
         ChatAckResponse: {
             ok: boolean;
         };
+        ChatContextInjection: {
+            /** @description The role it was sent under: user or system. */
+            role: string;
+            /** @description What added it, as the CLI names it, e.g. skill_listing, instructions, environment, date, hook_success. */
+            source: string;
+            /** @description The exact text sent, at most 256 KiB. */
+            text: string;
+            /** @description True when text was cut at the cap. */
+            truncated: boolean;
+            /** @description When the CLI added it, RFC 3339; empty when unknown. */
+            ts: string;
+        };
         ChatFileMatch: {
             /** @enum {string} */
             kind: "image" | "video" | "markdown" | "html" | "pdf" | "json" | "text" | "log" | "diff";
@@ -3575,6 +3604,27 @@ export interface components {
             base64: string;
             /** @description The image's media type, for example image/png. */
             mediaType: string;
+        };
+        ChatModelContextResponse: {
+            /** @description The context blocks the agent CLI added to the conversation (skill catalog, instructions, environment, date, hook output, reminders), oldest first. At most the newest 2000. */
+            injections: components["schemas"]["ChatContextInjection"][];
+            /** @description Each distinct system prompt and tool set sent, oldest first. The first is the initial system prompt; a later one means they changed mid-session. At most 20. */
+            shapes: components["schemas"]["ChatModelShape"][];
+            /** @description True when a cap dropped shapes or injections, or cut a text. */
+            truncated: boolean;
+        };
+        ChatModelShape: {
+            /** @description The system prompt's text blocks, each at most 256 KiB. */
+            system: string[];
+            tools: components["schemas"]["ChatModelTool"][];
+            /** @description When the CLI first sent this shape, RFC 3339; empty when unknown. */
+            ts: string;
+        };
+        ChatModelTool: {
+            description: string;
+            /** @description The tool's JSON Schema, as sent. */
+            inputSchema?: unknown;
+            name: string;
         };
         ChildBriefResponse: {
             /** @description Standing context for the subagent, delivered as SubagentStart additionalContext. */
@@ -13109,6 +13159,63 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getChatModelContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatModelContextResponse"];
+                };
+            };
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
