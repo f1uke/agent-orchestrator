@@ -309,7 +309,6 @@ describe("process summaries", () => {
 			{ kind: "todos", count: 2 },
 			{ kind: "tools", count: 1 },
 		]);
-		expect(summary.failed).toBe(1);
 	});
 
 	it("counts the visual guide read as its own kind, not as another tool", () => {
@@ -346,23 +345,22 @@ describe("process summaries", () => {
 		["guides", 1, "Read visual guidelines"],
 		["tools", 2, "Used 2 other tools"],
 	])("says %s x%i as %j", (kind, count, want) => {
-		expect(processSentence({ counts: [{ kind, count }], failed: 0 })).toBe(want);
+		expect(processSentence({ counts: [{ kind, count }] })).toBe(want);
 	});
 
-	it("counts a denied tool as failed", () => {
+	it("treats a denied tool as failed", () => {
 		const denied: ToolCallItem = {
 			...call("Bash", { command: "rm" }),
 			permission: { requestId: "r", status: "denied", message: "", updatedPermissions: [] },
 		};
 		expect(toolFailed(denied)).toBe(true);
-		expect(summarizeTools([denied]).failed).toBe(1);
 	});
 
-	it("does not count an expected non-zero exit as failed, and still counts a real one", () => {
+	it("does not treat an expected non-zero exit as failed, and still treats a real one as failed", () => {
 		const noMatch = call("Bash", { command: "git grep -c needle" }, { isError: true, content: "Exit code 1" }, "b1");
 		const differs = call("Bash", { command: "diff a b" }, { isError: true, content: "Exit code 1\n1c1" }, "b2");
 		const broken = call("Bash", { command: "npm test" }, { isError: true, content: "Exit code 1\nFAIL" }, "b3");
-		expect(summarizeTools([noMatch, differs, broken]).failed).toBe(1);
+		expect(toolFailed(differs)).toBe(false);
 		expect(toolFailed(noMatch)).toBe(false);
 		expect(toolFailed(broken)).toBe(true);
 	});

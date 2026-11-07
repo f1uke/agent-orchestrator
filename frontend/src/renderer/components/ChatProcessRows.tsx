@@ -10,7 +10,6 @@ import {
 	processSentence,
 	type ProcessSummary,
 	shortenPaths,
-	toolFailed,
 	toolRunning,
 	waitingVerb,
 } from "../lib/chat-tools";
@@ -167,9 +166,7 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 	const { summary } = row;
 	const running = summary.live ? row.members.filter((m) => m.kind === "tool" && toolRunning(m.call)).at(-1) : undefined;
 	const runningAgent = running?.kind === "tool" && isAgentCall(running.call) ? running : undefined;
-	const shown = open
-		? row.members
-		: row.members.filter((m) => m === runningAgent || (m.kind === "tool" && toolFailed(m.call, m.task)));
+	const shown = open ? row.members : row.members.filter((m) => m === runningAgent);
 	return (
 		<div className="chat-group" data-group data-live={summary.live ? "" : undefined}>
 			{summary.live ? (
@@ -181,10 +178,7 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 				/>
 			) : (
 				<Head onToggle={(next) => rest.toggleRow(row.key, next)} open={open}>
-					<span className="chat-group__text">
-						{processSentence(summary)}
-						{summary.failed > 0 ? <span className="chat-group__failed"> ({summary.failed} failed)</span> : null}
-					</span>
+					<span className="chat-group__text">{processSentence(summary)}</span>
 				</Head>
 			)}
 			{shown.length > 0 ? (
@@ -290,7 +284,6 @@ export function TurnRow({
 			<Head onToggle={(next) => toggleRow(row.key, next)} open={open} title={turnDetail(row.summary, row.messages)}>
 				<span className="chat-group__text">
 					{row.durationMs === undefined ? "Worked" : `Worked for ${formatDuration(row.durationMs)}`}
-					{row.summary.failed > 0 ? <span className="chat-group__failed"> · {row.summary.failed} failed</span> : null}
 				</span>
 			</Head>
 			{open ? (

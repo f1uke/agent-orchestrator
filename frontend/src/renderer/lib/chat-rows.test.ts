@@ -145,7 +145,6 @@ describe("chatRows process groups", () => {
 				{ kind: "reads", count: 1 },
 				{ kind: "todos", count: 2 },
 			],
-			failed: 1,
 		});
 	});
 
@@ -237,18 +236,9 @@ describe("chatRows live detail", () => {
 });
 
 describe("chatRows errored tools", () => {
-	it("keeps an errored call in the group's members and counts it as failed", () => {
+	it("keeps an errored call in the group's members", () => {
 		const rows = rowsOf([user(), tool("Bash", {}, "error"), tool("Read")]);
-		expect(group(rows).summary.failed).toBe(1);
 		expect(group(rows).members[0]).toMatchObject({ kind: "tool" });
-	});
-
-	it("counts a background command whose task failed, though its tool result was fine", () => {
-		const bash = tool("Bash", { command: "scripts/slow-check.sh", run_in_background: true });
-		const task = { id: "t1", toolUseId: bash.id, description: "", taskType: "local_bash", state: "error" as const };
-		const rows = rowsOf([user(), bash, tool("Read"), say("done"), turnEnd()], { tasks: [task] });
-		const turn = rows.find((r) => r.kind === "turn");
-		expect(turn?.kind === "turn" && turn.summary.failed).toBe(1);
 	});
 });
 

@@ -17,7 +17,7 @@ for (const viewport of VIEWPORTS) {
 			await expect(stream).toBeVisible();
 
 			await expect(stream.locator("[data-turn] .chat-group__head").first()).toHaveText(
-				/^Worked for \d+(s|m \d+s) · 1 failed$/,
+				/^Worked for \d+(s|m \d+s)$/,
 			);
 			await expect(stream.locator("[data-group]")).toHaveCount(0);
 			await expect(stream.locator('[data-tool="Bash"]')).toHaveCount(0);
@@ -31,11 +31,12 @@ for (const viewport of VIEWPORTS) {
 			await expect(first).toHaveAttribute("aria-expanded", "true");
 			const group = stream.locator("[data-group] .chat-group__head").first();
 			await expect(group).toContainText(/^(Ran|Read|Edited|Started) (a|an|\d+) /);
+			await expect(group).not.toContainText("failed");
 			const bash = stream.locator('[data-tool="Bash"]');
-			await expect(bash).toHaveCount(1);
-			await expect(bash).toContainText("failed · exit 1");
+			await expect(bash, "a closed group hides its failed call").toHaveCount(0);
 			await group.click();
 			await expect(stream.locator("[data-tool]").first()).toBeVisible();
+			await expect(bash.filter({ hasText: "failed · exit 1" })).toHaveCount(1);
 			await shot("turn-open");
 
 			const nested = stream.locator("[data-turn] .chat-group__body").first();

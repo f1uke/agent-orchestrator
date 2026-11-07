@@ -101,7 +101,7 @@ export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolN
 
 export type LiveTool = { verb: string; since: string };
 
-export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; failed: number; live?: LiveTool };
+export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; live?: LiveTool };
 
 const PHRASE: Record<ProcessKind, (n: number) => string> = {
 	commands: (n) => `ran ${n === 1 ? "a command" : `${n} commands`}`,
@@ -200,19 +200,14 @@ const KIND_ORDER: ProcessKind[] = [
 	"tools",
 ];
 
-export function summarizeTools(
-	calls: readonly ToolCallItem[],
-	taskOf: (toolUseId: string) => BackgroundTask | undefined = () => undefined,
-): ProcessSummary {
+export function summarizeTools(calls: readonly ToolCallItem[]): ProcessSummary {
 	const seen = new Map<ProcessKind, Set<string>>();
-	let failed = 0;
 	for (const call of calls) {
 		const kind = processKind(call.name);
 		seen.set(kind, (seen.get(kind) ?? new Set()).add(countKey(call)));
-		if (toolFailed(call, taskOf(call.id))) failed += 1;
 	}
 	const counts = KIND_ORDER.filter((kind) => seen.has(kind)).map((kind) => ({ kind, count: seen.get(kind)!.size }));
-	return { counts, failed };
+	return { counts };
 }
 
 const NEW_FILE_PREVIEW_LINES = 40;

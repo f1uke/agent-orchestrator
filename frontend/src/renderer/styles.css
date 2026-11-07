@@ -8050,10 +8050,6 @@ ol.note-prose__list {
 	white-space: nowrap;
 }
 
-.chat-group__failed {
-	color: var(--red);
-}
-
 .chat-group__running {
 	color: var(--fg-passive);
 	font-size: 13px;
