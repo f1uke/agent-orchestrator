@@ -326,7 +326,6 @@ export function ChatPane({
 const VIEW_OPTIONS: Array<{ view: ChatView; label: string; Icon: LucideIcon }> = [
 	{ view: "chat", label: "Chat", Icon: MessageSquare },
 	{ view: "trajectory", label: "Trajectory", Icon: Route },
-	{ view: "terminal", label: "Terminal", Icon: SquareTerminal },
 ];
 
 export function ChatViewToggle({ session, style }: { session: WorkspaceSession; style?: React.CSSProperties }) {

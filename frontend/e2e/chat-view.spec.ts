@@ -67,9 +67,7 @@ for (const viewport of VIEWPORTS) {
 			await expect(trajectory.locator(".chat-traj__row").filter({ hasText: "AskUserQuestion" }).first()).toBeVisible();
 			await shot("trajectory");
 
-			await toggle.getByRole("button", { name: "Terminal" }).click();
-			await expect(page.getByTestId("chat-pane")).toHaveCount(0);
-			await expect(page.locator(".terminal-toolbar").first()).toBeVisible();
+			await expect(toggle.getByRole("button", { name: "Terminal" })).toHaveCount(0);
 		});
 	});
 }

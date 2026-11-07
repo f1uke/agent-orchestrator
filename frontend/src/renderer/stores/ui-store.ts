@@ -69,6 +69,13 @@ type UiState = {
 	toggleTheme: () => void;
 	toggleSidebar: () => void;
 	toggleInspector: () => void;
+	/**
+	 * Called when the session view enters or leaves an orchestrator. An
+	 * orchestrator opens with the rail shut so its chat takes the full width;
+	 * this is not persisted, so a worker opened afterwards goes back to the rail
+	 * state the human last chose.
+	 */
+	resetInspectorForSession: (isOrchestrator: boolean) => void;
 	toggleProjectCollapsed: (projectId: string) => void;
 	toggleBoardLaneCollapsed: (lane: string) => void;
 	setProjectOrder: (orderedProjectIds: readonly string[]) => void;
@@ -223,6 +230,8 @@ export const useUiStore = create<UiState>((set) => ({
 			getLocalStorage()?.setItem(inspectorStorageKey, String(isInspectorOpen));
 			return { isInspectorOpen };
 		}),
+	resetInspectorForSession: (isOrchestrator) =>
+		set({ isInspectorOpen: isOrchestrator ? false : initialInspectorOpen() }),
 	toggleProjectCollapsed: (projectId) =>
 		set((state) => {
 			const collapsedProjectIds = new Set(state.collapsedProjectIds);
@@ -293,5 +302,6 @@ export function centerViewOf(
 ): ChatView {
 	if (session?.transport !== "chat") return "terminal";
 	const stored = chatViews[session.id];
-	return stored === "events" ? "trajectory" : (stored ?? "chat");
+	// A chat session has no Terminal view any more; an old pick falls back to Chat.
+	return stored === "events" || stored === "trajectory" ? "trajectory" : "chat";
 }

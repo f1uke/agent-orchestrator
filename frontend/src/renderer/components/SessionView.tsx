@@ -94,6 +94,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const chatViews = useUiStore((state) => state.chatViews);
 	const isInspectorOpen = useUiStore((state) => state.isInspectorOpen);
 	const toggleInspector = useUiStore((state) => state.toggleInspector);
+	const resetInspectorForSession = useUiStore((state) => state.resetInspectorForSession);
 	const { daemonStatus } = useShell();
 	const inspectorRef = useRef<PanelImperativeHandle | null>(null);
 	const inspectorSeparatorRef = useRef<HTMLDivElement | null>(null);
@@ -285,6 +286,16 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setSearchRequest(null);
 		editorSelection.current = "";
 	}, [sessionId]);
+
+	// An orchestrator opens with the rail shut so its chat is full width. Leaving
+	// it for a worker gives back the rail state the human last chose; worker to
+	// worker leaves the rail alone.
+	const shownOrchestratorRef = useRef(false);
+	useEffect(() => {
+		if (!sessionLoaded) return;
+		if (isOrchestrator || shownOrchestratorRef.current) resetInspectorForSession(isOrchestrator);
+		shownOrchestratorRef.current = isOrchestrator;
+	}, [sessionId, sessionLoaded, isOrchestrator, resetInspectorForSession]);
 
 	// THE RAIL DOES NOT MOVE WHEN YOU SWITCH MEMBERS — which is what makes the
 	// topbar's member switcher cheap enough to be the primary gesture.
@@ -588,7 +599,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	if (!hasInspector) {
 		inspectorDefaultSizeRef.current = null;
 	} else if (inspectorDefaultSizeRef.current === null) {
-		inspectorDefaultSizeRef.current = isInspectorOpen ? `${initialSplitPercent()}%` : "0%";
+		inspectorDefaultSizeRef.current = isInspectorOpen && !isOrchestrator ? `${initialSplitPercent()}%` : "0%";
 	}
 	const inspectorDefaultSize = inspectorDefaultSizeRef.current ?? "0%";
 

@@ -471,8 +471,27 @@ describe("SessionView", () => {
 		expect(screen.queryByTestId("resize-handle")).not.toBeInTheDocument();
 
 		// The shortcut is inactive without an inspector.
+		const before = useUiStore.getState().isInspectorOpen;
 		fireEvent.keyDown(window, { key: "B", metaKey: true, shiftKey: true });
+		expect(useUiStore.getState().isInspectorOpen).toBe(before);
+	});
+
+	it("opens a chat orchestrator with the rail shut, and gives a worker back the rail the human chose", () => {
+		window.localStorage.setItem("ao.inspector.open", "true");
+		useUiStore.setState({ isInspectorOpen: true });
+		const { rerender } = render(<SessionView sessionId="sess-orch-chat" />);
+		expect(useUiStore.getState().isInspectorOpen).toBe(false);
+		expect(panelSizes("inspector")[0]).toBe("0%");
+
+		rerender(<SessionView sessionId="sess-1" />);
 		expect(useUiStore.getState().isInspectorOpen).toBe(true);
+	});
+
+	it("leaves the rail alone when moving between workers", () => {
+		useUiStore.setState({ isInspectorOpen: false });
+		const { rerender } = render(<SessionView sessionId="sess-1" />);
+		rerender(<SessionView sessionId="sess-chat" />);
+		expect(useUiStore.getState().isInspectorOpen).toBe(false);
 	});
 
 	it("gives a chat orchestrator the inspector rail, toggled by the same shortcut", () => {
@@ -1025,7 +1044,7 @@ describe("SessionView — chat sessions", () => {
 		expect(screen.queryByTestId("chat-sess-1")).toBeNull();
 	});
 
-	it("opens a chat session on Chat and follows the stored view to Trajectory and Terminal", () => {
+	it("opens a chat session on Chat, follows the stored view to Trajectory, and shows a stored Terminal view as Chat", () => {
 		render(<SessionView sessionId="sess-chat" />);
 		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: chat");
 		expect(screen.queryByTestId("center-sess-chat")).toBeNull();
@@ -1034,8 +1053,8 @@ describe("SessionView — chat sessions", () => {
 		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: trajectory");
 
 		act(() => useUiStore.getState().setChatView("sess-chat", "terminal"));
-		expect(screen.queryByTestId("chat-sess-chat")).toBeNull();
-		expect(screen.getByTestId("center-sess-chat")).toBeInTheDocument();
+		expect(screen.getByTestId("chat-sess-chat")).toHaveTextContent("chat pane: chat");
+		expect(screen.queryByTestId("center-sess-chat")).toBeNull();
 	});
 
 	it("reads only a chat session's log, and opens its rail on Summary like any session", () => {
