@@ -7,7 +7,7 @@ import {
 	processKind,
 	type ProcessKind,
 	processSentence,
-	liveVerb,
+	liveStep,
 	shortenPaths,
 	summarizeTools,
 	taskLabel,
@@ -375,9 +375,8 @@ describe("process summaries", () => {
 	});
 });
 
-describe("liveVerb", () => {
+describe("liveStep", () => {
 	it.each<[string, object, string]>([
-		["Bash", { command: "go test ./..." }, "Running a command"],
 		["Read", { file_path: "/work/project/docs/README.md" }, "Reading README.md"],
 		["Skill", { skill: "artifact-design" }, "Running skill /artifact-design"],
 		["Agent", { subagent_type: "Explore", description: "find callers" }, "Running agent Explore"],
@@ -390,7 +389,27 @@ describe("liveVerb", () => {
 		["mcp__ao__show_widget", { title: "flow" }, "Making a visual"],
 		["mcp__ao__read_me", {}, "Reading visual guidelines"],
 	])("says a running %s call in plain words", (name, input, want) => {
-		expect(liveVerb(call(name, input))).toBe(want);
+		expect(liveStep(call(name, input))).toEqual({ verb: want });
+	});
+
+	it("says a running command by its description, with no detail", () => {
+		const input = { command: "go test ./...", description: "Run the webhook tests" };
+		expect(liveStep(call("Bash", input))).toEqual({ verb: "Run the webhook tests" });
+	});
+
+	it("falls back to the first line of the command when a command has no description", () => {
+		expect(liveStep(call("Bash", { command: "cd /work\ngo test ./..." }))).toEqual({
+			verb: "Running a command",
+			detail: "cd /work",
+		});
+		expect(liveStep(call("Bash", { command: "go test", description: "  " }))).toEqual({
+			verb: "Running a command",
+			detail: "go test",
+		});
+	});
+
+	it("has no detail for a command with neither description nor command", () => {
+		expect(liveStep(call("Bash", {}))).toEqual({ verb: "Running a command" });
 	});
 });
 

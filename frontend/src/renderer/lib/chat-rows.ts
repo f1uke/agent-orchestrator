@@ -6,7 +6,7 @@ import { taskList } from "./chat-tasks";
 import { isSuggestion, SUGGEST_SESSION, SUGGEST_SKILL } from "./chat-suggest";
 import { SHOW_WIDGET, widgetOf } from "./chat-widget";
 import { WRAP_UP, wrapUpOf } from "./chat-wrapup";
-import { type LiveTool, type ProcessSummary, liveVerb, summarizeTools, toolRunning } from "./chat-tools";
+import { type LiveStep, type ProcessSummary, latestLine, liveStep, summarizeTools, toolRunning } from "./chat-tools";
 
 /** A step inside a process group: a tool call, or the thinking between tool calls. */
 export type ProcessMember =
@@ -76,9 +76,9 @@ function role(item: ChatItem, queued: ReadonlySet<string>): Role {
 const opensTurn = (row: ChatRow) =>
 	row.kind === "item" && (row.item.kind === "user" || (row.item.kind === "task_message" && row.item.opensTurn));
 
-function liveTool(calls: readonly ToolCallItem[]): LiveTool | undefined {
+function liveTool(calls: readonly ToolCallItem[]): LiveStep | undefined {
 	const running = calls.filter(toolRunning).at(-1);
-	return running && { verb: liveVerb(running), since: running.startedTs };
+	return running && { ...liveStep(running), since: running.startedTs };
 }
 
 function memberRow(member: ProcessMember): ChatRow {
@@ -220,7 +220,13 @@ function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow |
 	return tasks.length === 0 ? undefined : { key: "waiting", kind: "waiting", tasks };
 }
 
-function thinkingRow(transcript: Transcript, overlay: StreamOverlay, rows: readonly ChatRow[]): ChatRow | undefined {
+type ThinkingLiveRow = Extract<ChatRow, { kind: "thinking_live" }>;
+
+function thinkingRow(
+	transcript: Transcript,
+	overlay: StreamOverlay,
+	rows: readonly ChatRow[],
+): ThinkingLiveRow | undefined {
 	if (transcript.pending.length > 0 || rows.at(-1)?.kind === "waiting") return undefined;
 	const running = transcript.items.some((i) => i.kind === "tool_call" && i.parentToolUseId === "" && toolRunning(i));
 	if (running) return undefined;
@@ -229,7 +235,7 @@ function thinkingRow(transcript: Transcript, overlay: StreamOverlay, rows: reado
 	const text = last?.kind === "thinking" ? last.text : "";
 	const since = transcript.busy ? transcript.thinkingSince : undefined;
 	if (since === undefined && text.trim() === "") return undefined;
-	const row: ChatRow = { key: "thinking-live", kind: "thinking_live", text };
+	const row: ThinkingLiveRow = { key: "thinking-live", kind: "thinking_live", text };
 	if (since !== undefined) row.since = since;
 	return row;
 }
@@ -343,10 +349,20 @@ export function chatRows(
 	streamed.forEach((block, i) => {
 		if (block.kind === "text") lastText = i;
 	});
+	const before = rows.length;
 	streamed.forEach((block, i) => {
 		if (block.kind === "thinking" && block.text.trim() === "") return;
 		rows.push({ key: `s${block.messageId}:${block.index}`, kind: "streaming", block, caret: i === lastText });
 	});
-	if (thinking) rows.push(thinking);
+	if (!thinking) return rows;
+	const tail = rows.length === before ? rows.at(-1) : undefined;
+	if (tail?.kind === "group" && !tail.summary.live) {
+		const detail = latestLine(thinking.text);
+		tail.summary.live = {
+			verb: "Thinking",
+			...(detail && { detail }),
+			...(thinking.since && { since: thinking.since }),
+		};
+	} else rows.push(thinking);
 	return rows;
 }

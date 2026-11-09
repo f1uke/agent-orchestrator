@@ -933,9 +933,60 @@ describe("ChatPane calm view", () => {
 			toolUse("b", "Bash", { command: "cd /work/project && go test ./..." }),
 		);
 		const head = document.querySelector("[data-group] .chat-group__head")!;
-		expect(head).toHaveTextContent(/^Running a command 1m 25s$/);
+		expect(head.querySelector(".chat-live__verb")).toHaveTextContent(/^Running a command$/);
+		expect(head.querySelector(".chat-live__detail")).toHaveTextContent(/^cd \/work\/project && go test \.\/\.\.\.$/);
+		expect(head.querySelector(".chat-live__time")).toHaveTextContent(/^1m 25s$/);
 		act(() => vi.advanceTimersByTime(1000));
-		expect(head).toHaveTextContent(/^Running a command 1m 26s$/);
+		expect(head.querySelector(".chat-live__time")).toHaveTextContent(/^1m 26s$/);
+	});
+
+	describe("a running command with a description", () => {
+		const described = () => {
+			vi.useFakeTimers({
+				toFake: ["Date", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"],
+			});
+			vi.setSystemTime(Date.parse("2026-10-30T10:01:25.000Z"));
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(
+				userIn("u1", "go"),
+				toolUse("a", "Read", { file_path: "/work/project/a.go" }),
+				toolDone("a"),
+				toolUse("b", "Bash", {
+					command: "go test ./...",
+					description: "รันเทสต์ทั้งโปรเจกต์เพื่อดูว่า webhook ผ่านไหม",
+				}),
+			);
+		};
+
+		it("names what it does in the folded header, with the timer", () => {
+			described();
+			const head = document.querySelector("[data-group] .chat-group__head")!;
+			expect(head.querySelector(".chat-live__verb")).toHaveTextContent(
+				"รันเทสต์ทั้งโปรเจกต์เพื่อดูว่า webhook ผ่านไหม",
+			);
+			expect(head.querySelector(".chat-live__detail")).toBeNull();
+			expect(head.querySelector(".chat-live__time")).toHaveTextContent(/^1m 25s$/);
+		});
+
+		it("shows the same words on the in-flight line once the group opens", () => {
+			described();
+			fireEvent.click(document.querySelector("[data-group] .chat-group__head")!);
+			const line = document.querySelector("[data-group] .chat-group__running")!;
+			expect(line).toHaveTextContent(/^รันเทสต์ทั้งโปรเจกต์เพื่อดูว่า webhook ผ่านไหม$/);
+		});
+	});
+
+	it("returns to the counted sentence once the running command finishes", () => {
+		const { feed } = renderPane("chat", fakeApi(), rooted);
+		feed(
+			userIn("u1", "go"),
+			toolUse("a", "Read", { file_path: "/work/project/a.go" }),
+			toolDone("a"),
+			toolUse("b", "Bash", { command: "go test", description: "Run the tests" }),
+		);
+		expect(document.querySelector("[data-group] .chat-live__verb")).toHaveTextContent("Run the tests");
+		feed(toolDone("b"));
+		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(/^Ran a command, read a file$/);
 	});
 
 	describe("the live Thinking row", () => {
@@ -979,6 +1030,17 @@ describe("ChatPane calm view", () => {
 			expect(liveRows()).toHaveLength(1);
 		});
 
+		it("lives in the finished tool group, which lists Thinking last once opened", () => {
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools(), tokens(12));
+			expect(document.querySelectorAll("[data-group]")).toHaveLength(1);
+			fireEvent.click(document.querySelector("[data-group] .chat-group__head")!);
+			const lines = document.querySelectorAll("[data-group] .chat-group__running");
+			expect(lines).toHaveLength(1);
+			expect(lines[0]).toHaveTextContent(/^Thinking$/);
+			expect(document.querySelectorAll("[data-group] [data-tool]")).toHaveLength(2);
+		});
+
 		it("goes when claude starts to answer", () => {
 			const { feed } = renderPane("chat", fakeApi(), rooted);
 			feed(...afterTools(), tokens(12));
@@ -1019,7 +1081,7 @@ describe("ChatPane calm view", () => {
 			recentChats.clear();
 
 			const running = renderPane("chat", fakeApi(), rooted);
-			running.feed(...afterTools(), at(30, toolUse("c", "Bash", { command: "go test" })));
+			running.feed(...afterTools(), at(30, toolUse("c", "Bash", { command: "go test", description: "Run the tests" })));
 			const runningShape = shapeOf(liveRows()[0]);
 			running.unmount();
 			recentChats.clear();

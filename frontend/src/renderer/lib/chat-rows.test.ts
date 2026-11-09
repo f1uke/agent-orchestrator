@@ -217,6 +217,23 @@ describe("chatRows live detail", () => {
 		expect(group(rows).summary.live).toEqual({ verb: "Reading a.md", since: "T1" });
 	});
 
+	it("names a running command by its description, and by its command when it has none", () => {
+		const described = {
+			...tool("Bash", { command: "go test", description: "รันเทสต์ของ webhook" }, "none"),
+			startedTs: "T2",
+		};
+		expect(group(rowsOf([user(), tool("Read"), described])).summary.live).toEqual({
+			verb: "รันเทสต์ของ webhook",
+			since: "T2",
+		});
+		const bare = { ...tool("Bash", { command: "go test ./..." }, "none"), startedTs: "T3" };
+		expect(group(rowsOf([user(), tool("Read"), bare])).summary.live).toEqual({
+			verb: "Running a command",
+			detail: "go test ./...",
+			since: "T3",
+		});
+	});
+
 	it("shows a lone running tool at the tail as a live group, and a lone finished one as its own row", () => {
 		const live = rowsOf([user(), say("on it"), tool("Bash", { command: "go test" }, "none")]);
 		expect(shape(live)).toEqual(["user", "assistant_text", "group"]);
@@ -678,7 +695,7 @@ describe("chatRows suggestions", () => {
 
 describe("chatRows live thinking", () => {
 	const SINCE = "2026-10-31T11:53:12.000Z";
-	const afterTool = () => [user(), tool("Read"), tool("Grep")];
+	const afterTool = () => [user(), tool("Read")];
 	const overlayOf = (...blocks: Array<{ kind: "text" | "thinking"; text: string }>) => ({
 		...emptyOverlay,
 		blocks: blocks.map((b, index) => ({ messageId: "m9", index, ...b })),
@@ -741,6 +758,53 @@ describe("chatRows live thinking", () => {
 		expect(live(rows)).toEqual([
 			{ key: "thinking-live", kind: "thinking_live", text: "The counter is read twice.\n\nMaybe the reset races.\n" },
 		]);
+	});
+});
+
+describe("chatRows thinking absorbed into the tail group", () => {
+	const SINCE = "2026-10-31T11:53:12.000Z";
+	const afterTool = () => [user(), tool("Read"), tool("Grep")];
+	const blocks = (text: string) => ({
+		...emptyOverlay,
+		blocks: [{ messageId: "m9", index: 0, kind: "thinking" as const, text }],
+	});
+	const kinds = (rows: ChatRow[]) => rows.map((r) => r.kind);
+
+	it("turns the finished tail group into a Thinking header instead of adding a row", () => {
+		const rows = rowsOf(afterTool(), { busy: true, thinkingSince: SINCE });
+		expect(kinds(rows)).toEqual(["item", "group"]);
+		expect(group(rows).summary.live).toEqual({ verb: "Thinking", since: SINCE });
+	});
+
+	it("carries the latest non-empty line of the thinking text as the detail", () => {
+		const rows = chatRows(
+			transcript(afterTool(), { busy: true, thinkingSince: SINCE }),
+			blocks("The counter is read twice.\n\nMaybe the reset races.\n"),
+		);
+		expect(kinds(rows)).toEqual(["item", "group"]);
+		expect(group(rows).summary.live).toEqual({ verb: "Thinking", detail: "Maybe the reset races.", since: SINCE });
+	});
+
+	it("keeps the separate row when no group sits right before it", () => {
+		const rows = rowsOf([user(), say("looking"), turnEnd(), user("u2")], { busy: true, thinkingSince: SINCE });
+		expect(kinds(rows).at(-1)).toBe("thinking_live");
+		expect(rows.some((r) => r.kind === "group")).toBe(false);
+	});
+
+	it("keeps the separate row when streamed text sits between the group and the thinking", () => {
+		const rows = chatRows(transcript(afterTool(), { busy: true, thinkingSince: SINCE }), {
+			...emptyOverlay,
+			blocks: [
+				{ messageId: "m8", index: 0, kind: "thinking", text: "earlier thought" },
+				{ messageId: "m9", index: 1, kind: "thinking", text: "now" },
+			],
+		});
+		expect(kinds(rows).slice(-3)).toEqual(["group", "streaming", "thinking_live"]);
+		expect(group(rows).summary.live).toBeUndefined();
+	});
+
+	it("leaves a finished group with no live label once thinking stops", () => {
+		expect(group(rowsOf(afterTool(), { busy: false })).summary.live).toBeUndefined();
 	});
 });
 
