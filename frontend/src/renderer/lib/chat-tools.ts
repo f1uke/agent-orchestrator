@@ -99,7 +99,6 @@ const PROCESS_KIND: Record<string, ProcessKind> = {
 
 export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolName] ?? "tools";
 
-/** What a running group is doing now: a tool call, or the model thinking after the last one. */
 export type LiveStep = { verb: string; detail?: string; since?: string };
 
 export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; live?: LiveStep };
