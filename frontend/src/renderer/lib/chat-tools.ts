@@ -99,9 +99,10 @@ const PROCESS_KIND: Record<string, ProcessKind> = {
 
 export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolName] ?? "tools";
 
-export type LiveTool = { verb: string; since: string };
+/** What a running group is doing now: a tool call, or the model thinking after the last one. */
+export type LiveStep = { verb: string; detail?: string; since?: string };
 
-export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; live?: LiveTool };
+export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; live?: LiveStep };
 
 const PHRASE: Record<ProcessKind, (n: number) => string> = {
 	commands: (n) => `ran ${n === 1 ? "a command" : `${n} commands`}`,
@@ -126,7 +127,6 @@ export function processSentence(summary: ProcessSummary): string {
 const baseName = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
 
 const LIVE_VERB: Record<string, (input: Record<string, unknown>) => string> = {
-	Bash: () => "Running a command",
 	Read: (i) => `Reading ${baseName(str(i.file_path))}`,
 	Skill: (i) => `Running skill /${str(i.skill)}`,
 	Agent: (i) => (str(i.subagent_type) ? `Running agent ${str(i.subagent_type)}` : "Running an agent"),
@@ -140,9 +140,26 @@ LIVE_VERB.Task = LIVE_VERB.Agent;
 LIVE_VERB[SHOW_WIDGET] = () => "Making a visual";
 LIVE_VERB[READ_ME] = () => "Reading visual guidelines";
 
-export function liveVerb(call: ToolCallItem): string {
+const lines = (text: string) =>
+	text
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line !== "");
+
+const firstLine = (text: string) => lines(text)[0] ?? "";
+
+export const latestLine = (text: string) => lines(text).at(-1) ?? "";
+
+export function liveStep(call: ToolCallItem): LiveStep {
+	const input = isObject(call.input) ? call.input : {};
+	if (call.name === "Bash") {
+		const description = firstLine(str(input.description));
+		if (description) return { verb: description };
+		const command = firstLine(str(input.command));
+		return command ? { verb: "Running a command", detail: command } : { verb: "Running a command" };
+	}
 	const say = LIVE_VERB[call.name];
-	return say ? say(isObject(call.input) ? call.input : {}) : `Running ${call.name}`;
+	return { verb: say ? say(input) : `Running ${call.name}` };
 }
 
 export const isAgentCall = (call: ToolCallItem) => call.name === "Agent" || call.name === "Task";

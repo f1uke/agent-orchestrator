@@ -6,7 +6,9 @@ import { formatDuration } from "../lib/chat-time";
 import {
 	isAgentCall,
 	isAgentTask,
-	liveVerb,
+	latestLine,
+	type LiveStep,
+	liveStep,
 	processSentence,
 	type ProcessSummary,
 	shortenPaths,
@@ -21,13 +23,6 @@ import { ResolvedLine, ToolCard } from "./ChatToolCard";
 
 export type OpenRows = Readonly<Record<string, boolean>>;
 export type ToggleRow = (key: string, open: boolean) => void;
-
-const latestLine = (text: string) =>
-	text
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line !== "")
-		.at(-1) ?? "";
 
 export function ThinkingRow({
 	text,
@@ -108,6 +103,15 @@ function LiveRow({
 	);
 }
 
+function LiveLine({ step }: { step: LiveStep }) {
+	return (
+		<div className="chat-group__running">
+			<span className="chat-live__verb">{step.verb}</span>
+			{step.detail ? <span className="chat-live__detail">{step.detail}</span> : null}
+		</div>
+	);
+}
+
 function Head({
 	open,
 	onToggle,
@@ -167,10 +171,17 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 	const running = summary.live ? row.members.filter((m) => m.kind === "tool" && toolRunning(m.call)).at(-1) : undefined;
 	const runningAgent = running?.kind === "tool" && isAgentCall(running.call) ? running : undefined;
 	const shown = open ? row.members : row.members.filter((m) => m === runningAgent);
+	const thinking = summary.live && !running ? summary.live : undefined;
 	return (
-		<div className="chat-group" data-group data-live={summary.live ? "" : undefined}>
+		<div
+			className="chat-group"
+			data-group
+			data-live={summary.live ? "" : undefined}
+			data-thinking={thinking ? "" : undefined}
+		>
 			{summary.live ? (
 				<LiveRow
+					detail={summary.live.detail}
 					onToggle={(next) => rest.toggleRow(row.key, next)}
 					open={open}
 					since={summary.live.since}
@@ -181,17 +192,16 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 					<span className="chat-group__text">{processSentence(summary)}</span>
 				</Head>
 			)}
-			{shown.length > 0 ? (
+			{shown.length > 0 || (open && thinking) ? (
 				<div className="chat-group__body">
 					{shown.map((member) =>
 						member === running && member.kind === "tool" && member !== runningAgent ? (
-							<div className="chat-group__running" key={member.key}>
-								{liveVerb(member.call)}
-							</div>
+							<LiveLine key={member.key} step={liveStep(member.call)} />
 						) : (
 							<Member key={member.key} member={member} {...rest} />
 						),
 					)}
+					{open && thinking ? <LiveLine step={thinking} /> : null}
 				</div>
 			) : null}
 			{running?.kind === "tool" ? <ResolvedLine call={running.call} /> : null}

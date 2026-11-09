@@ -766,6 +766,34 @@ function liveEntries(): ChatEntry[] {
 	}));
 }
 
+export const MOCK_ACTIVITY_CHAT_SESSION = "demo-chat-activity";
+
+export const ACTIVITY_DESCRIPTION =
+	"รันเทสต์ทั้งหมดของแพ็กเกจ webhook พร้อมตรวจ race condition แล้วรวมผลลัพธ์ของทุกเคสไว้ในไฟล์เดียวเพื่อให้ตรวจย้อนหลังได้ง่ายขึ้น จากนั้นเปรียบเทียบเวลาที่ใช้ของแต่ละเคสกับรอบก่อนหน้าเพื่อหาเคสที่ช้าลงผิดปกติและสรุปให้อ่านง่ายในตอนท้าย";
+
+function activityEntries(): ChatEntry[] {
+	const steps: Step[] = [
+		["host", { kind: "spawn", argv: ["claude"], resume: "", pid: 1 }],
+		sent("activity-brief", "Run the webhook tests with the race detector and report the result."),
+		lifecycle("activity-brief", "started"),
+		say("msg_a1", "Reading the sender first, then running the tests."),
+		tool("t-act-1", "msg_a2", "Read", { file_path: "/work/project/internal/webhook/sender.go" }),
+		result("t-act-1", "package webhook\n..."),
+		tool("t-act-2", "msg_a3", "Grep", { pattern: "parkedTotal", path: "/work/project/internal" }),
+		result("t-act-2", "Found 4 matches"),
+		tool("t-act-3", "msg_a4", "Bash", {
+			command: "go test -race ./internal/webhook/... -count=1 -json | tee /tmp/webhook-race.json",
+			description: ACTIVITY_DESCRIPTION,
+		}),
+	];
+	return steps.map(([dir, payload], i) => ({
+		seq: i + 1,
+		ts: new Date(Date.now() - (steps.length - i) * 1_000 - 20_000).toISOString(),
+		dir,
+		payload,
+	}));
+}
+
 export const MOCK_THINKING_CHAT_SESSION = "demo-chat-thinking";
 
 const thinkingTokens = (estimated: number, delta: number): Step => [
@@ -933,9 +961,11 @@ function stubSession(id: string): Promise<StubSession> {
 																						? exitsEntries()
 																						: id === MOCK_FOLD_CHAT_SESSION
 																							? foldAnswerEntries()
-																							: long
-																								? fixture
-																								: mockChatEntries(fixture);
+																							: id === MOCK_ACTIVITY_CHAT_SESSION
+																								? activityEntries()
+																								: long
+																									? fixture
+																									: mockChatEntries(fixture);
 			const folder = new ChatFolder();
 			log.forEach((entry) => folder.apply(entry));
 			return { log, folder, sent: 0 };
