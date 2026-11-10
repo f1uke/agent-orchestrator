@@ -143,6 +143,13 @@ func (c Client) SetModel(ctx context.Context, model string) error {
 	return c.call(ctx, map[string]string{"op": "set_model", "model": model}, &okResponse{})
 }
 
+// SetEffort changes the reasoning effort of the running claude from its next
+// request and returns once claude has accepted it. A level no model offers is a
+// RefusedError.
+func (c Client) SetEffort(ctx context.Context, level string) error {
+	return c.call(ctx, map[string]string{"op": "set_effort", "level": level}, &okResponse{})
+}
+
 // SetChrome relaunches claude with Claude in Chrome on or off, resuming the
 // same conversation. The host refuses while a turn runs, as a RefusedError.
 func (c Client) SetChrome(ctx context.Context, enabled bool) error {
