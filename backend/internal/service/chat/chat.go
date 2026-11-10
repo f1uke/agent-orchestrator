@@ -78,6 +78,16 @@ func (s *Service) SetModel(ctx context.Context, id domain.SessionID, model strin
 	return hostError(id, c.SetModel(ctx, model))
 }
 
+// SetEffort changes the reasoning effort of the session's claude from its next
+// request. A level no model lists is CHAT_REQUEST_REJECTED with the host's reason.
+func (s *Service) SetEffort(ctx context.Context, id domain.SessionID, level string) error {
+	c, err := s.client(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hostError(id, c.SetEffort(ctx, level))
+}
+
 // SetChrome turns Claude in Chrome on or off for the session by relaunching its
 // claude on the same conversation. A turn in flight is CHAT_REQUEST_REJECTED.
 func (s *Service) SetChrome(ctx context.Context, id domain.SessionID, enabled bool) error {

@@ -24,6 +24,7 @@ type ChatService interface {
 	Interrupt(ctx context.Context, id domain.SessionID) error
 	SetMode(ctx context.Context, id domain.SessionID, mode chatproto.PermissionMode) error
 	SetModel(ctx context.Context, id domain.SessionID, model string) error
+	SetEffort(ctx context.Context, id domain.SessionID, level string) error
 	SetChrome(ctx context.Context, id domain.SessionID, enabled bool) error
 	StopTask(ctx context.Context, id domain.SessionID, taskID string) error
 	Rewind(ctx context.Context, id domain.SessionID, uuid string, restoreFiles bool) error
@@ -50,6 +51,7 @@ func (c *ChatController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/chat/bash/stop", c.stopBash)
 	r.Put("/sessions/{sessionId}/chat/mode", c.setMode)
 	r.Put("/sessions/{sessionId}/chat/model", c.setModel)
+	r.Put("/sessions/{sessionId}/chat/effort", c.setEffort)
 	r.Put("/sessions/{sessionId}/chat/remote-control", c.setRemoteControl)
 	r.Put("/sessions/{sessionId}/chat/chrome", c.setChrome)
 }
@@ -260,6 +262,28 @@ func (c *ChatController) setModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.Svc.SetModel(r.Context(), sessionID(r), model); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ChatAckResponse{OK: true})
+}
+
+func (c *ChatController) setEffort(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/chat/effort")
+		return
+	}
+	var body SetChatEffortRequest
+	if err := decodeJSON(r, &body); err != nil {
+		chatBadRequest(w, r, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	level := strings.TrimSpace(body.Level)
+	if level == "" {
+		chatBadRequest(w, r, "LEVEL_REQUIRED", "level is required")
+		return
+	}
+	if err := c.Svc.SetEffort(r.Context(), sessionID(r), level); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
