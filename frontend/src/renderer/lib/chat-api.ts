@@ -37,6 +37,8 @@ export type ChatApi = {
 	/** Starts or stops Remote Control. The state and the session URL come back in the chat log, not in the result. */
 	setRemoteControl: (sessionId: string, enabled: boolean) => Promise<ChatResult>;
 	setChrome: (sessionId: string, enabled: boolean) => Promise<ChatResult>;
+	/** Sets the reasoning effort for the next requests; the level in use comes back in the chat log, not in the result. */
+	setEffort: (sessionId: string, level: string) => Promise<ChatResult>;
 	/** Runs a "!" command in the session's worktree as the person. The output comes back in the chat log, not in the result. */
 	runBash: (sessionId: string, command: string) => Promise<BashResult>;
 	/** Stops the running "!" command with this id. A finished or unknown id is a no-op. */
@@ -135,6 +137,8 @@ export const httpChatApi: ChatApi = {
 		),
 	setChrome: (sessionId, enabled) =>
 		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/chrome", { ...path(sessionId), body: { enabled } })),
+	setEffort: (sessionId, level) =>
+		settle(apiClient.PUT("/api/v1/sessions/{sessionId}/chat/effort", { ...path(sessionId), body: { level } })),
 	runBash,
 	stopBash: (sessionId, id) =>
 		settle(apiClient.POST("/api/v1/sessions/{sessionId}/chat/bash/stop", { ...path(sessionId), body: { id } })),

@@ -265,6 +265,7 @@ export function ChatPane({
 												bashBusy={transcript.bashBusy}
 												busy={transcript.busy}
 												chrome={transcript.chrome}
+												effort={transcript.effort}
 												commands={transcript.commands}
 												model={transcript.model}
 												models={transcript.models}
