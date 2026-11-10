@@ -308,6 +308,9 @@ const MOCK_COMMANDS = [
 	{ name: "open-pr", description: "Open the PR against the session target", argumentHint: "", builtin: false },
 ];
 
+// claude with no --effort applies medium, which is what a real get_settings answers.
+const MOCK_DEFAULT_EFFORT = "medium";
+
 function initialize(fixture: readonly ChatEntry[]): Step[] {
 	const answer = fixture.find((e) => e.dir === "out" && isObject(e.payload) && e.payload.type === "control_response")
 		?.payload as { response?: { response?: Record<string, unknown> } } | undefined;
@@ -319,6 +322,18 @@ function initialize(fixture: readonly ChatEntry[]): Step[] {
 			{
 				type: "control_response",
 				response: { subtype: "success", request_id: "demo-init", response: { ...body, commands: MOCK_COMMANDS } },
+			},
+		],
+		["in", { type: "control_request", request_id: "demo-settings", request: { subtype: "get_settings" } }],
+		[
+			"out",
+			{
+				type: "control_response",
+				response: {
+					subtype: "success",
+					request_id: "demo-settings",
+					response: { applied: { effort: MOCK_DEFAULT_EFFORT } },
+				},
 			},
 		],
 	];
@@ -1100,6 +1115,25 @@ export const stubChatApi: ChatApi = {
 		]);
 		return OK;
 	},
+	setEffort: async (id, level) => {
+		const session = await stubSession(id);
+		if (!session.folder.transcript().models.some((m) => m.supportedEffortLevels.includes(level))) {
+			return { ok: false, error: { kind: "rejected", message: `Effort '${level}' is not supported` } };
+		}
+		const requestId = `stub-effort-${session.folder.lastSeq}`;
+		append(id, session, [
+			[
+				"in",
+				{
+					type: "control_request",
+					request_id: requestId,
+					request: { subtype: "apply_flag_settings", settings: { effortLevel: level } },
+				},
+			],
+			["out", { type: "control_response", response: { subtype: "success", request_id: requestId } }],
+		]);
+		return OK;
+	},
 	rewind: async (id, uuid, restoreFiles) => {
 		const session = await stubSession(id);
 		const requestId = `stub-rewind-${++session.sent}`;
@@ -1153,7 +1187,8 @@ export const stubChatApi: ChatApi = {
 		if (session.folder.transcript().busy) {
 			return { ok: false, error: { kind: "rejected", message: "claude is busy: wait for the turn to end" } };
 		}
-		const argv = enabled ? ["claude", CHROME_FLAG] : ["claude"];
+		const { effort } = session.folder.transcript();
+		const argv = ["claude", ...(effort ? ["--effort", effort] : []), ...(enabled ? [CHROME_FLAG] : [])];
 		append(id, session, [["host", { kind: "spawn", argv, resume: SESSION, pid: session.folder.lastSeq + 2 }]]);
 		return OK;
 	},

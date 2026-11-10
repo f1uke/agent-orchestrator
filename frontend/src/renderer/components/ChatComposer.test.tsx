@@ -57,6 +57,8 @@ function renderComposer(
 		bashBusy?: boolean;
 		remoteControl?: RemoteControl;
 		chrome?: boolean;
+		effort?: string;
+		models?: ChatModel[];
 		sessionId?: string;
 	} = {},
 ) {
@@ -68,6 +70,7 @@ function renderComposer(
 		setModel: vi.fn<ChatActions["setModel"]>(async () => OK),
 		setRemoteControl: vi.fn<ChatActions["setRemoteControl"]>(async () => OK),
 		setChrome: vi.fn<ChatActions["setChrome"]>(async () => OK),
+		setEffort: vi.fn<ChatActions["setEffort"]>(async () => OK),
 		runBash: vi.fn<ChatActions["runBash"]>(async () => ({ ok: true, id: "b1" })),
 		stopBash: vi.fn<ChatActions["stopBash"]>(async () => OK),
 		stopTask: vi.fn<ChatActions["stopTask"]>(async () => ({ ok: true })),
@@ -89,10 +92,11 @@ function renderComposer(
 				bashBusy={live.bashBusy ?? false}
 				busy={live.busy ?? false}
 				chrome={live.chrome ?? false}
+				effort={live.effort ?? ""}
 				suggestion={suggestion}
 				commands={COMMANDS}
 				model="claude-opus-5-5"
-				models={MODELS}
+				models={live.models ?? MODELS}
 				remoteControl={live.remoteControl ?? REMOTE_CONTROL_OFF}
 				onToast={onToast}
 				permissionMode="default"
@@ -221,8 +225,59 @@ describe("ChatComposer model picker", () => {
 		expect(opus).toHaveTextContent("default");
 		expect(screen.getByRole("menuitemradio", { name: /Sonnet 5\.5/ })).toHaveAttribute("aria-checked", "false");
 		expect(screen.queryByRole("menuitemradio", { name: /Default \(recommended\)/ })).toBeNull();
-		expect(screen.getByTestId("chat-effort-hint")).toHaveTextContent("low · medium · high · xhigh · max");
 		expect(screen.getByRole("menuitemradio", { name: "Ask before edits" })).toHaveAttribute("aria-checked", "true");
+	});
+
+	it("lists the model's effort levels as radio items and checks the one in use", async () => {
+		const { user } = renderComposer({}, { effort: "high" });
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		for (const level of ["low", "medium", "high", "xhigh", "max"]) {
+			const item = await screen.findByRole("menuitemradio", { name: level });
+			expect(item).toHaveAttribute("aria-checked", String(level === "high"));
+		}
+	});
+
+	it("checks no level while the effort is unknown", async () => {
+		const { user } = renderComposer();
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		expect(await screen.findByRole("menuitemradio", { name: "medium" })).toHaveAttribute("aria-checked", "false");
+		expect(screen.getByRole("menuitemradio", { name: "high" })).toHaveAttribute("aria-checked", "false");
+	});
+
+	it("sends the picked effort level", async () => {
+		const { user, actions } = renderComposer({}, { effort: "high" });
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		await user.click(await screen.findByRole("menuitemradio", { name: "low" }));
+		await act(async () => undefined);
+		expect(actions.setEffort).toHaveBeenCalledWith("low");
+	});
+
+	it("shows claude's refusal of an effort level", async () => {
+		const { user, onToast } = renderComposer({
+			setEffort: vi.fn(
+				async () => ({ ok: false, error: { kind: "rejected", message: "Effort 'max' not supported" } }) as const,
+			),
+		});
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		await user.click(await screen.findByRole("menuitemradio", { name: "max" }));
+		await act(async () => undefined);
+		expect(onToast).toHaveBeenCalledWith("Effort 'max' not supported");
+	});
+
+	it("offers no effort levels for a model without effort support", async () => {
+		const haiku: ChatModel = {
+			value: "haiku",
+			resolvedModel: "claude-opus-5-5",
+			displayName: "Haiku 4.5",
+			description: "",
+			supportsEffort: false,
+			supportedEffortLevels: [],
+		};
+		const { user } = renderComposer({}, { models: [haiku], effort: "high" });
+		await user.click(screen.getByRole("button", { name: /Model and mode/ }));
+		await screen.findByRole("menuitemradio", { name: /Haiku 4\.5/ });
+		expect(screen.queryByText("Effort")).toBeNull();
+		expect(screen.queryByRole("menuitemradio", { name: "high" })).toBeNull();
 	});
 
 	it("sends the picked model's value", async () => {

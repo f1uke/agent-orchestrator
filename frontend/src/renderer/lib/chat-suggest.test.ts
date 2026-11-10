@@ -104,6 +104,7 @@ describe("liveSuggestions", () => {
 				commands: [],
 				models: [],
 				model: "",
+				effort: "",
 				chrome: false,
 				tasks: [],
 				agentModels: {},

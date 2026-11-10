@@ -82,6 +82,7 @@ function fakeApi() {
 		setModel: vi.fn<ChatApi["setModel"]>(async () => OK),
 		setRemoteControl: vi.fn<ChatApi["setRemoteControl"]>(async () => OK),
 		setChrome: vi.fn<ChatApi["setChrome"]>(async () => OK),
+		setEffort: vi.fn<ChatApi["setEffort"]>(async () => OK),
 		runBash: vi.fn<ChatApi["runBash"]>(async () => ({ ok: true, id: "b1" })),
 		stopBash: vi.fn<ChatApi["stopBash"]>(async () => OK),
 		stopTask: vi.fn<ChatApi["stopTask"]>(async () => OK),

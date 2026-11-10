@@ -208,6 +208,8 @@ export type Transcript = {
 	models: ChatModel[];
 	/** In use: the spawn's --model, then system/init or an accepted set_model. */
 	model: string;
+	/** In use: the spawn's --effort, then a get_settings answer or an accepted apply_flag_settings. "" when unknown. */
+	effort: string;
 	chrome: boolean;
 	tasks: BackgroundTask[];
 	/** The model each subagent's messages name, by the Agent call's tool_use id. */
@@ -278,12 +280,12 @@ function flagsOf(argv: readonly string[]): readonly string[] {
 	return end < 0 ? argv : argv.slice(0, end);
 }
 
-function modelFlag(argv: readonly string[]): string {
+function flagValue(argv: readonly string[], name: string): string {
 	const flags = flagsOf(argv);
 	for (let i = 0; i < flags.length; i++) {
 		const arg = flags[i];
-		if (arg.startsWith("--model=")) return arg.slice("--model=".length);
-		if (arg === "--model" && i + 1 < flags.length) return flags[i + 1];
+		if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1);
+		if (arg === name && i + 1 < flags.length) return flags[i + 1];
 	}
 	return "";
 }
@@ -307,14 +309,16 @@ export class ChatFolder {
 	private pending: Pending[] = [];
 	private mode = "";
 	private cost = 0;
-	// The id of a host's initialize, set_model or remote_control request, to what
-	// it asked, because claude's response does not repeat it.
-	private controls = new Map<string, { subtype: string; enabled: boolean }>();
+	// The id of a host's initialize, set_model, remote_control, get_settings or
+	// apply_flag_settings request, to what it asked, because claude's response
+	// does not repeat it.
+	private controls = new Map<string, { subtype: string; enabled: boolean; level: string }>();
 	private rewinds = new Map<string, RewindAsk>();
 	private remote: RemoteControl = REMOTE_CONTROL_OFF;
 	private slash: ChatCommand[] = [];
 	private models: ChatModel[] = [];
 	private model = "";
+	private effort = "";
 	private chrome = false;
 	private tasks = new Map<string, BackgroundTask>();
 	private agentModels: Record<string, string> = {};
@@ -387,6 +391,7 @@ export class ChatFolder {
 			commands: [...this.slash],
 			models: [...this.models],
 			model: this.model,
+			effort: this.effort,
 			chrome: this.chrome,
 			tasks: [...this.tasks.values()],
 			agentModels: { ...this.agentModels },
@@ -493,14 +498,20 @@ export class ChatFolder {
 		} else if (event.type === "control_response") this.answerPermission(event);
 		else if (event.type === "control_request") {
 			if (event.rewind && !event.rewind.dryRun) this.rewinds.set(event.requestId, event.rewind);
-			else this.askControl(event.requestId, event.subtype, event.enabled === true);
+			else this.askControl(event);
 		}
 	}
 
-	private askControl(requestId: string, subtype: string, enabled: boolean): void {
-		if (subtype === "initialize" || subtype === "set_model") this.controls.set(requestId, { subtype, enabled });
-		else if (subtype === "remote_control") {
-			this.controls.set(requestId, { subtype, enabled });
+	private askControl(event: Extract<ChatEvent, { type: "control_request" }>): void {
+		const { requestId, subtype } = event;
+		const enabled = event.enabled === true;
+		const level = event.effortLevel ?? "";
+		if (subtype === "initialize" || subtype === "set_model" || subtype === "get_settings") {
+			this.controls.set(requestId, { subtype, enabled, level });
+		} else if (subtype === "apply_flag_settings") {
+			if (level !== "") this.controls.set(requestId, { subtype, enabled, level });
+		} else if (subtype === "remote_control") {
+			this.controls.set(requestId, { subtype, enabled, level });
 			if (enabled) this.remote = { state: "connecting", url: "", detail: "" };
 		}
 	}
@@ -525,9 +536,17 @@ export class ChatFolder {
 			this.answerRemote(response, control.enabled);
 			return;
 		}
-		if (!response.ok || !isObject(response.response)) return;
+		if (!response.ok) return;
+		if (subtype === "apply_flag_settings") {
+			this.effort = control.level;
+			return;
+		}
+		if (!isObject(response.response)) return;
 		const body = response.response;
-		if (subtype === "initialize") {
+		if (subtype === "get_settings") {
+			const applied = isObject(body.applied) ? strField(body.applied, "effort") : "";
+			if (applied !== "") this.effort = applied;
+		} else if (subtype === "initialize") {
 			this.slash = parseCommands(body.commands);
 			this.models = parseModels(body.models);
 		} else if (typeof body.model === "string" && body.model !== "") {
@@ -714,7 +733,8 @@ export class ChatFolder {
 		switch (note.kind) {
 			case "spawn":
 				this.endProcess();
-				this.model = modelFlag(note.argv);
+				this.model = flagValue(note.argv, "--model");
+				this.effort = flagValue(note.argv, "--effort");
 				this.chrome = flagsOf(note.argv).includes(CHROME_FLAG);
 				this.awaitingBrief = note.resume === "";
 				if (note.resume !== "") this.notice("resumed", note.resume);

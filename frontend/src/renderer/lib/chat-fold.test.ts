@@ -696,6 +696,74 @@ describe("chat fold parity: commands, models and the model in use", () => {
 	});
 });
 
+describe("chat fold: the reasoning effort in use", () => {
+	const asked = (seq: number, id: string, request: object) =>
+		synth(seq, "in", { type: "control_request", request_id: id, request });
+	const answered = (seq: number, id: string, response?: object) =>
+		synth(seq, "out", {
+			type: "control_response",
+			response: { subtype: "success", request_id: id, ...(response && { response }) },
+		});
+	const refused = (seq: number, id: string) =>
+		synth(seq, "out", { type: "control_response", response: { subtype: "error", request_id: id, error: "no" } });
+	const spawn = (seq: number, argv: string[]) => synth(seq, "host", { kind: "spawn", resume: "", argv });
+	const getSettings = (seq: number, id: string) => asked(seq, id, { subtype: "get_settings" });
+	const apply = (seq: number, id: string, effortLevel: unknown) =>
+		asked(seq, id, { subtype: "apply_flag_settings", settings: { effortLevel } });
+
+	it("is unknown until something says", () => {
+		expect(foldEntries([]).effort).toBe("");
+		expect(foldEntries([spawn(1, ["claude", "-p"])]).effort).toBe("");
+	});
+
+	it.each([
+		[["claude", "--effort", "high"], "high"],
+		[["claude", "--effort=low"], "low"],
+		[["claude", "--", "--effort", "high"], ""],
+		[["claude", "--effort"], ""],
+	])("a spawn with argv %j takes effort %j", (argv, want) => {
+		expect(foldEntries([spawn(1, argv)]).effort).toBe(want);
+	});
+
+	it("a respawn without --effort forgets the level of the process before", () => {
+		const tr = foldEntries([spawn(1, ["claude", "--effort", "high"]), spawn(2, ["claude"])]);
+		expect(tr.effort).toBe("");
+	});
+
+	it("reads the level a get_settings answer says is applied", () => {
+		const tr = foldEntries([getSettings(1, "gs"), answered(2, "gs", { applied: { effort: "medium" } })]);
+		expect(tr.effort).toBe("medium");
+	});
+
+	it("ignores a get_settings answer that is refused or carries no level", () => {
+		const base = [spawn(1, ["claude", "--effort", "high"])];
+		expect(foldEntries([...base, getSettings(2, "gs"), refused(3, "gs")]).effort).toBe("high");
+		expect(foldEntries([...base, getSettings(2, "gs"), answered(3, "gs", { applied: {} })]).effort).toBe("high");
+	});
+
+	it("takes the level of an accepted apply_flag_settings, though claude answers with no body", () => {
+		const tr = foldEntries([spawn(1, ["claude", "--effort", "high"]), apply(2, "ef", "low"), answered(3, "ef")]);
+		expect(tr.effort).toBe("low");
+	});
+
+	it("leaves the level alone while the request is unanswered or when it is refused", () => {
+		const base = [spawn(1, ["claude", "--effort", "high"]), apply(2, "ef", "low")];
+		expect(foldEntries(base).effort).toBe("high");
+		expect(foldEntries([...base, refused(3, "ef")]).effort).toBe("high");
+	});
+
+	it("ignores an apply_flag_settings that sets no effort level", () => {
+		const tr = foldEntries([
+			spawn(1, ["claude", "--effort", "high"]),
+			apply(2, "ef", null),
+			answered(3, "ef"),
+			asked(4, "other", { subtype: "apply_flag_settings", settings: { alwaysThinkingEnabled: true } }),
+			answered(5, "other"),
+		]);
+		expect(tr.effort).toBe("high");
+	});
+});
+
 describe("chat fold: long_session.jsonl", () => {
 	const tr = foldEntries(loadFixture("long_session.jsonl"));
 	const task = (id: string) => tr.tasks.find((t) => t.id === id);
