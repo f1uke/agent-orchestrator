@@ -67,9 +67,13 @@ func TestContextUsageAskedAfterInitializeAndEachTurn(t *testing.T) {
 			t.Errorf("seq %d lost the categories: %s", e.Seq, e.Payload)
 		}
 	}
-	// The fake answers an ask only while it reads stdin for its next fixture
-	// input, and an ask after its last one may not be written at all once the
-	// fake exits and closes stdin.
+	readable := asksTheFakeCanRead(got, asks)
+	if answered != readable {
+		t.Errorf("logged %d context answers, want %d: every ask written before the fake's last input", answered, readable)
+	}
+}
+
+func asksTheFakeCanRead(got []chatproto.Entry, asks []int) int {
 	lastInput := 0
 	for i, e := range got {
 		id := messageID(e.Payload)
@@ -77,15 +81,13 @@ func TestContextUsageAskedAfterInitializeAndEachTurn(t *testing.T) {
 			lastInput = i
 		}
 	}
-	readable := 0
+	n := 0
 	for _, i := range asks {
 		if i < lastInput {
-			readable++
+			n++
 		}
 	}
-	if answered != readable {
-		t.Errorf("logged %d context answers, want %d: every ask written before the fake's last input", answered, readable)
-	}
+	return n
 }
 
 func unansweredContextHost(t *testing.T, timeout time.Duration) Config {

@@ -151,8 +151,6 @@ func recordStdin(line []byte) error {
 	return f.Close()
 }
 
-// fakeAsks maps the requests the host sends on its own to the file whose
-// contents the fake answers with; with no file the fake reads them and stays silent.
 func fakeAsks() (map[string][]byte, error) {
 	asks := map[string][]byte{}
 	for kind, env := range map[string]string{

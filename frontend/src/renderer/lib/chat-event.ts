@@ -141,7 +141,6 @@ export type ChatEvent =
 			requestId: string;
 			subtype: string;
 			enabled?: boolean;
-			/** The effortLevel an apply_flag_settings asks for; absent when it sets none. */
 			effortLevel?: string;
 			canUseTool?: CanUseTool;
 			rewind?: RewindAsk;

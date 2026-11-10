@@ -439,9 +439,8 @@ func (h *host) endProcessLocked() {
 	}
 }
 
-// setEffort applies level from claude's next request, so unlike Chrome it does
-// not wait for a turn to end. Claude answers success for a level it does not
-// know, so the levels the initialize answer offers decide.
+// Claude answers success for a level it does not know, so the levels the
+// initialize answer offers decide.
 func (h *host) setEffort(level string) (any, error) {
 	h.mu.Lock()
 	running := !h.closed && h.stdin != nil
@@ -607,8 +606,6 @@ func onlyApplied(line []byte) []byte {
 	})
 }
 
-// trimResponseBody rewrites the body of a control_response line with trim, which
-// reports whether it changed the body. A line that does not parse is kept as is.
 func trimResponseBody(line []byte, trim func(body map[string]json.RawMessage) bool) []byte {
 	var w struct {
 		Type     string `json:"type"`

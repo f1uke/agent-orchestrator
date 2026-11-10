@@ -207,8 +207,8 @@ type Folder struct {
 
 type control struct {
 	subtype string
-	enabled bool   // remote_control only
-	level   string // apply_flag_settings only
+	enabled bool // remote_control only
+	level   string
 }
 
 // NewFolder returns an empty Folder.
@@ -580,7 +580,6 @@ func flagsOf(argv []string) []string {
 	return argv
 }
 
-// flagValue is the value of a claude flag given as "--name v" or "--name=v".
 func flagValue(argv []string, name string) string {
 	argv = flagsOf(argv)
 	for i, a := range argv {

@@ -47,9 +47,8 @@ type SetModel struct {
 	Model     string
 }
 
-// SetEffort changes the reasoning effort of the running session from its next
-// request, through apply_flag_settings. Claude answers success without a body,
-// and also for a level it does not know, so the host checks the level first.
+// SetEffort changes the reasoning effort through apply_flag_settings. Claude
+// answers success for a level it does not know, so the host checks the level.
 type SetEffort struct {
 	RequestID string
 	Level     string
