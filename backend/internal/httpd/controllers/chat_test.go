@@ -30,6 +30,7 @@ type chatCall struct {
 	decision  chatproto.Decision
 	mode      chatproto.PermissionMode
 	model     string
+	level     string
 	taskID    string
 	uuid      string
 	restore   bool
@@ -66,6 +67,11 @@ func (f *fakeChatService) SetMode(_ context.Context, id domain.SessionID, mode c
 
 func (f *fakeChatService) SetModel(_ context.Context, id domain.SessionID, model string) error {
 	f.calls = append(f.calls, chatCall{op: "set_model", id: id, model: model})
+	return f.err
+}
+
+func (f *fakeChatService) SetEffort(_ context.Context, id domain.SessionID, level string) error {
+	f.calls = append(f.calls, chatCall{op: "set_effort", id: id, level: level})
 	return f.err
 }
 
@@ -122,6 +128,7 @@ var chatRoutes = []chatRoute{
 	{"interrupt", "POST", "/api/v1/sessions/s-1/chat/interrupt", ``},
 	{"mode", "PUT", "/api/v1/sessions/s-1/chat/mode", `{"mode":"plan"}`},
 	{"model", "PUT", "/api/v1/sessions/s-1/chat/model", `{"model":"haiku"}`},
+	{"effort", "PUT", "/api/v1/sessions/s-1/chat/effort", `{"level":"high"}`},
 	{"remote control", "PUT", "/api/v1/sessions/s-1/chat/remote-control", `{"enabled":true}`},
 	{"chrome", "PUT", "/api/v1/sessions/s-1/chat/chrome", `{"enabled":true}`},
 	{"stop task", "POST", "/api/v1/sessions/s-1/chat/tasks/bq3k9x1ab/stop", ``},
@@ -284,6 +291,24 @@ func TestChatInterruptAndMode(t *testing.T) {
 	}
 }
 
+func TestChatSetEffort(t *testing.T) {
+	svc := &fakeChatService{}
+	srv := newChatTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/s-1/chat/effort", `{"level":" xhigh "}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", status, body)
+	}
+	var resp controllers.ChatAckResponse
+	mustJSON(t, body, &resp)
+	if !resp.OK {
+		t.Errorf("response = %s, want ok", body)
+	}
+	want := []chatCall{{op: "set_effort", id: "s-1", level: "xhigh"}}
+	if !reflect.DeepEqual(svc.calls, want) {
+		t.Errorf("service got %+v, want %+v", svc.calls, want)
+	}
+}
+
 func TestChatRemoteControl(t *testing.T) {
 	svc := &fakeChatService{}
 	srv := newChatTestServer(t, svc)
@@ -401,6 +426,9 @@ func TestChatBadRequestsNeverReachTheService(t *testing.T) {
 		{"model: not JSON", "PUT", "model", `{`, "INVALID_JSON"},
 		{"model: empty", "PUT", "model", `{}`, "MODEL_REQUIRED"},
 		{"model: blank", "PUT", "model", `{"model":"  "}`, "MODEL_REQUIRED"},
+		{"effort: not JSON", "PUT", "effort", `{`, "INVALID_JSON"},
+		{"effort: empty", "PUT", "effort", `{}`, "LEVEL_REQUIRED"},
+		{"effort: blank", "PUT", "effort", `{"level":"  "}`, "LEVEL_REQUIRED"},
 		{"bash: not JSON", "POST", "bash", `{`, "INVALID_JSON"},
 		{"bash: no command", "POST", "bash", `{}`, "COMMAND_REQUIRED"},
 		{"bash: blank command", "POST", "bash", `{"command":" \t\n "}`, "COMMAND_REQUIRED"},

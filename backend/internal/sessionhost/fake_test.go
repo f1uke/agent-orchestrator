@@ -26,6 +26,7 @@ const (
 	envFakeSleeper  = "SESSIONHOST_FAKE_SLEEPER"
 	envFakeParent   = "SESSIONHOST_FAKE_PARENT"
 	envFakeContext  = "SESSIONHOST_FAKE_CONTEXT"
+	envFakeSettings = "SESSIONHOST_FAKE_SETTINGS"
 	envFakeEnv      = "SESSIONHOST_FAKE_ENV"
 	envFakeStdin    = "SESSIONHOST_FAKE_STDIN"
 )
@@ -87,7 +88,7 @@ func fakeClaude(fixture string) int {
 		return fail("%v", err)
 	}
 
-	contextBody, err := fakeContextBody()
+	asks, err := fakeAsks()
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -104,7 +105,7 @@ func fakeClaude(fixture string) int {
 				return fail("write stdout: %v", err)
 			}
 		case chatproto.DirIn:
-			got, err := readSkippingContextRequests(stdin, contextBody)
+			got, err := readSkippingHostAsks(stdin, asks)
 			if err != nil {
 				if stubborn {
 					time.Sleep(time.Hour)
@@ -150,19 +151,37 @@ func recordStdin(line []byte) error {
 	return f.Close()
 }
 
-func fakeContextBody() ([]byte, error) {
-	p := os.Getenv(envFakeContext)
-	if p == "" {
-		return nil, nil
+// fakeAsks maps the requests the host sends on its own to the file whose
+// contents the fake answers with; with no file the fake reads them and stays silent.
+func fakeAsks() (map[string][]byte, error) {
+	asks := map[string][]byte{}
+	for kind, env := range map[string]string{
+		"control_request/get_context_usage": envFakeContext,
+		"control_request/get_settings":      envFakeSettings,
+	} {
+		p := os.Getenv(env)
+		if p == "" {
+			asks[kind] = nil
+			continue
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		asks[kind] = b
 	}
-	return os.ReadFile(p)
+	return asks, nil
 }
 
-func readSkippingContextRequests(stdin *bufio.Reader, body []byte) ([]byte, error) {
+func readSkippingHostAsks(stdin *bufio.Reader, asks map[string][]byte) ([]byte, error) {
 	for {
 		got, err := stdin.ReadBytes('\n')
-		if err != nil || messageKind(got) != "control_request/get_context_usage" {
+		if err != nil {
 			return got, err
+		}
+		body, isAsk := asks[messageKind(got)]
+		if !isAsk {
+			return got, nil
 		}
 		if body == nil {
 			continue

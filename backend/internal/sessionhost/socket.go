@@ -43,6 +43,8 @@ type setModeRequest struct{ Mode chatproto.PermissionMode }
 
 type setModelRequest struct{ Model string }
 
+type setEffortRequest struct{ Level string }
+
 type setChromeRequest struct{ Enabled bool }
 
 type stopTaskRequest struct{ TaskID string }
@@ -68,6 +70,7 @@ func (answerRequest) isRequest()        {}
 func (interruptRequest) isRequest()     {}
 func (setModeRequest) isRequest()       {}
 func (setModelRequest) isRequest()      {}
+func (setEffortRequest) isRequest()     {}
 func (setChromeRequest) isRequest()     {}
 func (stopTaskRequest) isRequest()      {}
 func (rewindRequest) isRequest()        {}
@@ -95,6 +98,7 @@ func parseRequest(line []byte) (request, error) {
 		Interrupt          bool              `json:"interrupt"`
 		Mode               string            `json:"mode"`
 		Model              string            `json:"model"`
+		Level              string            `json:"level"`
 		TaskID             string            `json:"task_id"`
 		UUID               string            `json:"uuid"`
 		RestoreFiles       bool              `json:"restore_files"`
@@ -150,6 +154,11 @@ func parseRequest(line []byte) (request, error) {
 			return nil, errors.New("set_model needs model")
 		}
 		return setModelRequest{Model: w.Model}, nil
+	case "set_effort":
+		if w.Level == "" {
+			return nil, errors.New("set_effort needs level")
+		}
+		return setEffortRequest{Level: w.Level}, nil
 	case "set_chrome":
 		if w.Enabled == nil {
 			return nil, errors.New("set_chrome needs enabled")
@@ -348,6 +357,8 @@ func (h *host) do(req request) (any, error) {
 		return h.control("set_model", func(id string) chatproto.Outbound {
 			return chatproto.SetModel{RequestID: id, Model: r.Model}
 		})
+	case setEffortRequest:
+		return h.setEffort(r.Level)
 	case remoteControlRequest:
 		return h.control("remote_control", func(id string) chatproto.Outbound {
 			return chatproto.SetRemoteControl{RequestID: id, Enabled: r.Enabled}
