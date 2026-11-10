@@ -20,6 +20,8 @@ type Transcript struct {
 	Models           []Model       // from the latest initialize response
 	Model            string        // in use: the spawn's --model, then system/init or an accepted set_model
 	ChosenModel      string        // the latest accepted set_model, which a respawn passes as --model
+	Effort           string        // in use: the spawn's --effort, then a get_settings answer or an accepted apply_flag_settings; empty when unknown
+	ChosenEffort     string        // the latest accepted apply_flag_settings effortLevel, which a respawn passes as --effort
 	RemoteControl    RemoteControl // the Remote Control bridge; off after a process ends
 	Chrome           bool
 	Bash             *BashItem // the "!" command run the session is busy with, until it settles; nil when none
@@ -186,14 +188,17 @@ type Folder struct {
 	pending  []Pending
 	mode     string
 	cost     float64
-	// controls maps the id of a host's initialize, set_model or remote_control
-	// request to what it asked, because claude's response does not repeat it.
+	// controls maps the id of a host's initialize, set_model, get_settings,
+	// apply_flag_settings or remote_control request to what it asked, because
+	// claude's response does not repeat it.
 	controls map[string]control
 	remote   RemoteControl
 	slash    []Command
 	models   []Model
 	model    string
 	chosen   string
+	effort   string
+	chosenEf string
 	chrome   bool
 	suggest  string
 	bashes   map[string]*BashItem // every "!" command run, by id
@@ -202,7 +207,8 @@ type Folder struct {
 
 type control struct {
 	subtype string
-	enabled bool // remote_control only
+	enabled bool   // remote_control only
+	level   string // apply_flag_settings only
 }
 
 // NewFolder returns an empty Folder.
@@ -317,8 +323,12 @@ func (f *Folder) applyIn(ev Event) {
 			return
 		}
 		switch c.Subtype {
-		case "initialize", "set_model":
+		case "initialize", "set_model", "get_settings":
 			f.controls[ev.RequestID] = control{subtype: c.Subtype}
+		case "apply_flag_settings":
+			if level := effortLevel(c.Raw); level != "" {
+				f.controls[ev.RequestID] = control{subtype: c.Subtype, level: level}
+			}
 		case "remote_control":
 			enabled := remoteEnabled(c.Raw)
 			f.controls[ev.RequestID] = control{subtype: c.Subtype, enabled: enabled}
@@ -359,6 +369,17 @@ func (f *Folder) answerControl(r ControlResponse) {
 		}
 		if json.Unmarshal(r.Response, &body) == nil && body.Model != "" {
 			f.model, f.chosen = body.Model, body.Model
+		}
+	case "apply_flag_settings":
+		f.effort, f.chosenEf = c.level, c.level
+	case "get_settings":
+		var body struct {
+			Applied struct {
+				Effort string `json:"effort"`
+			} `json:"applied"`
+		}
+		if json.Unmarshal(r.Response, &body) == nil && body.Applied.Effort != "" {
+			f.effort = body.Applied.Effort
 		}
 	}
 }
@@ -523,7 +544,8 @@ func (f *Folder) applyHost(n HostNote) {
 	switch n.Kind {
 	case NoteSpawn:
 		f.endProcess()
-		f.model = modelFlag(n.Argv)
+		f.model = flagValue(n.Argv, "--model")
+		f.effort = flagValue(n.Argv, "--effort")
 		f.chrome = slices.Contains(flagsOf(n.Argv), ChromeFlag)
 		if n.Resume != "" {
 			f.items = append(f.items, Notice{Kind: NoticeResumed, Text: n.Resume})
@@ -558,17 +580,32 @@ func flagsOf(argv []string) []string {
 	return argv
 }
 
-func modelFlag(argv []string) string {
+// flagValue is the value of a claude flag given as "--name v" or "--name=v".
+func flagValue(argv []string, name string) string {
 	argv = flagsOf(argv)
 	for i, a := range argv {
-		if v, ok := strings.CutPrefix(a, "--model="); ok {
+		if v, ok := strings.CutPrefix(a, name+"="); ok {
 			return v
 		}
-		if a == "--model" && i+1 < len(argv) {
+		if a == name && i+1 < len(argv) {
 			return argv[i+1]
 		}
 	}
 	return ""
+}
+
+// effortLevel reads settings.effortLevel from an apply_flag_settings request.
+// It is empty when the request sets no effort, or clears it with null.
+func effortLevel(request json.RawMessage) string {
+	var w struct {
+		Settings struct {
+			EffortLevel string `json:"effortLevel"`
+		} `json:"settings"`
+	}
+	if json.Unmarshal(request, &w) != nil {
+		return ""
+	}
+	return w.Settings.EffortLevel
 }
 
 func exitText(code *int) string {
@@ -614,6 +651,8 @@ func (f *Folder) Transcript() Transcript {
 		Models:           slices.Clone(f.models),
 		Model:            f.model,
 		ChosenModel:      f.chosen,
+		Effort:           f.effort,
+		ChosenEffort:     f.chosenEf,
 		RemoteControl:    f.remote,
 		Chrome:           f.chrome,
 		Bash:             f.activeBash(),
