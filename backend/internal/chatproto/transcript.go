@@ -191,18 +191,18 @@ type Folder struct {
 	// controls maps the id of a host's initialize, set_model, get_settings,
 	// apply_flag_settings or remote_control request to what it asked, because
 	// claude's response does not repeat it.
-	controls map[string]control
-	remote   RemoteControl
-	slash    []Command
-	models   []Model
-	model    string
-	chosen   string
-	effort   string
-	chosenEf string
-	chrome   bool
-	suggest  string
-	bashes   map[string]*BashItem // every "!" command run, by id
-	bash     *BashItem            // the latest run
+	controls     map[string]control
+	remote       RemoteControl
+	slash        []Command
+	models       []Model
+	model        string
+	chosen       string
+	effort       string
+	chosenEffort string
+	chrome       bool
+	suggest      string
+	bashes       map[string]*BashItem // every "!" command run, by id
+	bash         *BashItem            // the latest run
 }
 
 type control struct {
@@ -371,7 +371,7 @@ func (f *Folder) answerControl(r ControlResponse) {
 			f.model, f.chosen = body.Model, body.Model
 		}
 	case "apply_flag_settings":
-		f.effort, f.chosenEf = c.level, c.level
+		f.effort, f.chosenEffort = c.level, c.level
 	case "get_settings":
 		var body struct {
 			Applied struct {
@@ -652,7 +652,7 @@ func (f *Folder) Transcript() Transcript {
 		Model:            f.model,
 		ChosenModel:      f.chosen,
 		Effort:           f.effort,
-		ChosenEffort:     f.chosenEf,
+		ChosenEffort:     f.chosenEffort,
 		RemoteControl:    f.remote,
 		Chrome:           f.chrome,
 		Bash:             f.activeBash(),
