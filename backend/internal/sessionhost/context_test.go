@@ -67,8 +67,24 @@ func TestContextUsageAskedAfterInitializeAndEachTurn(t *testing.T) {
 			t.Errorf("seq %d lost the categories: %s", e.Seq, e.Payload)
 		}
 	}
-	if answered != len(asks)-1 {
-		t.Errorf("logged %d context answers, want %d: all but the ask after the last turn", answered, len(asks)-1)
+	// The fake answers an ask only while it reads stdin for its next fixture
+	// input, and an ask after its last one may not be written at all once the
+	// fake exits and closes stdin.
+	lastInput := 0
+	for i, e := range got {
+		id := messageID(e.Payload)
+		if e.Dir == chatproto.DirIn && !strings.HasPrefix(id, contextRequestPrefix) && !strings.HasPrefix(id, settingsRequestPrefix) {
+			lastInput = i
+		}
+	}
+	readable := 0
+	for _, i := range asks {
+		if i < lastInput {
+			readable++
+		}
+	}
+	if answered != readable {
+		t.Errorf("logged %d context answers, want %d: every ask written before the fake's last input", answered, readable)
 	}
 }
 
