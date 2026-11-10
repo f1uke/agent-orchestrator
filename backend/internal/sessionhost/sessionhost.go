@@ -56,6 +56,7 @@ const (
 	defaultPredecessorWait = 10 * time.Second
 	predecessorPoll        = 50 * time.Millisecond
 	contextRequestPrefix   = "ctx-"
+	settingsRequestPrefix  = "gs-"
 	// stdoutDrain bounds the wait for claude's stdout to reach EOF after it
 	// exits, in case a leftover subprocess still holds the pipe open.
 	stdoutDrain = 2 * time.Second
@@ -143,13 +144,14 @@ func Run(ctx context.Context, cfg Config, pane io.Writer) (int, error) {
 type launch struct {
 	resume      string
 	model       string
+	effort      string
 	attachDir   string
 	suggestions bool
 	chrome      bool
 }
 
 func (l launch) from(t chatproto.Transcript, chrome bool) launch {
-	l.model, l.resume, l.chrome = t.ChosenModel, "", chrome
+	l.model, l.effort, l.resume, l.chrome = t.ChosenModel, t.ChosenEffort, "", chrome
 	if n := len(t.ClaudeSessionIDs); n > 0 {
 		l.resume = t.ClaudeSessionIDs[n-1]
 	}
@@ -331,9 +333,10 @@ func (h *host) runClaude(ctx context.Context, cfg Config, l launch, serve func()
 // claudeArgv puts the protocol flags and --resume before any "--", after
 // which claude reads prompt text. Claude refuses --session-id beside --resume,
 // so a resume drops the pinned id the agent command carries. A model chosen
-// with set_model replaces the command's --model, so a respawn keeps it.
+// with set_model replaces the command's --model, and an effort chosen with
+// apply_flag_settings its --effort, so a respawn keeps both.
 func claudeArgv(command []string, l launch) []string {
-	resume, model, attachDir, suggestions := l.resume, l.model, l.attachDir, l.suggestions
+	resume, model, effort, attachDir, suggestions := l.resume, l.model, l.effort, l.attachDir, l.suggestions
 	flags, rest := command, []string(nil)
 	if i := slices.Index(command, "--"); i >= 0 {
 		flags, rest = command[:i], command[i:]
@@ -347,6 +350,9 @@ func claudeArgv(command []string, l launch) []string {
 		case model != "" && flags[i] == "--model":
 			i++
 		case model != "" && strings.HasPrefix(flags[i], "--model="):
+		case effort != "" && flags[i] == "--effort":
+			i++
+		case effort != "" && strings.HasPrefix(flags[i], "--effort="):
 		case flags[i] == chatproto.ChromeFlag || flags[i] == "--no-chrome":
 		default:
 			argv = append(argv, flags[i])
@@ -354,6 +360,9 @@ func claudeArgv(command []string, l launch) []string {
 	}
 	if model != "" {
 		argv = append(argv, "--model", model)
+	}
+	if effort != "" {
+		argv = append(argv, "--effort", effort)
 	}
 	argv = append(argv, protocolFlags...)
 	if suggestions {
@@ -430,6 +439,27 @@ func (h *host) endProcessLocked() {
 	}
 }
 
+// Claude answers success for a level it does not know, so the levels the
+// initialize answer offers decide.
+func (h *host) setEffort(level string) (any, error) {
+	h.mu.Lock()
+	running := !h.closed && h.stdin != nil
+	models := h.folder.Transcript().Models
+	h.mu.Unlock()
+	if !running {
+		return nil, errNotRunning
+	}
+	offered := slices.ContainsFunc(models, func(m chatproto.Model) bool {
+		return slices.Contains(m.SupportedEffortLevels, level)
+	})
+	if !offered {
+		return nil, fmt.Errorf("unknown effort level %q", level)
+	}
+	return h.control("apply_flag_settings", func(id string) chatproto.Outbound {
+		return chatproto.SetEffort{RequestID: id, Level: level}
+	})
+}
+
 var errChromeBusy = errors.New(`claude is busy: wait for the turn, its background tasks and any "!" command to end, then turn Chrome on or off`)
 
 func (h *host) setChrome(enabled bool) (any, error) {
@@ -489,6 +519,9 @@ func (h *host) handleLine(line []byte) {
 		h.contextID = ""
 		logged = withoutGridRows(line)
 	}
+	if isResponse && strings.HasPrefix(r.RequestID, settingsRequestPrefix) {
+		logged = onlyApplied(line)
+	}
 	if err := h.appendLocked(chatproto.DirOut, logged); err != nil {
 		h.pane.line(dim("sessionhost: " + err.Error()))
 		return
@@ -510,12 +543,22 @@ func (h *host) handleLine(line []byte) {
 	if isResponse && h.initID != "" && r.RequestID == h.initID {
 		h.initID = ""
 		h.askContextLocked()
+		h.askSettingsLocked()
 		if h.promptAfterInit != "" {
 			if err := h.writeThenLogLocked(chatproto.UserInput{UUID: uuid.NewString(), Text: h.promptAfterInit}); err != nil {
 				h.pane.line(dim("sessionhost: send prompt: " + err.Error()))
 			}
 			h.promptAfterInit = ""
 		}
+	}
+}
+
+// askSettingsLocked learns the effort claude starts with, which neither the
+// initialize answer nor system/init carries.
+func (h *host) askSettingsLocked() {
+	err := h.writeThenLogLocked(chatproto.GetSettings{RequestID: settingsRequestPrefix + uuid.NewString()})
+	if err != nil {
+		h.pane.line(dim("sessionhost: get_settings: " + err.Error()))
 	}
 }
 
@@ -541,6 +584,29 @@ func (h *host) askContextLocked() {
 // The CLI's own /context drawing repeats the categories square by square and is
 // most of a get_context_usage answer.
 func withoutGridRows(line []byte) []byte {
+	return trimResponseBody(line, func(body map[string]json.RawMessage) bool {
+		if body["gridRows"] == nil {
+			return false
+		}
+		delete(body, "gridRows")
+		return true
+	})
+}
+
+// A get_settings answer also dumps every settings source, env block included,
+// and the fold reads only what is applied.
+func onlyApplied(line []byte) []byte {
+	return trimResponseBody(line, func(body map[string]json.RawMessage) bool {
+		applied := body["applied"]
+		clear(body)
+		if applied != nil {
+			body["applied"] = applied
+		}
+		return true
+	})
+}
+
+func trimResponseBody(line []byte, trim func(body map[string]json.RawMessage) bool) []byte {
 	var w struct {
 		Type     string `json:"type"`
 		Response struct {
@@ -550,10 +616,9 @@ func withoutGridRows(line []byte) []byte {
 			Response  map[string]json.RawMessage `json:"response,omitempty"`
 		} `json:"response"`
 	}
-	if json.Unmarshal(line, &w) != nil || w.Response.Response["gridRows"] == nil {
+	if json.Unmarshal(line, &w) != nil || w.Response.Response == nil || !trim(w.Response.Response) {
 		return line
 	}
-	delete(w.Response.Response, "gridRows")
 	b, err := json.Marshal(w)
 	if err != nil {
 		return line

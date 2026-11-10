@@ -141,6 +141,7 @@ export type ChatEvent =
 			requestId: string;
 			subtype: string;
 			enabled?: boolean;
+			effortLevel?: string;
 			canUseTool?: CanUseTool;
 			rewind?: RewindAsk;
 	  }
@@ -393,6 +394,12 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			}
 			if (subtype === "remote_control") {
 				return { type: "control_request", requestId, subtype, enabled: request.enabled === true };
+			}
+			if (subtype === "apply_flag_settings") {
+				const level = isObject(request.settings) ? request.settings.effortLevel : undefined;
+				return typeof level === "string" && level !== ""
+					? { type: "control_request", requestId, subtype, effortLevel: level }
+					: { type: "control_request", requestId, subtype };
 			}
 			if (subtype !== "can_use_tool") return { type: "control_request", requestId, subtype };
 			return {

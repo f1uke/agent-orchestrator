@@ -12,6 +12,7 @@ func TestClaudeArgv(t *testing.T) {
 		command []string
 		resume  string
 		model   string
+		effort  string
 		attach  string
 		suggest bool
 		chrome  bool
@@ -45,6 +46,30 @@ func TestClaudeArgv(t *testing.T) {
 			command: []string{"claude", "--model=opus", "--", "--model", "x"},
 			model:   "claude-sonnet-5-5",
 			want:    append(append([]string{"claude", "--model", "claude-sonnet-5-5"}, protocolFlags...), "--", "--model", "x"),
+		},
+		{
+			name:    "a chosen effort replaces the launch effort",
+			command: []string{"claude", "--effort", "high", "--model", "opus"},
+			effort:  "low",
+			want:    append([]string{"claude", "--model", "opus", "--effort", "low"}, protocolFlags...),
+		},
+		{
+			name:    "a chosen effort replaces the joined form too, and leaves prompt text alone",
+			command: []string{"claude", "--effort=high", "--", "--effort", "x"},
+			effort:  "low",
+			want:    append(append([]string{"claude", "--effort", "low"}, protocolFlags...), "--", "--effort", "x"),
+		},
+		{
+			name:    "a chosen effort is added when the command has none, beside the chosen model",
+			command: []string{"claude"},
+			model:   "claude-sonnet-5-5",
+			effort:  "max",
+			want:    append([]string{"claude", "--model", "claude-sonnet-5-5", "--effort", "max"}, protocolFlags...),
+		},
+		{
+			name:    "no chosen effort leaves the command's alone",
+			command: []string{"claude", "--effort=high"},
+			want:    append([]string{"claude", "--effort=high"}, protocolFlags...),
 		},
 		{
 			name:    "a session id after -- is prompt text, not a flag",
@@ -96,7 +121,7 @@ func TestClaudeArgv(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			l := launch{resume: c.resume, model: c.model, attachDir: c.attach, suggestions: c.suggest, chrome: c.chrome}
+			l := launch{resume: c.resume, model: c.model, effort: c.effort, attachDir: c.attach, suggestions: c.suggest, chrome: c.chrome}
 			if got := claudeArgv(c.command, l); !slices.Equal(got, c.want) {
 				t.Errorf("claudeArgv(%v, %+v) =\n %v\nwant\n %v", c.command, l, got, c.want)
 			}

@@ -103,6 +103,8 @@ type PickerProps = {
 	permissionMode: string;
 	disabled: boolean;
 	onModel: (value: string) => void;
+	effort: string;
+	onEffort: (level: string) => void;
 	onMode: (mode: PermissionMode) => void;
 	remoteControl: RemoteControl;
 	onRemoteControl: (enabled: boolean) => void;
@@ -116,6 +118,8 @@ export function ModelModePicker({
 	permissionMode,
 	disabled,
 	onChrome,
+	effort,
+	onEffort,
 	onModel,
 	onMode,
 	remoteControl,
@@ -157,9 +161,13 @@ export function ModelModePicker({
 						{efforts.length ? (
 							<>
 								<DropdownMenuLabel>Effort</DropdownMenuLabel>
-								<p className="chat-model-menu__note" data-testid="chat-effort-hint">
-									{efforts.join(" · ")}. Set when the session starts.
-								</p>
+								<DropdownMenuRadioGroup onValueChange={onEffort} value={effort}>
+									{efforts.map((level) => (
+										<DropdownMenuRadioItem key={level} value={level}>
+											{level}
+										</DropdownMenuRadioItem>
+									))}
+								</DropdownMenuRadioGroup>
 							</>
 						) : null}
 						<DropdownMenuSeparator />

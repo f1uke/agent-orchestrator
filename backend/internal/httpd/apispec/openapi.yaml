@@ -3880,6 +3880,64 @@ paths:
       summary: Turn Claude in Chrome on or off for a chat session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/chat/effort:
+    put:
+      operationId: setChatEffort
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersSetChatEffortRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Change the reasoning effort of a chat session's agent; the level is
+        kept when the agent restarts
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/chat/files/{root}/*:
     get:
       operationId: getChatFile
@@ -12983,6 +13041,17 @@ components:
           - boolean
       required:
       - enabled
+      type: object
+    ControllersSetChatEffortRequest:
+      properties:
+        level:
+          description: A reasoning effort level from the supportedEffortLevels the
+            session's initialize response lists, such as low or high. It applies from
+            the agent's next request, also mid-turn. A level no model lists is a 409
+            CHAT_REQUEST_REJECTED.
+          type: string
+      required:
+      - level
       type: object
     ControllersSetChatModelRequest:
       properties:

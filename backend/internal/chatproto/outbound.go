@@ -47,6 +47,17 @@ type SetModel struct {
 	Model     string
 }
 
+// SetEffort changes the reasoning effort through apply_flag_settings. Claude
+// answers success for a level it does not know, so the host checks the level.
+type SetEffort struct {
+	RequestID string
+	Level     string
+}
+
+// GetSettings asks claude for the settings it applies, whose answer carries the
+// effort the next request uses. The initialize response does not.
+type GetSettings struct{ RequestID string }
+
 // StopTask ends the background task TaskID, a Bash command or a subagent. Claude
 // answers success, then reports the task killed; it may answer an error in a
 // mode that cannot stop tasks.
@@ -100,6 +111,8 @@ func (Initialize) isOutbound()         {}
 func (Interrupt) isOutbound()          {}
 func (SetPermissionMode) isOutbound()  {}
 func (SetModel) isOutbound()           {}
+func (SetEffort) isOutbound()          {}
+func (GetSettings) isOutbound()        {}
 func (PermissionAnswer) isOutbound()   {}
 func (StopTask) isOutbound()           {}
 func (SetRemoteControl) isOutbound()   {}
@@ -175,6 +188,13 @@ func Encode(o Outbound) ([]byte, error) {
 			return nil, errors.New("chatproto: set_model needs a model")
 		}
 		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "set_model", "model": m.Model})
+	case SetEffort:
+		if m.Level == "" {
+			return nil, errors.New("chatproto: apply_flag_settings needs an effort level")
+		}
+		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "apply_flag_settings", "settings": map[string]any{"effortLevel": m.Level}})
+	case GetSettings:
+		return encodeControlRequest(m.RequestID, map[string]any{"subtype": "get_settings"})
 	case StopTask:
 		if m.TaskID == "" {
 			return nil, errors.New("chatproto: stop_task needs a task id")

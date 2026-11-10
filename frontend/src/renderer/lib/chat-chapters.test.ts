@@ -44,6 +44,7 @@ const rowsOf = (items: ChatItem[]) =>
 			commands: [],
 			models: [],
 			model: "",
+			effort: "",
 			chrome: false,
 			tasks: [],
 			agentModels: {},

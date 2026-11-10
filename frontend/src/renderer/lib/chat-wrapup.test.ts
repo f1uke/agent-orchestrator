@@ -58,6 +58,7 @@ describe("latestWrapUpId", () => {
 					commands: [],
 					models: [],
 					model: "",
+					effort: "",
 					chrome: false,
 					tasks: [],
 					agentModels: {},

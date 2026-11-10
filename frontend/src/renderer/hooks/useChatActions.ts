@@ -22,6 +22,7 @@ export type ChatActions = {
 	setModel: (model: string) => Promise<ChatResult>;
 	setRemoteControl: (enabled: boolean) => Promise<ChatResult>;
 	setChrome: (enabled: boolean) => Promise<ChatResult>;
+	setEffort: (level: string) => Promise<ChatResult>;
 	runBash: (command: string) => Promise<BashResult>;
 	stopBash: (id: string) => Promise<ChatResult>;
 	upload: (file: File) => Promise<UploadResult>;
@@ -57,6 +58,7 @@ export function useChatActions(sessionId: string, connection: ChatConnection, ap
 			setModel: (model) => run(api.setModel(sessionId, model)),
 			setRemoteControl: (enabled) => run(api.setRemoteControl(sessionId, enabled)),
 			setChrome: (enabled) => run(api.setChrome(sessionId, enabled)),
+			setEffort: (level) => run(api.setEffort(sessionId, level)),
 			runBash: async (command) => {
 				const result = await api.runBash(sessionId, command);
 				if (!result.ok && result.error.kind === "host_not_running") setHostDown(true);

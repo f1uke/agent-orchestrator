@@ -329,6 +329,7 @@ func TestClientWithNoHostIsNotReachable(t *testing.T) {
 		"Interrupt":     c.Interrupt(ctx),
 		"SetMode":       c.SetMode(ctx, chatproto.ModePlan),
 		"SetModel":      c.SetModel(ctx, "haiku"),
+		"SetEffort":     c.SetEffort(ctx, "low"),
 		"StopTask":      c.StopTask(ctx, "t1"),
 		"RemoteControl": c.RemoteControl(ctx, true),
 	} {

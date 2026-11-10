@@ -71,6 +71,8 @@ type ComposerProps = {
 	models: readonly ChatModel[];
 	model: string;
 	remoteControl: RemoteControl;
+	/** The reasoning effort in use; empty when claude has not said. */
+	effort: string;
 	chrome: boolean;
 	/** Claude's guess at the next message; shown as ghost text while the box is empty and the session idle. */
 	suggestion: string;
@@ -90,6 +92,7 @@ export function ChatComposer({
 	model,
 	remoteControl,
 	chrome,
+	effort,
 	suggestion,
 	onToast,
 	prefill,
@@ -484,10 +487,12 @@ export function ChatComposer({
 							<ModelModePicker
 								disabled={disabled}
 								chrome={chrome}
+								effort={effort}
 								chromeLocked={busy}
 								model={model}
 								models={models}
 								onChrome={(enabled) => void report(actions.setChrome(enabled))}
+								onEffort={(level) => void report(actions.setEffort(level))}
 								onMode={(mode: PermissionMode) => void report(actions.setMode(mode))}
 								onModel={(value) => void report(actions.setModel(value))}
 								onRemoteControl={(enabled) => void report(actions.setRemoteControl(enabled))}

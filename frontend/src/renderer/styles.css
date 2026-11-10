@@ -9387,13 +9387,6 @@ ol.note-prose__list {
 	white-space: nowrap;
 }
 
-.chat-model-menu__note {
-	margin: 0;
-	padding: 0 8px 6px;
-	color: var(--fg-passive);
-	font-size: 12px;
-}
-
 .chat-stop {
 	display: inline-flex;
 	height: 32px;
