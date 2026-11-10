@@ -920,10 +920,15 @@ func TestGetPromptDeliveryStrategyIsStdin(t *testing.T) {
 	}
 }
 
-func TestLaunchEnvTurnsOffTheAgentsViewAndOnTheTaskTools(t *testing.T) {
+func TestLaunchEnvTurnsOffTheAgentsViewAndOnTheTaskAndArtifactTools(t *testing.T) {
 	unsetEnv(t, "CLAUDE_CODE_ENABLE_TODO_TOOLS")
+	unsetEnv(t, "CLAUDE_CODE_ARTIFACT")
 	got := (&Plugin{}).LaunchEnv()
-	want := map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"}
+	want := map[string]string{
+		"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1",
+		"CLAUDE_CODE_ENABLE_TODO_TOOLS":  "1",
+		"CLAUDE_CODE_ARTIFACT":           "1",
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("LaunchEnv() = %v, want %v", got, want)
 	}
@@ -934,6 +939,14 @@ func TestLaunchEnvLeavesTheUsersTaskToolsSettingAlone(t *testing.T) {
 	got := (&Plugin{}).LaunchEnv()
 	if v, ok := got["CLAUDE_CODE_ENABLE_TODO_TOOLS"]; ok {
 		t.Fatalf("LaunchEnv() sets CLAUDE_CODE_ENABLE_TODO_TOOLS=%q over the user's own value", v)
+	}
+}
+
+func TestLaunchEnvLeavesTheUsersArtifactSettingAlone(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_ARTIFACT", "0")
+	got := (&Plugin{}).LaunchEnv()
+	if v, ok := got["CLAUDE_CODE_ARTIFACT"]; ok {
+		t.Fatalf("LaunchEnv() sets CLAUDE_CODE_ARTIFACT=%q over the user's own value", v)
 	}
 }
 
