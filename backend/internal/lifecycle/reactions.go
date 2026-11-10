@@ -273,9 +273,8 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// conflict is always freshly fetched (MergeabilityStale=false) and still nudges.
 	switch {
 	case o.Mergeability == domain.MergeConflicting && !o.MergeabilityStale:
-		// A PR stacked on an open parent is nudged too. Its mergeability is
-		// computed against its target, the parent's branch, so a conflict there
-		// stays until the child rebases onto the parent.
+		// Providers compute mergeability against the PR's target, so a stacked
+		// child conflicts with its parent's branch until it rebases onto it.
 		msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{PRIdentity: ident, PRURL: domain.SanitizeControlChars(o.URL)})
 		nudges = append(nudges, pendingNudge{key: mergeConflictKey(o.URL), sig: mergeConflictSignature(o), msg: msg, maxAttempts: 0})
 	case o.Mergeability == domain.MergeMergeable && !o.MergeabilityStale:
@@ -355,13 +354,12 @@ func (m *Manager) sessionComplete(ctx context.Context, id domain.SessionID) (boo
 
 // prStackedOnOpenParent reports whether the PR at prURL is stacked on top of
 // another still-open PR - i.e. its target branch is the source branch of an open
-// sibling. Such a PR targets a branch other than the session's PR target on
-// purpose, so the wrong-base nudge skips it. Branch facts are read from the
-// store, which the observer has already updated for this observation.
+// sibling. Branch facts are read from the store, which the observer has already
+// updated for this observation.
 //
 // The parent is looked for in TWO places, because a stack is routinely split
 // across workers: worker A owns the parent branch and its PR, and worker B is cut
-// from A's branch and targets it. A per-session lookup sees only the first shape.
+// from A's branch and targets it.
 //
 //  1. This session's own PRs. Unchanged, and checked first so the widened lookup
 //     can only ever add parents, never take one away.

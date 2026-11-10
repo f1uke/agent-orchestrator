@@ -611,9 +611,6 @@ func TestSCMObserverMultiPREndToEnd(t *testing.T) {
 			t.Fatalf("clean establishing poll must not nudge, got %d: %+v", got, f.spy.snapshot())
 		}
 
-		// The parent gained commits the child does not apply on top of. The root
-		// still merges cleanly into main; only the child, whose target is the
-		// root's branch, conflicts.
 		f.provider.observations[302] = openSCMObservation(childURL, 302, "sha-child", "feat/x/auth", "feat/x", domain.MergeConflicting)
 		if err := f.observer.Poll(ctx); err != nil {
 			t.Fatalf("Poll 2: %v", err)

@@ -1115,8 +1115,6 @@ func TestPRObservation_ClosedWithoutMergeDoesNotTerminate(t *testing.T) {
 	}
 }
 
-// The bottom-of-stack PR (not stacked on any open parent) still gets the
-// merge-conflict nudge even when it has open stacked children.
 func TestPRObservation_BottomOfStackConflictNudges(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")

@@ -102,10 +102,6 @@ func TestPRObservation_StackedPRIsSilent(t *testing.T) {
 	}
 }
 
-// A stack is routinely split across two workers: worker A owns the parent branch
-// and its PR, worker B is cut from A's branch and targets it. That child is
-// stacked too, so it is not a wrong base. The widened lookup must not treat a PR
-// that merely shares a branch NAME in another repo, host or project as a parent.
 func TestPRObservation_StackedPRAcrossSessions(t *testing.T) {
 	const (
 		provider = "github"

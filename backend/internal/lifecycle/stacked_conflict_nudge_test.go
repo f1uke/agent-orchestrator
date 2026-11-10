@@ -8,11 +8,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
-// A PR stacked on an open parent reports mergeability against its target branch,
-// which IS the parent's source branch. A conflict there means the parent gained
-// commits the child does not apply on top of, and it stays until the child
-// rebases onto the parent: the parent merging does not clear it. So the child's
-// worker must be told, whether it owns the parent PR or another worker does.
 func TestPRObservation_StackedChildConflictNudges(t *testing.T) {
 	const (
 		provider = "gitlab"
@@ -52,11 +47,6 @@ func TestPRObservation_StackedChildConflictNudges(t *testing.T) {
 	}
 }
 
-// Replays the observation sequence AO recorded for a GitLab MR stacked on another
-// worker's open MR (change_log, 2026-11-05 UTC), where the worker was never nudged
-// and a human had to say "fix the conflict" by hand. Each conflict episode must
-// reach the worker exactly once: re-polls and GitLab's "unknown" recompute window
-// stay silent, and a conflict that returns after the worker's fix is news again.
 func TestPRObservation_StackedChildConflictEpisodesAcrossWorkers(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-6"] = working("mer-6")
