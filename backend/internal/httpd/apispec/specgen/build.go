@@ -2805,6 +2805,20 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/effort", id: "setChatEffort", tag: "sessions",
+			summary:    "Change the reasoning effort of a chat session's agent; the level is kept when the agent restarts",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetChatEffortRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ChatAckResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/chat/model", id: "setChatModel", tag: "sessions",
 			summary:    "Switch the model of a chat session's agent",
 			pathParams: []any{controllers.SessionIDParam{}},

@@ -2489,6 +2489,11 @@ type StopChatBashRequest struct {
 	ID string `json:"id" description:"The id of the running command to stop. A finished or unknown id is a no-op."`
 }
 
+// SetChatEffortRequest is the body of PUT /api/v1/sessions/{sessionId}/chat/effort.
+type SetChatEffortRequest struct {
+	Level string `json:"level" description:"A reasoning effort level from the supportedEffortLevels the session's initialize response lists, such as low or high. It applies from the agent's next request, also mid-turn. A level no model lists is a 409 CHAT_REQUEST_REJECTED."`
+}
+
 // SetChatChromeRequest is the body of PUT /api/v1/sessions/{sessionId}/chat/chrome.
 type SetChatChromeRequest struct {
 	Enabled *bool `json:"enabled" description:"Turn Claude in Chrome on or off. The agent restarts on the same conversation, so a turn in flight is a 409 CHAT_REQUEST_REJECTED."`
