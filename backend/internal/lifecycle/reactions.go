@@ -273,19 +273,11 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// conflict is always freshly fetched (MergeabilityStale=false) and still nudges.
 	switch {
 	case o.Mergeability == domain.MergeConflicting && !o.MergeabilityStale:
-		// Only the bottom of a stack is available for the rebase nudge. A PR
-		// stacked on an open parent is expected to report conflicts against its
-		// parent branch until the parent merges and it retargets, so nudging the
-		// agent to rebase it now would be noise. Mergeability UNKNOWN (the brief
-		// post-retarget recompute window) never reaches here.
-		blocked, err := m.prBlockedByOpenParent(ctx, id, rec.ProjectID, o.URL)
-		if err != nil {
-			return err
-		}
-		if !blocked {
-			msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{PRIdentity: ident, PRURL: domain.SanitizeControlChars(o.URL)})
-			nudges = append(nudges, pendingNudge{key: mergeConflictKey(o.URL), sig: mergeConflictSignature(o), msg: msg, maxAttempts: 0})
-		}
+		// A PR stacked on an open parent is nudged too. Its mergeability is
+		// computed against its target, the parent's branch, so a conflict there
+		// stays until the child rebases onto the parent.
+		msg := m.renderNudge(messagetemplates.NameMergeConflict, messagetemplates.MergeConflictData{PRIdentity: ident, PRURL: domain.SanitizeControlChars(o.URL)})
+		nudges = append(nudges, pendingNudge{key: mergeConflictKey(o.URL), sig: mergeConflictSignature(o), msg: msg, maxAttempts: 0})
 	case o.Mergeability == domain.MergeMergeable && !o.MergeabilityStale:
 		// The conflict episode is over. Retract the dedup signature so a conflict
 		// that comes BACK on this PR is news again - the same edge-triggered
@@ -361,18 +353,15 @@ func (m *Manager) sessionComplete(ctx context.Context, id domain.SessionID) (boo
 	return merged, nil
 }
 
-// prBlockedByOpenParent reports whether the PR at prURL is stacked on top of
+// prStackedOnOpenParent reports whether the PR at prURL is stacked on top of
 // another still-open PR - i.e. its target branch is the source branch of an open
-// sibling. Such a PR is not the bottom of its stack and is exempt from
-// merge-conflict nudges: it is EXPECTED to report conflicts against a parent
-// branch that is still moving, and they disappear when the parent merges and the
-// child retargets. Branch facts are read from the store, which the observer has
-// already updated for this observation.
+// sibling. Such a PR targets a branch other than the session's PR target on
+// purpose, so the wrong-base nudge skips it. Branch facts are read from the
+// store, which the observer has already updated for this observation.
 //
 // The parent is looked for in TWO places, because a stack is routinely split
 // across workers: worker A owns the parent branch and its PR, and worker B is cut
-// from A's branch and targets it. A per-session lookup sees only the first shape,
-// so the guard used to miss the common one and nudged the child anyway.
+// from A's branch and targets it. A per-session lookup sees only the first shape.
 //
 //  1. This session's own PRs. Unchanged, and checked first so the widened lookup
 //     can only ever add parents, never take one away.
@@ -381,7 +370,7 @@ func (m *Manager) sessionComplete(ctx context.Context, id domain.SessionID) (boo
 //     provider/host/repo and by project; a PR whose repository coordinates are
 //     unknown (legacy rows) skips step 2 rather than matching every other blank
 //     row in the table.
-func (m *Manager) prBlockedByOpenParent(ctx context.Context, id domain.SessionID, projectID domain.ProjectID, prURL string) (bool, error) {
+func (m *Manager) prStackedOnOpenParent(ctx context.Context, id domain.SessionID, projectID domain.ProjectID, prURL string) (bool, error) {
 	prs, err := m.store.ListPRsBySession(ctx, id)
 	if err != nil {
 		return false, err
@@ -888,7 +877,7 @@ func (m *Manager) queuePRBaseMismatchNudge(ctx context.Context, id domain.Sessio
 	if target == "" || base == "" || base == target {
 		return nil
 	}
-	stacked, err := m.prBlockedByOpenParent(ctx, id, rec.ProjectID, o.URL)
+	stacked, err := m.prStackedOnOpenParent(ctx, id, rec.ProjectID, o.URL)
 	if err != nil {
 		return err
 	}
