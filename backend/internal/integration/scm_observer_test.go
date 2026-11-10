@@ -11,7 +11,6 @@ package integration
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -594,7 +593,7 @@ func TestSCMObserverMultiPREndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("stacked child blocked by an open parent is exempt from the rebase nudge", func(t *testing.T) {
+	t.Run("stacked child conflicting with its open parent is nudged to rebase", func(t *testing.T) {
 		ctx := context.Background()
 		f := newSCMFixture(t, "feat/x")
 		const (
@@ -603,9 +602,6 @@ func TestSCMObserverMultiPREndToEnd(t *testing.T) {
 		)
 		f.provider.detected["feat/x"] = detectedPR(rootURL, 301, "feat/x", "main", "sha-root")
 		f.provider.detected["feat/x/auth"] = detectedPR(childURL, 302, "feat/x/auth", "feat/x", "sha-child")
-		// Poll 1 establishes both rows (open, mergeable) so the stack relationship
-		// is durable before conflicts appear, making the poll-2 reaction order
-		// independent of map iteration.
 		f.provider.observations[301] = openSCMObservation(rootURL, 301, "sha-root", "feat/x", "main", domain.MergeMergeable)
 		f.provider.observations[302] = openSCMObservation(childURL, 302, "sha-child", "feat/x/auth", "feat/x", domain.MergeMergeable)
 		if err := f.observer.Poll(ctx); err != nil {
@@ -615,59 +611,26 @@ func TestSCMObserverMultiPREndToEnd(t *testing.T) {
 			t.Fatalf("clean establishing poll must not nudge, got %d: %+v", got, f.spy.snapshot())
 		}
 
-		// Poll 2: both PRs now report merge conflicts. Only the bottom of the
-		// stack (the root, targeting main) is available for the rebase nudge; the
-		// child targets feat/x, the still-open root's source branch, so it is
-		// expected to conflict against its parent until the parent merges and is
-		// suppressed.
-		f.provider.observations[301] = openSCMObservation(rootURL, 301, "sha-root", "feat/x", "main", domain.MergeConflicting)
 		f.provider.observations[302] = openSCMObservation(childURL, 302, "sha-child", "feat/x/auth", "feat/x", domain.MergeConflicting)
 		if err := f.observer.Poll(ctx); err != nil {
 			t.Fatalf("Poll 2: %v", err)
 		}
-
 		msgs := f.spy.snapshot()
 		if len(msgs) != 1 {
-			t.Fatalf("exactly one PR (the stack bottom) should be nudged, got %d: %+v", len(msgs), msgs)
+			t.Fatalf("the conflicting stacked child should be nudged once, got %d: %+v", len(msgs), msgs)
 		}
 		if msgs[0].session != f.session.ID {
 			t.Fatalf("nudge addressed to %q, want %q", msgs[0].session, f.session.ID)
 		}
-		if !strings.Contains(msgs[0].body, "merge conflicts") {
-			t.Fatalf("nudge body missing merge-conflict cue: %q", msgs[0].body)
+		if !strings.Contains(msgs[0].body, "merge conflicts") || !strings.Contains(msgs[0].body, "#302") {
+			t.Fatalf("nudge body should name the child's merge conflict: %q", msgs[0].body)
 		}
 
-		// The persisted dedup signature must be the root's, never the child's —
-		// proving the child was suppressed at the reaction layer, not merely
-		// deduped after sending.
-		rootSig, err := f.store.GetPRLastNudgeSignature(ctx, rootURL)
-		if err != nil {
-			t.Fatalf("GetPRLastNudgeSignature root: %v", err)
+		if err := f.observer.Poll(ctx); err != nil {
+			t.Fatalf("Poll 3: %v", err)
 		}
-		if rootSig == "" {
-			t.Fatal("root PR should have a persisted nudge signature")
-		}
-		childSig, err := f.store.GetPRLastNudgeSignature(ctx, childURL)
-		if err != nil {
-			t.Fatalf("GetPRLastNudgeSignature child: %v", err)
-		}
-		// Assert on the nudge bookkeeping specifically rather than on the blob
-		// being empty. The same payload also carries the ready-to-merge edge
-		// marker, which legitimately records that this child was ready in poll 1
-		// and stopped being ready in poll 2 — that is readiness state, not a nudge.
-		// attempts is written only by sendOnce, so an empty attempts map is exactly
-		// the claim this test makes: the child was suppressed at the reaction
-		// layer, never sent and then deduped.
-		var childPayload struct {
-			Attempts map[string]int `json:"attempts"`
-		}
-		if childSig != "" {
-			if err := json.Unmarshal([]byte(childSig), &childPayload); err != nil {
-				t.Fatalf("decode child signature %q: %v", childSig, err)
-			}
-		}
-		if len(childPayload.Attempts) != 0 {
-			t.Fatalf("stacked child must not record a nudge attempt: %q", childSig)
+		if got := f.spy.count(); got != 1 {
+			t.Fatalf("an unchanged conflict must not nudge again, got %d: %+v", got, f.spy.snapshot())
 		}
 	})
 }

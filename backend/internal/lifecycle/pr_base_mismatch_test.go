@@ -102,6 +102,86 @@ func TestPRObservation_StackedPRIsSilent(t *testing.T) {
 	}
 }
 
+func TestPRObservation_StackedPRAcrossSessions(t *testing.T) {
+	const (
+		provider = "github"
+		host     = "github.com"
+		repo     = "o/r"
+	)
+	child := domain.PullRequest{URL: "child", SourceBranch: "ao/x/auth", TargetBranch: "ao/x", Provider: provider, Host: host, Repo: repo}
+	parent := func(mutate func(*domain.PullRequest)) domain.PullRequest {
+		p := domain.PullRequest{URL: "parent", SourceBranch: "ao/x", TargetBranch: "main-fluke", Provider: provider, Host: host, Repo: repo}
+		if mutate != nil {
+			mutate(&p)
+		}
+		return p
+	}
+	tests := []struct {
+		name     string
+		prs      map[domain.SessionID][]domain.PullRequest
+		projects map[domain.SessionID]domain.ProjectID
+		wantNudg bool
+	}{
+		{
+			name: "parent PR owned by another worker in the same repo is stacked",
+			prs:  map[domain.SessionID][]domain.PullRequest{"mer-1": {child}, "mer-2": {parent(nil)}},
+		},
+		{
+			name: "parent PR in the same session is stacked",
+			prs:  map[domain.SessionID][]domain.PullRequest{"mer-1": {child, parent(nil)}},
+		},
+		{
+			name: "no open PR owns the target branch, so it is a wrong base",
+			prs: map[domain.SessionID][]domain.PullRequest{
+				"mer-1": {child},
+				"mer-2": {{URL: "unrelated", SourceBranch: "fix/other", TargetBranch: "main-fluke", Provider: provider, Host: host, Repo: repo}},
+			},
+			wantNudg: true,
+		},
+		{
+			name:     "a merged parent no longer makes it stacked",
+			prs:      map[domain.SessionID][]domain.PullRequest{"mer-1": {child}, "mer-2": {parent(func(p *domain.PullRequest) { p.Merged = true })}},
+			wantNudg: true,
+		},
+		{
+			name:     "same branch name in a different repo is not the parent",
+			prs:      map[domain.SessionID][]domain.PullRequest{"mer-1": {child}, "mer-2": {parent(func(p *domain.PullRequest) { p.Repo = "o/other" })}},
+			wantNudg: true,
+		},
+		{
+			name:     "same branch name on a different host is not the parent",
+			prs:      map[domain.SessionID][]domain.PullRequest{"mer-1": {child}, "mer-2": {parent(func(p *domain.PullRequest) { p.Host = "gitlab.com"; p.Provider = "gitlab" })}},
+			wantNudg: true,
+		},
+		{
+			name:     "same branch name in a different project is not the parent",
+			prs:      map[domain.SessionID][]domain.PullRequest{"mer-1": {child}, "oth-1": {parent(nil)}},
+			projects: map[domain.SessionID]domain.ProjectID{"oth-1": "oth"},
+			wantNudg: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, st, msg := newManager()
+			for id, prs := range tc.prs {
+				rec := withTarget(id, "main-fluke")
+				if p, ok := tc.projects[id]; ok {
+					rec.ProjectID = p
+				}
+				st.sessions[id] = rec
+				st.prs[id] = prs
+			}
+			o := ports.PRObservation{Fetched: true, URL: "child", Number: 2, SourceBranch: child.SourceBranch, TargetBranch: child.TargetBranch}
+			if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(msg.msgs) > 0; got != tc.wantNudg {
+				t.Fatalf("wrong-base nudged=%v, want %v (msgs: %v)", got, tc.wantNudg, msg.msgs)
+			}
+		})
+	}
+}
+
 // The nudge renders through the injected Renderer like every other one, so an
 // operator can reword it.
 func TestPRObservation_WrongBaseUsesTemplateOverride(t *testing.T) {
