@@ -141,8 +141,7 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 //
 // It also turns on the task tools (TaskCreate, TaskUpdate), which Claude Code leaves
 // off in a non-interactive or SDK launch; the chat inspector's Todo panel reads them.
-// It also turns on the claude.ai Artifact tools, which Claude Code leaves off in an SDK
-// launch (entrypoint sdk-cli, which `claude -p` sets for a chat session).
+// It also turns on the claude.ai Artifact tools, which Claude Code leaves off for SDK entrypoints.
 // A value the user set in the daemon's own env wins.
 func (p *Plugin) LaunchEnv() map[string]string {
 	env := map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}
