@@ -561,11 +561,8 @@ func appendPermissionFlags(cmd *[]string, permissions ports.PermissionMode) {
 	}
 }
 
-// aoSendRule pre-approves `ao send` on every launch and restore. In auto mode the
-// classifier otherwise judges each send and sometimes refuses a worker's report to
-// its own orchestrator as "Unsanctioned Communication". The rule cannot narrow to
-// the orchestrator's id: that id changes when the orchestrator respawns, and a
-// prefix rule cannot see flag order. ao send only reaches local AO sessions.
+// Claude's auto-mode classifier sometimes refuses a worker's `ao send` to its
+// orchestrator as "Unsanctioned Communication"; a pre-approved rule skips it.
 const aoSendRule = "Bash(ao send:*)"
 
 // appendToolFlags emits --allowedTools / --disallowedTools for a tool-scoped
