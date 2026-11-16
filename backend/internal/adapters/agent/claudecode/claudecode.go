@@ -164,6 +164,7 @@ const (
 //	claude [--settings <SettingsFile>] \
 //	       [--session-id <uuid>] \
 //	       [--permission-mode <mode>] \
+//	       --allowedTools <rules> \
 //	       [--append-system-prompt-file <path>] \
 //	       [-- <prompt>]
 //
@@ -204,7 +205,7 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 		permissions = cfg.Config.Permissions
 	}
 	appendPermissionFlags(&cmd, permissions)
-	appendToolFlags(&cmd, cfg.AllowedTools, cfg.DisallowedTools)
+	appendToolFlags(&cmd, append([]string{aoSendRule}, cfg.AllowedTools...), cfg.DisallowedTools)
 
 	if model := strings.TrimSpace(cfg.Config.Model); model != "" {
 		cmd = append(cmd, "--model", model)
@@ -261,7 +262,7 @@ func (p *Plugin) PreLaunch(ctx context.Context, cfg ports.LaunchConfig) error {
 
 // GetRestoreCommand rebuilds the argv that continues an existing Claude Code
 // session: `claude [--settings <SettingsFile>] [--permission-mode <mode>]
-// [--append-system-prompt-file <path>] --resume <agentSessionId>`. It prefers the hook-captured native session id
+// --allowedTools <rules> [--append-system-prompt-file <path>] --resume <agentSessionId>`. It prefers the hook-captured native session id
 // from cfg.Session.Metadata["agentSessionId"]; for sessions created before hooks
 // captured it, it falls back to the deterministic UUID AO pins via
 // --session-id at launch. ok is false only when neither is available, so the
@@ -308,6 +309,7 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 	cmd = append(cmd, binary)
 	appendSettingsFlag(&cmd, cfg.SettingsFile)
 	appendPermissionFlags(&cmd, cfg.Permissions)
+	appendToolFlags(&cmd, []string{aoSendRule}, nil)
 	// --resume rebuilds the system prompt from the current flags (it is not
 	// stored in the transcript), so standing instructions must be re-appended
 	// or a restored orchestrator loses its role.
@@ -558,6 +560,13 @@ func appendPermissionFlags(cmd *[]string, permissions ports.PermissionMode) {
 		*cmd = append(*cmd, "--permission-mode", "bypassPermissions")
 	}
 }
+
+// aoSendRule pre-approves `ao send` on every launch and restore. In auto mode the
+// classifier otherwise judges each send and sometimes refuses a worker's report to
+// its own orchestrator as "Unsanctioned Communication". The rule cannot narrow to
+// the orchestrator's id: that id changes when the orchestrator respawns, and a
+// prefix rule cannot see flag order. ao send only reaches local AO sessions.
+const aoSendRule = "Bash(ao send:*)"
 
 // appendToolFlags emits --allowedTools / --disallowedTools for a tool-scoped
 // launch. Each list is joined with commas into one value so rules that contain
