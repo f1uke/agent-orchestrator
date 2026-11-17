@@ -28,6 +28,7 @@ func TestGetLaunchCommandBypassWithPrompt(t *testing.T) {
 	want := []string{
 		"claude",
 		"--permission-mode", "bypassPermissions",
+		"--allowedTools", "Bash(ao send:*)",
 		"--", "-add a health check",
 	}
 	if !reflect.DeepEqual(cmd, want) {
@@ -87,6 +88,7 @@ func TestGetLaunchCommandPassesSystemPromptByFile(t *testing.T) {
 
 	want := []string{
 		"claude",
+		"--allowedTools", "Bash(ao send:*)",
 		"--append-system-prompt-file", promptFile,
 		"--", "do the thing",
 	}
@@ -414,7 +416,7 @@ func TestGetRestoreCommandReadsAgentSessionID(t *testing.T) {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
 	// The hook-captured native id wins over the derived fallback.
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", "claude-native-1"}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--allowedTools", "Bash(ao send:*)", "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -434,7 +436,7 @@ func TestGetRestoreCommandReappendsSystemPrompt(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", "You are an orchestrator.", "--resume", "claude-native-1"}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--allowedTools", "Bash(ao send:*)", "--append-system-prompt", "You are an orchestrator.", "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -454,7 +456,7 @@ func TestGetRestoreCommandPassesSystemPromptByFile(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt-file", promptFile, "--resume", "claude-native-1"}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--allowedTools", "Bash(ao send:*)", "--append-system-prompt-file", promptFile, "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -483,7 +485,7 @@ func TestGetRestoreCommandFallsBackToDerivedUUID(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", claudeSessionUUID("sess-r")}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--allowedTools", "Bash(ao send:*)", "--resume", claudeSessionUUID("sess-r")}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -582,7 +584,7 @@ func TestGetRestoreCommandResumesWhenTranscriptPresent(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", uid}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--allowedTools", "Bash(ao send:*)", "--resume", uid}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -829,7 +831,7 @@ func TestGetLaunchCommandEmitsToolAllowlist(t *testing.T) {
 	}
 
 	// Each list is one comma-joined value so a rule with spaces stays intact.
-	if !containsSubsequence(cmd, []string{"--allowedTools", "Read,Grep,Bash(git diff:*)"}) {
+	if !containsSubsequence(cmd, []string{"--allowedTools", "Bash(ao send:*),Read,Grep,Bash(git diff:*)"}) {
 		t.Fatalf("missing joined --allowedTools value; got %#v", cmd)
 	}
 	if !containsSubsequence(cmd, []string{"--disallowedTools", "Edit,Write,Bash(git push:*)"}) {
@@ -837,15 +839,15 @@ func TestGetLaunchCommandEmitsToolAllowlist(t *testing.T) {
 	}
 }
 
-func TestGetLaunchCommandOmitsToolFlagsWhenUnset(t *testing.T) {
+func TestGetLaunchCommandPreApprovesOnlyAOSendWhenUnrestricted(t *testing.T) {
 	p := &Plugin{resolvedBinary: "claude"}
 
 	cmd, err := p.GetLaunchCommand(context.Background(), ports.LaunchConfig{Prompt: "do it"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contains(cmd, "--allowedTools") || contains(cmd, "--disallowedTools") {
-		t.Fatalf("unrestricted launch should emit no tool flags; got %#v", cmd)
+	if !containsSubsequence(cmd, []string{"--allowedTools", "Bash(ao send:*)"}) || contains(cmd, "--disallowedTools") {
+		t.Fatalf("unrestricted launch should pre-approve only ao send; got %#v", cmd)
 	}
 }
 
@@ -1002,4 +1004,13 @@ func launchAndRestore(t *testing.T, settingsFile string) (launch, restore []stri
 		t.Fatalf("restore = (ok=%v, err=%v)", ok, err)
 	}
 	return launch, restore
+}
+
+func TestLaunchAndRestorePreApproveAOSend(t *testing.T) {
+	launch, restore := launchAndRestore(t, "")
+	for name, cmd := range map[string][]string{"launch": launch, "restore": restore} {
+		if !containsSubsequence(cmd, []string{"--allowedTools", "Bash(ao send:*)"}) {
+			t.Errorf("%s does not pre-approve ao send: %q", name, cmd)
+		}
+	}
 }
