@@ -57,12 +57,17 @@ func TestParseTrainPageFamilyFromTheLongestTrainLabel(t *testing.T) {
 		number, extra int
 		ok            bool
 	}{
-		"2026.10.12 - Release train #21":         {"demo", 21, 0, true},
-		"2026.10.12 - Pilot Release train #21":   {"pilot", 21, 0, true},
-		"2026.10.06 - Release train #20-1":       {"demo", 20, 1, true},
-		"2026.10.12 - Release train #21 (Moved)": {"", 0, 0, false},
-		"Release train retro":                    {"", 0, 0, false},
-		"2026.10.12 - PreRelease train #21":      {"", 0, 0, false},
+		"2026.10.12 - Release train #21":                        {"demo", 21, 0, true},
+		"2026.10.12 - Pilot Release train #21":                  {"pilot", 21, 0, true},
+		"2026.10.06 - Release train #20-1":                      {"demo", 20, 1, true},
+		"2026.10.12 - Release train #21 (Moved)":                {"", 0, 0, false},
+		"2026.11.19 - Release train #23-1 (Yellow santa)":       {"demo", 23, 1, true},
+		"2026.11.13 - Release train #23 (Yellow santa)":         {"demo", 23, 0, true},
+		"2026.11.19 - Pilot Release train #23-1 (Yellow santa)": {"pilot", 23, 1, true},
+		"2026.07.21 - Pilot Release train #15 (Skipped)":        {"", 0, 0, false},
+		"2026.10.12 - Release train #21 retro":                  {"", 0, 0, false},
+		"Release train retro":                                   {"", 0, 0, false},
+		"2026.10.12 - PreRelease train #21":                     {"", 0, 0, false},
 	} {
 		got, ok := ParseTrainPage(cfg, loc, rawPage(title, storageBody))
 		if ok != want.ok || got.Family != want.family || got.Number != want.number || got.Extra != want.extra {
