@@ -90,14 +90,22 @@ func ParseTrainPage(cfg Config, loc *time.Location, p RawPage) (PageFact, bool) 
 	return f, true
 }
 
+// deadPageMarks are title suffixes that mark a page as no longer its train's,
+// as in "Release train #15 (Skipped)". Any other suffix, such as the train's
+// codename in "Release train #23-1 (Yellow santa)", keeps the page.
+var deadPageMarks = map[string]bool{"skipped": true, "moved": true}
+
 func pageTrain(cfg Config, title string) (FamilyID, int, int, bool) {
 	fams := append([]Family(nil), cfg.Families...)
 	sort.SliceStable(fams, func(i, j int) bool { return len(fams[i].TrainLabel) > len(fams[j].TrainLabel) })
 	for _, fam := range fams {
-		re := regexp.MustCompile(`(?i)(?:^|\s)` + regexp.QuoteMeta(fam.TrainLabel) + `\s+#(\d+)(?:-(\d+))?$`)
+		re := regexp.MustCompile(`(?i)(?:^|\s)` + regexp.QuoteMeta(fam.TrainLabel) + `\s+#(\d+)(?:-(\d+))?(?:\s+\(([^)]*)\))?$`)
 		m := re.FindStringSubmatch(title)
 		if m == nil {
 			continue
+		}
+		if deadPageMarks[strings.ToLower(strings.TrimSpace(m[3]))] {
+			return "", 0, 0, false
 		}
 		number, _ := strconv.Atoi(m[1])
 		extra := 0
