@@ -69,6 +69,9 @@ export function settleOverlay(overlay: StreamOverlay, entry: ChatEntry): StreamO
 	const count = Array.isArray(content) ? content.length : 1;
 	const logged = { ...overlay.logged, [messageId]: (overlay.logged[messageId] ?? 0) + count };
 	const blocks = overlay.blocks.filter((b) => b.messageId !== messageId || b.index >= logged[messageId]);
-	const tool = overlay.tool && overlay.tool.messageId === messageId && overlay.tool.index < logged[messageId] ? undefined : overlay.tool;
+	const tool =
+		overlay.tool && overlay.tool.messageId === messageId && overlay.tool.index < logged[messageId]
+			? undefined
+			: overlay.tool;
 	return { ...overlay, blocks, tool, logged };
 }

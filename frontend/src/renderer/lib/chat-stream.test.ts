@@ -70,8 +70,7 @@ describe("chat stream overlay", () => {
 				json(1, '{"file_path":"/a/b.md",'),
 				json(1, '"content":"hi"}'),
 			);
-		const logged = (count: number) =>
-			out({ type: "assistant", message: { id: "m1", content: Array(count).fill({}) } });
+		const logged = (count: number) => out({ type: "assistant", message: { id: "m1", content: Array(count).fill({}) } });
 
 		it("shows the tool's name and how much input has arrived", () => {
 			const { tool } = writing();

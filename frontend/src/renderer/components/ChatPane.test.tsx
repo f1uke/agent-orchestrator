@@ -845,7 +845,8 @@ describe("ChatPane calm view", () => {
 	});
 
 	it("shows the latest line of a thinking stream on the closed row", () => {
-		const { delta } = renderPane();
+		const { feed, delta } = renderPane();
+		feed(out({ type: "system", subtype: "status", status: "requesting" }));
 		delta(
 			{ type: "message_start", message: { id: "m1" } },
 			{
@@ -990,13 +991,14 @@ describe("ChatPane calm view", () => {
 		expect(document.querySelector("[data-group] .chat-group__head")).toHaveTextContent(/^Ran a command, read a file$/);
 	});
 
-	describe("the live Thinking row", () => {
+	describe("the live status row", () => {
 		const at = (sec: number, e: ChatEntry): ChatEntry => ({
 			...e,
 			ts: new Date(Date.parse("2026-10-31T11:53:00.000Z") + sec * 1000).toISOString(),
 		});
-		const tokens = (sec: number) =>
-			at(sec, out({ type: "system", subtype: "thinking_tokens", estimated_tokens: 50, estimated_tokens_delta: 50 }));
+		const requesting = (sec: number) => at(sec, out({ type: "system", subtype: "status", status: "requesting" }));
+		const tokens = (sec: number, total = 50) =>
+			at(sec, out({ type: "system", subtype: "thinking_tokens", estimated_tokens: total, estimated_tokens_delta: 50 }));
 		const afterTools = () => [
 			at(0, userIn("u1", "find the drift")),
 			at(0, lifecycle("u1", "started")),
@@ -1015,25 +1017,35 @@ describe("ChatPane calm view", () => {
 			vi.setSystemTime(Date.parse("2026-10-31T11:53:40.000Z"));
 		});
 
-		it("appears with only thinking_tokens after a tool result, ticks, and goes on the next tool_use", () => {
+		it("appears with a model request after a tool result, counts up, and goes on the next tool_use", () => {
 			const { feed } = renderPane("chat", fakeApi(), rooted);
 			feed(...afterTools());
 			expect(thinkingRow()).toBeUndefined();
 
-			feed(tokens(12), tokens(12), tokens(20));
+			feed(requesting(12));
 			expect(liveRows()).toHaveLength(1);
 			expect(thinkingRow()).toHaveTextContent(/^Thinking 28s$/);
 			act(() => vi.advanceTimersByTime(1000));
 			expect(thinkingRow()).toHaveTextContent(/^Thinking 29s$/);
+			act(() => vi.advanceTimersByTime(4000));
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 33s$/);
 
 			feed(at(41, toolUse("c", "Bash", { command: "go test ./internal/webhook/..." })));
 			expect(thinkingRow()).toBeUndefined();
 			expect(liveRows()).toHaveLength(1);
 		});
 
+		it("shows claude's thinking token count next to the time as it rises", () => {
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools(), requesting(12), tokens(13, 410));
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 28s · 410 tokens$/);
+			feed(tokens(14, 1240));
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 28s · 1.2k tokens$/);
+		});
+
 		it("lives in the finished tool group, which lists Thinking last once opened", () => {
 			const { feed } = renderPane("chat", fakeApi(), rooted);
-			feed(...afterTools(), tokens(12));
+			feed(...afterTools(), requesting(12));
 			expect(document.querySelectorAll("[data-group]")).toHaveLength(1);
 			fireEvent.click(document.querySelector("[data-group] .chat-group__head")!);
 			const lines = document.querySelectorAll("[data-group] .chat-group__running");
@@ -1042,17 +1054,57 @@ describe("ChatPane calm view", () => {
 			expect(document.querySelectorAll("[data-group] [data-tool]")).toHaveLength(2);
 		});
 
-		it("goes when claude starts to answer", () => {
+		it("stays after claude logs a message, since the turn is not over, and goes when it ends", () => {
 			const { feed } = renderPane("chat", fakeApi(), rooted);
-			feed(...afterTools(), tokens(12));
+			feed(...afterTools(), requesting(12));
 			expect(thinkingRow()).toBeDefined();
-			feed(at(30, saying("The reset races the read.")));
-			expect(thinkingRow()).toBeUndefined();
+			feed(at(30, saying("Writing the proposal now.")));
+			expect(thinkingRow()).toBeDefined();
+			feed(
+				at(35, out({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0 })),
+				at(35, lifecycle("u1", "completed")),
+			);
+			expect(liveRows()).toHaveLength(0);
+		});
+
+		it("shows a turn claude opened itself, with no command from the user", () => {
+			const { feed } = renderPane("chat", fakeApi(), rooted);
+			feed(requesting(5));
+			expect(thinkingRow()).toHaveTextContent(/^Thinking 35s$/);
+		});
+
+		it("says Writing with the file's name and a rising token estimate while a tool's input streams", () => {
+			const { feed, delta } = renderPane("chat", fakeApi(), rooted);
+			feed(...afterTools(), requesting(12));
+			delta(
+				{ type: "message_start", message: { id: "m9" } },
+				{ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "w1", name: "Write" } },
+				{
+					type: "content_block_delta",
+					index: 0,
+					delta: {
+						type: "input_json_delta",
+						partial_json: '{"file_path":"/work/project/docs/proposal.md","content":"',
+					},
+				},
+			);
+			const writing = () => liveRows().find((r) => r.querySelector(".chat-live__verb")?.textContent === "Writing");
+			expect(liveRows()).toHaveLength(1);
+			expect(writing()?.querySelector(".chat-live__detail")).toHaveTextContent(/^proposal\.md$/);
+			expect(writing()?.querySelector(".chat-live__time")).toHaveTextContent(/^28s · 14 tokens$/);
+			delta({
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "input_json_delta", partial_json: "x".repeat(4000) },
+			});
+			expect(writing()?.querySelector(".chat-live__time")).toHaveTextContent(/ · 1k tokens$/);
+			feed(at(41, toolUse("w1", "Write", { file_path: "/work/project/docs/proposal.md", content: "x" })));
+			expect(writing()).toBeUndefined();
 		});
 
 		it("shows the latest line of streamed thinking text while collapsed", () => {
 			const { feed, delta } = renderPane("chat", fakeApi(), rooted);
-			feed(...afterTools(), tokens(12));
+			feed(...afterTools(), requesting(12));
 			delta(
 				{ type: "message_start", message: { id: "m9" } },
 				{ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
@@ -1076,7 +1128,7 @@ describe("ChatPane calm view", () => {
 					.filter((n) => n !== undefined),
 			});
 			const thinking = renderPane("chat", fakeApi(), rooted);
-			thinking.feed(...afterTools(), tokens(12));
+			thinking.feed(...afterTools(), requesting(12));
 			const thinkingShape = shapeOf(liveRows()[0]);
 			thinking.unmount();
 			recentChats.clear();

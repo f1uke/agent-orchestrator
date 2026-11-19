@@ -1,12 +1,12 @@
 import { Brain, ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { unfinished } from "../lib/chat-event";
+import { formatTokens } from "../lib/chat-inspect";
 import type { ChatRow, ProcessMember } from "../lib/chat-rows";
 import { formatDuration } from "../lib/chat-time";
 import {
 	isAgentCall,
 	isAgentTask,
-	latestLine,
 	type LiveStep,
 	liveStep,
 	processSentence,
@@ -55,11 +55,17 @@ function useNow(everyMs: number): number {
 	return now;
 }
 
-export function Elapsed({ since }: { since: string }) {
+export function Elapsed({ since, tokens }: { since: string; tokens?: number }) {
 	const now = useNow(1000);
 	const start = Date.parse(since);
 	if (Number.isNaN(start)) return null;
-	return <span className="chat-live__time"> {formatDuration(now - start)}</span>;
+	return (
+		<span className="chat-live__time">
+			{" "}
+			{formatDuration(now - start)}
+			{tokens ? ` · ${formatTokens(tokens)} tokens` : null}
+		</span>
+	);
 }
 
 export function LiveDots() {
@@ -76,12 +82,14 @@ function LiveRow({
 	verb,
 	since,
 	detail,
+	tokens,
 	open,
 	onToggle,
 }: {
 	verb: string;
 	since?: string;
 	detail?: string;
+	tokens?: number;
 	open: boolean;
 	onToggle: (open: boolean) => void;
 }) {
@@ -96,7 +104,7 @@ function LiveRow({
 				<LiveDots />
 				<span className="chat-live__verb">{verb}</span>
 				{detail ? <span className="chat-live__detail">{detail}</span> : null}
-				{since ? <Elapsed since={since} /> : null}
+				{since ? <Elapsed since={since} tokens={tokens} /> : null}
 			</span>
 			<ChevronRight className={cn("chat-chev", open && "chat-chev--open")} aria-hidden="true" />
 		</button>
@@ -177,7 +185,7 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 			className="chat-group"
 			data-group
 			data-live={summary.live ? "" : undefined}
-			data-thinking={thinking ? "" : undefined}
+			data-thinking={thinking?.verb === "Thinking" ? "" : undefined}
 		>
 			{summary.live ? (
 				<LiveRow
@@ -185,6 +193,7 @@ export function GroupRow({ row, ...rest }: MembersProps & { row: Extract<ChatRow
 					onToggle={(next) => rest.toggleRow(row.key, next)}
 					open={open}
 					since={summary.live.since}
+					tokens={summary.live.tokens}
 					verb={summary.live.verb}
 				/>
 			) : (
@@ -244,25 +253,28 @@ export function WaitingRow({
 	);
 }
 
-export function LiveThinkingRow({
+export function LiveStatusRow({
 	row,
 	openRows,
 	toggleRow,
 }: {
-	row: Extract<ChatRow, { kind: "thinking_live" }>;
+	row: Extract<ChatRow, { kind: "live" }>;
 	openRows: OpenRows;
 	toggleRow: ToggleRow;
 }) {
 	const open = openRows[row.key] ?? false;
 	const hasText = row.text.trim() !== "";
+	const { step } = row;
+	const thinking = step.verb === "Thinking";
 	return (
-		<div className="chat-group" data-live="" data-thinking>
+		<div className="chat-group" data-live="" data-thinking={thinking ? "" : undefined}>
 			<LiveRow
-				detail={hasText && !open ? latestLine(row.text) : undefined}
+				detail={thinking && open && hasText ? undefined : step.detail}
 				onToggle={(next) => toggleRow(row.key, next)}
 				open={open}
-				since={row.since}
-				verb="Thinking"
+				since={step.since}
+				tokens={step.tokens}
+				verb={step.verb}
 			/>
 			{open && hasText ? <div className="chat-think__body">{row.text}</div> : null}
 		</div>

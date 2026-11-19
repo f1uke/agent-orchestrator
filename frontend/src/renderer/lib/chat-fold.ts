@@ -216,7 +216,8 @@ export type Transcript = {
 	agentModels: Record<string, string>;
 	/** The size of the context the latest top-level response saw, known before the turn's result. */
 	contextTokens?: number;
-	thinkingSince?: string;
+	/** The top-level model request in flight, from claude's "requesting" status until the turn or the process ends. */
+	request?: { since: string; thinkingTokens: number };
 	contextBreakdown?: ContextBreakdown;
 	usage?: SubscriptionUsage;
 	/** The Remote Control bridge. Off after a process ends, because the bridge dies with claude. */
@@ -326,7 +327,7 @@ export class ChatFolder {
 	private pendingApiError: string | undefined;
 	private context: number | undefined;
 	private turnStart: string | undefined;
-	private thinkingSince: string | undefined;
+	private request: { since: string; thinkingTokens: number } | undefined;
 	private breakdown: ContextBreakdown | undefined;
 	private usage: SubscriptionUsage | undefined;
 	private awaitingBrief = false;
@@ -385,7 +386,7 @@ export class ChatFolder {
 			itemKeys: [...this.itemKeys],
 			pending: [...this.pending],
 			queued,
-			busy: [...this.commands.values()].includes("started"),
+			busy: [...this.commands.values()].includes("started") || this.request !== undefined,
 			permissionMode: this.mode,
 			costUsd: this.cost,
 			commands: [...this.slash],
@@ -396,7 +397,7 @@ export class ChatFolder {
 			tasks: [...this.tasks.values()],
 			agentModels: { ...this.agentModels },
 			contextTokens: this.context,
-			thinkingSince: this.thinkingSince,
+			request: this.request && { ...this.request },
 			contextBreakdown: this.breakdown,
 			usage: this.usage,
 			remoteControl: { ...this.remote },
@@ -414,7 +415,12 @@ export class ChatFolder {
 				if (event.model !== "") this.model = event.model;
 				break;
 			case "system":
-				if (event.subtype === "thinking_tokens" && event.parentToolUseId === "") this.thinkingSince ??= this.ts;
+				if (event.parentToolUseId === "") {
+					if (event.status === "requesting") this.request = { since: this.ts, thinkingTokens: 0 };
+					else if (event.subtype === "thinking_tokens" && this.request) {
+						this.request.thinkingTokens = event.estimatedTokens;
+					}
+				}
 				if (event.permissionMode !== "") this.mode = event.permissionMode;
 				if (event.subtype === "compact_boundary") this.notice("compacted", "", event.compact);
 				if (event.task) this.applyTask(event.task);
@@ -429,14 +435,13 @@ export class ChatFolder {
 				if (event.parentToolUseId === "" && event.contextTokens !== undefined) this.context = event.contextTokens;
 				break;
 			case "user":
-				if (event.parentToolUseId === "") this.thinkingSince = undefined;
 				if (event.isReplay) {
 					if (!this.applyTaskMessage(event.blocks)) this.addRemoteInput(event);
 				} else this.applyToolResults(event.blocks, event.structuredPatch);
 				break;
 			case "result":
 				if (this.settleBash()) break;
-				this.thinkingSince = undefined;
+				this.request = undefined;
 				this.cost = event.totalCostUsd;
 				if (event.contextTokens !== undefined) this.context = event.contextTokens;
 				const errorText = event.errorText || this.pendingApiError || "";
@@ -492,7 +497,6 @@ export class ChatFolder {
 	private applyIn(event: ChatEvent): void {
 		if (event.type === "user") {
 			if (!event.shouldQuery && this.injectBash(event.uuid)) return;
-			this.thinkingSince = undefined;
 			this.suggestion = "";
 			this.addUserInput(event.uuid, event.blocks, undefined);
 		} else if (event.type === "control_response") this.answerPermission(event);
@@ -590,10 +594,6 @@ export class ChatFolder {
 
 	private applyAssistant(messageId: string, parentToolUseId: string, blocks: Block[]): void {
 		for (const block of blocks) {
-			if (parentToolUseId === "" && block.type === "thinking") this.thinkingSince ??= this.ts;
-			else if (parentToolUseId === "" && (block.type === "text" || block.type === "tool_use")) {
-				this.thinkingSince = undefined;
-			}
 			if (block.type === "text") {
 				this.push({ kind: "assistant_text", messageId, text: block.text, parentToolUseId });
 			} else if (block.type === "thinking") {
@@ -853,7 +853,7 @@ export class ChatFolder {
 		}
 		this.suggestion = "";
 		this.remote = REMOTE_CONTROL_OFF;
-		this.thinkingSince = undefined;
+		this.request = undefined;
 		for (const [id, task] of this.tasks) {
 			if (unfinished(task.state)) this.tasks.set(id, { ...task, state: "stopped" });
 		}
