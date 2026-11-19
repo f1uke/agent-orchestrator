@@ -95,6 +95,10 @@ export type ChatEvent =
 	| {
 			type: "system";
 			subtype: string;
+			/** system/status: "requesting" before each model request. */
+			status: string;
+			/** system/thinking_tokens: claude's running estimate for the current request. */
+			estimatedTokens: number;
 			permissionMode: string;
 			parentToolUseId: string;
 			task?: TaskEvent;
@@ -343,6 +347,8 @@ function decodeKnown(type: string, line: Obj): ChatEvent | undefined {
 			return {
 				type: "system",
 				subtype: str(line.subtype),
+				status: str(line.status),
+				estimatedTokens: num(line.estimated_tokens),
 				permissionMode: str(line.permissionMode),
 				parentToolUseId: str(line.parent_tool_use_id),
 				task: decodeTask(line),
@@ -501,6 +507,8 @@ export type StreamDelta = {
 	messageStart?: string;
 	/** The message id claude stamps on each stream event, when it does. */
 	messageId?: string;
+	/** Set on a top-level content_block_start: what kind of block opens at `index`. */
+	blockStart?: { type: string; name: string };
 };
 
 export function parseStreamDelta(line: unknown): StreamDelta | undefined {
@@ -515,6 +523,9 @@ export function parseStreamDelta(line: unknown): StreamDelta | undefined {
 		messageId: str(line.api_message_id) || undefined,
 	};
 	if (event.type === "message_start" && isObject(event.message)) out.messageStart = str(event.message.id);
+	if (event.type === "content_block_start" && isObject(event.content_block)) {
+		out.blockStart = { type: str(event.content_block.type), name: str(event.content_block.name) };
+	}
 	if (event.type === "content_block_delta") {
 		if (delta.type === "text_delta") Object.assign(out, { kind: "text", text: str(delta.text) });
 		if (delta.type === "thinking_delta") Object.assign(out, { kind: "thinking", text: str(delta.thinking) });
