@@ -60,7 +60,7 @@ func copyCases() []copyCase {
 		copyCase{"L1", today, func(f *fixture) {
 			f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
 			f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
-			f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
+			f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")
 		}},
 		copyCase{"L3", today, func(f *fixture) {
 			v := f.version("di", "21", "3.5.0", liveFreeze, liveDue)
@@ -260,9 +260,9 @@ func TestSingularCardsReadAsOne(t *testing.T) {
 func trunkMRInWallet(t *testing.T, accept bool) (*fixture, *MRFact) {
 	f, _ := walletPlan(t, targetToday, targetFreeze, TargetTrain)
 	f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
-	mr := f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
+	mr := f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")
 	if accept {
-		f.human.Plans[0].Accepted = []PlanAccepted{{MRRef: "di!" + strconv.Itoa(mr.IID), Reason: "meant for develop"}}
+		f.human.Plans[0].Accepted = []PlanAccepted{{MRRef: "di!" + strconv.Itoa(mr.IID), Reason: "meant for main"}}
 	}
 	return f, mr
 }
@@ -273,13 +273,13 @@ func TestL10StaysQuietWhileL1FiresForTheSameBranchAndApp(t *testing.T) {
 
 	l1 := firedHits(b, "L1")
 	if len(l1) != 1 || l1[0].Subject.(SubjMR).IID != mr.IID {
-		t.Fatalf("L1 = %v, want the develop MR", firedIDs(b, "L1"))
+		t.Fatalf("L1 = %v, want the main MR", firedIDs(b, "L1"))
 	}
-	if want := "Retarget it to the sprint branch. Develop takes no feature work after the cutover. This also puts it in sprint 21."; l1[0].Copy.Do != want {
+	if want := "Retarget it to develop or the sprint branch. Main takes no feature work after the cutover. The sprint branch puts it in sprint 21."; l1[0].Copy.Do != want {
 		t.Fatalf("L1 do = %q, want %q", l1[0].Copy.Do, want)
 	}
 	if got, want := firedIDs(b, "L10"), []string{"L10~llb/22-2026/da/feature/demo-wallet"}; !slices.Equal(got, want) {
-		t.Fatalf("L10 = %v, want only the app with no MR into develop %v", got, want)
+		t.Fatalf("L10 = %v, want only the app with no MR into develop or the sprint branch %v", got, want)
 	}
 }
 

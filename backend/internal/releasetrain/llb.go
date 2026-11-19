@@ -11,8 +11,6 @@ import (
 // LLBState is where a long-lived branch stands.
 type LLBState string
 
-// Long-lived branch states. A landing into a sprint branch is right; into
-// anything else it is right only before the app's cutover.
 const (
 	LLBOpen         LLBState = "open"
 	LLBLanding      LLBState = "landing"
@@ -250,6 +248,11 @@ func llbOf(app App, name string, ins, outs []MRFact, snap Snapshot, jira map[str
 	return b
 }
 
+func onFlowLanding(target string) bool {
+	_, sprint := sprintOf(target)
+	return sprint || target == "develop"
+}
+
 func hasDay(m map[AppID]Day, app AppID) bool { _, ok := m[app]; return ok }
 
 func llbState(b LongLivedBranch, ins []MRFact, cutover Day, hasCutover bool) LLBState {
@@ -257,9 +260,9 @@ func llbState(b LongLivedBranch, ins []MRFact, cutover Day, hasCutover bool) LLB
 	if l == nil {
 		return LLBOpen
 	}
-	_, intoSprint := sprintOf(l.TargetBranch)
+	onFlow := onFlowLanding(l.TargetBranch)
 	if l.MergedOn == nil {
-		if intoSprint {
+		if onFlow {
 			return LLBLanding
 		}
 		return LLBLandingWrong
@@ -269,7 +272,7 @@ func llbState(b LongLivedBranch, ins []MRFact, cutover Day, hasCutover bool) LLB
 			return LLBStranded
 		}
 	}
-	if intoSprint || !hasCutover || l.MergedOn.Before(cutover) {
+	if onFlow || !hasCutover || l.MergedOn.Before(cutover) {
 		return LLBLanded
 	}
 	return LLBLandedWrong

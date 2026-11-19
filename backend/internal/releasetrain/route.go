@@ -172,6 +172,7 @@ func (r routing) destOf(app AppID, mrs []SprintMR) (DestKind, *SprintMR) {
 		n, isSprint := sprintOf(m.Target)
 		lb := r.llbs[app][m.Target]
 		_, fromSprint := sprintOf(m.Source)
+		landsInDevelop := m.Target == "develop" && r.llbs[app][m.Source] != nil
 		switch {
 		case lb != nil && (lb.Landing == nil || lb.Landing.MergedOn == nil):
 			return pick(DestLLB, DestLLBOpen), 2
@@ -181,6 +182,8 @@ func (r routing) destOf(app AppID, mrs []SprintMR) (DestKind, *SprintMR) {
 			return DestBack, 3
 		case !open && trunkTargetRE.MatchString(m.Target) && m.Merged != nil && m.Merged.Before(cut):
 			return DestBefore, 7
+		case landsInDevelop:
+			return pick(DestLLB, DestLLBOpen), 2
 		case isSprint && n == r.sprint:
 			return pick(DestSprint, DestSprintOpen), 1
 		case lb != nil:
@@ -229,11 +232,14 @@ func (r routing) RouteOf(key string, app AppID, mrs []SprintMR) Route {
 	if best == nil {
 		return Route{App: app, Kind: DestNone, To: NotRouted{}}
 	}
+	carrier := r.carrier(app, kind, best)
 	main := best
-	for i := range mrs {
-		if mrs[i].App == app && mrs[i].Target == best.Target {
-			main = &mrs[i]
-			break
+	if carrier == nil || carrier.Branch == best.Target {
+		for i := range mrs {
+			if mrs[i].App == app && mrs[i].Target == best.Target {
+				main = &mrs[i]
+				break
+			}
 		}
 	}
 	at := main.Created
@@ -246,7 +252,7 @@ func (r routing) RouteOf(key string, app AppID, mrs []SprintMR) Route {
 	}
 	first := r.firstTrain(app)
 	shipAt := at
-	landed := r.llbs[app][best.Target]
+	landed := carrier
 	if landed != nil && (landed.Landing == nil || landed.Landing.MergedOn == nil) {
 		landed = nil
 	}
@@ -275,8 +281,8 @@ func (r routing) RouteOf(key string, app AppID, mrs []SprintMR) Route {
 	case kind == DestPrev || kind == DestBack:
 		route.To = ToTrain{Train: r.train(r.sprint)}
 	case kind == DestLLB || kind == DestLLBOpen:
-		g := r.groups[app][best.Target]
-		to := ToLLB{Branch: best.Target}
+		g := r.groups[app][carrier.Branch]
+		to := ToLLB{Branch: carrier.Branch}
 		if g != nil {
 			to.Group = g.ID
 			switch t := g.Target.(type) {
@@ -313,6 +319,16 @@ func (r routing) RouteOf(key string, app AppID, mrs []SprintMR) Route {
 		}
 	}
 	return route
+}
+
+func (r routing) carrier(app AppID, kind DestKind, best *SprintMR) *LongLivedBranch {
+	if lb := r.llbs[app][best.Target]; lb != nil {
+		return lb
+	}
+	if kind == DestLLB || kind == DestLLBOpen {
+		return r.llbs[app][best.Source]
+	}
+	return nil
 }
 
 func (r routing) releaseRoute(app AppID, mrs []SprintMR, plan *TrainID, at Day, early Dest) Dest {

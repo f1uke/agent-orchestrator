@@ -82,6 +82,11 @@ func TestCardCodeState(t *testing.T) {
 			v.cardMR("wallet", "feature/demo-wallet", "feature/sprint-21-2026", MRMerged, "2026-10-05", "2026-10-06")
 			return nil
 		}, func([]int) CodeState { return CodeElsewhere{Branch: "feature/demo-wallet", On: Day{2026, 10, 3}} }},
+		{"a long-lived branch that landed in develop before the cut rides this train", "21", false, func(v *fv) []int {
+			ids := []int{v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-01", "2026-10-03")}
+			v.cardMR("wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-04", "2026-10-05")
+			return ids
+		}, func(ids []int) CodeState { return CodeMerged{MRs: ids, Via: "feature/demo-wallet"} }},
 		{"a long-lived branch that landed in develop after the cut ships later", "21", false, func(v *fv) []int {
 			v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-01", "2026-10-03")
 			v.cardMR("wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-11", "2026-10-12")
