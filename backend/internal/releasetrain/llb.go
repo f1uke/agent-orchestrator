@@ -11,6 +11,9 @@ import (
 // LLBState is where a long-lived branch stands.
 type LLBState string
 
+// Long-lived branch states. A landing into develop or a sprint branch is
+// right; into main, a release or a hotfix branch it is right only before the
+// app's cutover.
 const (
 	LLBOpen         LLBState = "open"
 	LLBLanding      LLBState = "landing"
