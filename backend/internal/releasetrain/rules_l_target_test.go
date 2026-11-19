@@ -43,7 +43,7 @@ func TestL10PlanTargetsATrainAndNoAppHasAnMRIntoItsSprintBranch(t *testing.T) {
 		t.Fatalf("L10 hits = %v, want one per app %v", got, want)
 	}
 	h := firedHits(b, "L10")[0]
-	wantCopy := Copy{What: "feature/demo-wallet is not in sprint 21 yet", Do: "Open an MR into the sprint branch before freeze Fri 30 Oct."}
+	wantCopy := Copy{What: "feature/demo-wallet is not in develop or sprint 21 yet", Do: "Open an MR into develop or the sprint branch before freeze Fri 30 Oct."}
 	if h.Severity != SevInfo || h.Train == nil || *h.Train != train22 || h.Evidence["group"] != PlanID("demo-wallet") || h.Copy != wantCopy {
 		t.Fatalf("L10 hit = %+v; want info on train 22, group demo-wallet, copy %+v", h, wantCopy)
 	}
@@ -83,7 +83,7 @@ func TestLLBTargetRulesStayQuiet(t *testing.T) {
 				f.mr(app, "wallet", "feature/demo-wallet", "feature/sprint-21-2026", MRMerged, "2026-10-20", "2026-10-21")
 			}
 		}},
-		{"both branches landed in develop before any cutover", TargetTrain, func(f *fixture) {
+		{"both branches landed in develop before the freeze", TargetTrain, func(f *fixture) {
 			for _, app := range []AppID{"di", "da"} {
 				f.mr(app, "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-20", "2026-10-21")
 			}

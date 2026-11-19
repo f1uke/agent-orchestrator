@@ -6,20 +6,20 @@ import (
 	"testing"
 )
 
-func TestL1OpenMRFromALongLivedBranchIntoTrunkAfterCutover(t *testing.T) {
+func TestL1OpenMRFromALongLivedBranchIntoMainAfterCutover(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(f *fixture) []*MRFact
 		plan  func(mrs []*MRFact) *LlbPlan
 		want  func(mrs []*MRFact) []string
 	}{
-		{"open into develop after the cutover", func(f *fixture) []*MRFact {
-			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")}
+		{"open into main after the cutover", func(f *fixture) []*MRFact {
+			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")}
 		}, nil, func(mrs []*MRFact) []string { return []string{"L1~mr/di/" + strconv.Itoa(mrs[0].IID)} }},
-		{"open into main counts too, one hit per MR", func(f *fixture) []*MRFact {
+		{"open into master counts too, one hit per MR", func(f *fixture) []*MRFact {
 			return []*MRFact{
-				f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", ""),
-				f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-13", ""),
+				f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", ""),
+				f.mr("di", "wallet", "feature/demo-wallet", "master", MROpened, "2026-10-13", ""),
 			}
 		}, nil, func(mrs []*MRFact) []string {
 			return []string{"L1~mr/di/" + strconv.Itoa(mrs[0].IID), "L1~mr/di/" + strconv.Itoa(mrs[1].IID)}
@@ -27,18 +27,21 @@ func TestL1OpenMRFromALongLivedBranchIntoTrunkAfterCutover(t *testing.T) {
 		{"open into the sprint branch is right", func(f *fixture) []*MRFact {
 			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "feature/sprint-21-2026", MROpened, "2026-10-12", "")}
 		}, nil, func([]*MRFact) []string { return nil }},
-		{"merged into develop is L2, not built", func(f *fixture) []*MRFact {
-			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-12", "2026-10-12")}
+		{"open into develop is on flow", func(f *fixture) []*MRFact {
+			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")}
+		}, nil, func([]*MRFact) []string { return nil }},
+		{"merged into main is not an open MR", func(f *fixture) []*MRFact {
+			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "main", MRMerged, "2026-10-12", "2026-10-12")}
 		}, nil, func([]*MRFact) []string { return nil }},
 		{"an accepted MR raises nothing", func(f *fixture) []*MRFact {
-			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")}
+			return []*MRFact{f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")}
 		}, func(mrs []*MRFact) *LlbPlan {
 			return &LlbPlan{ID: "demo-wallet", Name: "Wallet", TargetKind: TargetUnplanned,
 				Accepted: []PlanAccepted{{MRRef: "di!" + strconv.Itoa(mrs[0].IID), Reason: "ships in #21 as intended"}}}
 		}, func([]*MRFact) []string { return nil }},
 		{"no cutover yet in another app", func(f *fixture) []*MRFact {
 			f.mr("da", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
-			return []*MRFact{f.mr("da", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")}
+			return []*MRFact{f.mr("da", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")}
 		}, nil, func([]*MRFact) []string { return nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -64,15 +67,15 @@ func TestL1EvidenceAndText(t *testing.T) {
 	f := newFixture(t, today)
 	f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
 	f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
-	mr := f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
+	mr := f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")
 	hits := firedHits(f.reconcile(), "L1")
 	if len(hits) != 1 {
 		t.Fatalf("L1 hits = %v", hits)
 	}
 	h := hits[0]
 	want := Copy{
-		What: "MR !" + strconv.Itoa(mr.IID) + " takes feature/demo-wallet into develop",
-		Do:   "Retarget it to the sprint branch. Develop takes no feature work after the cutover.",
+		What: "MR !" + strconv.Itoa(mr.IID) + " takes feature/demo-wallet into main",
+		Do:   "Retarget it to develop or the sprint branch. Main takes no feature work after the cutover.",
 	}
 	if h.Copy != want || h.Severity != SevBlock || h.App != "di" || h.Train != nil || h.AgesOn != nil || h.Due != nil {
 		t.Fatalf("L1 hit = %+v, want copy %+v, block, app di, no train, never ages, no chip", h, want)

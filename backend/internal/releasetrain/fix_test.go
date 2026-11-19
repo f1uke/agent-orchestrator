@@ -187,7 +187,7 @@ func llbFixture(t *testing.T, plan *LlbPlan) (*fixture, *MRFact) {
 	f := newFixture(t, today)
 	f.mr("di", "DEMO-50 other", "feat/DEMO-50", "feature/sprint-2026-20", MRMerged, "2026-10-01", "2026-10-01")
 	f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
-	mr := f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
+	mr := f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")
 	if plan != nil {
 		f.human.Plans = []LlbPlan{*plan}
 	}

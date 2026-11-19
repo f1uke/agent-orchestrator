@@ -41,7 +41,7 @@ const landed: LLBGroup = {
 				state: "merged",
 				author: "Kai",
 				sourceBranch: "feature/demo-chat",
-				targetBranch: "develop",
+				targetBranch: "main",
 				createdOn: "2026-10-08",
 				mergedOn: "2026-10-09",
 				url: "",

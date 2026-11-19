@@ -176,7 +176,7 @@ func TestMineOnHitsFollowsTheirSubject(t *testing.T) {
 	other.detail().Conflicts = true
 	f.mr("da", "DEMO-50", "feat/DEMO-50", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
 	f.mr("da", "DEMO-5 wallet", "feat/DEMO-5", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
-	land := f.mr("da", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
+	land := f.mr("da", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")
 	land.AuthorUsername = "dee"
 	b := f.reconcile()
 

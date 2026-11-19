@@ -185,6 +185,9 @@ func TestLLBStates(t *testing.T) {
 		}, LLBLanding},
 		{"open MR into develop", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
+		}, LLBLanding},
+		{"open MR into main", func(f *fixture) {
+			f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")
 		}, LLBLandingWrong},
 		{"merged into the sprint branch", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "feature/sprint-21-2026", MRMerged, "2026-10-12", "2026-10-12")
@@ -194,6 +197,9 @@ func TestLLBStates(t *testing.T) {
 		}, LLBLanded},
 		{"merged into develop after the cutover", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-12", "2026-10-12")
+		}, LLBLanded},
+		{"merged into main after the cutover", func(f *fixture) {
+			f.mr("di", "wallet", "feature/demo-wallet", "main", MRMerged, "2026-10-12", "2026-10-12")
 		}, LLBLandedWrong},
 		{"a card MR in after the landing", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "feature/sprint-21-2026", MRMerged, "2026-10-08", "2026-10-08")
@@ -373,8 +379,11 @@ func TestLLBTarget(t *testing.T) {
 		{"landed into develop rides the first train frozen after it", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-09-20", "2026-09-21")
 		}, nil, LLBLandedIn{Train: train(21), App: "di", Branch: "feature/demo-wallet"}, LLBLanded},
-		{"landed into develop after the cutover is still landed, in the wrong place", func(f *fixture) {
+		{"landed into develop after the cutover is on flow", func(f *fixture) {
 			f.mr("di", "wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-12", "2026-10-12")
+		}, nil, LLBLandedIn{Train: train(22), App: "di", Branch: "feature/demo-wallet"}, LLBLanded},
+		{"landed into main after the cutover is still landed, in the wrong place", func(f *fixture) {
+			f.mr("di", "wallet", "feature/demo-wallet", "main", MRMerged, "2026-10-12", "2026-10-12")
 		}, nil, LLBLandedIn{Train: train(22), App: "di", Branch: "feature/demo-wallet"}, LLBLandedWrong},
 		{"planned", func(*fixture) {}, &LlbPlan{TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 22, Year: fixtureYear}},
 			LLBPlanned{Train: train(22)}, LLBOpen},

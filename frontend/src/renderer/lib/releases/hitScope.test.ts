@@ -104,7 +104,7 @@ describe("hits about a long-lived branch group", () => {
 			subject: { kind: "cardOnTrain", train: "22-2026", app: "di", key: "DEMO-7" },
 		}),
 		wallet("L1~mr/di/330", {
-			subject: { kind: "mr", app: "di", iid: 330, source: "feature/demo-wallet", target: "develop" },
+			subject: { kind: "mr", app: "di", iid: 330, source: "feature/demo-wallet", target: "main" },
 		}),
 		hit("L10~llb/22-2026/di/feature/demo-pay", { evidence: { group: "demo-pay", branch: "feature/demo-pay" } }),
 		hit("C1~v/22-2026/di"),

@@ -18,30 +18,29 @@ const (
 )
 
 type aim struct {
-	group          *LLBGroup
-	branch         *LongLivedBranch
-	train          *Train
-	version        *AppVersion
-	freeze         *Day
-	window         trainWindow
-	openIntoSprint []MRFact
+	group    *LLBGroup
+	branch   *LongLivedBranch
+	train    *Train
+	version  *AppVersion
+	freeze   *Day
+	window   trainWindow
+	openInto []MRFact
 }
 
 func aims(b *Board) []aim {
 	var out []aim
 	for gi := range b.LLBs {
 		g := &b.LLBs[gi]
-		planned, ok := g.Target.(LLBPlanned)
-		if !ok {
+		if g.Plan == nil || g.Plan.TargetKind != TargetTrain || g.Plan.TargetTrain == nil {
 			continue
 		}
-		t := b.train(planned.Train)
+		t := b.train(*g.Plan.TargetTrain)
 		if t == nil || !t.ID.regular() {
 			continue
 		}
 		for bi := range g.Branches {
 			br := &g.Branches[bi]
-			if br.Gone || landedAnywhere(br) {
+			if br.Gone {
 				continue
 			}
 			a := aim{group: g, branch: br, train: t, version: t.version(br.App), freeze: t.Freeze}
@@ -49,9 +48,15 @@ func aims(b *Board) []aim {
 				a.freeze = freezeOf(t, a.version)
 			}
 			a.window = windowOf(a.freeze, a.version, b.Today)
+			if br.Landing != nil && br.Landing.MergedOn != nil {
+				if br.Train != nil && !t.ID.less(*br.Train) {
+					continue
+				}
+				a.window = windowMissed
+			}
 			for _, mr := range br.outs {
-				if into, ok := sprintTrain(mr.TargetBranch); ok && into == t.ID && mr.State == MROpened {
-					a.openIntoSprint = append(a.openIntoSprint, mr)
+				if mr.State == MROpened && intoTrain(mr.TargetBranch, t.ID) {
+					a.openInto = append(a.openInto, mr)
 				}
 			}
 			out = append(out, a)
@@ -60,13 +65,12 @@ func aims(b *Board) []aim {
 	return out
 }
 
-func landedAnywhere(br *LongLivedBranch) bool {
-	for _, mr := range br.outs {
-		if mr.MergedOn != nil {
-			return true
-		}
+func intoTrain(target string, train TrainID) bool {
+	if target == "develop" {
+		return true
 	}
-	return false
+	into, ok := sprintTrain(target)
+	return ok && into == train
 }
 
 func windowOf(freeze *Day, v *AppVersion, today Day) trainWindow {
@@ -120,7 +124,7 @@ func (b *Board) projectWebURL(app AppID) string {
 
 var readsAim = []KindName{KindMilestones.Name, KindMRs.Name}
 
-type trunkKey struct {
+type mainKey struct {
 	app    AppID
 	branch string
 }
@@ -130,21 +134,21 @@ var ruleL10 = rule{
 	Subjects: []SubjectKind{SubjectLLBBranch},
 	Mine:     MineListedCards,
 	Reads:    readsAim,
-	Title:    "Long-lived branch targets a train but has no MR into its sprint branch",
+	Title:    "Long-lived branch targets a train but has no MR into develop or its sprint branch",
 	Hint:     "Per app in the group. Info until 3 working days before freeze, then risk. After the freeze it is L13.",
 	Check: func(b *Board) []Hit {
 		var out []Hit
-		onTrunk := map[trunkKey]bool{}
-		for _, t := range openTrunkMRs(b) {
-			onTrunk[trunkKey{t.branch.App, t.branch.Branch}] = true
+		onMain := map[mainKey]bool{}
+		for _, t := range openMainMRs(b) {
+			onMain[mainKey{t.branch.App, t.branch.Branch}] = true
 		}
 		for _, a := range aims(b) {
-			if a.window == windowMissed || len(a.openIntoSprint) > 0 || onTrunk[trunkKey{a.branch.App, a.branch.Branch}] {
+			if a.window == windowMissed || len(a.openInto) > 0 || onMain[mainKey{a.branch.App, a.branch.Branch}] {
 				continue
 			}
 			h := a.hit(a.branchSubject(), Copy{
-				What: fmt.Sprintf("%s is not in sprint %d yet", a.branch.Branch, a.train.ID.Number-1),
-				Do:   "Open an MR into the sprint branch " + before("freeze", a.freeze) + ".",
+				What: fmt.Sprintf("%s is not in develop or sprint %d yet", a.branch.Branch, a.train.ID.Number-1),
+				Do:   "Open an MR into develop or the sprint branch " + before("freeze", a.freeze) + ".",
 			})
 			h.Severity = severityIn(a.window)
 			if newMR := b.newMRURL(a); newMR != "" {
@@ -205,7 +209,7 @@ var ruleL12 = rule{
 	Subjects: []SubjectKind{SubjectMR},
 	Mine:     MineMR,
 	Reads:    readsAim,
-	Title:    "Long-lived branch's MR into the sprint branch is still open near freeze",
+	Title:    "Long-lived branch's MR into develop or the sprint branch is still open near freeze",
 	Hint:     "3 working days or fewer before the freeze of the train its plan targets. Conflicts and pipeline are not read for these MRs.",
 	Check: func(b *Board) []Hit {
 		var out []Hit
@@ -213,9 +217,9 @@ var ruleL12 = rule{
 			if a.window != windowNear {
 				continue
 			}
-			for _, mr := range a.openIntoSprint {
+			for _, mr := range a.openInto {
 				h := a.hit(SubjMR{App: a.branch.App, IID: mr.IID, Source: mr.SourceBranch, Target: mr.TargetBranch}, Copy{
-					What: fmt.Sprintf("MR !%d from %s into the sprint branch is still open", mr.IID, a.branch.Branch),
+					What: fmt.Sprintf("MR !%d from %s into %s is still open", mr.IID, a.branch.Branch, mr.TargetBranch),
 					Do:   "Merge it " + before("freeze", a.freeze) + ".",
 				})
 				h.Evidence["mr"] = mr.IID
@@ -232,7 +236,7 @@ var ruleL13 = rule{
 	Mine:     MineListedCards,
 	Reads:    readsAim,
 	Title:    "Long-lived branch missed the train its plan targets",
-	Hint:     "The freeze passed or the release MR is open, and the branch has not merged into the sprint branch. Retarget the plan.",
+	Hint:     "The freeze passed or the release MR is open, and the branch did not merge into develop or the sprint branch before the freeze. Retarget the plan.",
 	Check: func(b *Board) []Hit {
 		var out []Hit
 		for _, a := range aims(b) {
@@ -242,7 +246,7 @@ var ruleL13 = rule{
 			next := TrainID{Number: a.train.ID.Number + 1, Year: a.train.ID.Year}
 			h := a.hit(a.branchSubject(), Copy{
 				What: fmt.Sprintf("%s missed train %s", a.branch.Branch, a.train.ID.short()),
-				Do:   fmt.Sprintf("Retarget its plan to train %s. It never merged into the sprint %d branch.", next.short(), a.train.ID.Number-1),
+				Do:   fmt.Sprintf("Retarget its plan to train %s. It never merged into develop or the sprint %d branch before freeze.", next.short(), a.train.ID.Number-1),
 			})
 			h.Primary = &Action{Label: "Retarget plan", Details: true}
 			h.dueAt(b.Today, a.freeze, DueFreeze)

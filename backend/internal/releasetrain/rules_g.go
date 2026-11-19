@@ -267,7 +267,7 @@ var ruleL8 = rule{
 	Mine:     MineMR,
 	Reads:    []KindName{KindBoardSprints.Name, KindSprintCards.Name, KindMRs.Name, KindBranchCards.Name},
 	Title:    "Card MR into develop after the sprint-branch cutover",
-	Hint:     "The same cards the sprint row puts in \"off the sprint flow\". An open MR is caught before it merges.",
+	Hint:     "The same cards the sprint row puts in \"off the sprint flow\". An open MR is caught before it merges. A long-lived branch merging into develop is on the flow.",
 	Check: func(b *Board) []Hit {
 		return forEachSprintCard(b, func(row *SprintRow, c *SprintCard) []Hit {
 			var out []Hit

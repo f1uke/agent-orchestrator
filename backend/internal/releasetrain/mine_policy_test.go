@@ -274,7 +274,7 @@ func TestALandingAlertIsMineThroughACardOnTheBranch(t *testing.T) {
 	f.mr("di", "DEMO-5 wallet again", "feat/DEMO-5-b", "feature/demo-wallet", MRMerged, "2026-09-03", "2026-09-04")
 	f.mr("di", "DEMO-6 wallet", "feat/DEMO-6", "feature/demo-wallet", MRMerged, "2026-09-03", "2026-09-04")
 	f.llbCards = append(f.llbCards, &IssueFact{Key: "DEMO-5", Assignee: dee})
-	land := f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
+	land := f.mr("di", "wallet", "feature/demo-wallet", "main", MROpened, "2026-10-12", "")
 	expectMine(t, f.reconcile(), HitID("L1~mr/di/"+strconv.Itoa(land.IID)), []MineReason{{Why: MineCard, Ref: "DEMO-5"}})
 }
 

@@ -7,22 +7,22 @@ import (
 	"strings"
 )
 
-var trunkRE = regexp.MustCompile(`^(develop|main|master)$`)
+var mainRE = regexp.MustCompile(`^(main|master)$`)
 
 var ruleL1 = rule{
 	ID: "L1", Group: "G", Severity: SevBlock, DefaultOn: true, Scope: scopePerApp,
 	Subjects: []SubjectKind{SubjectMR},
 	Mine:     MineMR,
 	Reads:    []KindName{KindMRs.Name},
-	Title:    "Long-lived branch has an open MR into develop or main after cutover",
-	Hint:     "Catches the wrong landing before it merges; it should go into the sprint branch.",
+	Title:    "Long-lived branch has an open MR into main after cutover",
+	Hint:     "Catches the wrong landing before it merges; it should go into develop or the sprint branch.",
 	Check: func(b *Board) []Hit {
-		trunk := openTrunkMRs(b)
-		out := make([]Hit, 0, len(trunk))
-		for _, t := range trunk {
-			do := fmt.Sprintf("Retarget it to the sprint branch. %s takes no feature work after the cutover.", upperFirst(t.mr.TargetBranch))
+		open := openMainMRs(b)
+		out := make([]Hit, 0, len(open))
+		for _, t := range open {
+			do := fmt.Sprintf("Retarget it to develop or the sprint branch. %s takes no feature work after the cutover.", upperFirst(t.mr.TargetBranch))
 			if planned, ok := t.group.Target.(LLBPlanned); ok {
-				do += fmt.Sprintf(" This also puts it in sprint %d.", planned.Train.Number-1)
+				do += fmt.Sprintf(" The sprint branch puts it in sprint %d.", planned.Train.Number-1)
 			}
 			h := Hit{
 				Subject: SubjMR{App: t.branch.App, IID: t.mr.IID, Source: t.mr.SourceBranch, Target: t.mr.TargetBranch}, App: t.branch.App,
@@ -39,15 +39,15 @@ var ruleL1 = rule{
 	},
 }
 
-type trunkMR struct {
+type mainMR struct {
 	group   *LLBGroup
 	branch  *LongLivedBranch
 	mr      MRFact
 	cutover Day
 }
 
-func openTrunkMRs(b *Board) []trunkMR {
-	var out []trunkMR
+func openMainMRs(b *Board) []mainMR {
+	var out []mainMR
 	for gi := range b.LLBs {
 		g := &b.LLBs[gi]
 		for bi := range g.Branches {
@@ -57,8 +57,8 @@ func openTrunkMRs(b *Board) []trunkMR {
 				continue
 			}
 			for _, mr := range br.outs {
-				if mr.State == MROpened && trunkRE.MatchString(mr.TargetBranch) && !accepted(g.Plan, br.App, mr.IID) {
-					out = append(out, trunkMR{group: g, branch: br, mr: mr, cutover: cutover})
+				if mr.State == MROpened && mainRE.MatchString(mr.TargetBranch) && !accepted(g.Plan, br.App, mr.IID) {
+					out = append(out, mainMR{group: g, branch: br, mr: mr, cutover: cutover})
 				}
 			}
 		}
@@ -92,7 +92,7 @@ var ruleL3 = rule{
 	Mine:     MineListedCards,
 	Reads:    []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name, KindMRs.Name, KindPages.Name, KindPageCards.Name, KindLLBCards.Name},
 	Title:    "Card is on a train page but parked in a long-lived branch that does not target it",
-	Hint:     "Its code will not ride this train unless the branch lands in the sprint branch before the cut.",
+	Hint:     "Its code will not ride this train unless the branch lands in develop or the sprint branch before the cut.",
 	Check: func(b *Board) []Hit {
 		groups := groupsByBranch(b.LLBs)
 		var out []Hit

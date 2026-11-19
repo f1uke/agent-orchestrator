@@ -66,10 +66,14 @@ export const CODE_META: Readonly<Record<CodeState["kind"], Meta>> = {
 
 export const LLB_STATE_META: Readonly<Record<LLBState | "gone", Omit<Meta, "glyph">>> = {
 	open: { tone: "hotfix", label: "parked, not merged out yet", short: "parked" },
-	landing: { tone: "running", label: "MR open into the sprint branch", short: "landing" },
-	landing_wrong: { tone: "waiting", label: "MR open into develop", short: "MR into develop" },
-	landed: { tone: "done", label: "merged into the sprint branch", short: "landed" },
-	landed_wrong: { tone: "failed", label: "merged into develop, not the sprint branch", short: "into develop" },
+	landing: { tone: "running", label: "MR open into develop or the sprint branch", short: "landing" },
+	landing_wrong: { tone: "waiting", label: "MR open into main or a release branch", short: "MR off flow" },
+	landed: { tone: "done", label: "merged into develop or the sprint branch", short: "landed" },
+	landed_wrong: {
+		tone: "failed",
+		label: "merged into main or a release branch, not develop or the sprint branch",
+		short: "off flow",
+	},
 	stranded: { tone: "waiting", label: "MRs merged into it after it landed", short: "stranded" },
 	gone: { tone: "todo", label: "branch deleted, never merged", short: "deleted" },
 };
