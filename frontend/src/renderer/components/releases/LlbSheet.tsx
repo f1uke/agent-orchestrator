@@ -76,7 +76,7 @@ function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	} else if (t.kind === "dropped") text = "Marked dropped. Its cards will not ship.";
 	else if (t.kind === "none") {
 		const n = new Set(g.branches.flatMap((b) => b.cards.map((c) => c.key))).size;
-		text = `No target train yet. Its ${n} cards have no train until it merges into a sprint branch.`;
+		text = `No target train yet. Its ${n} cards have no train until it merges into develop or a sprint branch.`;
 	} else {
 		tone = urgency(g, board);
 		const freeze = board.trains.find((x) => x.id === t.train)?.freeze;
@@ -93,7 +93,7 @@ function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 		text = (
 			<>
 				Targets <b>{trainLabel(board, t.train)}</b>.{" "}
-				{left.length ? `Not merged into the sprint branch yet on ${left.join(" and ")}. ` : ""}
+				{left.length ? `Not merged into develop or the sprint branch yet on ${left.join(" and ")}. ` : ""}
 				{when}.
 			</>
 		);
@@ -559,8 +559,8 @@ export function llbsSheet(
 		body: (
 			<>
 				<div className="sec muted text-[12.5px]">
-					Feature branches that collect cards over several sprints, then merge into a sprint branch. Set a target train
-					on each so the page can show what is due.
+					Feature branches that collect cards over several sprints, then merge into develop or a sprint branch. Set a
+					target train on each so the page can show what is due.
 				</div>
 				<div className="sec">
 					<div className="sec-h">

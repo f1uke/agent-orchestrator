@@ -237,7 +237,7 @@ const RULES: [string, Severity, string][] = [
 	["F1", "info", "Two trains overlap"],
 	["G6", "hygiene", "MR names a card key that Jira moved to another project"],
 	["L9", "risk", "Code stranded in a branch that is not a sprint branch, a long-lived branch or develop"],
-	["L10", "info", "Long-lived branch targets a train but has no MR into its sprint branch"],
+	["L10", "info", "Long-lived branch targets a train but has no MR into develop or its sprint branch"],
 ];
 
 const KINDS: readonly [string, string, number][] = [
@@ -591,8 +591,8 @@ function baseBoard(today: string): Board {
 			"L10",
 			"info",
 			{
-				what: "feature/demo-wallet is not in sprint 21 yet",
-				do: `Open an MR into the sprint branch before freeze ${dayLabel(f22)}.`,
+				what: "feature/demo-wallet is not in develop or sprint 21 yet",
+				do: `Open an MR into develop or the sprint branch before freeze ${dayLabel(f22)}.`,
 			},
 			{ kind: "llbBranch", train: "22-2026", app: "di", branch: "feature/demo-wallet", group: "demo-wallet" },
 			{
@@ -1808,15 +1808,15 @@ const subjectHits = (today: string): [string, Severity, AlertCopy, Subject, Part
 		"L1~mr/di/330",
 		"block",
 		{
-			what: "MR !330 takes feature/demo-wallet into develop",
-			do: "Retarget it to the sprint branch. Develop takes no feature work after the cutover.",
+			what: "MR !330 takes feature/demo-wallet into main",
+			do: "Retarget it to develop or the sprint branch. Main takes no feature work after the cutover.",
 		},
 		{
 			kind: "mr",
 			app: "di",
 			iid: 330,
 			source: "feature/demo-wallet",
-			target: "develop",
+			target: "main",
 		},
 	],
 	[
