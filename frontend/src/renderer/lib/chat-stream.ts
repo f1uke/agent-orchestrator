@@ -16,9 +16,7 @@ export type StreamingTool = {
 	messageId: string;
 	index: number;
 	name: string;
-	/** Characters of input received so far. */
 	chars: number;
-	/** The first characters of the input, enough to read a leading file_path. */
 	head: string;
 };
 

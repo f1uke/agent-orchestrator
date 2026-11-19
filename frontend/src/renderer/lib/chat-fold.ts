@@ -216,7 +216,6 @@ export type Transcript = {
 	agentModels: Record<string, string>;
 	/** The size of the context the latest top-level response saw, known before the turn's result. */
 	contextTokens?: number;
-	/** The top-level model request in flight, from claude's "requesting" status until the turn or the process ends. */
 	request?: { since: string; thinkingTokens: number };
 	contextBreakdown?: ContextBreakdown;
 	usage?: SubscriptionUsage;

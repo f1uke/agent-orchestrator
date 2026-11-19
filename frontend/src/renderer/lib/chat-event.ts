@@ -507,7 +507,6 @@ export type StreamDelta = {
 	messageStart?: string;
 	/** The message id claude stamps on each stream event, when it does. */
 	messageId?: string;
-	/** Set on a top-level content_block_start: what kind of block opens at `index`. */
 	blockStart?: { type: string; name: string };
 };
 

@@ -224,7 +224,6 @@ type LiveStatusRow = Extract<ChatRow, { kind: "live" }>;
 
 const WRITE_TARGET = /"(?:file_path|notebook_path)"\s*:\s*"((?:[^"\\]|\\.)*)"/;
 
-// The tool input arrives as JSON text, so the target is read from its first characters.
 function writeTarget(tool: StreamingTool): string {
 	const raw = WRITE_TARGET.exec(tool.head)?.[1];
 	if (raw === undefined) return tool.name;
@@ -235,8 +234,6 @@ function writeTarget(tool: StreamingTool): string {
 	return path.split(/[\\/]/).at(-1) || tool.name;
 }
 
-// The one row that tells the human a turn is still moving. A running tool, a waiting
-// permission or streamed text already shows that, so this only fills the gaps.
 function liveRow(transcript: Transcript, overlay: StreamOverlay, rows: readonly ChatRow[]): LiveStatusRow | undefined {
 	const { request } = transcript;
 	if (!request || transcript.pending.length > 0 || rows.at(-1)?.kind === "waiting") return undefined;
