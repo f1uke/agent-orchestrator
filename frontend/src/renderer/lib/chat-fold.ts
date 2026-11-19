@@ -418,7 +418,8 @@ export class ChatFolder {
 				if (event.parentToolUseId === "") {
 					if (event.status === "requesting") this.request = { since: this.ts, thinkingTokens: 0 };
 					else if (event.subtype === "thinking_tokens" && this.request) {
-						this.request.thinkingTokens = event.estimatedTokens;
+						// Claude restarts the estimate from 1 for the next content block of the same request.
+						this.request.thinkingTokens = Math.max(this.request.thinkingTokens, event.estimatedTokens);
 					}
 				}
 				if (event.permissionMode !== "") this.mode = event.permissionMode;

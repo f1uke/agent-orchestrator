@@ -1011,6 +1011,12 @@ describe("chat fold: the open model request", () => {
 		expect(next.request).toEqual({ since: iso(9), thinkingTokens: 0 });
 	});
 
+	it("never lets the count fall, since claude counts the next content block of a request from 1 again", () => {
+		const tr = fold(requesting(1), tokens(3, 198), tokens(4, 1), tokens(4, 47), tokens(5, 234));
+		expect(tr.request?.thinkingTokens).toBe(234);
+		expect(fold(requesting(1), tokens(3, 198), tokens(4, 3)).request?.thinkingTokens).toBe(198);
+	});
+
 	it("ignores thinking tokens when no request is open", () => {
 		expect(fold(tokens(3, 40)).request).toBeUndefined();
 	});
