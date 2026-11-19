@@ -545,7 +545,7 @@ test.describe("releases page", () => {
 		await open(page, "?sheet=llb:demo-wallet");
 		const sheet = page.locator(".rel-sheet");
 		await expect(sheet.locator('.al[data-hit="L10~llb/22-2026/di/feature/demo-wallet"]')).toContainText(
-			"feature/demo-wallet is not in sprint 21 yet",
+			"feature/demo-wallet is not in develop or sprint 21 yet",
 		);
 		await expect(sheet.locator(".al[data-hit]")).toHaveCount(1);
 	});
