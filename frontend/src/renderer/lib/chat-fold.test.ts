@@ -967,16 +967,18 @@ describe("chat fold: the task brief", () => {
 	});
 });
 
-describe("chat fold: the thinking stretch", () => {
+describe("chat fold: the open model request", () => {
 	const T0 = Date.parse("2026-10-31T11:53:00.000Z");
 	const iso = (sec: number) => new Date(T0 + sec * 1000).toISOString();
 	let seq = 0;
 	const at = (sec: number, dir: Direction, payload: object): ChatEntry => ({ seq: ++seq, ts: iso(sec), dir, payload });
-	const tokens = (sec: number, parent: string | null = null) =>
+	const requesting = (sec: number, parent: string | null = null) =>
+		at(sec, "out", { type: "system", subtype: "status", status: "requesting", parent_tool_use_id: parent });
+	const tokens = (sec: number, total: number, parent: string | null = null) =>
 		at(sec, "out", {
 			type: "system",
 			subtype: "thinking_tokens",
-			estimated_tokens: 50,
+			estimated_tokens: total,
 			estimated_tokens_delta: 50,
 			parent_tool_use_id: parent,
 		});
@@ -989,51 +991,56 @@ describe("chat fold: the thinking stretch", () => {
 			parent_tool_use_id: parent,
 			message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
 		});
+	const result = (sec: number) =>
+		at(sec, "out", { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0 });
 	const fold = (...entries: ChatEntry[]) => {
 		const tr = foldEntries(entries);
 		seq = 0;
 		return tr;
 	};
 
-	it("starts at the first thinking_tokens after a tool result and keeps that start through the burst", () => {
-		const tr = fold(toolUse(0, "t1"), toolResult(10, "t1"), tokens(12), tokens(12), tokens(30));
-		expect(tr.thinkingSince).toBe(iso(12));
+	it("opens at a requesting status, with no command, and makes the transcript busy", () => {
+		const tr = fold(requesting(3));
+		expect(tr.request).toEqual({ since: iso(3), thinkingTokens: 0 });
+		expect(tr.busy).toBe(true);
 	});
 
-	it("is cleared by the next tool_use, text, tool result or turn end", () => {
-		const base = () => [toolUse(0, "t1"), toolResult(10, "t1"), tokens(12)];
-		expect(fold(...base(), toolUse(40, "t2")).thinkingSince).toBeUndefined();
-		expect(fold(...base(), assistant(40, { type: "text", text: "Found it." })).thinkingSince).toBeUndefined();
-		expect(
-			fold(...base(), at(40, "out", { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0 }))
-				.thinkingSince,
-		).toBeUndefined();
-		expect(fold(toolUse(0, "t1"), tokens(5), toolResult(10, "t1")).thinkingSince).toBeUndefined();
+	it("follows the thinking token count and restarts from zero at the next request", () => {
+		expect(fold(requesting(1), tokens(3, 40), tokens(4, 90)).request).toEqual({ since: iso(1), thinkingTokens: 90 });
+		const next = fold(requesting(1), tokens(3, 90), toolUse(5, "t1"), toolResult(8, "t1"), requesting(9));
+		expect(next.request).toEqual({ since: iso(9), thinkingTokens: 0 });
 	});
 
-	it("restarts at the next thinking signal after a reset", () => {
-		const tr = fold(
-			tokens(2),
-			toolUse(5, "t1"),
-			toolResult(9, "t1"),
-			assistant(11, { type: "thinking", thinking: "" }),
-		);
-		expect(tr.thinkingSince).toBe(iso(11));
+	it("never lets the count fall, since claude counts the next content block of a request from 1 again", () => {
+		const tr = fold(requesting(1), tokens(3, 198), tokens(4, 1), tokens(4, 47), tokens(5, 234));
+		expect(tr.request?.thinkingTokens).toBe(234);
+		expect(fold(requesting(1), tokens(3, 198), tokens(4, 3)).request?.thinkingTokens).toBe(198);
 	});
 
-	it("is cleared by the user's next input", () => {
-		const tr = fold(tokens(2), at(3, "in", { type: "user", uuid: "u2", message: { content: "also check the docs" } }));
-		expect(tr.thinkingSince).toBeUndefined();
+	it("ignores thinking tokens when no request is open", () => {
+		expect(fold(tokens(3, 40)).request).toBeUndefined();
 	});
 
-	it("ignores a subagent's thinking and its tool results", () => {
-		expect(fold(toolUse(0, "agent"), tokens(4, "agent")).thinkingSince).toBeUndefined();
-		const tr = fold(toolUse(0, "t1"), toolResult(1, "t1"), tokens(2), toolResult(6, "s1", "bg-agent"));
-		expect(tr.thinkingSince).toBe(iso(2));
+	it("stays open through text, tool calls and the user's next input", () => {
+		const open = () => [requesting(1), tokens(2, 30)];
+		expect(fold(...open(), assistant(3, { type: "text", text: "Writing it." })).request?.since).toBe(iso(1));
+		expect(fold(...open(), toolUse(3, "t1")).request?.since).toBe(iso(1));
+		const queued = at(4, "in", { type: "user", uuid: "u2", message: { content: "also check the docs" } });
+		expect(fold(...open(), queued).request?.since).toBe(iso(1));
 	});
 
-	it("has no stretch with no thinking signal at all", () => {
-		expect(fold(toolUse(0, "t1"), toolResult(10, "t1")).thinkingSince).toBeUndefined();
+	it("is closed by the turn's result and by the process ending", () => {
+		expect(fold(requesting(1), result(5)).request).toBeUndefined();
+		expect(fold(requesting(1), result(5)).busy).toBe(false);
+		const exit = synth(9, "host", { kind: "exit", code: 0 });
+		const tr = foldEntries([requesting(1), exit]);
+		expect([tr.request, tr.busy]).toEqual([undefined, false]);
+	});
+
+	it("ignores a subagent's request and its thinking tokens", () => {
+		expect(fold(requesting(1, "agent")).request).toBeUndefined();
+		const tr = fold(requesting(1), tokens(2, 40, "agent"), toolResult(3, "s1", "bg-agent"));
+		expect(tr.request).toEqual({ since: iso(1), thinkingTokens: 0 });
 	});
 });
 

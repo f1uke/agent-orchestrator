@@ -1,7 +1,7 @@
 import { chapterOf, MARK_CHAPTER } from "./chat-chapters";
 import { type TurnDocs, turnDocs } from "./chat-docs";
 import type { BackgroundTask, ChatItem, Pending, ToolCallItem, Transcript } from "./chat-fold";
-import type { StreamingBlock, StreamOverlay } from "./chat-stream";
+import type { StreamingBlock, StreamingTool, StreamOverlay } from "./chat-stream";
 import { taskList } from "./chat-tasks";
 import { isSuggestion, SUGGEST_SESSION, SUGGEST_SKILL } from "./chat-suggest";
 import { SHOW_WIDGET, widgetOf } from "./chat-widget";
@@ -30,7 +30,7 @@ export type ChatRow =
 	| { key: string; kind: "streaming"; block: StreamingBlock; caret: boolean }
 	| { key: string; kind: "group"; members: ProcessMember[]; summary: ProcessSummary }
 	| { key: string; kind: "waiting"; tasks: WaitingTask[] }
-	| { key: string; kind: "thinking_live"; since?: string; text: string }
+	| { key: "live"; kind: "live"; step: LiveStep; text: string }
 	| {
 			key: string;
 			kind: "turn";
@@ -220,24 +220,40 @@ function waitingRow(transcript: Transcript, rows: readonly ChatRow[]): ChatRow |
 	return tasks.length === 0 ? undefined : { key: "waiting", kind: "waiting", tasks };
 }
 
-type ThinkingLiveRow = Extract<ChatRow, { kind: "thinking_live" }>;
+type LiveStatusRow = Extract<ChatRow, { kind: "live" }>;
 
-function thinkingRow(
-	transcript: Transcript,
-	overlay: StreamOverlay,
-	rows: readonly ChatRow[],
-): ThinkingLiveRow | undefined {
-	if (transcript.pending.length > 0 || rows.at(-1)?.kind === "waiting") return undefined;
+const WRITE_TARGET = /"(?:file_path|notebook_path)"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+
+function writeTarget(tool: StreamingTool): string {
+	const raw = WRITE_TARGET.exec(tool.head)?.[1];
+	if (raw === undefined) return tool.name;
+	let path = raw;
+	try {
+		path = JSON.parse(`"${raw}"`);
+	} catch {}
+	return path.split(/[\\/]/).at(-1) || tool.name;
+}
+
+function liveRow(transcript: Transcript, overlay: StreamOverlay, rows: readonly ChatRow[]): LiveStatusRow | undefined {
+	const { request } = transcript;
+	if (!request || transcript.pending.length > 0 || rows.at(-1)?.kind === "waiting") return undefined;
 	const running = transcript.items.some((i) => i.kind === "tool_call" && i.parentToolUseId === "" && toolRunning(i));
 	if (running) return undefined;
 	const last = overlay.blocks.at(-1);
-	if (last?.kind === "text") return undefined;
+	const { tool } = overlay;
+	if (!tool && last?.kind === "text") return undefined;
 	const text = last?.kind === "thinking" ? last.text : "";
-	const since = transcript.busy ? transcript.thinkingSince : undefined;
-	if (since === undefined && text.trim() === "") return undefined;
-	const row: ThinkingLiveRow = { key: "thinking-live", kind: "thinking_live", text };
-	if (since !== undefined) row.since = since;
-	return row;
+	const step: LiveStep = { verb: "Thinking", since: request.since };
+	if (tool) {
+		step.verb = "Writing";
+		step.detail = writeTarget(tool);
+		if (tool.chars > 0) step.tokens = Math.round(tool.chars / 4);
+	} else {
+		const detail = latestLine(text);
+		if (detail) step.detail = detail;
+		if (request.thinkingTokens > 0) step.tokens = request.thinkingTokens;
+	}
+	return { key: "live", kind: "live", step, text };
 }
 
 export function chatRows(
@@ -343,8 +359,9 @@ export function chatRows(
 	for (const pending of transcript.pending) {
 		if (!toolIds.has(pending.toolUseId)) rows.push({ key: `p${pending.requestId}`, kind: "pending", pending });
 	}
-	const thinking = thinkingRow(transcript, overlay, rows);
-	const streamed = thinking ? overlay.blocks.slice(0, -1) : overlay.blocks;
+	const live = liveRow(transcript, overlay, rows);
+	const takesThinking = live !== undefined && overlay.blocks.at(-1)?.kind === "thinking";
+	const streamed = takesThinking ? overlay.blocks.slice(0, -1) : overlay.blocks;
 	let lastText = -1;
 	streamed.forEach((block, i) => {
 		if (block.kind === "text") lastText = i;
@@ -354,15 +371,9 @@ export function chatRows(
 		if (block.kind === "thinking" && block.text.trim() === "") return;
 		rows.push({ key: `s${block.messageId}:${block.index}`, kind: "streaming", block, caret: i === lastText });
 	});
-	if (!thinking) return rows;
+	if (!live) return rows;
 	const tail = rows.length === before ? rows.at(-1) : undefined;
-	if (tail?.kind === "group" && !tail.summary.live) {
-		const detail = latestLine(thinking.text);
-		tail.summary.live = {
-			verb: "Thinking",
-			...(detail && { detail }),
-			...(thinking.since && { since: thinking.since }),
-		};
-	} else rows.push(thinking);
+	if (tail?.kind === "group" && !tail.summary.live) tail.summary.live = live.step;
+	else rows.push(live);
 	return rows;
 }

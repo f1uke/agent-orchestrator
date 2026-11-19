@@ -99,7 +99,7 @@ const PROCESS_KIND: Record<string, ProcessKind> = {
 
 export const processKind = (toolName: string): ProcessKind => PROCESS_KIND[toolName] ?? "tools";
 
-export type LiveStep = { verb: string; detail?: string; since?: string };
+export type LiveStep = { verb: string; detail?: string; since?: string; tokens?: number };
 
 export type ProcessSummary = { counts: { kind: ProcessKind; count: number }[]; live?: LiveStep };
 

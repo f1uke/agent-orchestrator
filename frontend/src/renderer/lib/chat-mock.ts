@@ -811,6 +811,11 @@ function activityEntries(): ChatEntry[] {
 
 export const MOCK_THINKING_CHAT_SESSION = "demo-chat-thinking";
 
+const requesting: Step = [
+	"out",
+	{ type: "system", subtype: "status", status: "requesting", session_id: SESSION, user_message_uuid: "thinking-brief" },
+];
+
 const thinkingTokens = (estimated: number, delta: number): Step => [
 	"out",
 	{
@@ -833,6 +838,7 @@ function thinkingEntries(): ChatEntry[] {
 		result("t-think-1", "package webhook\n..."),
 		tool("t-think-2", "msg_k3", "Grep", { pattern: "parkedTotal", path: "/work/project/internal" }),
 		result("t-think-2", "Found 4 matches"),
+		requesting,
 		thinkingTokens(50, 50),
 		thinkingTokens(195, 145),
 		thinkingTokens(410, 215),

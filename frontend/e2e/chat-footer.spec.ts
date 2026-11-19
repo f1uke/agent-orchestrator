@@ -51,12 +51,12 @@ for (const viewport of VIEWPORTS) {
 			await expect(rail(page).getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 		});
 
-		test("shows a live Thinking row while only thinking_tokens arrive", async ({ page }, info) => {
+		test("shows a live Thinking row with a rising token count during a model request", async ({ page }, info) => {
 			await page.goto("/#/projects/ao-demo/sessions/demo-chat-thinking");
 			const stream = page.getByTestId("chat-stream");
 			const live = stream.locator(".chat-live-row");
 			await expect(live).toHaveCount(1);
-			await expect(live).toHaveText(/^Thinking \d+s$/);
+			await expect(live).toHaveText(/^Thinking \d+s · [\d.]+k? tokens$/);
 			const first = await live.textContent();
 			await expect(live).not.toHaveText(first ?? "", { timeout: 3000 });
 			await page.screenshot({ path: info.outputPath(`chat-footer-thinking-${viewport.width}.png`) });

@@ -694,43 +694,59 @@ describe("chatRows suggestions", () => {
 	});
 });
 
-describe("chatRows live thinking", () => {
+describe("chatRows live status", () => {
 	const SINCE = "2026-10-31T11:53:12.000Z";
+	const request = { since: SINCE, thinkingTokens: 0 };
 	const afterTool = () => [user(), tool("Read")];
 	const overlayOf = (...blocks: Array<{ kind: "text" | "thinking"; text: string }>) => ({
 		...emptyOverlay,
 		blocks: blocks.map((b, index) => ({ messageId: "m9", index, ...b })),
 	});
-	const live = (rows: ChatRow[]) => rows.filter((r) => r.kind === "thinking_live");
+	const writing = (head: string, chars = head.length) => ({
+		...emptyOverlay,
+		tool: { messageId: "m9", index: 1, name: "Write", chars, head },
+	});
+	const live = (rows: ChatRow[]) => rows.filter((r) => r.kind === "live");
+	const pending = {
+		requestId: "r1",
+		toolName: "Bash",
+		toolUseId: "x",
+		kind: "permission" as const,
+		input: {},
+		suggestions: [],
+		defaultToNo: false,
+	};
 
-	it("ends the rows with one Thinking row when only thinking_tokens followed a tool result", () => {
-		const rows = rowsOf(afterTool(), { busy: true, thinkingSince: SINCE });
-		expect(rows.at(-1)).toEqual({ key: "thinking-live", kind: "thinking_live", since: SINCE, text: "" });
+	it("ends the rows with one Thinking row while a model request is open and nothing else is live", () => {
+		const rows = rowsOf(afterTool(), { request });
+		expect(rows.at(-1)).toEqual({ key: "live", kind: "live", step: { verb: "Thinking", since: SINCE }, text: "" });
 	});
 
-	it("needs a real thinking signal and a running turn", () => {
+	it("shows claude's thinking token count once it reports one", () => {
+		const rows = rowsOf(afterTool(), { request: { since: SINCE, thinkingTokens: 1234 } });
+		expect(live(rows)).toMatchObject([{ step: { verb: "Thinking", since: SINCE, tokens: 1234 } }]);
+	});
+
+	it("needs an open request", () => {
 		expect(live(rowsOf(afterTool(), { busy: true }))).toEqual([]);
-		expect(live(rowsOf(afterTool(), { busy: false, thinkingSince: SINCE }))).toEqual([]);
+		expect(live(rowsOf(afterTool(), { busy: false }))).toEqual([]);
 	});
 
-	it("never shows while a tool runs, a request waits, or claude streams text", () => {
+	it("never shows while a top-level tool runs, a permission waits, or claude streams text", () => {
 		const running = [user(), tool("Read"), tool("Bash", { command: "go test ./..." }, "none")];
-		expect(live(rowsOf(running, { busy: true, thinkingSince: SINCE }))).toEqual([]);
-		const pending = {
-			requestId: "r1",
-			toolName: "Bash",
-			toolUseId: "x",
-			kind: "permission" as const,
-			input: {},
-			suggestions: [],
-			defaultToNo: false,
-		};
-		expect(live(rowsOf(afterTool(), { busy: true, thinkingSince: SINCE, pending: [pending] }))).toEqual([]);
+		expect(live(rowsOf(running, { request }))).toEqual([]);
+		expect(live(rowsOf(afterTool(), { request, pending: [pending] }))).toEqual([]);
 		const streamingText = chatRows(
-			transcript(afterTool(), { busy: true, thinkingSince: SINCE }),
+			transcript(afterTool(), { request }),
 			overlayOf({ kind: "thinking", text: "hmm" }, { kind: "text", text: "Found it" }),
 		);
 		expect(live(streamingText)).toEqual([]);
+	});
+
+	it("is not hidden by a background subagent's running tool", () => {
+		const agent = { ...tool("Agent"), id: "ag" };
+		const items = [user(), agent, tool("Bash", {}, "none", "ag")];
+		expect(live(rowsOf(items, { request }))).toHaveLength(1);
 	});
 
 	it("never stacks with the Waiting on row", () => {
@@ -744,26 +760,87 @@ describe("chatRows live thinking", () => {
 			background: true,
 			startedTs: SINCE,
 		};
-		const rows = rowsOf([user(), soak, say("started"), turnEnd()], { tasks: [task], thinkingSince: SINCE });
-		expect(rows.filter((r) => r.kind === "waiting" || r.kind === "thinking_live").map((r) => r.kind)).toEqual([
-			"waiting",
-		]);
+		const rows = rowsOf([user(), soak, say("started"), turnEnd()], { tasks: [task], request });
+		expect(rows.filter((r) => r.kind === "waiting" || r.kind === "live").map((r) => r.kind)).toEqual(["waiting"]);
+	});
+
+	it("stays after claude has logged some text, since a tool can stream for minutes after it", () => {
+		const rows = rowsOf([user(), say("Writing the proposal now.")], { request });
+		expect(live(rows)).toHaveLength(1);
 	});
 
 	it("takes over a streaming thinking block, so its text shows in the one live row", () => {
 		const rows = chatRows(
-			transcript(afterTool(), { busy: true }),
+			transcript(afterTool(), { request }),
 			overlayOf({ kind: "thinking", text: "The counter is read twice.\n\nMaybe the reset races.\n" }),
 		);
 		expect(rows.filter((r) => r.kind === "streaming")).toEqual([]);
 		expect(live(rows)).toEqual([
-			{ key: "thinking-live", kind: "thinking_live", text: "The counter is read twice.\n\nMaybe the reset races.\n" },
+			{
+				key: "live",
+				kind: "live",
+				step: { verb: "Thinking", detail: "Maybe the reset races.", since: SINCE },
+				text: "The counter is read twice.\n\nMaybe the reset races.\n",
+			},
 		]);
+	});
+
+	describe("while a tool call's input streams", () => {
+		it("says Writing with the file's name and a token estimate of a quarter of the characters", () => {
+			const overlay = writing('{"file_path":"/Users/a/docs/proposal.md","content":"# Pro', 4800);
+			const rows = chatRows(transcript(afterTool(), { request }), overlay);
+			expect(live(rows)).toMatchObject([
+				{ step: { verb: "Writing", detail: "proposal.md", since: SINCE, tokens: 1200 } },
+			]);
+		});
+
+		it.each([
+			["a notebook", '{"notebook_path":"/w/analysis.ipynb","new_source":"x"', "analysis.ipynb"],
+			["an escaped quote in the name", '{"file_path":"/w/a \\"b\\".md"', 'a "b".md'],
+			["a path that has not finished arriving", '{"file_path":"/w/pro', "Write"],
+			["no path at all", '{"command":"ls"', "Write"],
+		])("names the target for %s", (_name, head, detail) => {
+			const rows = chatRows(transcript(afterTool(), { request }), writing(head));
+			expect(live(rows)).toMatchObject([{ step: { verb: "Writing", detail } }]);
+		});
+
+		it("shows no token estimate before any input has arrived", () => {
+			const rows = chatRows(transcript(afterTool(), { request }), writing("", 0));
+			expect(live(rows)).toMatchObject([{ step: { verb: "Writing", detail: "Write" } }]);
+			expect(live(rows)[0]).not.toHaveProperty("step.tokens");
+		});
+
+		it("yields to a running tool, a waiting permission and a Waiting on row", () => {
+			const running = [user(), tool("Bash", {}, "none")];
+			expect(live(chatRows(transcript(running, { request }), writing("{")))).toEqual([]);
+			expect(live(chatRows(transcript(afterTool(), { request, pending: [pending] }), writing("{")))).toEqual([]);
+		});
+
+		it("keeps the thinking text that came before the tool for the fold-out", () => {
+			const overlay = {
+				...writing('{"file_path":"/a.md"'),
+				blocks: [{ messageId: "m9", index: 0, kind: "thinking" as const, text: "plan" }],
+			};
+			const rows = chatRows(transcript(afterTool(), { request }), overlay);
+			expect(live(rows)).toMatchObject([{ text: "plan" }]);
+			expect(rows.filter((r) => r.kind === "streaming")).toEqual([]);
+		});
+
+		it("does not swallow streamed text that came before the tool", () => {
+			const overlay = {
+				...writing('{"file_path":"/a.md"'),
+				blocks: [{ messageId: "m9", index: 0, kind: "text" as const, text: "Here goes." }],
+			};
+			const rows = chatRows(transcript(afterTool(), { request }), overlay);
+			expect(rows.filter((r) => r.kind === "streaming")).toHaveLength(1);
+			expect(live(rows)).toMatchObject([{ step: { verb: "Writing" }, text: "" }]);
+		});
 	});
 });
 
-describe("chatRows thinking absorbed into the tail group", () => {
+describe("chatRows live status absorbed into the tail group", () => {
 	const SINCE = "2026-10-31T11:53:12.000Z";
+	const request = { since: SINCE, thinkingTokens: 0 };
 	const afterTool = () => [user(), tool("Read"), tool("Grep")];
 	const blocks = (text: string) => ({
 		...emptyOverlay,
@@ -772,40 +849,153 @@ describe("chatRows thinking absorbed into the tail group", () => {
 	const kinds = (rows: ChatRow[]) => rows.map((r) => r.kind);
 
 	it("turns the finished tail group into a Thinking header instead of adding a row", () => {
-		const rows = rowsOf(afterTool(), { busy: true, thinkingSince: SINCE });
+		const rows = rowsOf(afterTool(), { request });
 		expect(kinds(rows)).toEqual(["item", "group"]);
 		expect(group(rows).summary.live).toEqual({ verb: "Thinking", since: SINCE });
 	});
 
 	it("carries the latest non-empty line of the thinking text as the detail", () => {
 		const rows = chatRows(
-			transcript(afterTool(), { busy: true, thinkingSince: SINCE }),
+			transcript(afterTool(), { request }),
 			blocks("The counter is read twice.\n\nMaybe the reset races.\n"),
 		);
 		expect(kinds(rows)).toEqual(["item", "group"]);
 		expect(group(rows).summary.live).toEqual({ verb: "Thinking", detail: "Maybe the reset races.", since: SINCE });
 	});
 
+	it("carries the token count", () => {
+		const rows = rowsOf(afterTool(), { request: { since: SINCE, thinkingTokens: 640 } });
+		expect(group(rows).summary.live).toEqual({ verb: "Thinking", since: SINCE, tokens: 640 });
+	});
+
+	it("takes the Writing step too, with the target and the estimate", () => {
+		const overlay = {
+			...emptyOverlay,
+			tool: { messageId: "m9", index: 0, name: "Write", chars: 400, head: '{"file_path":"/a/plan.md"' },
+		};
+		const rows = chatRows(transcript(afterTool(), { request }), overlay);
+		expect(kinds(rows)).toEqual(["item", "group"]);
+		expect(group(rows).summary.live).toEqual({ verb: "Writing", detail: "plan.md", since: SINCE, tokens: 100 });
+	});
+
 	it("keeps the separate row when no group sits right before it", () => {
-		const rows = rowsOf([user(), say("looking"), turnEnd(), user("u2")], { busy: true, thinkingSince: SINCE });
-		expect(kinds(rows).at(-1)).toBe("thinking_live");
+		const rows = rowsOf([user(), say("looking"), turnEnd(), user("u2")], { request });
+		expect(kinds(rows).at(-1)).toBe("live");
 		expect(rows.some((r) => r.kind === "group")).toBe(false);
 	});
 
 	it("keeps the separate row when streamed text sits between the group and the thinking", () => {
-		const rows = chatRows(transcript(afterTool(), { busy: true, thinkingSince: SINCE }), {
+		const rows = chatRows(transcript(afterTool(), { request }), {
 			...emptyOverlay,
 			blocks: [
 				{ messageId: "m8", index: 0, kind: "thinking", text: "earlier thought" },
 				{ messageId: "m9", index: 1, kind: "thinking", text: "now" },
 			],
 		});
-		expect(kinds(rows).slice(-3)).toEqual(["group", "streaming", "thinking_live"]);
+		expect(kinds(rows).slice(-3)).toEqual(["group", "streaming", "live"]);
 		expect(group(rows).summary.live).toBeUndefined();
 	});
 
-	it("leaves a finished group with no live label once thinking stops", () => {
+	it("leaves a finished group with no live label once the request closes", () => {
 		expect(group(rowsOf(afterTool(), { busy: false })).summary.live).toBeUndefined();
+	});
+});
+
+describe("chatRows live status over a recorded turn", () => {
+	let seq = 0;
+	const at = (dir: ChatEntry["dir"], payload: object): ChatEntry => ({
+		seq: ++seq,
+		ts: "2026-10-31T11:53:12.000Z",
+		dir,
+		payload,
+	});
+	const requesting = () => at("out", { type: "system", subtype: "status", status: "requesting" });
+	const thinkingTokens = (total: number) =>
+		at("out", { type: "system", subtype: "thinking_tokens", estimated_tokens: total, estimated_tokens_delta: 50 });
+	const readCall = () =>
+		at("out", {
+			type: "assistant",
+			message: { id: "m1", content: [{ type: "tool_use", id: "a1", name: "Read", input: {} }] },
+		});
+	const readDone = () =>
+		at("out", { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "a1", content: "x" }] } });
+	const result = (extra: object = {}) =>
+		at("out", { type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, usage: {}, ...extra });
+	const rowsFor = (...entries: ChatEntry[]) => {
+		const tr = foldEntries(entries);
+		return { tr, rows: chatRows(tr, emptyOverlay, new Set()) };
+	};
+	const lives = (rows: ChatRow[]) => rows.filter((r) => r.kind === "live");
+	const liveVerbs = (rows: ChatRow[]) =>
+		rows.flatMap((r) =>
+			r.kind === "live" ? [r.step.verb] : r.kind === "group" && r.summary.live ? [r.summary.live.verb] : [],
+		);
+
+	const taskNotice = () =>
+		at("out", {
+			type: "user",
+			isReplay: true,
+			message: {
+				role: "user",
+				content:
+					"<task-notification>\n<task-id>k1</task-id>\n<status>completed</status>\n<summary>soak finished</summary>\n</task-notification>",
+			},
+		});
+
+	it("shows a Thinking row from the request on, before any thinking token arrives", () => {
+		const { tr, rows } = rowsFor(at("in", { type: "user", uuid: "u1", message: { content: "go" } }), requesting());
+		expect([tr.busy, liveVerbs(rows)]).toEqual([true, ["Thinking"]]);
+	});
+
+	it("shows the row in a turn that claude opened itself, with no command and no user message", () => {
+		const { tr, rows } = rowsFor(taskNotice(), requesting(), thinkingTokens(80));
+		expect(tr.busy).toBe(true);
+		expect(lives(rows)).toMatchObject([{ step: { verb: "Thinking", tokens: 80 } }]);
+	});
+
+	it("shows Thinking between tool calls, folded into the tool group header", () => {
+		const { rows } = rowsFor(
+			at("in", { type: "user", uuid: "u1", message: { content: "go" } }),
+			requesting(),
+			readCall(),
+			readDone(),
+			thinkingTokens(300),
+		);
+		expect(liveVerbs(rows)).toEqual(["Thinking"]);
+	});
+
+	it("shows nothing once the turn ends, whether it succeeded, failed or was interrupted", () => {
+		const open = () => [
+			at("in", { type: "user", uuid: "u1", message: { content: "go" } }),
+			at("out", { type: "command_lifecycle", command_uuid: "u1", state: "started" }),
+			requesting(),
+			thinkingTokens(300),
+		];
+		const completed = () => at("out", { type: "command_lifecycle", command_uuid: "u1", state: "completed" });
+		const failed = () => result({ subtype: "error_during_execution", is_error: true });
+		const interrupt = () =>
+			at("out", { type: "user", message: { content: [{ type: "text", text: "[Request interrupted by user]" }] } });
+		const ends = [
+			() => [result(), completed()],
+			() => [failed(), completed()],
+			() => [interrupt(), failed(), completed()],
+		];
+		for (const end of ends) {
+			const { tr, rows } = rowsFor(...open(), ...end());
+			expect([tr.busy, liveVerbs(rows)]).toEqual([false, []]);
+		}
+	});
+
+	it("shows nothing after the process exits mid-request", () => {
+		const exit = { seq: 99, ts: "", dir: "host" as const, payload: { kind: "exit", code: 1 } };
+		const { tr, rows } = rowsFor(requesting(), exit);
+		expect([tr.busy, liveVerbs(rows)]).toEqual([false, []]);
+	});
+
+	it("shows nothing while the model's tool call runs, then Thinking again after its result and the next request", () => {
+		const entries = [at("in", { type: "user", uuid: "u1", message: { content: "go" } }), requesting(), readCall()];
+		expect(liveVerbs(rowsFor(...entries).rows)).not.toContain("Thinking");
+		expect(liveVerbs(rowsFor(...entries, readDone(), requesting()).rows)).toEqual(["Thinking"]);
 	});
 });
 

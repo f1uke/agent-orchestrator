@@ -61,7 +61,7 @@ import { type AnswerHandler, PendingRequestCard, type RequestState, ResolvedLine
 import {
 	GroupRow,
 	LiveDots,
-	LiveThinkingRow,
+	LiveStatusRow,
 	type OpenRows,
 	ThinkingRow,
 	type ToggleRow,
@@ -755,8 +755,8 @@ export const ChatRowView = memo(function ChatRowView(props: RowProps) {
 			return <GroupRow openRows={openRows} root={root} row={row} theme={theme} toggleRow={toggleRow} />;
 		case "waiting":
 			return <WaitingRow openRows={openRows} root={root} row={row} toggleRow={toggleRow} />;
-		case "thinking_live":
-			return <LiveThinkingRow openRows={openRows} row={row} toggleRow={toggleRow} />;
+		case "live":
+			return <LiveStatusRow openRows={openRows} row={row} toggleRow={toggleRow} />;
 		case "turn":
 			return (
 				<TurnRow
