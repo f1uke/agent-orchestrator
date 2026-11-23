@@ -5,11 +5,6 @@ import { expect, onTestFinished, vi } from "vitest";
 const XCODE_NAME = "App.xcworkspace";
 const MAC_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)";
 
-/**
- * Makes the "Open in…" menu reachable in jsdom: a Mac user agent (the menu is
- * macOS-only) and launchers that report an Xcode workspace and VS Code, so every
- * item the terminal toolbar can offer is on screen.
- */
 export function stubOpenIn() {
 	vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(MAC_UA);
 	const openIn = window.ao!.openIn;
@@ -33,11 +28,6 @@ export function stubOpenIn() {
 	return launchers;
 }
 
-/**
- * The terminal session's "Open in…" menu, item by item: the same labels in the
- * same order, each launching on `directory`. Every placement of the menu is held
- * to this one list.
- */
 export async function expectTerminalOpenInMenu(
 	user: UserEvent,
 	launchers: ReturnType<typeof stubOpenIn>,

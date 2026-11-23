@@ -340,8 +340,6 @@ describe("ShellTopbar Open in… menu", () => {
 
 	beforeEach(() => getMock.mockReset());
 
-	// A chat session has no terminal toolbar. Without an iOS run bar to carry the
-	// menu, the topbar does, beside the Chat | Trajectory switch.
 	it("carries the terminal's menu for a chat session with no iOS run bar", async () => {
 		answerIosProject(noProject);
 		const launchers = stubOpenIn();

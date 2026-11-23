@@ -83,10 +83,6 @@ export function IosRunBar({
 	terminalTarget,
 }: {
 	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
-	/**
-	 * The directory for the "Open in…" menu, given only where no terminal
-	 * toolbar carries one (a chat session).
-	 */
 	openInDirectory?: string;
 	/** Point the terminal at the run pane - what Run does, and what the chip re-does. */
 	onShowRun: (handleId: string) => void;

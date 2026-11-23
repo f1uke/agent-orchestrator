@@ -14,7 +14,6 @@ import {
 type OpenInMenuProps = {
 	/** The working directory to open. When absent, the menu renders nothing. */
 	directory?: string;
-	/** The trigger's look, so it sits in whichever bar carries it. */
 	triggerClassName?: string;
 };
 

@@ -817,9 +817,6 @@ describe("IosRunBar", () => {
 		expect(screen.queryByText("Build log")).not.toBeInTheDocument();
 	});
 
-	// A chat session has no terminal toolbar, so the run bar carries the menu the
-	// toolbar would have. Under a terminal the toolbar already has it, and the bar
-	// is not handed a directory.
 	it("carries the terminal's Open in… menu when it is given the session's directory", async () => {
 		answer();
 		const launchers = stubOpenIn();

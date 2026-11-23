@@ -92,10 +92,6 @@ export function ShellTopbar() {
 	// while its own full-page surface (/projects/<id>/jira) is showing.
 	const isJiraRoute = /\/projects\/[^/]+\/jira$/.test(pathname);
 
-	// A chat session has no terminal toolbar, so its "Open in…" menu sits in the
-	// iOS run bar where the session has one, and here beside the view switch
-	// where it does not. A terminal session keeps the toolbar's. The run bar asks
-	// the same query, so this costs no request of its own.
 	const isChatSession = isSessionRoute && session?.transport === "chat";
 	const iosProject = useIosProject(isChatSession ? session.id : undefined);
 	const showOpenIn = isChatSession && iosProject.isFetched && !hasIosRunBar(iosProject.data?.project);
