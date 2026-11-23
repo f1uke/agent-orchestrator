@@ -12,6 +12,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import {
+	hasIosRunBar,
 	useIosProject,
 	useRefreshIosProject,
 	useRunXcodegen,
@@ -38,6 +39,7 @@ import { isBase, isWatchable, sessionDevices } from "../lib/sim-devices";
 import { cn } from "../lib/utils";
 import type { TerminalTarget } from "../types/terminal";
 import { BuildIssuesSheet, issueCounts } from "./BuildIssuesSheet";
+import { OpenInMenu } from "./OpenInMenu";
 import { SimDevicePicker } from "./SimDevicePicker";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -73,6 +75,7 @@ import { XcodegenResultSheet, type XcodegenViewState } from "./XcodegenResultShe
  */
 export function IosRunBar({
 	onOpenWorkspaceFile,
+	openInDirectory,
 	onShowRun,
 	onShowAgent,
 	sessionId,
@@ -80,6 +83,7 @@ export function IosRunBar({
 	terminalTarget,
 }: {
 	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
+	openInDirectory?: string;
 	/** Point the terminal at the run pane - what Run does, and what the chip re-does. */
 	onShowRun: (handleId: string) => void;
 	/** Point the terminal back at the agent. */
@@ -101,7 +105,7 @@ export function IosRunBar({
 	// The device list is only asked for once the bar is really rendering, which
 	// on a non-iOS project is never. `enabled` is what keeps a Go worktree from
 	// polling simctl every five seconds for a control it does not have.
-	const hasProject = Boolean(project?.name) || (project?.xcodegen?.specs?.length ?? 0) > 0;
+	const hasProject = hasIosRunBar(project);
 	const devices = useSimDevices(hasProject);
 	// A simulator is a machine-wide resource, so the session holding one is
 	// often working on something else entirely. This is what lets the picker
@@ -299,6 +303,10 @@ export function IosRunBar({
 							watching={watchingRun}
 						/>
 					) : null}
+					<OpenInMenu
+						directory={openInDirectory}
+						triggerClassName="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-overlay hover:text-foreground"
+					/>
 				</div>
 			</div>
 		</div>

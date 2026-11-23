@@ -11,6 +11,10 @@ export type IosProjectResponse = components["schemas"]["ControllersIOSProjectRes
 
 export const iosProjectQueryKey = (sessionId: string) => ["ios-project", sessionId] as const;
 
+export function hasIosRunBar(project: IosProject | undefined): boolean {
+	return Boolean(project?.name) || (project?.xcodegen?.specs?.length ?? 0) > 0;
+}
+
 /**
  * What this session can build for iOS, and the run it already has.
  *

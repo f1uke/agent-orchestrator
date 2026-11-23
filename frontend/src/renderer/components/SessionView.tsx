@@ -137,7 +137,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	const editorSelection = useRef("");
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
-	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
+	// The "Open in…" menu opens the session's worktree; when the daemon
 	// did not report one (e.g. an orchestrator), fall back to the project root.
 	const workspace = session ? workspaces.find((w) => w.id === session.workspaceId) : undefined;
 	const directory = session?.workspacePath ?? workspace?.path;
@@ -817,6 +817,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					<IosRunBar
 						key={session.id}
 						onOpenWorkspaceFile={openWorkspaceFile}
+						openInDirectory={directory}
 						onShowAgent={() => setTerminalTarget({ kind: "worker" })}
 						onShowRun={(handleId) => setTerminalTarget({ kind: "run", handleId })}
 						sessionId={session.id}

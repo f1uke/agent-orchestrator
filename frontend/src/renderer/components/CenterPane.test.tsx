@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
+import { expectTerminalOpenInMenu, stubOpenIn } from "../test/open-in-menu";
 import { CenterPane } from "./CenterPane";
 
 // The terminal body pulls in xterm/SSE machinery irrelevant to the toolbar under test.
@@ -160,5 +162,14 @@ describe("CenterPane split chrome", () => {
 		expect(screen.queryByLabelText("Increase terminal font size")).not.toBeInTheDocument();
 		const toolbar = document.querySelector(".terminal-toolbar")!;
 		expect(toolbar.className).toContain("opacity-60");
+	});
+});
+
+describe("CenterPane toolbar Open in… menu", () => {
+	it("opens the session's worktree in Terminal, Finder, its Xcode workspace and VS Code", async () => {
+		const launchers = stubOpenIn();
+		render(<CenterPane session={worker} theme="dark" daemonReady directory="/w/my-app" />);
+
+		await expectTerminalOpenInMenu(userEvent.setup(), launchers, "/w/my-app");
 	});
 });

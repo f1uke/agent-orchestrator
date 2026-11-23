@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { expectTerminalOpenInMenu, stubOpenIn } from "../test/open-in-menu";
 import { IosRunBar } from "./IosRunBar";
 
 const { getMock, postMock } = vi.hoisted(() => ({ getMock: vi.fn(), postMock: vi.fn() }));
@@ -56,10 +57,11 @@ function Wrapper({ children }: { children: ReactNode }) {
 	return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-function renderBar(onShowRun = vi.fn(), onShowAgent = vi.fn()) {
+function renderBar(onShowRun = vi.fn(), onShowAgent = vi.fn(), openInDirectory?: string) {
 	render(
 		<IosRunBar
 			onShowAgent={onShowAgent}
+			openInDirectory={openInDirectory}
 			onShowRun={onShowRun}
 			sessionId={SESSION}
 			terminalTarget={{ kind: "worker" }}
@@ -813,5 +815,23 @@ describe("IosRunBar", () => {
 		await userEvent.click(await screen.findByRole("button", { name: /NterDev \(Debug\) failed/ }));
 		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
 		expect(screen.queryByText("Build log")).not.toBeInTheDocument();
+	});
+
+	it("carries the terminal's Open in… menu when it is given the session's directory", async () => {
+		answer();
+		const launchers = stubOpenIn();
+		renderBar(vi.fn(), vi.fn(), "/w/nter");
+
+		const bar = await screen.findByTestId("ios-run-bar");
+		await expectTerminalOpenInMenu(userEvent.setup(), launchers, "/w/nter", bar);
+	});
+
+	it("has no Open in… menu of its own above a terminal, whose toolbar has one", async () => {
+		answer();
+		stubOpenIn();
+		renderBar();
+
+		await screen.findByTestId("ios-run-bar");
+		expect(screen.queryByRole("button", { name: "Open in…" })).not.toBeInTheDocument();
 	});
 });
