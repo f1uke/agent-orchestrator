@@ -12,6 +12,15 @@ export type IosProjectResponse = components["schemas"]["ControllersIOSProjectRes
 export const iosProjectQueryKey = (sessionId: string) => ["ios-project", sessionId] as const;
 
 /**
+ * Whether the run bar draws for this project: an Xcode project, or an xcodegen
+ * spec that can generate one. A control placed "in the run bar, or elsewhere
+ * when there is none" asks this, so the two places never both show it.
+ */
+export function hasIosRunBar(project: IosProject | undefined): boolean {
+	return Boolean(project?.name) || (project?.xcodegen?.specs?.length ?? 0) > 0;
+}
+
+/**
  * What this session can build for iOS, and the run it already has.
  *
  * 🗝 An empty `project.name` is the ORDINARY answer, not a failure: most

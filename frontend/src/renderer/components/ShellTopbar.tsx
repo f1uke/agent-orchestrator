@@ -4,7 +4,9 @@ import { GitBranch, PanelRightClose, PanelRightOpen, Plus } from "lucide-react";
 import { useState } from "react";
 import { ChatViewToggle } from "./ChatPane";
 import { NotificationCenter } from "./NotificationCenter";
+import { OpenInMenu } from "./OpenInMenu";
 import { isOrchestratorSession, type SessionActivityState, type WorkspaceSession } from "../types/workspace";
+import { hasIosRunBar, useIosProject } from "../hooks/useIosProject";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { useUiStore } from "../stores/ui-store";
 import { OrchestratorIcon } from "./icons";
@@ -89,6 +91,14 @@ export function ShellTopbar() {
 	// Browse Jira sits next to New task wherever a project is in scope. It lights up
 	// while its own full-page surface (/projects/<id>/jira) is showing.
 	const isJiraRoute = /\/projects\/[^/]+\/jira$/.test(pathname);
+
+	// A chat session has no terminal toolbar, so its "Open in…" menu sits in the
+	// iOS run bar where the session has one, and here beside the view switch
+	// where it does not. A terminal session keeps the toolbar's. The run bar asks
+	// the same query, so this costs no request of its own.
+	const isChatSession = isSessionRoute && session?.transport === "chat";
+	const iosProject = useIosProject(isChatSession ? session.id : undefined);
+	const showOpenIn = isChatSession && iosProject.isFetched && !hasIosRunBar(iosProject.data?.project);
 
 	// THE MEMBER SWITCHER lives here, and the choice is load-bearing: this header
 	// is rendered ONCE by the shell for the whole session route, whereas
@@ -238,6 +248,14 @@ export function ShellTopbar() {
 					</button>
 				) : null}
 				{isSessionRoute && session ? <ChatViewToggle session={session} style={noDragStyle} /> : null}
+				{showOpenIn ? (
+					<span className="inline-flex" style={noDragStyle}>
+						<OpenInMenu
+							directory={session?.workspacePath ?? project?.path}
+							triggerClassName="dashboard-app-header__icon-btn"
+						/>
+					</span>
+				) : null}
 				<NotificationCenter style={noDragStyle} />
 				{session && allowedInspectorViews(session).length > 0 ? (
 					<button

@@ -367,7 +367,9 @@ describe("ShellTopbar Open in… menu", () => {
 		stubOpenIn();
 		renderTopbar(sessionWith({ transport: "chat", workspacePath: "/w/nter" }));
 
-		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/ios-project", expect.anything()));
+		await waitFor(() =>
+			expect(getMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/ios-project", expect.anything()),
+		);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(screen.queryByRole("button", { name: "Open in…" })).not.toBeInTheDocument();
 	});

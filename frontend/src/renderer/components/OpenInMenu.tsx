@@ -14,6 +14,8 @@ import {
 type OpenInMenuProps = {
 	/** The working directory to open. When absent, the menu renders nothing. */
 	directory?: string;
+	/** The trigger's look, so it sits in whichever bar carries it. */
+	triggerClassName?: string;
 };
 
 // The launchers shell out to macOS-only tools (`open`, Ghostty/Terminal, Xcode),
@@ -23,14 +25,17 @@ type OpenInMenuProps = {
 const TOAST_DISMISS_MS = 4000;
 
 /**
- * A share-style terminal-toolbar button that opens the session's working
+ * A share-style button that opens the session's working
  * directory in Terminal (Ghostty when installed, else Terminal.app), Finder,
  * VS Code (when installed), an Xcode workspace/project detected at the directory
  * root, or Android Studio on a detected Gradle root (worktree root or `android/`
  * subdir). Detection runs in the Electron main process (fs + installed apps); a
  * failed launch surfaces a toast rather than crashing.
  */
-export function OpenInMenu({ directory }: OpenInMenuProps) {
+export function OpenInMenu({
+	directory,
+	triggerClassName = "terminal-toolbar__control terminal-toolbar__control--icon",
+}: OpenInMenuProps) {
 	const [open, setOpen] = useState(false);
 	const [targets, setTargets] = useState<OpenInTargets | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -84,12 +89,7 @@ export function OpenInMenu({ directory }: OpenInMenuProps) {
 		<>
 			<DropdownMenu open={open} onOpenChange={setOpen}>
 				<DropdownMenuTrigger asChild>
-					<button
-						aria-label="Open in…"
-						className="terminal-toolbar__control terminal-toolbar__control--icon"
-						title="Open in…"
-						type="button"
-					>
+					<button aria-label="Open in…" className={triggerClassName} title="Open in…" type="button">
 						<Share className="h-3.5 w-3.5" aria-hidden="true" />
 					</button>
 				</DropdownMenuTrigger>
