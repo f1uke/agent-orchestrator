@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionActivityState, WorkspaceSession, WorkspaceSummary } from "../types/workspace";
+import { expectTerminalOpenInMenu, stubOpenIn } from "../test/open-in-menu";
 import { ShellTopbar } from "./ShellTopbar";
 
-const { navigateMock, paramsMock, pathnameMock, useWorkspaceQueryMock } = vi.hoisted(() => ({
+const { getMock, navigateMock, paramsMock, pathnameMock, useWorkspaceQueryMock } = vi.hoisted(() => ({
+	getMock: vi.fn(),
 	navigateMock: vi.fn(),
 	paramsMock: { projectId: undefined as string | undefined, sessionId: undefined as string | undefined },
 	pathnameMock: { value: "/" },
@@ -26,6 +28,13 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../hooks/useWorkspaceQuery", () => ({
 	useWorkspaceQuery: () => useWorkspaceQueryMock(),
 	workspaceQueryKey: ["workspaces"],
+}));
+
+vi.mock("../lib/api-client", () => ({
+	apiClient: { GET: getMock, POST: vi.fn() },
+	apiErrorMessage: (_error: unknown, fallback = "Request failed") => fallback,
+	getApiBaseUrl: () => "http://127.0.0.1:3001",
+	subscribeApiBaseUrl: () => () => {},
 }));
 
 vi.mock("./NewTaskDialog", () => ({ NewTaskDialog: () => null }));
@@ -314,5 +323,61 @@ describe("ShellTopbar — copying the session's id", () => {
 
 		expect(writeText).toHaveBeenCalledWith("proj-1-orc");
 		expect(writeText).not.toHaveBeenCalledWith("@proj-1-orc");
+	});
+});
+
+describe("ShellTopbar Open in… menu", () => {
+	const noProject = { project: { name: "", path: "", kind: "", schemes: [], configurations: [] } };
+	const nter = { project: { name: "Nter.xcworkspace", path: "/w/nter/Nter.xcworkspace", kind: "workspace" } };
+
+	function answerIosProject(response: unknown) {
+		getMock.mockImplementation((path: string) =>
+			path === "/api/v1/sessions/{sessionId}/ios-project"
+				? Promise.resolve({ data: response })
+				: Promise.resolve({ error: new Error("not stubbed"), response: { status: 500 } }),
+		);
+	}
+
+	beforeEach(() => getMock.mockReset());
+
+	// A chat session has no terminal toolbar. Without an iOS run bar to carry the
+	// menu, the topbar does, beside the Chat | Trajectory switch.
+	it("carries the terminal's menu for a chat session with no iOS run bar", async () => {
+		answerIosProject(noProject);
+		const launchers = stubOpenIn();
+		renderTopbar(sessionWith({ transport: "chat", workspacePath: "/w/go-app" }));
+
+		await screen.findByRole("button", { name: "Open in…" });
+		await expectTerminalOpenInMenu(userEvent.setup(), launchers, "/w/go-app");
+	});
+
+	it("falls back to the project root for a chat session with no worktree of its own", async () => {
+		answerIosProject(noProject);
+		const launchers = stubOpenIn();
+		renderTopbar(sessionWith({ kind: "orchestrator", transport: "chat" }));
+
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole("button", { name: "Open in…" }));
+		await user.click(await screen.findByRole("menuitem", { name: "Open in Finder" }));
+		expect(launchers.finder).toHaveBeenCalledWith("/repo/my-app");
+	});
+
+	it("leaves the menu to the iOS run bar on a chat session that has one", async () => {
+		answerIosProject(nter);
+		stubOpenIn();
+		renderTopbar(sessionWith({ transport: "chat", workspacePath: "/w/nter" }));
+
+		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/ios-project", expect.anything()));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(screen.queryByRole("button", { name: "Open in…" })).not.toBeInTheDocument();
+	});
+
+	it("leaves the menu to the terminal toolbar on a terminal session", () => {
+		answerIosProject(noProject);
+		stubOpenIn();
+		renderTopbar(sessionWith({ workspacePath: "/w/go-app" }));
+
+		expect(screen.queryByRole("button", { name: "Open in…" })).not.toBeInTheDocument();
+		expect(getMock).not.toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/ios-project", expect.anything());
 	});
 });
