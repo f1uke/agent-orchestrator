@@ -802,22 +802,25 @@ func TestPromptSuggestionSurvivesEventsThatAreNotInput(t *testing.T) {
 	}
 }
 
-func TestFoldChromeFollowsTheLatestSpawn(t *testing.T) {
+func TestFoldChromeIsOnUnlessTheLatestSpawnTurnedItOff(t *testing.T) {
 	spawn := func(seq uint64, argv ...string) Entry {
 		b, _ := json.Marshal(map[string]any{"kind": "spawn", "argv": argv})
 		return synth(seq, DirHost, string(b))
 	}
-	if tr := foldEntries(t, []Entry{spawn(1, "claude", "-p")}); tr.Chrome {
-		t.Error("a spawn without --chrome folded Chrome = true")
+	if tr := foldEntries(t, nil); !tr.Chrome {
+		t.Error("a session that has not spawned yet folded Chrome = false")
 	}
-	on := []Entry{spawn(1, "claude", "-p"), spawn(2, "claude", "-p", "--chrome", "--resume", "s-1")}
-	if tr := foldEntries(t, on); !tr.Chrome {
-		t.Error("a later spawn with --chrome folded Chrome = false")
+	if tr := foldEntries(t, []Entry{spawn(1, "claude", "-p")}); !tr.Chrome {
+		t.Error("a spawn with neither flag, from before chrome was on by default, folded Chrome = false")
 	}
-	if tr := foldEntries(t, append(on, spawn(3, "claude", "-p", "--resume", "s-1"))); tr.Chrome {
-		t.Error("a spawn after the chrome one, without the flag, kept Chrome = true")
+	off := []Entry{spawn(1, "claude", "-p", "--chrome"), spawn(2, "claude", "-p", "--no-chrome", "--resume", "s-1")}
+	if tr := foldEntries(t, off); tr.Chrome {
+		t.Error("a later spawn with --no-chrome folded Chrome = true")
 	}
-	if tr := foldEntries(t, []Entry{spawn(1, "claude", "--", "--chrome")}); tr.Chrome {
-		t.Error("--chrome after -- is prompt text, not the flag")
+	if tr := foldEntries(t, append(off, spawn(3, "claude", "-p", "--chrome", "--resume", "s-1"))); !tr.Chrome {
+		t.Error("a spawn after the --no-chrome one, with --chrome, kept Chrome = false")
+	}
+	if tr := foldEntries(t, []Entry{spawn(1, "claude", "--chrome", "--", "--no-chrome")}); !tr.Chrome {
+		t.Error("--no-chrome after -- is prompt text, not the flag")
 	}
 }

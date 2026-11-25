@@ -252,7 +252,7 @@ func TestClaudeIsNotAskedForPromptSuggestionsWhenTheProjectTurnsThemOff(t *testi
 func TestFreshSessionEndToEnd(t *testing.T) {
 	cfg, fixture, argvFile := runFirstSession(t, shortDir(t))
 
-	want := append(append(append([]string{"--model", "sonnet"}, wantProtocolFlags...), "--prompt-suggestions"), "--add-dir", attachmentsBeside(cfg.LogPath))
+	want := append(append(append([]string{"--model", "sonnet"}, wantProtocolFlags...), "--chrome", "--prompt-suggestions"), "--add-dir", attachmentsBeside(cfg.LogPath))
 	if got := readArgv(t, argvFile); !slices.Equal(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
 	}

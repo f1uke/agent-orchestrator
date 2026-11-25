@@ -571,7 +571,10 @@ func (f *Folder) applyHost(n HostNote) {
 
 // ChromeFlag is the claude flag that turns on Claude in Chrome. Print mode
 // ignores the setting that enables it by default, so a host must pass it.
-const ChromeFlag = "--chrome"
+const (
+	ChromeFlag   = "--chrome"
+	NoChromeFlag = "--no-chrome"
+)
 
 func flagsOf(argv []string) []string {
 	if i := slices.Index(argv, "--"); i >= 0 {

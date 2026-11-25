@@ -237,7 +237,7 @@ func TestABusyRunRefusesWhatWouldRaceIt(t *testing.T) {
 	if got := refusal(t, b.c.Rewind(ctx, "u-1", false)); got != errBashBusy.Error() {
 		t.Errorf("rewind refused with %q, want %q", got, errBashBusy)
 	}
-	if got := refusal(t, b.c.SetChrome(ctx, true)); got != errChromeBusy.Error() {
+	if got := refusal(t, b.c.SetChrome(ctx, false)); got != errChromeBusy.Error() {
 		t.Errorf("set_chrome refused with %q, want %q", got, errChromeBusy)
 	}
 	if got := loggedInputs(t, b.cfg.LogPath, "user/"); len(got) != 0 {
