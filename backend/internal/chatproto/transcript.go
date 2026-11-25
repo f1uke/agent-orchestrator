@@ -222,6 +222,7 @@ func NewFolder() *Folder {
 		controls: map[string]control{},
 		bashes:   map[string]*BashItem{},
 		remote:   RemoteControl{State: RemoteOff},
+		chrome:   true,
 	}
 }
 
@@ -546,7 +547,7 @@ func (f *Folder) applyHost(n HostNote) {
 		f.endProcess()
 		f.model = flagValue(n.Argv, "--model")
 		f.effort = flagValue(n.Argv, "--effort")
-		f.chrome = slices.Contains(flagsOf(n.Argv), ChromeFlag)
+		f.chrome = !slices.Contains(flagsOf(n.Argv), NoChromeFlag)
 		if n.Resume != "" {
 			f.items = append(f.items, Notice{Kind: NoticeResumed, Text: n.Resume})
 		} else {
@@ -569,8 +570,8 @@ func (f *Folder) applyHost(n HostNote) {
 	}
 }
 
-// ChromeFlag is the claude flag that turns on Claude in Chrome. Print mode
-// ignores the setting that enables it by default, so a host must pass it.
+// Print mode ignores the setting that enables Claude in Chrome by default, so a
+// host must pass ChromeFlag or NoChromeFlag.
 const (
 	ChromeFlag   = "--chrome"
 	NoChromeFlag = "--no-chrome"

@@ -353,7 +353,7 @@ func claudeArgv(command []string, l launch) []string {
 		case effort != "" && flags[i] == "--effort":
 			i++
 		case effort != "" && strings.HasPrefix(flags[i], "--effort="):
-		case flags[i] == chatproto.ChromeFlag || flags[i] == "--no-chrome":
+		case flags[i] == chatproto.ChromeFlag || flags[i] == chatproto.NoChromeFlag:
 		default:
 			argv = append(argv, flags[i])
 		}
@@ -365,11 +365,13 @@ func claudeArgv(command []string, l launch) []string {
 		argv = append(argv, "--effort", effort)
 	}
 	argv = append(argv, protocolFlags...)
-	if suggestions {
-		argv = append(argv, "--prompt-suggestions")
-	}
 	if l.chrome {
 		argv = append(argv, chatproto.ChromeFlag)
+	} else {
+		argv = append(argv, chatproto.NoChromeFlag)
+	}
+	if suggestions {
+		argv = append(argv, "--prompt-suggestions")
 	}
 	if attachDir != "" {
 		argv = append(argv, "--add-dir", attachDir)

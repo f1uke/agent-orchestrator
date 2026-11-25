@@ -1,7 +1,7 @@
 import type { AnswerBody } from "./chat-answers";
 import type { ChatApi, ChatResult, ModelContext } from "./chat-api";
 import { type ChatEntry, type Direction, isObject, unfinished } from "./chat-event";
-import { CHROME_FLAG, ChatFolder, type Pending } from "./chat-fold";
+import { CHROME_FLAG, ChatFolder, NO_CHROME_FLAG, type Pending } from "./chat-fold";
 import { pngBase64, type Rgb } from "./chat-mock-images";
 import { chapterEntries, MOCK_CHAPTERS_CHAT_SESSION } from "./chat-mock-chapters";
 import { foldAnswerEntries, MOCK_FOLD_CHAT_SESSION } from "./chat-mock-fold";
@@ -1194,7 +1194,7 @@ export const stubChatApi: ChatApi = {
 			return { ok: false, error: { kind: "rejected", message: "claude is busy: wait for the turn to end" } };
 		}
 		const { effort } = session.folder.transcript();
-		const argv = ["claude", ...(effort ? ["--effort", effort] : []), ...(enabled ? [CHROME_FLAG] : [])];
+		const argv = ["claude", ...(effort ? ["--effort", effort] : []), enabled ? CHROME_FLAG : NO_CHROME_FLAG];
 		append(id, session, [["host", { kind: "spawn", argv, resume: SESSION, pid: session.folder.lastSeq + 2 }]]);
 		return OK;
 	},
