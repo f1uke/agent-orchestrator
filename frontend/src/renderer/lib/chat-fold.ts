@@ -274,6 +274,7 @@ function parseModels(raw: unknown): ChatModel[] {
 }
 
 export const CHROME_FLAG = "--chrome";
+export const NO_CHROME_FLAG = "--no-chrome";
 
 function flagsOf(argv: readonly string[]): readonly string[] {
 	const end = argv.indexOf("--");
@@ -319,7 +320,7 @@ export class ChatFolder {
 	private models: ChatModel[] = [];
 	private model = "";
 	private effort = "";
-	private chrome = false;
+	private chrome = true;
 	private tasks = new Map<string, BackgroundTask>();
 	private agentModels: Record<string, string> = {};
 	private ts = "";
@@ -735,7 +736,7 @@ export class ChatFolder {
 				this.endProcess();
 				this.model = flagValue(note.argv, "--model");
 				this.effort = flagValue(note.argv, "--effort");
-				this.chrome = flagsOf(note.argv).includes(CHROME_FLAG);
+				this.chrome = !flagsOf(note.argv).includes(NO_CHROME_FLAG);
 				this.awaitingBrief = note.resume === "";
 				if (note.resume !== "") this.notice("resumed", note.resume);
 				else this.notice("spawn", "");

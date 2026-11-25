@@ -11,34 +11,40 @@ import (
 
 const chromeInit = `{"type":"system","subtype":"init","session_id":"cs-1","model":"sonnet","permissionMode":"default","tools":[]}`
 
-func TestSetChromeRelaunchesClaudeInPlace(t *testing.T) {
+func TestChromeIsOnAtLaunchAndSetChromeRelaunchesClaudeInPlace(t *testing.T) {
 	dir := shortDir(t)
 	cfg, argvFile := fakeConfig(t, dir, waitingFixture(t, dir, fixtureLine{chatproto.DirOut, chromeInit}))
 	startHost(t, cfg)
 	eventually(t, "claude's init is logged", func() bool { return state(t, cfg.SocketPath).ClaudeSessionID == "cs-1" })
-	if argv := readArgv(t, argvFile); slices.Contains(argv, "--chrome") {
-		t.Fatalf("first launch argv = %v, want no --chrome", argv)
+	if argv := readArgv(t, argvFile); !slices.Contains(argv, "--chrome") {
+		t.Fatalf("first launch argv = %v, want --chrome", argv)
+	}
+	if !state(t, cfg.SocketPath).Chrome {
+		t.Error("state after the first launch says chrome is off")
 	}
 	firstPID := state(t, cfg.SocketPath).PID
 
-	callOK(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": true})
+	callOK(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": false})
 	eventually(t, "claude is relaunched", func() bool {
 		s := state(t, cfg.SocketPath)
 		return s.PID != 0 && s.PID != firstPID
 	})
 	var argv []string
-	eventually(t, "the relaunch argv has --chrome", func() bool {
+	eventually(t, "the relaunch argv has --no-chrome", func() bool {
 		b, err := os.ReadFile(argvFile)
-		return err == nil && json.Unmarshal(b, &argv) == nil && slices.Contains(argv, "--chrome")
+		return err == nil && json.Unmarshal(b, &argv) == nil && slices.Contains(argv, "--no-chrome")
 	})
+	if slices.Contains(argv, "--chrome") {
+		t.Errorf("relaunch argv = %v, want no --chrome", argv)
+	}
 	if i := slices.Index(argv, "--resume"); i < 0 || argv[i+1] != "cs-1" {
 		t.Errorf("relaunch argv = %v, want --resume cs-1", argv)
 	}
-	if !state(t, cfg.SocketPath).Chrome {
-		t.Error("state after the relaunch says chrome is off")
+	if state(t, cfg.SocketPath).Chrome {
+		t.Error("state after the relaunch says chrome is on")
 	}
 
-	callOK(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": true})
+	callOK(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": false})
 	if pid := state(t, cfg.SocketPath).PID; pid == firstPID {
 		t.Errorf("pid went back to the first claude")
 	}
@@ -55,10 +61,10 @@ func TestSetChromeWaitsForTheTurnToEnd(t *testing.T) {
 	startHost(t, cfg)
 	eventually(t, "the turn is running", func() bool { return state(t, cfg.SocketPath).Busy })
 	pid := state(t, cfg.SocketPath).PID
-	if got := callErr(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": true}); got != errChromeBusy.Error() {
+	if got := callErr(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": false}); got != errChromeBusy.Error() {
 		t.Errorf("set_chrome while busy: error %q", got)
 	}
-	if s := state(t, cfg.SocketPath); s.PID != pid || s.Chrome {
+	if s := state(t, cfg.SocketPath); s.PID != pid || !s.Chrome {
 		t.Errorf("a refused set_chrome changed the process: pid %d -> %d, chrome %v", pid, s.PID, s.Chrome)
 	}
 }
@@ -73,6 +79,6 @@ func TestSetChromeWaitsForBackgroundTasks(t *testing.T) {
 	startHost(t, cfg)
 	eventually(t, "claude's init is logged", func() bool { return state(t, cfg.SocketPath).ClaudeSessionID == "cs-1" })
 	eventually(t, "the task start is logged", func() bool {
-		return callErr(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": true}) == errChromeBusy.Error()
+		return callErr(t, cfg.SocketPath, map[string]any{"op": "set_chrome", "enabled": false}) == errChromeBusy.Error()
 	})
 }
